@@ -16,8 +16,10 @@ const (
 )
 
 type Email struct {
-	ID    uuid.UUID `json:"id"`
-	Email string    `json:"email"`
+	ID       uuid.UUID  `json:"id"`
+	UserID   string     `json:"user_id"`
+	WorkerID *uuid.UUID `json:"worker_id"`
+	Email    string     `json:"email"`
 
 	Name           string `json:"name"`
 	SignaturePlain string `json:"signature_plain"`
@@ -43,6 +45,8 @@ type Email struct {
 	WarmupIncrease  int        `json:"warmup_increase"`
 	WarmupReplyRate int        `json:"warmup_reply_rate"`
 	WarmupTag       string     `json:"warmup_tag"`
+
+	Timezone string `json:"timezone"`
 
 	Tags []string `json:"tags"`
 
@@ -101,6 +105,8 @@ type UpdateEmail struct {
 	SignatureHTML  *string `json:"signature_html"`
 	SignatureSync  *bool   `json:"signature_sync"`
 	SignatureCode  *bool   `json:"signature_code"`
+
+	Status *string `json:"status"` // active, inactive, revoked
 
 	CampaignLimit *int    `json:"campaign_limit"`
 	MinWaitTime   *int    `json:"min_wait_time"`

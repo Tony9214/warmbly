@@ -1,5 +1,5 @@
 CREATE TYPE task_type AS ENUM('campaign', 'warmup', 'email');
-CREATE TYPE task_status AS ENUM('pending', 'active', 'completed', 'failed')
+CREATE TYPE task_status AS ENUM('pending', 'active', 'completed', 'failed');
 
 CREATE TABLE tasks (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -46,10 +46,10 @@ CREATE TABLE email_tasks (
     bcc TEXT[],
     in_reply_to TEXT[],
     subject TEXT NOT NULL,
+    body TEXT NOT NULL,
 
     PRIMARY KEY (task_id),
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (target_account_id) REFERENCES email_accounts(id) ON DELETE SET NULL
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
 CREATE TABLE task_failures (

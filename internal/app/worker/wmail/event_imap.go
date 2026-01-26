@@ -17,6 +17,11 @@ func (w *WMail) onImapEmailUpdate(ctx context.Context, msg *models.EmailMessageD
 	}
 
 	if internalMessage == nil {
+		// Check and record sync event for rate limiting (new email)
+		if rateLimitErr := w.CheckAndRecordSync(ctx, 1); rateLimitErr != nil {
+			return rateLimitErr
+		}
+
 		msg.ID = uuid.New()
 		now := time.Now()
 

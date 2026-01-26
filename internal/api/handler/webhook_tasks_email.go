@@ -16,7 +16,7 @@ func (h *Handler) HandleEmailTask(c *gin.Context) {
 		return
 	}
 
-	var taskPayload proto.EmailTask
+	var taskPayload proto.ProcessTask
 
 	if err := protob.Unmarshal(rawData, &taskPayload); err != nil {
 		errx.Handle(c, errx.ErrInvalid)
@@ -28,5 +28,5 @@ func (h *Handler) HandleEmailTask(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusOK)
+	c.Status(http.StatusNoContent)
 }

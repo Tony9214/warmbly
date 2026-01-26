@@ -20,6 +20,11 @@ func (w *WMail) onGoogleMessageAdd(ctx context.Context, msg *models.EmailMessage
 		return nil
 	}
 
+	// Check and record sync event for rate limiting
+	if rateLimitErr := w.CheckAndRecordSync(ctx, 1); rateLimitErr != nil {
+		return rateLimitErr
+	}
+
 	msg.ID = uuid.New()
 	now := time.Now()
 

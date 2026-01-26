@@ -2,11 +2,13 @@ package gtasks
 
 import (
 	"context"
+	"time"
 
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
 	gproto "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type Client struct {
@@ -30,31 +32,38 @@ func NewClient(ctx context.Context, queueName, url, serviceAccountEmail string) 
 	}, nil
 }
 
-func (c *Client) CreateTask(ctx context.Context, taskData *proto.CampaignTask) (string, error) {
+func (c *Client) CreateTask(ctx context.Context, taskData *proto.ProcessTask, scheduleTime time.Time) (string, error) {
 	body, err := gproto.Marshal(taskData)
 	if err != nil {
 		return "", err
 	}
 
-	req := &cloudtaskspb.CreateTaskRequest{
-		Parent: c.queueName,
-		Task: &cloudtaskspb.Task{
-			MessageType: &cloudtaskspb.Task_HttpRequest{
-				HttpRequest: &cloudtaskspb.HttpRequest{
-					HttpMethod: cloudtaskspb.HttpMethod_POST,
-					Url:        c.url,
-					Body:       body,
-					AuthorizationHeader: &cloudtaskspb.HttpRequest_OidcToken{
-						OidcToken: &cloudtaskspb.OidcToken{
-							ServiceAccountEmail: c.serviceAccountEmail,
-						},
+	task := &cloudtaskspb.Task{
+		MessageType: &cloudtaskspb.Task_HttpRequest{
+			HttpRequest: &cloudtaskspb.HttpRequest{
+				HttpMethod: cloudtaskspb.HttpMethod_POST,
+				Url:        c.url,
+				Body:       body,
+				AuthorizationHeader: &cloudtaskspb.HttpRequest_OidcToken{
+					OidcToken: &cloudtaskspb.OidcToken{
+						ServiceAccountEmail: c.serviceAccountEmail,
 					},
-					Headers: map[string]string{
-						"Content-Type": "application/octet-stream", // important!
-					},
+				},
+				Headers: map[string]string{
+					"Content-Type": "application/octet-stream",
 				},
 			},
 		},
+	}
+
+	// Add schedule time if provided and in the future
+	if !scheduleTime.IsZero() && scheduleTime.After(time.Now()) {
+		task.ScheduleTime = timestamppb.New(scheduleTime)
+	}
+
+	req := &cloudtaskspb.CreateTaskRequest{
+		Parent: c.queueName,
+		Task:   task,
 	}
 
 	out, err := c.client.CreateTask(ctx, req)

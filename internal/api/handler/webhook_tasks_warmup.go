@@ -9,7 +9,7 @@ import (
 	protob "google.golang.org/protobuf/proto"
 )
 
-func (h *Handler) HandleCampaignTasks(c *gin.Context) {
+func (h *Handler) HandleWarmupTask(c *gin.Context) {
 	rawData, err := c.GetRawData()
 	if err != nil {
 		errx.Handle(c, errx.ErrInvalid)
@@ -23,7 +23,7 @@ func (h *Handler) HandleCampaignTasks(c *gin.Context) {
 		return
 	}
 
-	if err := h.TasksService.HandleCampaignTask(&taskPayload); err != nil {
+	if err := h.TasksService.HandleEmailTask(&taskPayload); err != nil {
 		errx.Handle(c, err)
 		return
 	}

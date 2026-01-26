@@ -31,13 +31,48 @@ const (
 )
 
 type SendEmail struct {
-	To        []string     `json:"to"`
-	Cc        []string     `json:"cc"`
-	Bcc       []string     `json:"bcc"`
-	Subject   string       `json:"subject"`
-	BodyPlain string       `json:"body_plain"`
-	BodyHTML  string       `json:"body_html"`
-	Parent    *EmailParent `json:"parent"`
+	TaskID        uuid.UUID    `json:"task_id"`
+	EmailID       uuid.UUID    `json:"email_id"`
+	To            []string     `json:"to"`
+	Cc            []string     `json:"cc"`
+	Bcc           []string     `json:"bcc"`
+	Subject       string       `json:"subject"`
+	BodyS3Key     string       `json:"body_s3_key"`
+	MessageID     string       `json:"message_id"`
+	InReplyTo     string       `json:"in_reply_to,omitempty"`
+	Parent        *EmailParent `json:"parent,omitempty"`
+	IsWarmup      bool         `json:"is_warmup"`
+	TrackingInfo  *TrackingInfo `json:"tracking_info,omitempty"`
+}
+
+// TrackingInfo contains tracking configuration for campaign emails
+type TrackingInfo struct {
+	OpenTracking   bool   `json:"open_tracking"`
+	LinkTracking   bool   `json:"link_tracking"`
+	TrackingDomain string `json:"tracking_domain"`
+}
+
+// EmailSendError contains detailed error information for failed email sends
+type EmailSendError struct {
+	Code           string `json:"code"`
+	Type           string `json:"type"`
+	Message        string `json:"message"`
+	ResolveMethod  string `json:"resolve_method"`
+	UserVisible    bool   `json:"user_visible"`
+	UserTitle      string `json:"user_title,omitempty"`
+	UserMessage    string `json:"user_message,omitempty"`
+	ActionRequired string `json:"action_required,omitempty"`
+}
+
+// SendEmailResult is the result from worker after sending email
+type SendEmailResult struct {
+	TaskID         uuid.UUID       `json:"task_id"`
+	Success        bool            `json:"success"`
+	MessageID      string          `json:"message_id,omitempty"`
+	ProviderMsgID  string          `json:"provider_msg_id,omitempty"`
+	SentAt         time.Time       `json:"sent_at,omitempty"`
+	Error          *EmailSendError `json:"error,omitempty"`
+	LegacyErrorMsg string          `json:"legacy_error,omitempty"` // Deprecated: use Error instead
 }
 
 type AddWorkerEmailGoogleData struct {

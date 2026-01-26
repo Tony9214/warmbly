@@ -17,6 +17,7 @@ CREATE TYPE email_status AS ENUM('active', 'inactive', 'revoked');
 CREATE TABLE email_accounts (
     id UUID NOT NULL,
     user_id UUID NOT NULL,
+    worker_id UUID,
     email VARCHAR(255) NOT NULL,
 
     name VARCHAR(255) NOT NULL,
@@ -36,6 +37,7 @@ CREATE TABLE email_accounts (
     reply_to TEXT NOT NULL DEFAULT '',
 
     tracking_domain TEXT NOT NULL DEFAULT '',
+    timezone TEXT NOT NULL DEFAULT 'UTC',
 
     warmup TIMESTAMP,
     warmup_base INT NOT NULL DEFAULT 10,
@@ -98,11 +100,6 @@ CREATE TABLE email_categories (
     CONSTRAINT valid_color CHECK (color ~* '^#[a-f0-9]{6}$')
 );
 
-CREATE TABLE email_message_categories (
-    message UUID NOT NULL REFERENCES email_messages(id) ON DELETE CASCADE,
-    category UUID NOT NULL REFERENCES email_categories(id) ON DELETE CASCADE,
-    UNIQUE (message, category)
-);
 
 CREATE TYPE campaign_status AS ENUM('draft', 'active', 'paused');
 
@@ -190,7 +187,7 @@ CREATE TABLE contacts (
 CREATE TABLE campaign_leads (
     contact_id UUID NOT NULL,
     campaign_id UUID NOT NULL REFERENCES campaigns (id) ON DELETE CASCADE,
-    PRIMARY KEY (campaign_id, contact_id)
+    PRIMARY KEY (campaign_id, contact_id),
     FOREIGN KEY (contact_id) REFERENCES contacts (id) ON DELETE CASCADE,
     FOREIGN KEY (campaign_id) REFERENCES campaigns (id) ON DELETE CASCADE
 );
@@ -211,7 +208,7 @@ CREATE TABLE folders (
 CREATE TABLE campaign_folders (
     campaign_id UUID NOT NULL,
     folder_id UUID NOT NULL,
-    UNIQUE (campaign, folder),
+    PRIMARY KEY (campaign_id, folder_id),
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
     FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
 );

@@ -27,6 +27,12 @@ func (w *JobsService) InitEvents() {
 	Register(w, models.JobEventTypeMailboxUpdate, w.HandleMailboxUpdate)
 	Register(w, models.JobEventTypeMailboxDelete, w.HandleMailboxDelete)
 	Register(w, models.JobEventTypeHistoryIDUpdate, w.HandleHistoryIDUpdate)
+
+	// Email error handlers
+	Register(w, models.JobEventTypeEmailAuthError, w.HandleEmailAuthError)
+	Register(w, models.JobEventTypeEmailDisabled, w.HandleEmailDisabled)
+	Register(w, models.JobEventTypeEmailRateLimited, w.HandleEmailRateLimited)
+	Register(w, models.JobEventTypeEmailServerError, w.HandleEmailServerError)
 }
 
 func Register[T any](w *JobsService, eventType models.JobEventType, handler EventHandler[T]) {

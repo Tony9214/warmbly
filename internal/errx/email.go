@@ -43,6 +43,13 @@ const (
 	MailErrorCodeAuthenticationFailed MailErrorCode = "AUTHENTICATION_FAILED" // e.g. invalid token
 	MailErrorCodeConnectionLost       MailErrorCode = "CONNECTION_LOST"
 	MailErrorCodeImapUnknown          MailErrorCode = "IMAP_UNKNOWN"
+
+	// Rate limiting and abuse detection
+	MailErrorCodeRateLimitExceeded MailErrorCode = "RATE_LIMIT_EXCEEDED"
+	MailErrorCodeSendingTooFast    MailErrorCode = "SENDING_TOO_FAST"
+	MailErrorCodeRecipientRejected MailErrorCode = "RECIPIENT_REJECTED"
+	MailErrorCodeQuotaExceeded     MailErrorCode = "QUOTA_EXCEEDED"
+	MailErrorCodeAccountSuspended  MailErrorCode = "ACCOUNT_SUSPENDED"
 )
 
 var MailErrorCodeGoogleUnknown = func(code int) MailErrorCode {
@@ -128,4 +135,85 @@ var (
 			MailErrorResolveMethodReload,
 		)
 	}
+
+	// Rate limiting and abuse errors
+	ErrMailRateLimitExceeded = MError(
+		MailErrorWarning,
+		MailErrorCodeRateLimitExceeded,
+		"This email account has exceeded the sync rate limit. This may indicate suspicious activity.",
+		MailErrorResolveMethodNone,
+	)
+	ErrMailSendingTooFast = MError(
+		MailErrorWarning,
+		MailErrorCodeSendingTooFast,
+		"Emails are being sent too quickly. Please wait before sending more emails.",
+		MailErrorResolveMethodRetry,
+	)
+	ErrMailRecipientRejected = MError(
+		MailErrorWarning,
+		MailErrorCodeRecipientRejected,
+		"The recipient email address was rejected by the mail server.",
+		MailErrorResolveMethodNone,
+	)
+	ErrMailQuotaExceeded = MError(
+		MailErrorCritical,
+		MailErrorCodeQuotaExceeded,
+		"Your email sending quota has been exceeded. Please try again later.",
+		MailErrorResolveMethodRetry,
+	)
+	ErrMailAccountSuspended = MError(
+		MailErrorCritical,
+		MailErrorCodeAccountSuspended,
+		"This email account has been suspended. Please contact your email provider.",
+		MailErrorResolveMethodReload,
+	)
 )
+
+// UserErrorInfo contains user-visible error information
+type UserErrorInfo struct {
+	Title          string
+	Message        string
+	ActionRequired string
+}
+
+// GetUserErrorInfo returns user-friendly error information for display
+func (e *MailError) GetUserErrorInfo() UserErrorInfo {
+	info := UserErrorInfo{
+		Title:   "Email Error",
+		Message: e.Message,
+	}
+
+	switch e.Code {
+	case MailErrorCodeGoogleAuth, MailErrorCodeAuthenticationFailed:
+		info.Title = "Authentication Required"
+		info.ActionRequired = "Please re-authorize your email account"
+	case MailErrorCodeInvalidCredentials:
+		info.Title = "Invalid Credentials"
+		info.ActionRequired = "Please update your email credentials"
+	case MailErrorCodeServerUnreachable:
+		info.Title = "Connection Error"
+		info.ActionRequired = "The email server is temporarily unavailable. We'll retry automatically."
+	case MailErrorCodeRateLimitExceeded:
+		info.Title = "Rate Limit Exceeded"
+		info.ActionRequired = "Your account has been temporarily limited due to unusual activity"
+	case MailErrorCodeSendingTooFast:
+		info.Title = "Sending Too Fast"
+		info.ActionRequired = "Please wait before sending more emails"
+	case MailErrorCodeQuotaExceeded:
+		info.Title = "Quota Exceeded"
+		info.ActionRequired = "Your daily sending limit has been reached"
+	case MailErrorCodeAccountSuspended:
+		info.Title = "Account Suspended"
+		info.ActionRequired = "Contact your email provider to resolve this issue"
+	case MailErrorCodeRecipientRejected:
+		info.Title = "Recipient Rejected"
+		info.ActionRequired = "The recipient address was not accepted"
+	}
+
+	return info
+}
+
+// IsUserVisible returns true if this error should be shown to users
+func (e *MailError) IsUserVisible() bool {
+	return e.Type == MailErrorCritical || e.Type == MailErrorWarning
+}

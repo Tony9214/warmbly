@@ -19,6 +19,8 @@ import (
 type CampaignRepository interface {
 	Create(ctx context.Context, userID string, data *models.CreateCampaign) (*models.Campaign, error)
 	Get(ctx context.Context, userID, id string) (*models.Campaign, error)
+	GetByID(ctx context.Context, campaignID uuid.UUID) (*models.Campaign, error)
+	GetSequenceByID(ctx context.Context, sequenceID uuid.UUID) (*models.Sequence, error)
 	Search(ctx context.Context, userID, query string, cursor, folder *string, limit int32) (*models.CampaignsResult, error)
 	Update(ctx context.Context, userID, query string, data *models.UpdateCampaign) (*models.Campaign, *errx.Error)
 	Delete(ctx context.Context, userID, id string) error
@@ -475,4 +477,64 @@ func (r *campaignRepository) Update(ctx context.Context, userID, campaignID stri
 	}
 
 	return &campaign, nil
+}
+
+// GetByID retrieves a campaign by ID without requiring userID (for internal service use)
+func (r *campaignRepository) GetByID(ctx context.Context, campaignID uuid.UUID) (*models.Campaign, error) {
+	var campaign models.Campaign
+
+	query := fmt.Sprintf(
+		`SELECT c.user_id, %s
+		 FROM campaigns c
+		 LEFT JOIN campaign_email_tags cet ON cet.campaign = c.id
+		 LEFT JOIN campaign_folders cec ON cec.campaign = c.id
+		 WHERE c.id = $1
+		 GROUP BY c.id`,
+		CAMPAIGN_SELECT_FULL,
+	)
+
+	row := r.DB.QueryRow(ctx, query, campaignID)
+	err := row.Scan(
+		&campaign.UserID,
+		&campaign.ID, &campaign.Name, &campaign.Description, &campaign.Status,
+		&campaign.StopOnReply, &campaign.OpenTracking, &campaign.LinkTracking,
+		&campaign.TextOnly, &campaign.DailyLimit, &campaign.UnsubscribeHeader, &campaign.RiskyEmails,
+		&campaign.CC, &campaign.BCC, &campaign.StartDate, &campaign.EndDate, &campaign.Timezone, &campaign.Days,
+		&campaign.StartTime, &campaign.EndTime,
+		&campaign.UpdatedAt, &campaign.CreatedAt,
+		&campaign.EmailTags, &campaign.Folders,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrResourceNotFound
+		}
+		db.CaptureError(err, query, []any{campaignID}, "queryrow")
+		return nil, err
+	}
+
+	return &campaign, nil
+}
+
+// GetSequenceByID retrieves a sequence by ID
+func (r *campaignRepository) GetSequenceByID(ctx context.Context, sequenceID uuid.UUID) (*models.Sequence, error) {
+	query := `
+		SELECT id, name, subject, body_plain, body_html, body_sync, body_code, wait_after, updated_at, created_at
+		FROM sequences
+		WHERE id = $1
+	`
+
+	var seq models.Sequence
+	err := r.DB.QueryRow(ctx, query, sequenceID).Scan(
+		&seq.ID, &seq.Name, &seq.Subject, &seq.BodyPlain, &seq.BodyHTML,
+		&seq.BodySync, &seq.BodyCode, &seq.WaitAfter, &seq.UpdatedAt, &seq.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrResourceNotFound
+		}
+		db.CaptureError(err, query, []any{sequenceID}, "queryrow")
+		return nil, err
+	}
+
+	return &seq, nil
 }

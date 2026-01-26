@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.4
-// source: campaign_task.proto
+// source: tasks.proto
 
 package proto
 
@@ -21,31 +21,29 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type CampaignTask struct {
+type ProcessTask struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// UUID of the campaign
-	CampaignId string `protobuf:"bytes,1,opt,name=campaign_id,json=campaignId,proto3" json:"campaign_id,omitempty"`
 	// UUID of the task
 	TaskId        string `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CampaignTask) Reset() {
-	*x = CampaignTask{}
-	mi := &file_campaign_task_proto_msgTypes[0]
+func (x *ProcessTask) Reset() {
+	*x = ProcessTask{}
+	mi := &file_tasks_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CampaignTask) String() string {
+func (x *ProcessTask) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CampaignTask) ProtoMessage() {}
+func (*ProcessTask) ProtoMessage() {}
 
-func (x *CampaignTask) ProtoReflect() protoreflect.Message {
-	mi := &file_campaign_task_proto_msgTypes[0]
+func (x *ProcessTask) ProtoReflect() protoreflect.Message {
+	mi := &file_tasks_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,110 +54,43 @@ func (x *CampaignTask) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CampaignTask.ProtoReflect.Descriptor instead.
-func (*CampaignTask) Descriptor() ([]byte, []int) {
-	return file_campaign_task_proto_rawDescGZIP(), []int{0}
+// Deprecated: Use ProcessTask.ProtoReflect.Descriptor instead.
+func (*ProcessTask) Descriptor() ([]byte, []int) {
+	return file_tasks_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *CampaignTask) GetCampaignId() string {
-	if x != nil {
-		return x.CampaignId
-	}
-	return ""
-}
-
-func (x *CampaignTask) GetTaskId() string {
+func (x *ProcessTask) GetTaskId() string {
 	if x != nil {
 		return x.TaskId
 	}
 	return ""
 }
 
-type EmailTask struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// UUID of the email account
-	EmailId string `protobuf:"bytes,1,opt,name=email_id,json=emailId,proto3" json:"email_id,omitempty"`
-	// UUID of the task
-	TaskId        string `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
+var File_tasks_proto protoreflect.FileDescriptor
 
-func (x *EmailTask) Reset() {
-	*x = EmailTask{}
-	mi := &file_campaign_task_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EmailTask) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EmailTask) ProtoMessage() {}
-
-func (x *EmailTask) ProtoReflect() protoreflect.Message {
-	mi := &file_campaign_task_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EmailTask.ProtoReflect.Descriptor instead.
-func (*EmailTask) Descriptor() ([]byte, []int) {
-	return file_campaign_task_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *EmailTask) GetEmailId() string {
-	if x != nil {
-		return x.EmailId
-	}
-	return ""
-}
-
-func (x *EmailTask) GetTaskId() string {
-	if x != nil {
-		return x.TaskId
-	}
-	return ""
-}
-
-var File_campaign_task_proto protoreflect.FileDescriptor
-
-const file_campaign_task_proto_rawDesc = "" +
+const file_tasks_proto_rawDesc = "" +
 	"\n" +
-	"\x13campaign_task.proto\x12\x05tasks\"H\n" +
-	"\fCampaignTask\x12\x1f\n" +
-	"\vcampaign_id\x18\x01 \x01(\tR\n" +
-	"campaignId\x12\x17\n" +
-	"\atask_id\x18\x02 \x01(\tR\x06taskId\"?\n" +
-	"\tEmailTask\x12\x19\n" +
-	"\bemail_id\x18\x01 \x01(\tR\aemailId\x12\x17\n" +
+	"\vtasks.proto\x12\x05tasks\"&\n" +
+	"\vProcessTask\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskIdB$Z\"warmbly/internal/tasks/proto;protob\x06proto3"
 
 var (
-	file_campaign_task_proto_rawDescOnce sync.Once
-	file_campaign_task_proto_rawDescData []byte
+	file_tasks_proto_rawDescOnce sync.Once
+	file_tasks_proto_rawDescData []byte
 )
 
-func file_campaign_task_proto_rawDescGZIP() []byte {
-	file_campaign_task_proto_rawDescOnce.Do(func() {
-		file_campaign_task_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_campaign_task_proto_rawDesc), len(file_campaign_task_proto_rawDesc)))
+func file_tasks_proto_rawDescGZIP() []byte {
+	file_tasks_proto_rawDescOnce.Do(func() {
+		file_tasks_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_tasks_proto_rawDesc), len(file_tasks_proto_rawDesc)))
 	})
-	return file_campaign_task_proto_rawDescData
+	return file_tasks_proto_rawDescData
 }
 
-var file_campaign_task_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_campaign_task_proto_goTypes = []any{
-	(*CampaignTask)(nil), // 0: tasks.CampaignTask
-	(*EmailTask)(nil),    // 1: tasks.EmailTask
+var file_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_tasks_proto_goTypes = []any{
+	(*ProcessTask)(nil), // 0: tasks.ProcessTask
 }
-var file_campaign_task_proto_depIdxs = []int32{
+var file_tasks_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -167,26 +98,26 @@ var file_campaign_task_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_campaign_task_proto_init() }
-func file_campaign_task_proto_init() {
-	if File_campaign_task_proto != nil {
+func init() { file_tasks_proto_init() }
+func file_tasks_proto_init() {
+	if File_tasks_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_campaign_task_proto_rawDesc), len(file_campaign_task_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tasks_proto_rawDesc), len(file_tasks_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_campaign_task_proto_goTypes,
-		DependencyIndexes: file_campaign_task_proto_depIdxs,
-		MessageInfos:      file_campaign_task_proto_msgTypes,
+		GoTypes:           file_tasks_proto_goTypes,
+		DependencyIndexes: file_tasks_proto_depIdxs,
+		MessageInfos:      file_tasks_proto_msgTypes,
 	}.Build()
-	File_campaign_task_proto = out.File
-	file_campaign_task_proto_goTypes = nil
-	file_campaign_task_proto_depIdxs = nil
+	File_tasks_proto = out.File
+	file_tasks_proto_goTypes = nil
+	file_tasks_proto_depIdxs = nil
 }

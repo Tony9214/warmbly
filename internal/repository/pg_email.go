@@ -20,9 +20,34 @@ import (
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
+// SMTPCredentials holds SMTP/IMAP server credentials
+type SMTPCredentials struct {
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUser     string
+	SMTPPassword string
+	IMAPHost     string
+	IMAPPort     int
+	IMAPUser     string
+	IMAPPassword string
+}
+
+// OAuthCredentials holds OAuth token credentials
+type OAuthCredentials struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    time.Time
+}
+
 type EmailRepository interface {
 	Search(ctx context.Context, userID, search string, cursor, tag *string, limit int32) (*models.EmailsResult, *errx.Error)
 	Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error)
+	GetByID(ctx context.Context, emailAccountID uuid.UUID) (*models.Email, *errx.Error)
+	GetByTags(ctx context.Context, userID string, tags []string) ([]models.Email, *errx.Error)
+	GetSMTPCredentials(ctx context.Context, emailAccountID uuid.UUID) (*SMTPCredentials, *errx.Error)
+	GetOAuthCredentials(ctx context.Context, emailAccountID uuid.UUID) (*OAuthCredentials, *errx.Error)
+	GetWorkerID(ctx context.Context, emailAccountID uuid.UUID) (*uuid.UUID, *errx.Error)
+	SetWorkerID(ctx context.Context, emailAccountID, workerID uuid.UUID) *errx.Error
 	Update(ctx context.Context, userID, emailAccountID string, udata *models.UpdateEmail) (*models.Email, *errx.Error)
 	UpdateTrackingDomain(ctx context.Context, userID, emailAccountID, domain string) *errx.Error
 	Delete(ctx context.Context, userID, emailAccountID string) *errx.Error
@@ -479,6 +504,16 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		args = append(args, *udata.SignatureCode)
 		argPos++
 	}
+	if udata.Status != nil {
+		// Validate status - must be one of: active, inactive, revoked
+		status := *udata.Status
+		if status != "active" && status != "inactive" && status != "revoked" {
+			return nil, errx.ErrInvalid
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "status", argPos))
+		args = append(args, status)
+		argPos++
+	}
 	if udata.CampaignLimit != nil {
 		if *udata.CampaignLimit < 0 || *udata.CampaignLimit > 100 {
 			return nil, errx.ErrEmailCampaignLimit
@@ -651,5 +686,224 @@ func (r *emailRepository) Delete(ctx context.Context, userID, emailAccountID str
 	if cmd.RowsAffected() == 0 {
 		return errx.ErrNotFound
 	}
+	return nil
+}
+
+// GetByID retrieves an email account by ID without requiring userID (for internal service use)
+func (r *emailRepository) GetByID(ctx context.Context, emailAccountID uuid.UUID) (*models.Email, *errx.Error) {
+	query := `
+		SELECT
+		 ea.id, ea.user_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
+		 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
+		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
+		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag, ea.timezone,
+		 ea.created_at, ea.updated_at,
+		 COALESCE(array_agg(eat.tag) FILTER (WHERE eat.tag IS NOT NULL), '{}') AS tags
+		FROM email_accounts ea
+		LEFT JOIN email_tags eat ON eat.email = ea.id
+		WHERE ea.id = $1
+		GROUP BY ea.id
+	`
+
+	var i models.Email
+	err := r.DB.QueryRow(ctx, query, emailAccountID).Scan(
+		&i.ID, &i.UserID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode,
+		&i.Provider, &i.Status, &i.LastSyncedAt, &i.LastID, &i.CampaignLimit,
+		&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.Warmup, &i.WarmupBase,
+		&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.Timezone,
+		&i.CreatedAt, &i.UpdatedAt, &i.Tags,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrNotFound
+		}
+		db.CaptureError(err, query, []any{emailAccountID}, "queryrow")
+		return nil, errx.InternalError()
+	}
+
+	return &i, nil
+}
+
+// GetByTags retrieves email accounts matching any of the specified tags
+func (r *emailRepository) GetByTags(ctx context.Context, userID string, tags []string) ([]models.Email, *errx.Error) {
+	if len(tags) == 0 {
+		return []models.Email{}, nil
+	}
+
+	query := `
+		SELECT DISTINCT ON (ea.id)
+		 ea.id, ea.user_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
+		 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
+		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
+		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag, ea.timezone,
+		 ea.created_at, ea.updated_at
+		FROM email_accounts ea
+		JOIN email_tags eat ON eat.email = ea.id
+		WHERE ea.user_id = $1
+		  AND eat.tag = ANY($2)
+		  AND ea.status = 'active'
+		ORDER BY ea.id
+	`
+
+	rows, err := r.DB.Query(ctx, query, userID, tags)
+	if err != nil {
+		db.CaptureError(err, query, []any{userID, tags}, "query")
+		return nil, errx.InternalError()
+	}
+	defer rows.Close()
+
+	var emails []models.Email
+	for rows.Next() {
+		var i models.Email
+		err := rows.Scan(
+			&i.ID, &i.UserID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode,
+			&i.Provider, &i.Status, &i.LastSyncedAt, &i.LastID, &i.CampaignLimit,
+			&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.Warmup, &i.WarmupBase,
+			&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.Timezone,
+			&i.CreatedAt, &i.UpdatedAt,
+		)
+		if err != nil {
+			db.CaptureError(err, "", nil, "scan")
+			return nil, errx.InternalError()
+		}
+		i.Tags = []string{} // Tags not fetched in this query
+		emails = append(emails, i)
+	}
+
+	return emails, nil
+}
+
+// GetSMTPCredentials retrieves SMTP/IMAP credentials for an email account
+func (r *emailRepository) GetSMTPCredentials(ctx context.Context, emailAccountID uuid.UUID) (*SMTPCredentials, *errx.Error) {
+	query := `
+		SELECT smtp_host, smtp_port, smtp_user, smtp_password,
+		       imap_host, imap_port, imap_user, imap_password
+		FROM email_accounts_smtp_imap
+		WHERE email_account_id = $1
+	`
+
+	var creds SMTPCredentials
+	var smtpHost, smtpUser, smtpPassword, imapHost, imapUser, imapPassword string
+
+	err := r.DB.QueryRow(ctx, query, emailAccountID).Scan(
+		&smtpHost, &creds.SMTPPort, &smtpUser, &smtpPassword,
+		&imapHost, &creds.IMAPPort, &imapUser, &imapPassword,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrNotFound
+		}
+		db.CaptureError(err, query, []any{emailAccountID}, "queryrow")
+		return nil, errx.InternalError()
+	}
+
+	// Decrypt credentials
+	var xerr error
+	creds.SMTPHost, xerr = r.Encrypt.Decrypt(smtpHost)
+	if xerr != nil {
+		sentry.CaptureException(xerr)
+		return nil, errx.InternalError()
+	}
+	creds.SMTPUser, xerr = r.Encrypt.Decrypt(smtpUser)
+	if xerr != nil {
+		sentry.CaptureException(xerr)
+		return nil, errx.InternalError()
+	}
+	creds.SMTPPassword, xerr = r.Encrypt.Decrypt(smtpPassword)
+	if xerr != nil {
+		sentry.CaptureException(xerr)
+		return nil, errx.InternalError()
+	}
+	creds.IMAPHost, xerr = r.Encrypt.Decrypt(imapHost)
+	if xerr != nil {
+		sentry.CaptureException(xerr)
+		return nil, errx.InternalError()
+	}
+	creds.IMAPUser, xerr = r.Encrypt.Decrypt(imapUser)
+	if xerr != nil {
+		sentry.CaptureException(xerr)
+		return nil, errx.InternalError()
+	}
+	creds.IMAPPassword, xerr = r.Encrypt.Decrypt(imapPassword)
+	if xerr != nil {
+		sentry.CaptureException(xerr)
+		return nil, errx.InternalError()
+	}
+
+	return &creds, nil
+}
+
+// GetOAuthCredentials retrieves OAuth credentials for an email account
+func (r *emailRepository) GetOAuthCredentials(ctx context.Context, emailAccountID uuid.UUID) (*OAuthCredentials, *errx.Error) {
+	query := `
+		SELECT access_token, refresh_token, expires_at
+		FROM email_accounts_oauth
+		WHERE email_account_id = $1
+	`
+
+	var accessToken, refreshToken string
+	var expiresAt time.Time
+
+	err := r.DB.QueryRow(ctx, query, emailAccountID).Scan(
+		&accessToken, &refreshToken, &expiresAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrNotFound
+		}
+		db.CaptureError(err, query, []any{emailAccountID}, "queryrow")
+		return nil, errx.InternalError()
+	}
+
+	// Decrypt tokens
+	var xerr error
+	decryptedAccessToken, xerr := r.Encrypt.Decrypt(accessToken)
+	if xerr != nil {
+		sentry.CaptureException(xerr)
+		return nil, errx.InternalError()
+	}
+	decryptedRefreshToken, xerr := r.Encrypt.Decrypt(refreshToken)
+	if xerr != nil {
+		sentry.CaptureException(xerr)
+		return nil, errx.InternalError()
+	}
+
+	return &OAuthCredentials{
+		AccessToken:  decryptedAccessToken,
+		RefreshToken: decryptedRefreshToken,
+		ExpiresAt:    expiresAt,
+	}, nil
+}
+
+// GetWorkerID retrieves the worker ID assigned to an email account
+func (r *emailRepository) GetWorkerID(ctx context.Context, emailAccountID uuid.UUID) (*uuid.UUID, *errx.Error) {
+	query := `SELECT worker_id FROM email_accounts WHERE id = $1`
+
+	var workerID *uuid.UUID
+	err := r.DB.QueryRow(ctx, query, emailAccountID).Scan(&workerID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrNotFound
+		}
+		db.CaptureError(err, query, []any{emailAccountID}, "queryrow")
+		return nil, errx.InternalError()
+	}
+
+	return workerID, nil
+}
+
+// SetWorkerID assigns a worker to an email account
+func (r *emailRepository) SetWorkerID(ctx context.Context, emailAccountID, workerID uuid.UUID) *errx.Error {
+	query := `UPDATE email_accounts SET worker_id = $1, updated_at = NOW() WHERE id = $2`
+
+	cmd, err := r.DB.Exec(ctx, query, workerID, emailAccountID)
+	if err != nil {
+		db.CaptureError(err, query, []any{workerID, emailAccountID}, "exec")
+		return errx.InternalError()
+	}
+	if cmd.RowsAffected() == 0 {
+		return errx.ErrNotFound
+	}
+
 	return nil
 }

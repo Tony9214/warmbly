@@ -7,7 +7,8 @@ import (
 )
 
 type Campaign struct {
-	ID uuid.UUID `json:"id"`
+	ID     uuid.UUID `json:"id"`
+	UserID string    `json:"user_id"`
 
 	Name        string `json:"name"`
 	Description string `json:"description"`
