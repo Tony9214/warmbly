@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -18,11 +20,53 @@ func (h *Handler) GetUniboxIncoming(c *gin.Context) {
 		return
 	}
 
-	from := c.Query("from")
-	cursor := c.Query("cursor")
-	limit := c.Query("limit")
+	// Build search params from query
+	params := &models.MailSearchParams{
+		Cursor: c.Query("cursor"),
+	}
 
-	resp, xerr := h.UniboxService.Incoming(c.Request.Context(), uid, limit, cursor, from)
+	// Parse limit
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil {
+			params.PageSize = l
+		}
+	}
+
+	// Parse sender filter
+	if from := c.Query("from"); from != "" {
+		params.Sender = &from
+	}
+
+	// Parse subject filter
+	if subject := c.Query("subject"); subject != "" {
+		params.Subject = &subject
+	}
+
+	// Parse unseen filter
+	if unseenStr := c.Query("unseen"); unseenStr == "true" {
+		unseen := true
+		params.Unseen = &unseen
+	}
+
+	// Parse date filters
+	if sinceStr := c.Query("since"); sinceStr != "" {
+		if since, err := time.Parse("2006-01-02", sinceStr); err == nil {
+			params.Since = &since
+		}
+	}
+	if untilStr := c.Query("until"); untilStr != "" {
+		if until, err := time.Parse("2006-01-02", untilStr); err == nil {
+			params.Until = &until
+		}
+	}
+
+	// Parse email account filter
+	if emailIDStr := c.Query("email_id"); emailIDStr != "" {
+		// Note: For email account filtering, we may need to enhance the repository
+		// This is left as metadata in search params for now
+	}
+
+	resp, xerr := h.UniboxService.Search(c.Request.Context(), uid, params)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return
@@ -111,4 +155,31 @@ func (h *Handler) UniboxMarkSeen(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// GetUnseenCount gets the count of unseen emails
+// GET /unibox/count
+func (h *Handler) GetUnseenCount(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		errx.Handle(c, errx.ErrUser)
+		return
+	}
+
+	// Optional email account filter
+	var emailAccountID *uuid.UUID
+	if emailIDStr := c.Query("email_id"); emailIDStr != "" {
+		if id, err := uuid.Parse(emailIDStr); err == nil {
+			emailAccountID = &id
+		}
+	}
+
+	count, xerr := h.UniboxService.GetUnseenCount(c.Request.Context(), uid, emailAccountID)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"count": count})
 }

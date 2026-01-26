@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"github.com/warmbly/warmbly/internal/app/analytics"
+	"github.com/warmbly/warmbly/internal/app/apikey"
+	"github.com/warmbly/warmbly/internal/app/audit"
 	"github.com/warmbly/warmbly/internal/app/auth"
 	"github.com/warmbly/warmbly/internal/app/campaign"
 	"github.com/warmbly/warmbly/internal/app/contact"
 	"github.com/warmbly/warmbly/internal/app/email"
 	"github.com/warmbly/warmbly/internal/app/group"
+	"github.com/warmbly/warmbly/internal/app/ratelimit"
 	"github.com/warmbly/warmbly/internal/app/role"
 	"github.com/warmbly/warmbly/internal/app/sequence"
 	"github.com/warmbly/warmbly/internal/app/socket"
@@ -34,4 +38,10 @@ type Handler struct {
 	TzService     tz.TzService
 	SocketService socket.SocketService
 	TasksService  tasks.TasksService
+
+	// New services
+	APIKeyService    apikey.APIKeyService
+	AnalyticsService analytics.AnalyticsService
+	AuditService     audit.AuditService
+	RateLimitService ratelimit.RateLimitService
 }

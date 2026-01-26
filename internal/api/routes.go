@@ -8,6 +8,7 @@ import (
 	"github.com/warmbly/warmbly/internal/api/handler"
 	"github.com/warmbly/warmbly/internal/api/handler/grouph"
 	"github.com/warmbly/warmbly/internal/api/middleware"
+	"github.com/warmbly/warmbly/internal/models"
 )
 
 func Run(
@@ -93,12 +94,59 @@ func Run(
 		unibox := protected.Group("/unibox")
 		{
 			unibox.GET("", h.GetUniboxIncoming)
+			unibox.GET("/count", h.GetUnseenCount)
+			unibox.GET("/thread", h.GetUniboxThread)
 			unibox.PATCH("/seen", h.UniboxMarkSeen)
 			unibox.GET("/:id", h.GetUniboxEmail)
-			unibox.GET("/thread", h.GetUniboxThread)
 		}
 
 		protected.POST("/getaway", h.GenerateWebsocket)
+
+		// API Keys management
+		apiKeys := protected.Group("/api-keys")
+		apiKeys.Use(m.RateLimitMiddleware(models.RateLimitWrite))
+		{
+			apiKeys.GET("", h.ListAPIKeys)
+			apiKeys.POST("", h.CreateAPIKey)
+			apiKeys.GET("/permissions", h.ListAPIPermissions)
+			apiKeys.GET("/:id", h.GetAPIKey)
+			apiKeys.PATCH("/:id", h.UpdateAPIKey)
+			apiKeys.DELETE("/:id", h.RevokeAPIKey)
+		}
+
+		// Analytics endpoints
+		analytics := protected.Group("/analytics")
+		analytics.Use(m.RateLimitMiddleware(models.RateLimitAnalytics))
+		{
+			analytics.GET("/warmup", h.GetWarmupAnalytics)
+			analytics.GET("/campaigns/:id", h.GetCampaignAnalytics)
+			analytics.GET("/campaigns/:id/daily", h.GetCampaignDailyStats)
+			analytics.GET("/accounts", h.GetAllAccountStatuses)
+			analytics.GET("/accounts/:id", h.GetAccountStatus)
+			analytics.GET("/usage", h.GetUsageOverview)
+		}
+
+		// Audit logs
+		auditLogs := protected.Group("/audit-logs")
+		auditLogs.Use(m.RateLimitMiddleware(models.RateLimitRead))
+		{
+			auditLogs.GET("", h.GetAuditLogs)
+		}
+
+		// Realtime subscription info
+		realtime := protected.Group("/realtime")
+		{
+			realtime.GET("/info", h.GetRealtimeInfo)
+		}
+	}
+
+	// Admin routes (requires additional role check)
+	admin := r.Group("/admin")
+	admin.Use(m.AuthMiddleware())
+	{
+		admin.GET("/users/:id/rate-limits", h.GetUserRateLimits)
+		admin.PATCH("/users/:id/rate-limits", h.UpdateUserRateLimits)
+		admin.GET("/audit-logs", h.GetAdminAuditLogs)
 	}
 
 	webhook := r.Group("/webhook")

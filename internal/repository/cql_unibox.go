@@ -27,6 +27,8 @@ type UniboxRepository interface {
 	GetByID(ctx context.Context, userID, id uuid.UUID) (*models.EmailMessageStoreData, error)
 	GetByThread(ctx context.Context, userID, emailID uuid.UUID, threadID string, limit int, cursor string) (*models.MailSearchResult, error)
 	GetBySender(ctx context.Context, userID uuid.UUID, sender string, limit int, cursor string) (*models.MailSearchResult, error)
+	Search(ctx context.Context, userID uuid.UUID, params *models.MailSearchParams) (*models.MailSearchResult, error)
+	GetUnseenCount(ctx context.Context, userID uuid.UUID, emailAccountID *uuid.UUID) (int64, error)
 	MarkSeen(ctx context.Context, userID, id uuid.UUID, seen bool) error
 	MarkSeenBulk(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, seen bool) error
 	Delete(ctx context.Context, userID, id uuid.UUID) error
@@ -431,4 +433,118 @@ func (r *uniboxRepository) Delete(ctx context.Context, userId, id uuid.UUID) err
 		cql,
 		params...,
 	).WithContext(ctx).Exec()
+}
+
+// ----------------------------------------------------------------------
+// Search Emails with filters
+// ----------------------------------------------------------------------
+func (r *uniboxRepository) Search(ctx context.Context, userID uuid.UUID, params *models.MailSearchParams) (*models.MailSearchResult, error) {
+	var pageState []byte
+	if params.Cursor != "" {
+		pageState = cdb.DecodePageState(params.Cursor)
+	}
+
+	limit := params.PageSize
+	if limit <= 0 {
+		limit = 50
+	}
+
+	// Build query with ALLOW FILTERING for additional conditions
+	// Note: In production with large datasets, consider using materialized views
+	// or secondary indexes for better performance
+	cql := fmt.Sprintf(`
+		SELECT %s
+		FROM emails
+		WHERE user_id = ?
+	`, strings.Join(MailFields, ","))
+
+	queryParams := []any{userID}
+
+	// Cassandra doesn't support arbitrary WHERE clauses like SQL
+	// We need to fetch and filter in-memory for complex queries
+	// For better performance, use materialized views for common query patterns
+
+	if params.Unseen != nil && *params.Unseen {
+		cql += " AND seen = ?"
+		queryParams = append(queryParams, false)
+	}
+
+	cql += " ALLOW FILTERING"
+
+	iter := r.db.Query(cql, queryParams...).
+		PageSize(limit).
+		PageState(pageState).
+		WithContext(ctx).
+		Iter()
+
+	var emails []models.EmailMessageStoreDataPreview
+	var e models.EmailMessageStoreDataPreview
+
+	for iter.Scan(&e.ID, &e.EmailID, &e.ThreadID, &e.Subject, &e.Snippet, &e.InternalDate, &e.Seen) {
+		// Apply client-side filters for fields that can't be filtered in CQL
+		if params.Since != nil && e.InternalDate.Before(*params.Since) {
+			continue
+		}
+		if params.Until != nil && e.InternalDate.After(*params.Until) {
+			continue
+		}
+		if params.Subject != nil && *params.Subject != "" {
+			if !strings.Contains(strings.ToLower(e.Subject), strings.ToLower(*params.Subject)) {
+				continue
+			}
+		}
+
+		emails = append(emails, e)
+	}
+
+	nextState := iter.PageState()
+	hasMore := len(nextState) > 0
+	var nextCursor *string
+	if hasMore {
+		encoded := cdb.EncodePageState(nextState)
+		nextCursor = &encoded
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, err
+	}
+
+	return &models.MailSearchResult{
+		Data: emails,
+		Pagination: models.CPagination{
+			HasMore:    hasMore,
+			NextCursor: nextCursor,
+		},
+	}, nil
+}
+
+// ----------------------------------------------------------------------
+// Get Unseen Count
+// ----------------------------------------------------------------------
+func (r *uniboxRepository) GetUnseenCount(ctx context.Context, userID uuid.UUID, emailAccountID *uuid.UUID) (int64, error) {
+	cql := `
+		SELECT COUNT(*)
+		FROM emails
+		WHERE user_id = ? AND seen = false
+		ALLOW FILTERING
+	`
+
+	params := []any{userID}
+
+	if emailAccountID != nil {
+		cql = `
+			SELECT COUNT(*)
+			FROM emails
+			WHERE user_id = ? AND email_id = ? AND seen = false
+			ALLOW FILTERING
+		`
+		params = append(params, *emailAccountID)
+	}
+
+	var count int64
+	if err := r.db.Query(cql, params...).WithContext(ctx).Scan(&count); err != nil {
+		return 0, err
+	}
+
+	return count, nil
 }
