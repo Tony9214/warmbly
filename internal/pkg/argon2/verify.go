@@ -66,18 +66,18 @@ func DecodeHash(hash string) (params *Params, salt, key []byte, err error) {
 	params = &Params{}
 	_, err = fmt.Sscanf(vals[3], "m=%d,t=%d,p=%d", &params.Memory, &params.Iterations, &params.Parallelism)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, ErrInvalidHash
 	}
 
 	salt, err = base64.RawStdEncoding.Strict().DecodeString(vals[4])
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, ErrInvalidHash
 	}
 	params.SaltLength = uint32(len(salt))
 
 	key, err = base64.RawStdEncoding.Strict().DecodeString(vals[5])
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, ErrInvalidHash
 	}
 	params.KeyLength = uint32(len(key))
 

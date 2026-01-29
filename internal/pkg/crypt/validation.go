@@ -2,13 +2,12 @@ package crypt
 
 import (
 	"regexp"
-
-	"github.com/google/uuid"
 )
 
+var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 func IsValidUUID(u string) bool {
-	_, err := uuid.Parse(u)
-	return err == nil
+	return uuidRegex.MatchString(u)
 }
 
 func IsValidHexColor(s string) bool {
