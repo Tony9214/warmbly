@@ -17,6 +17,8 @@ const (
 
 type Worker struct {
 	ID           uuid.UUID  `json:"id"`
+	Name         string     `json:"name"`
+	Notes        string     `json:"notes"`
 	IPAddr       string     `json:"ip_addr"`
 	Active       bool       `json:"active"`
 	FreeTier     bool       `json:"free_tier"`
@@ -52,75 +54,77 @@ const (
 )
 
 type SendEmail struct {
-	TaskID        uuid.UUID    `json:"task_id"`
-	EmailID       uuid.UUID    `json:"email_id"`
-	To            []string     `json:"to"`
-	Cc            []string     `json:"cc"`
-	Bcc           []string     `json:"bcc"`
-	Subject       string       `json:"subject"`
-	BodyS3Key     string       `json:"body_s3_key"`
-	MessageID     string       `json:"message_id"`
-	InReplyTo     string       `json:"in_reply_to,omitempty"`
-	Parent        *EmailParent `json:"parent,omitempty"`
-	IsWarmup      bool         `json:"is_warmup"`
-	TrackingInfo  *TrackingInfo `json:"tracking_info,omitempty"`
+	TaskID       uuid.UUID     `json:"task_id" avro:"task_id"`
+	EmailID      uuid.UUID     `json:"email_id" avro:"email_id"`
+	UserID       uuid.UUID     `json:"user_id" avro:"user_id"`
+	To           []string      `json:"to" avro:"to"`
+	Cc           []string      `json:"cc" avro:"cc"`
+	Bcc          []string      `json:"bcc" avro:"bcc"`
+	Subject      string        `json:"subject" avro:"subject"`
+	BodyS3Key    string        `json:"body_s3_key" avro:"body_s3_key"`
+	MessageID    string        `json:"message_id" avro:"message_id"`
+	InReplyTo    string        `json:"in_reply_to,omitempty" avro:"in_reply_to"`
+	Parent       *EmailParent  `json:"parent,omitempty" avro:"parent"`
+	IsWarmup     bool          `json:"is_warmup" avro:"is_warmup"`
+	TrackingInfo *TrackingInfo `json:"tracking_info,omitempty" avro:"tracking_info"`
+	WarmupToken  string        `json:"warmup_token,omitempty" avro:"warmup_token"`
 }
 
 // TrackingInfo contains tracking configuration for campaign emails
 type TrackingInfo struct {
-	OpenTracking   bool   `json:"open_tracking"`
-	LinkTracking   bool   `json:"link_tracking"`
-	TrackingDomain string `json:"tracking_domain"`
+	OpenTracking   bool   `json:"open_tracking" avro:"open_tracking"`
+	LinkTracking   bool   `json:"link_tracking" avro:"link_tracking"`
+	TrackingDomain string `json:"tracking_domain" avro:"tracking_domain"`
 }
 
 // EmailSendError contains detailed error information for failed email sends
 type EmailSendError struct {
-	Code           string `json:"code"`
-	Type           string `json:"type"`
-	Message        string `json:"message"`
-	ResolveMethod  string `json:"resolve_method"`
-	UserVisible    bool   `json:"user_visible"`
-	UserTitle      string `json:"user_title,omitempty"`
-	UserMessage    string `json:"user_message,omitempty"`
-	ActionRequired string `json:"action_required,omitempty"`
+	Code           string `json:"code" avro:"code"`
+	Type           string `json:"type" avro:"type"`
+	Message        string `json:"message" avro:"message"`
+	ResolveMethod  string `json:"resolve_method" avro:"resolve_method"`
+	UserVisible    bool   `json:"user_visible" avro:"user_visible"`
+	UserTitle      string `json:"user_title,omitempty" avro:"user_title"`
+	UserMessage    string `json:"user_message,omitempty" avro:"user_message"`
+	ActionRequired string `json:"action_required,omitempty" avro:"action_required"`
 }
 
 // SendEmailResult is the result from worker after sending email
 type SendEmailResult struct {
-	TaskID         uuid.UUID       `json:"task_id"`
-	Success        bool            `json:"success"`
-	MessageID      string          `json:"message_id,omitempty"`
-	ProviderMsgID  string          `json:"provider_msg_id,omitempty"`
-	SentAt         time.Time       `json:"sent_at,omitempty"`
-	Error          *EmailSendError `json:"error,omitempty"`
-	LegacyErrorMsg string          `json:"legacy_error,omitempty"` // Deprecated: use Error instead
+	TaskID         uuid.UUID       `json:"task_id" avro:"task_id"`
+	Success        bool            `json:"success" avro:"success"`
+	MessageID      string          `json:"message_id,omitempty" avro:"message_id"`
+	ProviderMsgID  string          `json:"provider_msg_id,omitempty" avro:"provider_msg_id"`
+	SentAt         time.Time       `json:"sent_at,omitempty" avro:"sent_at"`
+	Error          *EmailSendError `json:"error,omitempty" avro:"error"`
+	LegacyErrorMsg string          `json:"legacy_error,omitempty" avro:"legacy_error"` // Deprecated: use Error instead
 }
 
 type AddWorkerEmailGoogleData struct {
-	LastHistoryID uint64        `json:"last_history_id"`
-	Token         *oauth2.Token `json:"token"`
+	LastHistoryID uint64        `json:"last_history_id" avro:"last_history_id"`
+	Token         *oauth2.Token `json:"token" avro:"token"`
 }
 
 type AddWorkerEmailSmtpImapData struct {
-	Mailboxes   []Mailbox     `json:"mailboxes"`
-	Token       *oauth2.Token `json:"token"`
-	Credentials *SmtpImap     `json:"credentials"`
+	Mailboxes   []Mailbox     `json:"mailboxes" avro:"mailboxes"`
+	Token       *oauth2.Token `json:"token" avro:"token"`
+	Credentials *SmtpImap     `json:"credentials" avro:"credentials"`
 }
 
 type AddWorkerEmail struct {
-	ID        uuid.UUID                   `json:"id"`
-	ImapSync  bool                        `json:"imap_sync"`
-	Email     string                      `json:"email"`
-	FirstName string                      `json:"first_name"`
-	LastName  string                      `json:"last_name"`
-	Type      InboxProvider               `json:"type"`
-	Google    *AddWorkerEmailGoogleData   `json:"google"`
-	SmtpImap  *AddWorkerEmailSmtpImapData `json:"smtp_imap"`
+	ID        uuid.UUID                   `json:"id" avro:"id"`
+	ImapSync  bool                        `json:"imap_sync" avro:"imap_sync"`
+	Email     string                      `json:"email" avro:"email"`
+	FirstName string                      `json:"first_name" avro:"first_name"`
+	LastName  string                      `json:"last_name" avro:"last_name"`
+	Type      InboxProvider               `json:"type" avro:"type"`
+	Google    *AddWorkerEmailGoogleData   `json:"google" avro:"google"`
+	SmtpImap  *AddWorkerEmailSmtpImapData `json:"smtp_imap" avro:"smtp_imap"`
 
-	Cfg oauth2.Config `json:"-"`
+	Cfg oauth2.Config `json:"-" avro:"-"`
 }
 
 type RemoveWorkerEmail struct {
-	UserID  string `json:"user_id"`
-	EmailID string `json:"email_id"`
+	UserID  string `json:"user_id" avro:"user_id"`
+	EmailID string `json:"email_id" avro:"email_id"`
 }

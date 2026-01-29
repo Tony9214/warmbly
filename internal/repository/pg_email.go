@@ -166,9 +166,12 @@ func (r *emailRepository) NewOauthAccount(ctx context.Context, userID string, da
 		CampaignLimit: config.CampaignLimitDefault,
 		MinWaitTime:   config.MinWaitTimeDefault,
 
-		WarmupBase:     config.WarmupBaseDefault,
-		WarmupMax:      config.WarmupMaxDefault,
-		WarmupIncrease: config.WarmupIncreaseDefault,
+		WarmupBase:      config.WarmupBaseDefault,
+		WarmupMax:       config.WarmupMaxDefault,
+		WarmupIncrease:  config.WarmupIncreaseDefault,
+		WarmupStartTime: "08:00",
+		WarmupEndTime:   "20:00",
+		WarmupDays:      0,
 
 		CreatedAt: t,
 		UpdatedAt: t,
@@ -302,9 +305,12 @@ func (r *emailRepository) NewSMTPIMAPAccount(ctx context.Context, userID string,
 		CampaignLimit: config.CampaignLimitDefault,
 		MinWaitTime:   config.MinWaitTimeDefault,
 
-		WarmupBase:     config.WarmupBaseDefault,
-		WarmupMax:      config.WarmupMaxDefault,
-		WarmupIncrease: config.WarmupIncreaseDefault,
+		WarmupBase:      config.WarmupBaseDefault,
+		WarmupMax:       config.WarmupMaxDefault,
+		WarmupIncrease:  config.WarmupIncreaseDefault,
+		WarmupStartTime: "08:00",
+		WarmupEndTime:   "20:00",
+		WarmupDays:      0,
 
 		CreatedAt: t,
 		UpdatedAt: t,
@@ -319,11 +325,12 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 	}
 
 	query := `
-		SELECT 
+		SELECT
 		 ea.id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 	 	 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
-		 ea.warmup_max, ea.warmup_increase, ea.created_at, ea.updated_at,
+		 ea.warmup_max, ea.warmup_increase, ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days,
+		 ea.created_at, ea.updated_at,
 		 COALESCE(
 			array_agg(eat.tag_id) FILTER (WHERE eat.tag IS NOT NULL), '{}'
 		 ) AS tags
@@ -365,6 +372,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 			&i.ID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode, &i.Provider, &i.Status,
 			&i.LastSyncedAt, &i.LastID, &i.CampaignLimit, &i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain,
 			&i.Warmup, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease,
+			&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays,
 			&i.CreatedAt, &i.UpdatedAt, &i.Tags,
 		)
 		if err != nil {
@@ -427,11 +435,12 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 
 func (r *emailRepository) Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error) {
 	query := `
-		SELECT 
+		SELECT
 		ea.id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 		 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
-		 ea.warmup_max, ea.warmup_increase, ea.created_at, ea.updated_at,
+		 ea.warmup_max, ea.warmup_increase, ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days,
+		 ea.created_at, ea.updated_at,
 		 COALESCE(array_agg(eat.tag) FILTER (WHERE eat.tag IS NOT NULL), '{}') AS tags
 		FROM email_accounts ea
 		LEFT JOIN email_tags eat ON eat.email = ea.id
@@ -453,6 +462,7 @@ func (r *emailRepository) Get(ctx context.Context, userID, emailAccountID string
 		&i.ID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode, &i.Provider, &i.Status,
 		&i.LastSyncedAt, &i.LastID, &i.CampaignLimit, &i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain,
 		&i.Warmup, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease,
+		&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays,
 		&i.CreatedAt, &i.UpdatedAt, &i.Tags,
 	)
 	if err != nil {
@@ -581,6 +591,30 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		args = append(args, *udata.WarmupReplyRate)
 		argPos++
 	}
+	if udata.WarmupStartTime != nil {
+		if err := validate.CampaignTime(*udata.WarmupStartTime); err != nil {
+			return nil, err
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "warmup_start_time", argPos))
+		args = append(args, *udata.WarmupStartTime)
+		argPos++
+	}
+	if udata.WarmupEndTime != nil {
+		if err := validate.CampaignTime(*udata.WarmupEndTime); err != nil {
+			return nil, err
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "warmup_end_time", argPos))
+		args = append(args, *udata.WarmupEndTime)
+		argPos++
+	}
+	if udata.WarmupDays != nil {
+		if *udata.WarmupDays < 0 || *udata.WarmupDays > 127 {
+			return nil, errx.ErrInvalid
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "warmup_days", argPos))
+		args = append(args, *udata.WarmupDays)
+		argPos++
+	}
 
 	if argPos == 3 {
 		return nil, errx.ErrNotEnough
@@ -601,7 +635,8 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		WHERE user_id = $1 AND id = $2
 		RETURNING id, email, name, signature_plain, signature_html, signature_sync, signature_code, provider, status,
 		          last_synced_at, last_id, campaign_limit, min_wait_time, reply_to, tracking_domain,
-		          warmup, warmup_base, warmup_max, warmup_increase, warmup_reply_rate, warmup_tag, created_at, updated_at
+		          warmup, warmup_base, warmup_max, warmup_increase, warmup_reply_rate, warmup_tag,
+		          warmup_start_time, warmup_end_time, warmup_days, created_at, updated_at
 	`, strings.Join(setClauses, ", "))
 
 	var i models.Email
@@ -609,6 +644,7 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		&i.ID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode, &i.Provider, &i.Status,
 		&i.LastSyncedAt, &i.LastID, &i.CampaignLimit, &i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain,
 		&i.Warmup, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag,
+		&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays,
 		&i.CreatedAt, &i.UpdatedAt,
 	)
 	if err != nil {
@@ -696,7 +732,8 @@ func (r *emailRepository) GetByID(ctx context.Context, emailAccountID uuid.UUID)
 		 ea.id, ea.user_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 		 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
-		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag, ea.timezone,
+		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag,
+		 ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days, ea.timezone,
 		 ea.created_at, ea.updated_at,
 		 COALESCE(array_agg(eat.tag) FILTER (WHERE eat.tag IS NOT NULL), '{}') AS tags
 		FROM email_accounts ea
@@ -710,7 +747,8 @@ func (r *emailRepository) GetByID(ctx context.Context, emailAccountID uuid.UUID)
 		&i.ID, &i.UserID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode,
 		&i.Provider, &i.Status, &i.LastSyncedAt, &i.LastID, &i.CampaignLimit,
 		&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.Warmup, &i.WarmupBase,
-		&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.Timezone,
+		&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag,
+		&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays, &i.Timezone,
 		&i.CreatedAt, &i.UpdatedAt, &i.Tags,
 	)
 	if err != nil {
@@ -735,7 +773,8 @@ func (r *emailRepository) GetByTags(ctx context.Context, userID string, tags []s
 		 ea.id, ea.user_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 		 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
-		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag, ea.timezone,
+		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag,
+		 ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days, ea.timezone,
 		 ea.created_at, ea.updated_at
 		FROM email_accounts ea
 		JOIN email_tags eat ON eat.email = ea.id
@@ -759,7 +798,8 @@ func (r *emailRepository) GetByTags(ctx context.Context, userID string, tags []s
 			&i.ID, &i.UserID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode,
 			&i.Provider, &i.Status, &i.LastSyncedAt, &i.LastID, &i.CampaignLimit,
 			&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.Warmup, &i.WarmupBase,
-			&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.Timezone,
+			&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag,
+			&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays, &i.Timezone,
 			&i.CreatedAt, &i.UpdatedAt,
 		)
 		if err != nil {

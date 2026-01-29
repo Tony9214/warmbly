@@ -72,7 +72,7 @@ CREATE TYPE subscription_status AS ENUM (
 CREATE TABLE subscriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    organization_id UUID REFERENCES organizations(id),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
 
     -- Stripe identifiers
@@ -99,7 +99,7 @@ CREATE TABLE subscriptions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT unique_user_subscription UNIQUE (user_id)
+    CONSTRAINT unique_org_subscription UNIQUE (organization_id)
 );
 
 CREATE INDEX idx_subscriptions_stripe_customer ON subscriptions(stripe_customer_id);

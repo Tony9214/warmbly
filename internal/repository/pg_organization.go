@@ -50,11 +50,17 @@ type OrganizationRepository interface {
 	GetEmailAccountCount(ctx context.Context, orgID uuid.UUID) (int, error)
 	GetContactCount(ctx context.Context, orgID uuid.UUID) (int, error)
 
+	// Ownership counts
+	GetUserOwnedOrganizationCount(ctx context.Context, userID uuid.UUID) (int, error)
+
 	// Enterprise inquiries
 	CreateEnterpriseInquiry(ctx context.Context, inquiry *models.EnterpriseInquiry) error
 	GetEnterpriseInquiry(ctx context.Context, id uuid.UUID) (*models.EnterpriseInquiry, error)
 	ListEnterpriseInquiries(ctx context.Context, status string, limit, offset int) ([]models.EnterpriseInquiry, error)
 	UpdateEnterpriseInquiryStatus(ctx context.Context, id uuid.UUID, status string, processedBy uuid.UUID) error
+
+	// Admin permissions
+	GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error)
 }
 
 type organizationRepository struct {
@@ -491,6 +497,13 @@ func (r *organizationRepository) GetContactCount(ctx context.Context, orgID uuid
 	return count, err
 }
 
+// GetUserOwnedOrganizationCount returns the number of organizations owned by a user
+func (r *organizationRepository) GetUserOwnedOrganizationCount(ctx context.Context, userID uuid.UUID) (int, error) {
+	var count int
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM organizations WHERE owner_user_id = $1`, userID).Scan(&count)
+	return count, err
+}
+
 // CreateEnterpriseInquiry creates a new enterprise inquiry
 func (r *organizationRepository) CreateEnterpriseInquiry(ctx context.Context, inquiry *models.EnterpriseInquiry) error {
 	query := `
@@ -565,4 +578,14 @@ func (r *organizationRepository) UpdateEnterpriseInquiryStatus(ctx context.Conte
 	`
 	_, err := r.db.Exec(ctx, query, id, status, time.Now(), processedBy)
 	return err
+}
+
+// GetUserAdminPermissions retrieves the admin permissions for a user
+func (r *organizationRepository) GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error) {
+	var perms uint32
+	err := r.db.QueryRow(ctx, `SELECT admin_permissions FROM users WHERE id = $1`, userID).Scan(&perms)
+	if err == pgx.ErrNoRows {
+		return 0, nil
+	}
+	return perms, err
 }

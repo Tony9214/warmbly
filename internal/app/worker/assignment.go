@@ -11,29 +11,29 @@ import (
 )
 
 var (
-	ErrNoAvailableWorkers   = errors.New("no available workers")
-	ErrNoDedicatedWorkers   = errors.New("no dedicated workers available")
-	ErrUserAlreadyAssigned  = errors.New("user already has a dedicated worker assigned")
+	ErrNoAvailableWorkers  = errors.New("no available workers")
+	ErrNoDedicatedWorkers  = errors.New("no dedicated workers available")
+	ErrOrgAlreadyAssigned  = errors.New("organization already has a dedicated worker assigned")
 )
 
 type WorkerAssignmentService interface {
 	// AssignWorkerToEmail assigns an appropriate worker to an email account
-	// based on the user's subscription status (free tier vs paid)
-	AssignWorkerToEmail(ctx context.Context, emailAccountID, userID uuid.UUID) (*uuid.UUID, error)
+	// based on the organization's subscription status (free tier vs paid)
+	AssignWorkerToEmail(ctx context.Context, emailAccountID, orgID uuid.UUID) (*uuid.UUID, error)
 
 	// SelectSharedWorker selects the least loaded shared worker for the given tier
 	SelectSharedWorker(ctx context.Context, freeTier bool) (*models.Worker, error)
 
 	// Dedicated worker management
-	AssignDedicatedWorker(ctx context.Context, userID, subscriptionID uuid.UUID) error
-	ReleaseDedicatedWorker(ctx context.Context, userID uuid.UUID) error
-	GetDedicatedWorker(ctx context.Context, userID uuid.UUID) (*models.Worker, error)
+	AssignDedicatedWorker(ctx context.Context, orgID, subscriptionID uuid.UUID) error
+	ReleaseDedicatedWorker(ctx context.Context, orgID uuid.UUID) error
+	GetDedicatedWorker(ctx context.Context, orgID uuid.UUID) (*models.Worker, error)
 
 	// Migration operations
-	MigrateUserToPremiumWorkers(ctx context.Context, userID uuid.UUID) error
-	MigrateUserToFreeWorkers(ctx context.Context, userID uuid.UUID) error
-	MigrateUserToDedicated(ctx context.Context, userID uuid.UUID, subscriptionID uuid.UUID) error
-	MigrateUserToShared(ctx context.Context, userID uuid.UUID) error
+	MigrateOrgToPremiumWorkers(ctx context.Context, orgID uuid.UUID) error
+	MigrateOrgToFreeWorkers(ctx context.Context, orgID uuid.UUID) error
+	MigrateOrgToDedicated(ctx context.Context, orgID uuid.UUID, subscriptionID uuid.UUID) error
+	MigrateOrgToShared(ctx context.Context, orgID uuid.UUID) error
 	MigrateEmailsFromWorker(ctx context.Context, workerID uuid.UUID, targetFreeTier bool) error
 }
 
@@ -56,25 +56,25 @@ func NewAssignmentService(
 }
 
 // AssignWorkerToEmail assigns an appropriate worker to an email account
-func (s *workerAssignmentService) AssignWorkerToEmail(ctx context.Context, emailAccountID, userID uuid.UUID) (*uuid.UUID, error) {
-	// 1. Check user's subscription status
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+func (s *workerAssignmentService) AssignWorkerToEmail(ctx context.Context, emailAccountID, orgID uuid.UUID) (*uuid.UUID, error) {
+	// 1. Check organization's subscription status
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
 
 	// 2. Determine if free tier or paid
-	isPaidUser := sub != nil && sub.HasPaidSubscription()
+	isPaidOrg := sub != nil && sub.HasPaidSubscription()
 
-	// 3. Check if paid user has dedicated worker plan
-	if isPaidUser {
+	// 3. Check if paid org has dedicated worker plan
+	if isPaidOrg {
 		plan, err := s.planRepo.GetByID(ctx, sub.PlanID)
 		if err != nil {
 			return nil, err
 		}
 		if plan != nil && plan.DedicatedWorkers > 0 {
-			// Check if user has a dedicated worker
-			dedicatedWorker, err := s.workerRepo.GetDedicatedWorkerByUserID(ctx, userID)
+			// Check if org has a dedicated worker
+			dedicatedWorker, err := s.workerRepo.GetDedicatedWorkerByUserID(ctx, orgID)
 			if err != nil {
 				return nil, err
 			}
@@ -92,7 +92,7 @@ func (s *workerAssignmentService) AssignWorkerToEmail(ctx context.Context, email
 	}
 
 	// 4. Assign to shared worker (strict tier separation)
-	freeTier := !isPaidUser // Free trial = free workers, Paid = premium workers
+	freeTier := !isPaidOrg // Free trial = free workers, Paid = premium workers
 	worker, err := s.SelectSharedWorker(ctx, freeTier)
 	if err != nil {
 		return nil, err
@@ -136,15 +136,15 @@ func (s *workerAssignmentService) SelectSharedWorker(ctx context.Context, freeTi
 	return &workers[0], nil
 }
 
-// AssignDedicatedWorker assigns a dedicated worker to a user
-func (s *workerAssignmentService) AssignDedicatedWorker(ctx context.Context, userID, subscriptionID uuid.UUID) error {
-	// Check if user already has a dedicated worker
-	existing, err := s.workerRepo.GetActiveDedicatedAssignment(ctx, userID)
+// AssignDedicatedWorker assigns a dedicated worker to an organization
+func (s *workerAssignmentService) AssignDedicatedWorker(ctx context.Context, orgID, subscriptionID uuid.UUID) error {
+	// Check if org already has a dedicated worker
+	existing, err := s.workerRepo.GetActiveDedicatedAssignment(ctx, orgID)
 	if err != nil {
 		return err
 	}
 	if existing != nil {
-		return ErrUserAlreadyAssigned
+		return ErrOrgAlreadyAssigned
 	}
 
 	// Find an available dedicated worker
@@ -160,7 +160,7 @@ func (s *workerAssignmentService) AssignDedicatedWorker(ctx context.Context, use
 	assignment := &models.DedicatedWorkerAssignment{
 		ID:             uuid.New(),
 		WorkerID:       worker.ID,
-		UserID:         userID,
+		UserID:         orgID,
 		SubscriptionID: subscriptionID,
 		AssignedAt:     time.Now(),
 	}
@@ -169,26 +169,24 @@ func (s *workerAssignmentService) AssignDedicatedWorker(ctx context.Context, use
 }
 
 // ReleaseDedicatedWorker releases a dedicated worker assignment
-func (s *workerAssignmentService) ReleaseDedicatedWorker(ctx context.Context, userID uuid.UUID) error {
-	return s.workerRepo.ReleaseDedicatedAssignment(ctx, userID)
+func (s *workerAssignmentService) ReleaseDedicatedWorker(ctx context.Context, orgID uuid.UUID) error {
+	return s.workerRepo.ReleaseDedicatedAssignment(ctx, orgID)
 }
 
-// GetDedicatedWorker gets the dedicated worker for a user
-func (s *workerAssignmentService) GetDedicatedWorker(ctx context.Context, userID uuid.UUID) (*models.Worker, error) {
-	return s.workerRepo.GetDedicatedWorkerByUserID(ctx, userID)
+// GetDedicatedWorker gets the dedicated worker for an organization
+func (s *workerAssignmentService) GetDedicatedWorker(ctx context.Context, orgID uuid.UUID) (*models.Worker, error) {
+	return s.workerRepo.GetDedicatedWorkerByUserID(ctx, orgID)
 }
 
-// MigrateUserToPremiumWorkers migrates all user's emails from free to premium workers
-// Called when a trial user subscribes to a paid plan
-func (s *workerAssignmentService) MigrateUserToPremiumWorkers(ctx context.Context, userID uuid.UUID) error {
-	// Get all email account IDs for the user
-	accountIDs, err := s.workerRepo.GetEmailAccountsByUserID(ctx, userID)
+// MigrateOrgToPremiumWorkers migrates all org's emails from free to premium workers
+// Called when a trial org subscribes to a paid plan
+func (s *workerAssignmentService) MigrateOrgToPremiumWorkers(ctx context.Context, orgID uuid.UUID) error {
+	accountIDs, err := s.workerRepo.GetEmailAccountsByOrganizationID(ctx, orgID)
 	if err != nil {
 		return err
 	}
 
 	for _, accountID := range accountIDs {
-		// Get current worker info via workerRepo
 		info, err := s.workerRepo.GetEmailAccountWorkerInfo(ctx, accountID)
 		if err != nil || info == nil {
 			continue
@@ -217,17 +215,15 @@ func (s *workerAssignmentService) MigrateUserToPremiumWorkers(ctx context.Contex
 	return nil
 }
 
-// MigrateUserToFreeWorkers migrates all user's emails to free tier workers
+// MigrateOrgToFreeWorkers migrates all org's emails to free tier workers
 // Called when a paid subscription is cancelled/expired
-func (s *workerAssignmentService) MigrateUserToFreeWorkers(ctx context.Context, userID uuid.UUID) error {
-	// Get all email account IDs for the user
-	accountIDs, err := s.workerRepo.GetEmailAccountsByUserID(ctx, userID)
+func (s *workerAssignmentService) MigrateOrgToFreeWorkers(ctx context.Context, orgID uuid.UUID) error {
+	accountIDs, err := s.workerRepo.GetEmailAccountsByOrganizationID(ctx, orgID)
 	if err != nil {
 		return err
 	}
 
 	for _, accountID := range accountIDs {
-		// Get current worker info via workerRepo
 		info, err := s.workerRepo.GetEmailAccountWorkerInfo(ctx, accountID)
 		if err != nil || info == nil {
 			continue
@@ -256,17 +252,17 @@ func (s *workerAssignmentService) MigrateUserToFreeWorkers(ctx context.Context, 
 	return nil
 }
 
-// MigrateUserToDedicated migrates user's emails to their dedicated worker
-func (s *workerAssignmentService) MigrateUserToDedicated(ctx context.Context, userID uuid.UUID, subscriptionID uuid.UUID) error {
-	// First, assign a dedicated worker to the user
-	if err := s.AssignDedicatedWorker(ctx, userID, subscriptionID); err != nil {
-		if !errors.Is(err, ErrUserAlreadyAssigned) {
+// MigrateOrgToDedicated migrates org's emails to their dedicated worker
+func (s *workerAssignmentService) MigrateOrgToDedicated(ctx context.Context, orgID uuid.UUID, subscriptionID uuid.UUID) error {
+	// First, assign a dedicated worker to the org
+	if err := s.AssignDedicatedWorker(ctx, orgID, subscriptionID); err != nil {
+		if !errors.Is(err, ErrOrgAlreadyAssigned) {
 			return err
 		}
 	}
 
 	// Get the dedicated worker
-	dedicatedWorker, err := s.workerRepo.GetDedicatedWorkerByUserID(ctx, userID)
+	dedicatedWorker, err := s.workerRepo.GetDedicatedWorkerByUserID(ctx, orgID)
 	if err != nil {
 		return err
 	}
@@ -274,14 +270,12 @@ func (s *workerAssignmentService) MigrateUserToDedicated(ctx context.Context, us
 		return ErrNoDedicatedWorkers
 	}
 
-	// Get all email account IDs for the user
-	accountIDs, err := s.workerRepo.GetEmailAccountsByUserID(ctx, userID)
+	accountIDs, err := s.workerRepo.GetEmailAccountsByOrganizationID(ctx, orgID)
 	if err != nil {
 		return err
 	}
 
 	for _, accountID := range accountIDs {
-		// Get current worker info via workerRepo
 		info, err := s.workerRepo.GetEmailAccountWorkerInfo(ctx, accountID)
 		if err != nil || info == nil {
 			continue
@@ -304,16 +298,14 @@ func (s *workerAssignmentService) MigrateUserToDedicated(ctx context.Context, us
 	return nil
 }
 
-// MigrateUserToShared migrates user's emails from dedicated to shared workers
-func (s *workerAssignmentService) MigrateUserToShared(ctx context.Context, userID uuid.UUID) error {
-	// Get all email account IDs for the user
-	accountIDs, err := s.workerRepo.GetEmailAccountsByUserID(ctx, userID)
+// MigrateOrgToShared migrates org's emails from dedicated to shared workers
+func (s *workerAssignmentService) MigrateOrgToShared(ctx context.Context, orgID uuid.UUID) error {
+	accountIDs, err := s.workerRepo.GetEmailAccountsByOrganizationID(ctx, orgID)
 	if err != nil {
 		return err
 	}
 
 	for _, accountID := range accountIDs {
-		// Get current worker info via workerRepo
 		info, err := s.workerRepo.GetEmailAccountWorkerInfo(ctx, accountID)
 		if err != nil || info == nil {
 			continue
@@ -336,7 +328,7 @@ func (s *workerAssignmentService) MigrateUserToShared(ctx context.Context, userI
 	}
 
 	// Release the dedicated worker
-	if err := s.ReleaseDedicatedWorker(ctx, userID); err != nil {
+	if err := s.ReleaseDedicatedWorker(ctx, orgID); err != nil {
 		// Log but don't fail
 	}
 
@@ -383,10 +375,6 @@ func (s *workerAssignmentService) migrateEmailToWorker(ctx context.Context, emai
 	if err := s.workerRepo.IncrementAccountCount(ctx, newWorkerID); err != nil {
 		// Log but don't fail
 	}
-
-	// TODO: 4. Notify workers via Kafka (remove from old, add to new)
-	// s.notifyWorkerRemoveEmail(ctx, oldWorkerID, emailAccountID)
-	// s.notifyWorkerAddEmail(ctx, newWorkerID, emailAccount)
 
 	return nil
 }

@@ -28,40 +28,42 @@ type TrialStatus struct {
 }
 
 type TrialService interface {
-	// StartFreeTrial creates a new free trial subscription for a user
-	StartFreeTrial(ctx context.Context, userID uuid.UUID) error
-
 	// StartFreeTrialWithOrg creates a new free trial subscription linked to an organization
-	StartFreeTrialWithOrg(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID) error
+	StartFreeTrialWithOrg(ctx context.Context, userID uuid.UUID, orgID uuid.UUID) error
 
-	// GetTrialStatus returns the current trial status for a user
-	GetTrialStatus(ctx context.Context, userID uuid.UUID) (*TrialStatus, *errx.Error)
+	// GetTrialStatus returns the current trial status for an organization
+	GetTrialStatus(ctx context.Context, orgID uuid.UUID) (*TrialStatus, *errx.Error)
 }
 
 type trialService struct {
-	subRepo repository.SubscriptionRepository
+	subRepo  repository.SubscriptionRepository
+	userRepo repository.UserRepository
 }
 
-func NewService(subRepo repository.SubscriptionRepository) TrialService {
+func NewService(subRepo repository.SubscriptionRepository, userRepo repository.UserRepository) TrialService {
 	return &trialService{
-		subRepo: subRepo,
+		subRepo:  subRepo,
+		userRepo: userRepo,
 	}
 }
 
-// StartFreeTrial creates a new free trial subscription for a user
-func (s *trialService) StartFreeTrial(ctx context.Context, userID uuid.UUID) error {
-	return s.StartFreeTrialWithOrg(ctx, userID, nil)
-}
-
 // StartFreeTrialWithOrg creates a new free trial subscription linked to an organization
-func (s *trialService) StartFreeTrialWithOrg(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID) error {
-	// Check if user already has a subscription
-	existing, err := s.subRepo.GetByUserID(ctx, userID)
+func (s *trialService) StartFreeTrialWithOrg(ctx context.Context, userID uuid.UUID, orgID uuid.UUID) error {
+	// Check if user already used their free trial
+	user, err := s.userRepo.GetUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user != nil && user.FreeTrialUsed {
+		return nil // No-op: user already used their free trial
+	}
+
+	// Check if org already has a subscription
+	existing, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return err
 	}
 	if existing != nil {
-		// User already has a subscription
 		return nil
 	}
 
@@ -81,12 +83,22 @@ func (s *trialService) StartFreeTrialWithOrg(ctx context.Context, userID uuid.UU
 		FreeTrialEndsAt:    &trialEnds,
 	}
 
-	return s.subRepo.Create(ctx, sub)
+	if err := s.subRepo.Create(ctx, sub); err != nil {
+		return err
+	}
+
+	// Mark the user's free trial as used
+	if err := s.userRepo.SetFreeTrialUsed(ctx, userID); err != nil {
+		// Log but don't fail - the subscription was created successfully
+		return nil
+	}
+
+	return nil
 }
 
-// GetTrialStatus returns the current trial status for a user
-func (s *trialService) GetTrialStatus(ctx context.Context, userID uuid.UUID) (*TrialStatus, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+// GetTrialStatus returns the current trial status for an organization
+func (s *trialService) GetTrialStatus(ctx context.Context, orgID uuid.UUID) (*TrialStatus, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription")
 	}

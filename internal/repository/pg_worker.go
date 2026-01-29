@@ -37,6 +37,7 @@ type WorkerRepository interface {
 	// Email account worker queries
 	GetEmailAccountsByWorkerID(ctx context.Context, workerID uuid.UUID) ([]uuid.UUID, error)
 	GetEmailAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	GetEmailAccountsByOrganizationID(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
 	GetEmailAccountWorkerInfo(ctx context.Context, emailAccountID uuid.UUID) (*EmailAccountWorkerInfo, error)
 	UpdateEmailAccountWorker(ctx context.Context, emailAccountID, workerID uuid.UUID) error
 	ClearEmailAccountWorker(ctx context.Context, emailAccountID uuid.UUID) error
@@ -270,6 +271,28 @@ func (r *workerRepository) GetEmailAccountsByUserID(ctx context.Context, userID 
 	return ids, rows.Err()
 }
 
+// GetEmailAccountsByOrganizationID retrieves all email account IDs for an organization
+func (r *workerRepository) GetEmailAccountsByOrganizationID(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
+	query := `SELECT id FROM email_accounts WHERE organization_id = $1`
+
+	rows, err := r.db.Query(ctx, query, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+
+	return ids, rows.Err()
+}
+
 // UpdateEmailAccountWorker assigns a worker to an email account
 func (r *workerRepository) UpdateEmailAccountWorker(ctx context.Context, emailAccountID, workerID uuid.UUID) error {
 	query := `UPDATE email_accounts SET worker_id = $1, updated_at = NOW() WHERE id = $2`
@@ -330,15 +353,17 @@ func PauseCampaignsByUserID(ctx context.Context, db *pgxpool.Pool, userID uuid.U
 // GetExpiredTrialsWithoutPayment retrieves subscriptions with expired free trials and no paid subscription
 func GetExpiredTrialsWithoutPayment(ctx context.Context, db *pgxpool.Pool) ([]models.Subscription, error) {
 	query := `
-		SELECT id, user_id, plan_id, stripe_customer_id, stripe_subscription_id,
-		       stripe_price_id, status, current_period_start, current_period_end,
-		       cancel_at_period_end, canceled_at, trial_start, trial_end,
-		       free_trial_started_at, free_trial_ends_at, is_enterprise, created_at, updated_at
-		FROM subscriptions
-		WHERE free_trial_ends_at IS NOT NULL
-		  AND free_trial_ends_at < NOW()
-		  AND stripe_subscription_id IS NULL
-		  AND status NOT IN ('canceled', 'incomplete_expired')
+		SELECT s.id, s.user_id, s.organization_id, s.plan_id, s.stripe_customer_id, s.stripe_subscription_id,
+		       s.stripe_price_id, s.status, s.current_period_start, s.current_period_end,
+		       s.cancel_at_period_end, s.canceled_at, s.trial_start, s.trial_end,
+		       s.free_trial_started_at, s.free_trial_ends_at, s.is_enterprise, s.created_at, s.updated_at,
+		       u.email
+		FROM subscriptions s
+		LEFT JOIN users u ON s.user_id = u.id
+		WHERE s.free_trial_ends_at IS NOT NULL
+		  AND s.free_trial_ends_at < NOW()
+		  AND s.stripe_subscription_id IS NULL
+		  AND s.status NOT IN ('canceled', 'incomplete_expired')
 	`
 
 	rows, err := db.Query(ctx, query)
@@ -351,10 +376,11 @@ func GetExpiredTrialsWithoutPayment(ctx context.Context, db *pgxpool.Pool) ([]mo
 	for rows.Next() {
 		var s models.Subscription
 		if err := rows.Scan(
-			&s.ID, &s.UserID, &s.PlanID, &s.StripeCustomerID, &s.StripeSubscriptionID,
+			&s.ID, &s.UserID, &s.OrganizationID, &s.PlanID, &s.StripeCustomerID, &s.StripeSubscriptionID,
 			&s.StripePriceID, &s.Status, &s.CurrentPeriodStart, &s.CurrentPeriodEnd,
 			&s.CancelAtPeriodEnd, &s.CanceledAt, &s.TrialStart, &s.TrialEnd,
 			&s.FreeTrialStartedAt, &s.FreeTrialEndsAt, &s.IsEnterprise, &s.CreatedAt, &s.UpdatedAt,
+			&s.UserEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -362,6 +388,20 @@ func GetExpiredTrialsWithoutPayment(ctx context.Context, db *pgxpool.Pool) ([]mo
 	}
 
 	return subs, rows.Err()
+}
+
+// PauseCampaignsByOrganizationID pauses all active campaigns for an organization
+func PauseCampaignsByOrganizationID(ctx context.Context, db *pgxpool.Pool, orgID uuid.UUID, reason string) error {
+	query := `UPDATE campaigns SET status = $1, updated_at = NOW() WHERE organization_id = $2 AND status = 'active'`
+	_, err := db.Exec(ctx, query, reason, orgID)
+	return err
+}
+
+// DisableWarmupByOrganizationID disables warmup for all email accounts belonging to an organization
+func DisableWarmupByOrganizationID(ctx context.Context, db *pgxpool.Pool, orgID uuid.UUID) error {
+	query := `UPDATE email_accounts SET warmup = NULL, updated_at = NOW() WHERE organization_id = $1`
+	_, err := db.Exec(ctx, query, orgID)
+	return err
 }
 
 // MarkSubscriptionTrialExpired marks a subscription as expired trial

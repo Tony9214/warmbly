@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/warmbly/warmbly/internal/models"
 )
 
 // WarmupPool represents a warmup pool
@@ -69,6 +70,13 @@ type WarmupRepository interface {
 	IncrementDailyCount(ctx context.Context, accountID uuid.UUID, date time.Time) error
 	GetWarmupStatistics(ctx context.Context, accountID uuid.UUID, from, to time.Time) ([]WarmupStatistic, error)
 	GetOrCreateDailyStats(ctx context.Context, accountID uuid.UUID, date time.Time, targetVolume int) (*WarmupStatistic, error)
+
+	// Warmup token management
+	CreateWarmupToken(ctx context.Context, token *models.WarmupToken) error
+	GetWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error)
+	ConsumeWarmupToken(ctx context.Context, tokenID uuid.UUID) error
+	RecordInvalidTokenAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string) error
+	CountRecentInvalidAttempts(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error)
 }
 
 type warmupRepository struct {
@@ -332,4 +340,76 @@ func (r *warmupRepository) GetOrCreateDailyStats(ctx context.Context, accountID 
 	)
 
 	return stat, err
+}
+
+// CreateWarmupToken creates a warmup verification token
+func (r *warmupRepository) CreateWarmupToken(ctx context.Context, token *models.WarmupToken) error {
+	query := `
+		INSERT INTO warmup_tokens (token, task_id, sender_account_id, recipient_account_id, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`
+	_, err := r.db.Exec(ctx, query,
+		token.Token,
+		token.TaskID,
+		token.SenderAccountID,
+		token.RecipientAccountID,
+		token.ExpiresAt,
+	)
+	return err
+}
+
+// GetWarmupToken retrieves a valid (unconsumed, unexpired) warmup token
+func (r *warmupRepository) GetWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error) {
+	query := `
+		SELECT token, task_id, sender_account_id, recipient_account_id, created_at, consumed_at, expires_at
+		FROM warmup_tokens
+		WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW()
+	`
+
+	t := &models.WarmupToken{}
+	err := r.db.QueryRow(ctx, query, tokenID).Scan(
+		&t.Token,
+		&t.TaskID,
+		&t.SenderAccountID,
+		&t.RecipientAccountID,
+		&t.CreatedAt,
+		&t.ConsumedAt,
+		&t.ExpiresAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+
+	return t, err
+}
+
+// ConsumeWarmupToken marks a warmup token as consumed
+func (r *warmupRepository) ConsumeWarmupToken(ctx context.Context, tokenID uuid.UUID) error {
+	query := `UPDATE warmup_tokens SET consumed_at = NOW() WHERE token = $1`
+	_, err := r.db.Exec(ctx, query, tokenID)
+	return err
+}
+
+// RecordInvalidTokenAttempt records an invalid warmup token attempt
+func (r *warmupRepository) RecordInvalidTokenAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string) error {
+	query := `
+		INSERT INTO warmup_invalid_token_attempts (email_account_id, attempted_token)
+		VALUES ($1, $2)
+	`
+	_, err := r.db.Exec(ctx, query, accountID, attemptedToken)
+	return err
+}
+
+// CountRecentInvalidAttempts counts invalid token attempts since a given time
+func (r *warmupRepository) CountRecentInvalidAttempts(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM warmup_invalid_token_attempts
+		WHERE email_account_id = $1 AND created_at > $2
+	`
+
+	var count int
+	err := r.db.QueryRow(ctx, query, accountID, since).Scan(&count)
+	return count, err
 }

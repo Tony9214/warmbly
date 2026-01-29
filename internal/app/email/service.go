@@ -5,6 +5,7 @@ import (
 
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/errx"
+	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/models"
@@ -22,6 +23,7 @@ type EmailService interface {
 type emailService struct {
 	emailRepository repository.EmailRepository
 	cipherService   cipher.CipherService
+	publisher       events.Publisher
 	producer        *kafka.Producer
 	r               *cache.Cache
 }
@@ -29,10 +31,27 @@ type emailService struct {
 func NewService(
 	emailRepository repository.EmailRepository,
 	cipherService cipher.CipherService,
-	producer *kafka.Producer,
+	publisher events.Publisher,
 ) EmailService {
 	return &emailService{
 		emailRepository: emailRepository,
 		cipherService:   cipherService,
+		publisher:       publisher,
+	}
+}
+
+func NewServiceWithKafka(
+	emailRepository repository.EmailRepository,
+	cipherService cipher.CipherService,
+	publisher events.Publisher,
+	producer *kafka.Producer,
+	r *cache.Cache,
+) EmailService {
+	return &emailService{
+		emailRepository: emailRepository,
+		cipherService:   cipherService,
+		publisher:       publisher,
+		producer:        producer,
+		r:               r,
 	}
 }

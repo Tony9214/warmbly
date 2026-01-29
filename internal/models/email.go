@@ -16,10 +16,11 @@ const (
 )
 
 type Email struct {
-	ID       uuid.UUID  `json:"id"`
-	UserID   string     `json:"user_id"`
-	WorkerID *uuid.UUID `json:"worker_id"`
-	Email    string     `json:"email"`
+	ID             uuid.UUID  `json:"id"`
+	UserID         string     `json:"user_id"`
+	OrganizationID *uuid.UUID `json:"organization_id,omitempty"`
+	WorkerID       *uuid.UUID `json:"worker_id"`
+	Email          string     `json:"email"`
 
 	Name           string `json:"name"`
 	SignaturePlain string `json:"signature_plain"`
@@ -45,6 +46,9 @@ type Email struct {
 	WarmupIncrease  int        `json:"warmup_increase"`
 	WarmupReplyRate int        `json:"warmup_reply_rate"`
 	WarmupTag       string     `json:"warmup_tag"`
+	WarmupStartTime string     `json:"warmup_start_time"`
+	WarmupEndTime   string     `json:"warmup_end_time"`
+	WarmupDays      int        `json:"warmup_days"`
 
 	Timezone string `json:"timezone"`
 
@@ -116,7 +120,10 @@ type UpdateEmail struct {
 	WarmupBase      *int  `json:"warmup_base"`
 	WarmupMax       *int  `json:"warmup_max"`
 	WarmupIncrease  *int  `json:"warmup_increase"`
-	WarmupReplyRate *int  `json:"warmup_reply_rate"`
+	WarmupReplyRate *int    `json:"warmup_reply_rate"`
+	WarmupStartTime *string `json:"warmup_start_time"`
+	WarmupEndTime   *string `json:"warmup_end_time"`
+	WarmupDays      *int    `json:"warmup_days"`
 
 	Tags []string `json:"tags"`
 }

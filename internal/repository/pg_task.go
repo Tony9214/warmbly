@@ -39,14 +39,18 @@ type WarmupTask struct {
 
 // EmailTask represents email-specific task data
 type EmailTask struct {
-	TaskID     uuid.UUID
-	To         []string
-	CC         []string
-	BCC        []string
-	InReplyTo  []string
-	Subject    string
-	Body       string
-	Encrypted  bool
+	TaskID    uuid.UUID
+	To        []string
+	CC        []string
+	BCC       []string
+	InReplyTo []string
+	Subject   string
+	Body      string
+	BodyHTML  string
+	BodyPlain string
+	ThreadID  *string
+	SendMode  string
+	Encrypted bool
 }
 
 // TaskFailure represents a task failure record
@@ -81,8 +85,21 @@ type TaskRepository interface {
 	UpdateTaskScheduledAt(ctx context.Context, taskID uuid.UUID, scheduledAt time.Time, cloudTaskName string) error
 	RecordTaskFailure(ctx context.Context, taskID uuid.UUID, title, message string) error
 
+	// Count only campaign tasks completed today (excludes warmup)
+	CountCampaignEmailsSentToday(ctx context.Context, accountID uuid.UUID) (int, error)
+
+	// Create user-initiated email task (transactional)
+	CreateEmailTaskFull(ctx context.Context, task *Task, emailTask *EmailTask) error
+
 	// Delete operations
 	DeleteTask(ctx context.Context, taskID uuid.UUID) error
+
+	// Task locking
+	CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) error
+	UpdateTaskStatusWithLock(ctx context.Context, taskID uuid.UUID, status string) error
+
+	// Update campaign task with contact/sequence IDs (for tracking)
+	UpdateCampaignTaskTracking(ctx context.Context, taskID, contactID, sequenceID uuid.UUID) error
 }
 
 type taskRepository struct {
@@ -148,9 +165,14 @@ func (r *taskRepository) CreateWarmupTask(ctx context.Context, warmupTask *Warmu
 // CreateEmailTask creates email-specific task data
 func (r *taskRepository) CreateEmailTask(ctx context.Context, emailTask *EmailTask) error {
 	query := `
-		INSERT INTO email_tasks (task_id, "to", cc, bcc, in_reply_to, subject, body, encrypted)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO email_tasks (task_id, to_addrs, cc, bcc, in_reply_to, subject, body, body_html, body_plain, thread_id, send_mode, encrypted)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
+
+	sendMode := emailTask.SendMode
+	if sendMode == "" {
+		sendMode = "instant"
+	}
 
 	_, err := r.db.Exec(ctx, query,
 		emailTask.TaskID,
@@ -160,6 +182,10 @@ func (r *taskRepository) CreateEmailTask(ctx context.Context, emailTask *EmailTa
 		emailTask.InReplyTo,
 		emailTask.Subject,
 		emailTask.Body,
+		emailTask.BodyHTML,
+		emailTask.BodyPlain,
+		emailTask.ThreadID,
+		sendMode,
 		emailTask.Encrypted,
 	)
 
@@ -243,7 +269,7 @@ func (r *taskRepository) GetWarmupTask(ctx context.Context, taskID uuid.UUID) (*
 // GetEmailTask retrieves email task data
 func (r *taskRepository) GetEmailTask(ctx context.Context, taskID uuid.UUID) (*EmailTask, error) {
 	query := `
-		SELECT task_id, "to", cc, bcc, in_reply_to, subject, body, encrypted
+		SELECT task_id, to_addrs, cc, bcc, in_reply_to, subject, body, body_html, body_plain, thread_id, send_mode, encrypted
 		FROM email_tasks
 		WHERE task_id = $1
 	`
@@ -257,6 +283,10 @@ func (r *taskRepository) GetEmailTask(ctx context.Context, taskID uuid.UUID) (*E
 		&emailTask.InReplyTo,
 		&emailTask.Subject,
 		&emailTask.Body,
+		&emailTask.BodyHTML,
+		&emailTask.BodyPlain,
+		&emailTask.ThreadID,
+		&emailTask.SendMode,
 		&emailTask.Encrypted,
 	)
 
@@ -265,6 +295,71 @@ func (r *taskRepository) GetEmailTask(ctx context.Context, taskID uuid.UUID) (*E
 	}
 
 	return emailTask, err
+}
+
+// CountCampaignEmailsSentToday counts only campaign tasks completed today (excludes warmup)
+func (r *taskRepository) CountCampaignEmailsSentToday(ctx context.Context, accountID uuid.UUID) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM tasks
+		WHERE email_account_id = $1
+		  AND status = 'completed'
+		  AND task_type = 'campaign'
+		  AND DATE(completed_at) = CURRENT_DATE
+	`
+
+	var count int
+	err := r.db.QueryRow(ctx, query, accountID).Scan(&count)
+	return count, err
+}
+
+// CreateEmailTaskFull creates a task and email task entry in a single transaction
+func (r *taskRepository) CreateEmailTaskFull(ctx context.Context, task *Task, emailTask *EmailTask) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Create task
+	taskQuery := `
+		INSERT INTO tasks (id, task_type, email_account_id, status, message_id, scheduled_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+	`
+	_, err = tx.Exec(ctx, taskQuery, task.ID, task.TaskType, task.EmailAccountID, task.Status, task.MessageID, task.ScheduledAt)
+	if err != nil {
+		return err
+	}
+
+	// Create email task
+	sendMode := emailTask.SendMode
+	if sendMode == "" {
+		sendMode = "instant"
+	}
+
+	etQuery := `
+		INSERT INTO email_tasks (task_id, to_addrs, cc, bcc, in_reply_to, subject, body, body_html, body_plain, thread_id, send_mode, encrypted)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+	`
+	_, err = tx.Exec(ctx, etQuery,
+		emailTask.TaskID,
+		emailTask.To,
+		emailTask.CC,
+		emailTask.BCC,
+		emailTask.InReplyTo,
+		emailTask.Subject,
+		emailTask.Body,
+		emailTask.BodyHTML,
+		emailTask.BodyPlain,
+		emailTask.ThreadID,
+		sendMode,
+		emailTask.Encrypted,
+	)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 // CountEmailsSentToday counts emails sent today from an account
@@ -401,5 +496,87 @@ func (r *taskRepository) RecordTaskFailure(ctx context.Context, taskID uuid.UUID
 func (r *taskRepository) DeleteTask(ctx context.Context, taskID uuid.UUID) error {
 	query := `DELETE FROM tasks WHERE id = $1`
 	_, err := r.db.Exec(ctx, query, taskID)
+	return err
+}
+
+// CreateTaskWithLock creates a task with a PostgreSQL advisory lock to prevent duplicate creation
+func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Acquire advisory lock based on campaign ID
+	if campaignTask != nil && campaignTask.CampaignID != nil {
+		_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('campaign_task_' || $1::text))`, *campaignTask.CampaignID)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Create task
+	taskQuery := `
+		INSERT INTO tasks (id, task_type, email_account_id, status, message_id, scheduled_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+	`
+	_, err = tx.Exec(ctx, taskQuery, task.ID, task.TaskType, task.EmailAccountID, task.Status, task.MessageID, task.ScheduledAt)
+	if err != nil {
+		return err
+	}
+
+	// Create campaign task entry if provided
+	if campaignTask != nil {
+		ctQuery := `INSERT INTO campaign_tasks (task_id, campaign_id, contact_id, sequence_id) VALUES ($1, $2, $3, $4)`
+		_, err = tx.Exec(ctx, ctQuery, campaignTask.TaskID, campaignTask.CampaignID, campaignTask.ContactID, campaignTask.SequenceID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// UpdateTaskStatusWithLock updates task status with an advisory lock to prevent race conditions
+func (r *taskRepository) UpdateTaskStatusWithLock(ctx context.Context, taskID uuid.UUID, status string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Acquire advisory lock on task ID
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, taskID)
+	if err != nil {
+		return err
+	}
+
+	// Update status
+	query := `
+		UPDATE tasks
+		SET status = $1,
+		    updated_at = NOW(),
+		    completed_at = CASE WHEN $1 = 'completed' THEN NOW() ELSE completed_at END
+		WHERE id = $2
+	`
+	_, err = tx.Exec(ctx, query, status, taskID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// UpdateCampaignTaskTracking updates the campaign task with contact_id and sequence_id
+// This is called when the task is processed and we know which contact/sequence to send to
+// These IDs are needed for tracking pixel/click events to record progress
+func (r *taskRepository) UpdateCampaignTaskTracking(ctx context.Context, taskID, contactID, sequenceID uuid.UUID) error {
+	query := `
+		UPDATE campaign_tasks
+		SET contact_id = $2, sequence_id = $3
+		WHERE task_id = $1
+	`
+
+	_, err := r.db.Exec(ctx, query, taskID, contactID, sequenceID)
 	return err
 }

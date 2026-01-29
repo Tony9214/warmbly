@@ -6,6 +6,7 @@ import (
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
+	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/pkg/generation"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -32,13 +33,15 @@ type (
 type TasksService interface {
 	HandleCampaignTask(task *proto.ProcessTask) *errx.Error
 	HandleEmailTask(task *proto.ProcessTask) *errx.Error
+	HandleUserEmailTask(task *proto.ProcessTask) *errx.Error
 }
 
 type tasksService struct {
 	// Infrastructure
-	tasksClient      *gtasks.Client
-	producerClient   *kafka.Producer
-	generationClient *generation.GenerationClient
+	tasksClient        *gtasks.Client
+	producerClient     *kafka.Producer
+	generationClient   *generation.GenerationClient
+	streamingPublisher *pubsub.StreamingPublisher
 
 	// Services
 	scheduler     scheduler.SchedulerService
@@ -53,12 +56,14 @@ type tasksService struct {
 	emailRepo            repository.EmailRepository
 	campaignRepo         repository.CampaignRepository
 	contactRepo          repository.ContactRepository
+	campaignLogRepo      repository.CampaignLogRepository
 }
 
 func NewService(
 	tasksClient *gtasks.Client,
 	producerClient *kafka.Producer,
 	generationClient *generation.GenerationClient,
+	streamingPublisher *pubsub.StreamingPublisher,
 	scheduler scheduler.SchedulerService,
 	cipherService cipher.CipherService,
 	emailSender EmailSender,
@@ -69,11 +74,13 @@ func NewService(
 	emailRepo repository.EmailRepository,
 	campaignRepo repository.CampaignRepository,
 	contactRepo repository.ContactRepository,
+	campaignLogRepo repository.CampaignLogRepository,
 ) TasksService {
 	return &tasksService{
 		tasksClient:          tasksClient,
 		producerClient:       producerClient,
 		generationClient:     generationClient,
+		streamingPublisher:   streamingPublisher,
 		scheduler:            scheduler,
 		cipherService:        cipherService,
 		emailSender:          emailSender,
@@ -84,5 +91,6 @@ func NewService(
 		emailRepo:            emailRepo,
 		campaignRepo:         campaignRepo,
 		contactRepo:          contactRepo,
+		campaignLogRepo:      campaignLogRepo,
 	}
 }

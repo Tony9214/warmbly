@@ -2,6 +2,7 @@
 CREATE TABLE api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
 
     -- Key identification
     name VARCHAR(255) NOT NULL,
@@ -34,6 +35,9 @@ CREATE INDEX idx_api_keys_user ON api_keys(user_id, status);
 
 -- Index for prefix lookup (for key display/identification)
 CREATE INDEX idx_api_keys_prefix ON api_keys(user_id, key_prefix);
+
+-- Index for organization's keys
+CREATE INDEX idx_api_keys_org ON api_keys(organization_id, status);
 
 -- API Key usage logs (for audit trail)
 CREATE TABLE api_key_usage_logs (

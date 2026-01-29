@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -17,13 +18,13 @@ func (h *Handler) CreateCampaign(c *gin.Context) {
 	var data models.CreateCampaign
 
 	if err := c.ShouldBindJSON(&data); err != nil {
-		errx.Handle(c, errx.ErrInvalid)
+		errx.JSON(c, errx.ErrInvalid)
 		return
 	}
 
 	resp, err := h.CampaignService.Create(c.Request.Context(), userIDStr, &data)
 	if err != nil {
-		errx.Handle(c, err)
+		errx.JSON(c, err)
 		return
 	}
 
@@ -42,7 +43,7 @@ func (h *Handler) GetCampaign(c *gin.Context) {
 
 	resp, err := h.CampaignService.Get(c.Request.Context(), userID, id)
 	if err != nil {
-		errx.Handle(c, err)
+		errx.JSON(c, err)
 		return
 	}
 
@@ -59,7 +60,7 @@ func (h *Handler) SearchCampaigns(c *gin.Context) {
 
 	resp, err := h.CampaignService.Search(c.Request.Context(), userID, query, cursor, folder, limit)
 	if err != nil {
-		errx.Handle(c, err)
+		errx.JSON(c, err)
 		return
 	}
 
@@ -74,13 +75,13 @@ func (h *Handler) UpdateCampaign(c *gin.Context) {
 	var data models.UpdateCampaign
 
 	if err := c.ShouldBindJSON(&data); err != nil {
-		errx.Handle(c, errx.ErrInvalid)
+		errx.JSON(c, errx.ErrInvalid)
 		return
 	}
 
 	resp, err := h.CampaignService.Update(c.Request.Context(), userIDStr, id, &data)
 	if err != nil {
-		errx.Handle(c, err)
+		errx.JSON(c, err)
 		return
 	}
 
@@ -100,7 +101,7 @@ func (h *Handler) DeleteCampaign(c *gin.Context) {
 	id := c.Param("id")
 
 	if err := h.CampaignService.Delete(c.Request.Context(), userIDStr, id); err != nil {
-		errx.Handle(c, err)
+		errx.JSON(c, err)
 		return
 	}
 
@@ -112,4 +113,70 @@ func (h *Handler) DeleteCampaign(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// StartCampaign starts a campaign
+// POST /campaigns/:id/start
+func (h *Handler) StartCampaign(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
+	id := c.Param("id")
+
+	if xerr := h.CampaignService.StartCampaign(c.Request.Context(), *orgID, id); xerr != nil {
+		errx.JSON(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "started"})
+}
+
+// StopCampaign stops a campaign
+// POST /campaigns/:id/stop
+func (h *Handler) StopCampaign(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
+	id := c.Param("id")
+
+	if xerr := h.CampaignService.StopCampaign(c.Request.Context(), *orgID, id); xerr != nil {
+		errx.JSON(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "stopped"})
+}
+
+// GetCampaignLogs returns campaign activity logs
+// GET /campaigns/:id/logs
+func (h *Handler) GetCampaignLogs(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id := c.Param("id")
+
+	cursorStr := c.Query("cursor")
+	var cursor *string
+	if cursorStr != "" {
+		cursor = &cursorStr
+	}
+
+	limit := 50
+	if limitStr := c.DefaultQuery("limit", "50"); limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	result, xerr := h.CampaignService.GetLogs(c.Request.Context(), userID, id, limit, cursor)
+	if xerr != nil {
+		errx.JSON(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }

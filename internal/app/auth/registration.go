@@ -117,24 +117,23 @@ func (s *authService) RegistrationConfirm(ctx context.Context, data *ConfirmData
 	}
 
 	// Auto-create organization for new user
-	var orgID *uuid.UUID
+	var org *models.Organization
 	if s.organizationService != nil {
 		orgName := u.FirstName + "'s Organization"
 		if u.FirstName == "" {
 			orgName = "My Organization"
 		}
-		org, orgErr := s.organizationService.Create(ctx, u.ID, orgName)
+		var orgErr *errx.Error
+		org, orgErr = s.organizationService.Create(ctx, u.ID, orgName)
 		if orgErr != nil {
 			sentry.CaptureException(orgErr)
 			// Don't fail registration if org creation fails
-		} else {
-			orgID = &org.ID
 		}
 	}
 
 	// Start 2-week free trial for new user (linked to organization)
-	if s.trialService != nil {
-		if err := s.trialService.StartFreeTrialWithOrg(ctx, u.ID, orgID); err != nil {
+	if s.trialService != nil && org != nil {
+		if err := s.trialService.StartFreeTrialWithOrg(ctx, u.ID, org.ID); err != nil {
 			sentry.CaptureException(err)
 			// Don't fail registration if trial creation fails
 		}

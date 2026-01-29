@@ -56,3 +56,26 @@ CREATE INDEX idx_warmup_spam_reports_reporter ON warmup_spam_reports(reporter_ac
 INSERT INTO warmup_pools (pool_type, name, description) VALUES
     ('free', 'Free Warmup Pool', 'Default pool for all users'),
     ('premium', 'Premium Warmup Pool', 'Premium pool for subscribers');
+
+-- Warmup verification tokens (anti-abuse)
+CREATE TABLE warmup_tokens (
+    token UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    sender_account_id UUID NOT NULL REFERENCES email_accounts(id) ON DELETE CASCADE,
+    recipient_account_id UUID NOT NULL REFERENCES email_accounts(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    consumed_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days')
+);
+CREATE INDEX idx_warmup_tokens_task ON warmup_tokens(task_id);
+CREATE INDEX idx_warmup_tokens_recipient ON warmup_tokens(recipient_account_id);
+CREATE INDEX idx_warmup_tokens_unconsumed ON warmup_tokens(token) WHERE consumed_at IS NULL;
+
+-- Track invalid warmup token attempts per account
+CREATE TABLE warmup_invalid_token_attempts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email_account_id UUID NOT NULL REFERENCES email_accounts(id) ON DELETE CASCADE,
+    attempted_token TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_warmup_invalid_attempts_account ON warmup_invalid_token_attempts(email_account_id, created_at);

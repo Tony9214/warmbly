@@ -41,16 +41,21 @@ CREATE TABLE warmup_tasks (
 CREATE TABLE email_tasks (
     task_id UUID NOT NULL,
 
-    to TEXT[],
+    to_addrs TEXT[],
     cc TEXT[],
     bcc TEXT[],
     in_reply_to TEXT[],
     subject TEXT NOT NULL,
     body TEXT NOT NULL,
+    body_html TEXT NOT NULL DEFAULT '',
+    body_plain TEXT NOT NULL DEFAULT '',
+    thread_id TEXT,
+    send_mode VARCHAR(20) NOT NULL DEFAULT 'instant',
 
     PRIMARY KEY (task_id),
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_email_tasks_thread ON email_tasks(thread_id) WHERE thread_id IS NOT NULL;
 
 CREATE TABLE task_failures (
     task_id UUID NOT NULL,

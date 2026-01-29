@@ -226,3 +226,174 @@ func (h *Handler) GetRealtimeInfo(c *gin.Context) {
 		},
 	})
 }
+
+// GetDashboardAnalytics returns main dashboard analytics overview
+// GET /analytics/dashboard?period=7d
+func (h *Handler) GetDashboardAnalytics(c *gin.Context) {
+	userIDStr := middleware.GetUserID(c)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		errx.Handle(c, errx.ErrAuth)
+		return
+	}
+
+	// Parse period (7d, 30d, 90d)
+	period := c.DefaultQuery("period", "7d")
+	if period != "7d" && period != "30d" && period != "90d" {
+		period = "7d"
+	}
+
+	analytics, xerr := h.AnalyticsService.GetDashboardAnalytics(c.Request.Context(), userID, period)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, analytics)
+}
+
+// GetCampaignHourlyStats returns hourly statistics for a campaign on a specific date
+// GET /analytics/campaigns/:id/hourly?date=2024-01-15
+func (h *Handler) GetCampaignHourlyStats(c *gin.Context) {
+	userIDStr := middleware.GetUserID(c)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		errx.Handle(c, errx.ErrAuth)
+		return
+	}
+
+	campaignIDStr := c.Param("id")
+	campaignID, err := uuid.Parse(campaignIDStr)
+	if err != nil {
+		errx.Handle(c, errx.ErrNotFound)
+		return
+	}
+
+	// Parse date
+	dateStr := c.Query("date")
+	if dateStr == "" {
+		dateStr = time.Now().Format("2006-01-02")
+	}
+
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "Invalid date format (expected YYYY-MM-DD)"))
+		return
+	}
+
+	stats, xerr := h.AnalyticsService.GetCampaignHourlyStats(c.Request.Context(), userID, campaignID, date)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": stats, "date": dateStr})
+}
+
+// CompareCampaigns returns comparison statistics for multiple campaigns
+// GET /analytics/campaigns/compare?ids=uuid1,uuid2&from=2024-01-01&to=2024-01-31
+func (h *Handler) CompareCampaigns(c *gin.Context) {
+	userIDStr := middleware.GetUserID(c)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		errx.Handle(c, errx.ErrAuth)
+		return
+	}
+
+	// Parse campaign IDs
+	idsStr := c.Query("ids")
+	if idsStr == "" {
+		errx.Handle(c, errx.New(errx.BadRequest, "ids parameter is required"))
+		return
+	}
+
+	var campaignIDs []uuid.UUID
+	for _, idStr := range splitAndTrim(idsStr) {
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			continue
+		}
+		campaignIDs = append(campaignIDs, id)
+	}
+
+	if len(campaignIDs) == 0 {
+		errx.Handle(c, errx.New(errx.BadRequest, "at least one valid campaign ID is required"))
+		return
+	}
+
+	// Limit to 10 campaigns
+	if len(campaignIDs) > 10 {
+		campaignIDs = campaignIDs[:10]
+	}
+
+	// Parse date range
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+
+	if fromStr == "" || toStr == "" {
+		errx.Handle(c, errx.New(errx.BadRequest, "from and to date parameters are required"))
+		return
+	}
+
+	from, err := time.Parse("2006-01-02", fromStr)
+	if err != nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "Invalid from date format (expected YYYY-MM-DD)"))
+		return
+	}
+
+	to, err := time.Parse("2006-01-02", toStr)
+	if err != nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "Invalid to date format (expected YYYY-MM-DD)"))
+		return
+	}
+
+	comparison, xerr := h.AnalyticsService.CompareCampaigns(c.Request.Context(), userID, campaignIDs, from, to)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, comparison)
+}
+
+// splitAndTrim splits a comma-separated string and trims whitespace
+func splitAndTrim(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := make([]string, 0)
+	for _, part := range split(s, ',') {
+		trimmed := trim(part)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
+func split(s string, sep rune) []string {
+	var result []string
+	current := ""
+	for _, c := range s {
+		if c == sep {
+			result = append(result, current)
+			current = ""
+		} else {
+			current += string(c)
+		}
+	}
+	result = append(result, current)
+	return result
+}
+
+func trim(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
+		end--
+	}
+	return s[start:end]
+}

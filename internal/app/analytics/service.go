@@ -24,6 +24,11 @@ type AnalyticsService interface {
 
 	// Usage overview
 	GetUsageOverview(ctx context.Context, userID uuid.UUID, period string) (*models.UsageOverview, *errx.Error)
+
+	// Dashboard analytics
+	GetDashboardAnalytics(ctx context.Context, userID uuid.UUID, period string) (*models.DashboardAnalytics, *errx.Error)
+	GetCampaignHourlyStats(ctx context.Context, userID, campaignID uuid.UUID, date time.Time) ([]models.CampaignHourlyStats, *errx.Error)
+	CompareCampaigns(ctx context.Context, userID uuid.UUID, campaignIDs []uuid.UUID, from, to time.Time) (*models.CampaignComparison, *errx.Error)
 }
 
 type analyticsService struct {
@@ -313,4 +318,91 @@ func calculateTargetVolume(email *models.Email) int {
 	}
 
 	return target
+}
+
+// Dashboard Analytics implementations
+
+func (s *analyticsService) GetDashboardAnalytics(ctx context.Context, userID uuid.UUID, period string) (*models.DashboardAnalytics, *errx.Error) {
+	// Calculate date range from period
+	var from, to time.Time
+	to = time.Now()
+
+	switch period {
+	case "7d":
+		from = to.AddDate(0, 0, -7)
+	case "30d":
+		from = to.AddDate(0, 0, -30)
+	case "90d":
+		from = to.AddDate(0, 0, -90)
+	default:
+		from = to.AddDate(0, 0, -7) // Default to 7 days
+		period = "7d"
+	}
+
+	// Get overall stats
+	overallStats, xerr := s.analyticsRepo.GetDashboardOverallStats(ctx, userID, from, to)
+	if xerr != nil {
+		return nil, xerr
+	}
+
+	// Get recent activity
+	recentActivity, xerr := s.analyticsRepo.GetRecentActivity(ctx, userID, 20)
+	if xerr != nil {
+		recentActivity = make([]models.RecentActivityItem, 0)
+	}
+
+	// Get top campaigns
+	topCampaigns, xerr := s.analyticsRepo.GetTopCampaigns(ctx, userID, from, to, 5, "emails_sent")
+	if xerr != nil {
+		topCampaigns = make([]models.TopCampaignStats, 0)
+	}
+
+	// Get account health summary
+	accountHealth, xerr := s.analyticsRepo.GetAccountHealthSummary(ctx, userID)
+	if xerr != nil {
+		accountHealth = &models.AccountHealthSummary{}
+	}
+
+	// Get daily trend
+	dailyTrend, xerr := s.analyticsRepo.GetDashboardDailyTrend(ctx, userID, from, to)
+	if xerr != nil {
+		dailyTrend = make([]models.DashboardDailyStats, 0)
+	}
+
+	return &models.DashboardAnalytics{
+		Period:         period,
+		OverallStats:   *overallStats,
+		RecentActivity: recentActivity,
+		TopCampaigns:   topCampaigns,
+		AccountHealth:  *accountHealth,
+		DailyTrend:     dailyTrend,
+	}, nil
+}
+
+func (s *analyticsService) GetCampaignHourlyStats(ctx context.Context, userID, campaignID uuid.UUID, date time.Time) ([]models.CampaignHourlyStats, *errx.Error) {
+	// Verify campaign ownership
+	campaign, err := s.campaignRepo.GetByID(ctx, campaignID)
+	if err != nil {
+		return nil, errx.ErrNotFound
+	}
+	if campaign.UserID != userID.String() {
+		return nil, errx.ErrForbidden
+	}
+
+	return s.analyticsRepo.GetCampaignHourlyStats(ctx, campaignID, date)
+}
+
+func (s *analyticsService) CompareCampaigns(ctx context.Context, userID uuid.UUID, campaignIDs []uuid.UUID, from, to time.Time) (*models.CampaignComparison, *errx.Error) {
+	// Validate that all campaigns belong to user
+	for _, campaignID := range campaignIDs {
+		campaign, err := s.campaignRepo.GetByID(ctx, campaignID)
+		if err != nil {
+			return nil, errx.ErrNotFound
+		}
+		if campaign.UserID != userID.String() {
+			return nil, errx.ErrForbidden
+		}
+	}
+
+	return s.analyticsRepo.CompareCampaigns(ctx, userID, campaignIDs, from, to)
 }

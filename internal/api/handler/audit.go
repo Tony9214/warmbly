@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,7 +29,7 @@ func (h *Handler) GetAuditLogs(c *gin.Context) {
 
 	// Parse optional filters
 	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := parseInt(limitStr); err == nil && l > 0 && l <= 100 {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
 			params.Limit = l
 		}
 	}
@@ -84,7 +85,7 @@ func (h *Handler) GetAdminAuditLogs(c *gin.Context) {
 
 	// Parse optional filters
 	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := parseInt(limitStr); err == nil && l > 0 && l <= 100 {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
 			params.Limit = l
 		}
 	}

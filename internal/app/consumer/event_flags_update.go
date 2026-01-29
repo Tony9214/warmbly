@@ -16,6 +16,22 @@ func (s *JobsService) HandleFlagsAdd(ctx context.Context, e *models.JobEventFlag
 		return err
 	}
 
+	// Check if a warmup email is being flagged as spam
+	if s.WarmupRepo != nil && containsSpamFlag(e.Flags) {
+		// Check if this email has a warmup token in its flags
+		isWarmupEmail := false
+		for _, f := range email.Flags {
+			if len(f) > len("X-Warmbly-Token:") && f[:len("X-Warmbly-Token:")] == "X-Warmbly-Token:" {
+				isWarmupEmail = true
+				break
+			}
+		}
+		if isWarmupEmail {
+			s.WarmupRepo.IncrementSpamScore(ctx, e.EmailID, 10)
+			s.checkAndAutoBlock(ctx, e.EmailID)
+		}
+	}
+
 	var updated bool
 
 	for i := range e.Flags {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -10,38 +11,42 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 )
 
-// CreateAPIKey creates a new API key for the user
+// CreateAPIKey creates a new API key for the organization
 // POST /api-keys
 func (h *Handler) CreateAPIKey(c *gin.Context) {
-	userIDStr := middleware.GetUserID(c)
-	userID, err := uuid.Parse(userIDStr)
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
+	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
-		errx.Handle(c, errx.ErrAuth)
+		errx.JSON(c, errx.ErrUnauthorized)
 		return
 	}
 
 	var data models.CreateAPIKey
 	if err := c.ShouldBindJSON(&data); err != nil {
-		errx.Handle(c, errx.New(errx.BadRequest, "Invalid request body"))
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid request body"))
 		return
 	}
 
-	keyWithSecret, xerr := h.APIKeyService.Create(c.Request.Context(), userID, &data)
+	keyWithSecret, xerr := h.APIKeyService.Create(c.Request.Context(), *orgID, userID, &data)
 	if xerr != nil {
-		errx.Handle(c, xerr)
+		errx.JSON(c, xerr)
 		return
 	}
 
 	c.JSON(http.StatusCreated, keyWithSecret)
 }
 
-// ListAPIKeys lists all API keys for the user
+// ListAPIKeys lists all API keys for the organization
 // GET /api-keys
 func (h *Handler) ListAPIKeys(c *gin.Context) {
-	userIDStr := middleware.GetUserID(c)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		errx.Handle(c, errx.ErrAuth)
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -54,14 +59,14 @@ func (h *Handler) ListAPIKeys(c *gin.Context) {
 
 	limit := 50
 	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := parseInt(limitStr); err == nil && l > 0 && l <= 100 {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
 			limit = l
 		}
 	}
 
-	result, xerr := h.APIKeyService.List(c.Request.Context(), userID, limit, cursor)
+	result, xerr := h.APIKeyService.List(c.Request.Context(), *orgID, limit, cursor)
 	if xerr != nil {
-		errx.Handle(c, xerr)
+		errx.JSON(c, xerr)
 		return
 	}
 
@@ -71,23 +76,22 @@ func (h *Handler) ListAPIKeys(c *gin.Context) {
 // GetAPIKey gets a specific API key
 // GET /api-keys/:id
 func (h *Handler) GetAPIKey(c *gin.Context) {
-	userIDStr := middleware.GetUserID(c)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		errx.Handle(c, errx.ErrAuth)
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
 	keyIDStr := c.Param("id")
 	keyID, err := uuid.Parse(keyIDStr)
 	if err != nil {
-		errx.Handle(c, errx.ErrNotFound)
+		errx.JSON(c, errx.ErrNotFound)
 		return
 	}
 
-	key, xerr := h.APIKeyService.Get(c.Request.Context(), userID, keyID)
+	key, xerr := h.APIKeyService.Get(c.Request.Context(), *orgID, keyID)
 	if xerr != nil {
-		errx.Handle(c, xerr)
+		errx.JSON(c, xerr)
 		return
 	}
 
@@ -97,29 +101,28 @@ func (h *Handler) GetAPIKey(c *gin.Context) {
 // UpdateAPIKey updates an API key
 // PATCH /api-keys/:id
 func (h *Handler) UpdateAPIKey(c *gin.Context) {
-	userIDStr := middleware.GetUserID(c)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		errx.Handle(c, errx.ErrAuth)
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
 	keyIDStr := c.Param("id")
 	keyID, err := uuid.Parse(keyIDStr)
 	if err != nil {
-		errx.Handle(c, errx.ErrNotFound)
+		errx.JSON(c, errx.ErrNotFound)
 		return
 	}
 
 	var data models.UpdateAPIKey
 	if err := c.ShouldBindJSON(&data); err != nil {
-		errx.Handle(c, errx.New(errx.BadRequest, "Invalid request body"))
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid request body"))
 		return
 	}
 
-	key, xerr := h.APIKeyService.Update(c.Request.Context(), userID, keyID, &data)
+	key, xerr := h.APIKeyService.Update(c.Request.Context(), *orgID, keyID, &data)
 	if xerr != nil {
-		errx.Handle(c, xerr)
+		errx.JSON(c, xerr)
 		return
 	}
 
@@ -129,17 +132,16 @@ func (h *Handler) UpdateAPIKey(c *gin.Context) {
 // RevokeAPIKey revokes an API key
 // DELETE /api-keys/:id
 func (h *Handler) RevokeAPIKey(c *gin.Context) {
-	userIDStr := middleware.GetUserID(c)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		errx.Handle(c, errx.ErrAuth)
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
 	keyIDStr := c.Param("id")
 	keyID, err := uuid.Parse(keyIDStr)
 	if err != nil {
-		errx.Handle(c, errx.ErrNotFound)
+		errx.JSON(c, errx.ErrNotFound)
 		return
 	}
 
@@ -148,9 +150,9 @@ func (h *Handler) RevokeAPIKey(c *gin.Context) {
 		reason = "Revoked by user"
 	}
 
-	xerr := h.APIKeyService.Revoke(c.Request.Context(), userID, keyID, reason)
+	xerr := h.APIKeyService.Revoke(c.Request.Context(), *orgID, keyID, reason)
 	if xerr != nil {
-		errx.Handle(c, xerr)
+		errx.JSON(c, xerr)
 		return
 	}
 
@@ -169,19 +171,3 @@ func (h *Handler) ListAPIPermissions(c *gin.Context) {
 	})
 }
 
-// parseInt helper
-func parseInt(s string) (int, error) {
-	var n int
-	_, err := parseIntFromString(s, &n)
-	return n, err
-}
-
-func parseIntFromString(s string, n *int) (int, error) {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, errx.New(errx.BadRequest, "Invalid number")
-		}
-		*n = *n*10 + int(c-'0')
-	}
-	return *n, nil
-}

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
@@ -22,11 +23,11 @@ const (
 )
 
 type APIKeyService interface {
-	Create(ctx context.Context, userID uuid.UUID, data *models.CreateAPIKey) (*models.APIKeyWithSecret, *errx.Error)
-	Get(ctx context.Context, userID, keyID uuid.UUID) (*models.APIKey, *errx.Error)
-	List(ctx context.Context, userID uuid.UUID, limit int, cursor *uuid.UUID) (*models.APIKeysResult, *errx.Error)
-	Update(ctx context.Context, userID, keyID uuid.UUID, data *models.UpdateAPIKey) (*models.APIKey, *errx.Error)
-	Revoke(ctx context.Context, userID, keyID uuid.UUID, reason string) *errx.Error
+	Create(ctx context.Context, orgID, userID uuid.UUID, data *models.CreateAPIKey) (*models.APIKeyWithSecret, *errx.Error)
+	Get(ctx context.Context, orgID, keyID uuid.UUID) (*models.APIKey, *errx.Error)
+	List(ctx context.Context, orgID uuid.UUID, limit int, cursor *uuid.UUID) (*models.APIKeysResult, *errx.Error)
+	Update(ctx context.Context, orgID, keyID uuid.UUID, data *models.UpdateAPIKey) (*models.APIKey, *errx.Error)
+	Revoke(ctx context.Context, orgID, keyID uuid.UUID, reason string) *errx.Error
 
 	// Validation
 	ValidateKey(ctx context.Context, rawKey string) (*models.APIKey, *errx.Error)
@@ -82,7 +83,7 @@ func hashKey(rawKey string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-func (s *apiKeyService) Create(ctx context.Context, userID uuid.UUID, data *models.CreateAPIKey) (*models.APIKeyWithSecret, *errx.Error) {
+func (s *apiKeyService) Create(ctx context.Context, orgID, userID uuid.UUID, data *models.CreateAPIKey) (*models.APIKeyWithSecret, *errx.Error) {
 	// Validate name
 	if len(data.Name) == 0 || len(data.Name) > 255 {
 		return nil, errx.New(errx.BadRequest, "Name must be between 1 and 255 characters")
@@ -100,7 +101,7 @@ func (s *apiKeyService) Create(ctx context.Context, userID uuid.UUID, data *mode
 	}
 
 	// Create in database
-	key, xerr := s.repo.Create(ctx, userID, data, prefix, hash)
+	key, xerr := s.repo.Create(ctx, orgID, userID, data, prefix, hash)
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -112,28 +113,28 @@ func (s *apiKeyService) Create(ctx context.Context, userID uuid.UUID, data *mode
 	}, nil
 }
 
-func (s *apiKeyService) Get(ctx context.Context, userID, keyID uuid.UUID) (*models.APIKey, *errx.Error) {
-	return s.repo.GetByID(ctx, userID, keyID)
+func (s *apiKeyService) Get(ctx context.Context, orgID, keyID uuid.UUID) (*models.APIKey, *errx.Error) {
+	return s.repo.GetByID(ctx, orgID, keyID)
 }
 
-func (s *apiKeyService) List(ctx context.Context, userID uuid.UUID, limit int, cursor *uuid.UUID) (*models.APIKeysResult, *errx.Error) {
+func (s *apiKeyService) List(ctx context.Context, orgID uuid.UUID, limit int, cursor *uuid.UUID) (*models.APIKeysResult, *errx.Error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	return s.repo.List(ctx, userID, limit, cursor)
+	return s.repo.List(ctx, orgID, limit, cursor)
 }
 
-func (s *apiKeyService) Update(ctx context.Context, userID, keyID uuid.UUID, data *models.UpdateAPIKey) (*models.APIKey, *errx.Error) {
+func (s *apiKeyService) Update(ctx context.Context, orgID, keyID uuid.UUID, data *models.UpdateAPIKey) (*models.APIKey, *errx.Error) {
 	// Validate name if provided
 	if data.Name != nil && (len(*data.Name) == 0 || len(*data.Name) > 255) {
 		return nil, errx.New(errx.BadRequest, "Name must be between 1 and 255 characters")
 	}
 
-	return s.repo.Update(ctx, userID, keyID, data)
+	return s.repo.Update(ctx, orgID, keyID, data)
 }
 
-func (s *apiKeyService) Revoke(ctx context.Context, userID, keyID uuid.UUID, reason string) *errx.Error {
-	return s.repo.Revoke(ctx, userID, keyID, reason)
+func (s *apiKeyService) Revoke(ctx context.Context, orgID, keyID uuid.UUID, reason string) *errx.Error {
+	return s.repo.Revoke(ctx, orgID, keyID, reason)
 }
 
 func (s *apiKeyService) ValidateKey(ctx context.Context, rawKey string) (*models.APIKey, *errx.Error) {
@@ -184,7 +185,6 @@ func (s *apiKeyService) ValidateKeyIP(key *models.APIKey, ip string) bool {
 		if allowed == ip {
 			return true
 		}
-		// TODO: Add CIDR range support if needed
 	}
 
 	return false
@@ -195,16 +195,19 @@ func (s *apiKeyService) ValidateKeyPermission(key *models.APIKey, permission uin
 }
 
 func (s *apiKeyService) UpdateLastUsed(ctx context.Context, keyID uuid.UUID) {
-	// Fire and forget - don't block the request
+	// Fire and forget - don't block the request, but use a proper timeout
 	go func() {
-		_ = s.repo.UpdateLastUsed(context.Background(), keyID)
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.repo.UpdateLastUsed(bgCtx, keyID)
 	}()
 }
 
 func (s *apiKeyService) LogUsage(ctx context.Context, log *models.APIKeyUsageLog) {
-	// Fire and forget - don't block the request
+	// Fire and forget - don't block the request, but use a proper timeout
 	go func() {
-		_ = s.repo.LogUsage(context.Background(), log)
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.repo.LogUsage(bgCtx, log)
 	}()
 }
-

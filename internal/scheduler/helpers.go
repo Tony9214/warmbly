@@ -68,6 +68,36 @@ func ensureBusinessHours(t time.Time, timezone string) time.Time {
 	return ensureTimeWindow(t, "08:00", "20:00", loc)
 }
 
+// calculateHoursRemainingUntil calculates hours remaining until a specific end time
+func calculateHoursRemainingUntil(timezone, endTime string) float64 {
+	loc := loadLocation(timezone)
+	now := time.Now().In(loc)
+	endMinutes := parseTimeOfDay(endTime)
+	if endMinutes == 0 {
+		endMinutes = 20 * 60 // fallback to 8pm
+	}
+	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), endMinutes/60, endMinutes%60, 0, 0, loc)
+	if now.After(endOfDay) {
+		return 0
+	}
+	return math.Max(0, endOfDay.Sub(now).Hours())
+}
+
+// calculateFirstSlotTomorrowAt calculates first slot tomorrow at a specific start time
+func calculateFirstSlotTomorrowAt(timezone, startTime string) time.Time {
+	loc := loadLocation(timezone)
+	now := time.Now().In(loc)
+	startMinutes := parseTimeOfDay(startTime)
+	if startMinutes == 0 {
+		startMinutes = 8 * 60 // fallback to 8am
+	}
+	tomorrow := now.Add(24 * time.Hour)
+	firstSlot := time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(),
+		startMinutes/60, startMinutes%60, 0, 0, loc)
+	jitter := randomJitter(0, 60)
+	return firstSlot.Add(time.Minute * time.Duration(jitter))
+}
+
 // avoidRoundTimes adds randomness to avoid exact round times (10:00, 11:00)
 func avoidRoundTimes(t time.Time) time.Time {
 	if t.Minute() == 0 {
@@ -165,4 +195,51 @@ func selectAccountForSend(accounts []models.Email, currentTime time.Time) *model
 	// For now, use simple round-robin based on current minute
 	index := currentTime.Minute() % len(accounts)
 	return &accounts[index]
+}
+
+// AccountCandidate holds an email account with its computed scheduling weight
+type AccountCandidate struct {
+	Account        models.Email
+	RemainingToday int
+	WarmupAgeDays  int
+	Weight         float64
+}
+
+// computeWeight calculates a scheduling weight for an account based on remaining capacity and warmup age.
+// Accounts with more remaining capacity and older warmup age get higher weight.
+func computeWeight(remaining int, warmupAgeDays int) float64 {
+	if remaining <= 0 {
+		return 0
+	}
+	warmupFactor := 1.0 + math.Log2(float64(warmupAgeDays+1))
+	return float64(remaining) * warmupFactor
+}
+
+// selectAccountWeighted picks an account using weighted random selection.
+// Returns nil if all candidates have zero weight.
+func selectAccountWeighted(candidates []AccountCandidate) *AccountCandidate {
+	var totalWeight float64
+	var viable []AccountCandidate
+	for _, c := range candidates {
+		if c.Weight > 0 {
+			totalWeight += c.Weight
+			viable = append(viable, c)
+		}
+	}
+
+	if len(viable) == 0 {
+		return nil
+	}
+
+	r := rand.Float64() * totalWeight
+	var cumulative float64
+	for i := range viable {
+		cumulative += viable[i].Weight
+		if r <= cumulative {
+			return &viable[i]
+		}
+	}
+
+	// Fallback to last viable candidate
+	return &viable[len(viable)-1]
 }

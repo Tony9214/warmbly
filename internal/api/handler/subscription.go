@@ -11,16 +11,15 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 )
 
-// GetSubscription returns the current user's subscription
+// GetSubscription returns the current organization's subscription
 func (h *Handler) GetSubscription(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
-	sub, errX := h.SubscriptionService.Get(c.Request.Context(), uid)
+	sub, errX := h.SubscriptionService.Get(c.Request.Context(), *orgID)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
@@ -29,16 +28,15 @@ func (h *Handler) GetSubscription(c *gin.Context) {
 	c.JSON(http.StatusOK, sub)
 }
 
-// GetSubscriptionLimits returns the current user's subscription with rate limits
+// GetSubscriptionLimits returns the current organization's subscription with rate limits
 func (h *Handler) GetSubscriptionLimits(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
-	sub, errX := h.SubscriptionService.GetWithLimits(c.Request.Context(), uid)
+	sub, errX := h.SubscriptionService.GetWithLimits(c.Request.Context(), *orgID)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
@@ -67,6 +65,12 @@ func (h *Handler) CreateCheckoutSession(c *gin.Context) {
 		return
 	}
 
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
 	var req struct {
 		PriceID    string `json:"price_id" binding:"required"`
 		SuccessURL string `json:"success_url" binding:"required"`
@@ -77,7 +81,7 @@ func (h *Handler) CreateCheckoutSession(c *gin.Context) {
 		return
 	}
 
-	session, errX := h.StripeService.CreateCheckoutSession(c.Request.Context(), uid, req.PriceID, req.SuccessURL, req.CancelURL)
+	session, errX := h.StripeService.CreateCheckoutSession(c.Request.Context(), uid, *orgID, req.PriceID, req.SuccessURL, req.CancelURL)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
@@ -91,10 +95,9 @@ func (h *Handler) CreateCheckoutSession(c *gin.Context) {
 
 // CreateBillingPortalSession creates a Stripe billing portal session
 func (h *Handler) CreateBillingPortalSession(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -106,7 +109,7 @@ func (h *Handler) CreateBillingPortalSession(c *gin.Context) {
 		return
 	}
 
-	sub, errX := h.SubscriptionService.Get(c.Request.Context(), uid)
+	sub, errX := h.SubscriptionService.Get(c.Request.Context(), *orgID)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
@@ -121,12 +124,11 @@ func (h *Handler) CreateBillingPortalSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"portal_url": portalURL})
 }
 
-// CancelSubscription cancels the current user's subscription
+// CancelSubscription cancels the current organization's subscription
 func (h *Handler) CancelSubscription(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -135,7 +137,7 @@ func (h *Handler) CancelSubscription(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&req)
 
-	sub, errX := h.SubscriptionService.Get(c.Request.Context(), uid)
+	sub, errX := h.SubscriptionService.Get(c.Request.Context(), *orgID)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
@@ -185,12 +187,11 @@ func (h *Handler) HandleStripeWebhook(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"received": true})
 }
 
-// GetTrialStatus returns the current user's free trial status
+// GetTrialStatus returns the current organization's free trial status
 func (h *Handler) GetTrialStatus(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -199,7 +200,7 @@ func (h *Handler) GetTrialStatus(c *gin.Context) {
 		return
 	}
 
-	status, errX := h.TrialService.GetTrialStatus(c.Request.Context(), uid)
+	status, errX := h.TrialService.GetTrialStatus(c.Request.Context(), *orgID)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
@@ -208,12 +209,11 @@ func (h *Handler) GetTrialStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-// GetFeatureStatus returns the current user's feature access status
+// GetFeatureStatus returns the current organization's feature access status
 func (h *Handler) GetFeatureStatus(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -222,31 +222,30 @@ func (h *Handler) GetFeatureStatus(c *gin.Context) {
 		return
 	}
 
-	status, errX := h.FeatureGateService.GetSubscriptionStatus(c.Request.Context(), uid)
+	status, errX := h.FeatureGateService.GetSubscriptionStatus(c.Request.Context(), *orgID)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
 	}
 
 	// Add additional feature flags
-	canSend, _ := h.FeatureGateService.CanSendCampaignEmail(c.Request.Context(), uid)
-	canWarmup, _ := h.FeatureGateService.CanUseWarmup(c.Request.Context(), uid)
-	canUnibox, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), uid)
+	canSend, _ := h.FeatureGateService.CanSendCampaignEmail(c.Request.Context(), *orgID)
+	canWarmup, _ := h.FeatureGateService.CanUseWarmup(c.Request.Context(), *orgID)
+	canUnibox, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"subscription":        status,
-		"can_send_campaigns":  canSend,
-		"can_use_warmup":      canWarmup,
-		"can_use_unibox":      canUnibox,
+		"subscription":       status,
+		"can_send_campaigns": canSend,
+		"can_use_warmup":     canWarmup,
+		"can_use_unibox":     canUnibox,
 	})
 }
 
-// ChangePlan changes the user's subscription plan with proration
+// ChangePlan changes the organization's subscription plan with proration
 func (h *Handler) ChangePlan(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -259,7 +258,7 @@ func (h *Handler) ChangePlan(c *gin.Context) {
 		return
 	}
 
-	updated, errX := h.StripeService.ChangePlan(c.Request.Context(), uid, req.PlanID, req.ProrationBehavior)
+	updated, errX := h.StripeService.ChangePlan(c.Request.Context(), *orgID, req.PlanID, req.ProrationBehavior)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
@@ -273,10 +272,9 @@ func (h *Handler) ChangePlan(c *gin.Context) {
 
 // PreviewPlanChange previews the proration for a plan change
 func (h *Handler) PreviewPlanChange(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -292,7 +290,7 @@ func (h *Handler) PreviewPlanChange(c *gin.Context) {
 		return
 	}
 
-	preview, errX := h.StripeService.PreviewPlanChange(c.Request.Context(), uid, newPlanID)
+	preview, errX := h.StripeService.PreviewPlanChange(c.Request.Context(), *orgID, newPlanID)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return
@@ -340,9 +338,6 @@ func (h *Handler) SubmitEnterpriseInquiry(c *gin.Context) {
 		errx.JSON(c, errX)
 		return
 	}
-
-	// TODO: Send email notification to sales team
-	// TODO: Send confirmation email to user
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "Thank you! Our team will contact you within 24 hours.",

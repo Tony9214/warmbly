@@ -36,6 +36,8 @@ type Campaign struct {
 	EmailTags []string `json:"email_tags"`
 	Folders   []string `json:"folders"`
 
+	LastStatusChangeAt *time.Time `json:"last_status_change_at,omitempty"`
+
 	UpdatedAt time.Time `json:"updated_at"`
 	CreatedAt time.Time `json:"created_at"`
 }

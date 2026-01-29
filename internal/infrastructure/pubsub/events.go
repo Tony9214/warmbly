@@ -47,6 +47,10 @@ const (
 	EventBulkProgress  EventType = "BULK_PROGRESS"
 	EventBulkCompleted EventType = "BULK_COMPLETED"
 	EventBulkFailed    EventType = "BULK_FAILED"
+
+	// Tracking events (from Rust tracking service)
+	EventEmailOpened  EventType = "EMAIL_OPENED"
+	EventEmailClicked EventType = "EMAIL_CLICKED"
 )
 
 // BaseEvent contains common fields for all events
@@ -126,6 +130,16 @@ type WarmupStatsEvent struct {
 	EmailsSent     int    `json:"emails_sent"`
 	EmailsReplied  int    `json:"emails_replied"`
 	TargetVolume   int    `json:"target_volume"`
+}
+
+// TrackingEventPayload for email open/click tracking events
+type TrackingEventPayload struct {
+	BaseEvent
+	CampaignID   string `json:"campaign_id"`
+	ContactID    string `json:"contact_id,omitempty"`
+	ContactEmail string `json:"contact_email,omitempty"`
+	SequenceID   string `json:"sequence_id,omitempty"`
+	OriginalURL  string `json:"original_url,omitempty"` // For click events
 }
 
 // New publish methods
@@ -249,6 +263,25 @@ func (p *StreamingPublisher) PublishToUser(ctx context.Context, userID string, e
 	}
 
 	if err := p.client.Publish(ctx, TopicUserEvents, event, attrs); err != nil {
+		// Log error but don't fail
+	}
+}
+
+// PublishTrackingEvent publishes an email open/click tracking event
+func (p *StreamingPublisher) PublishTrackingEvent(ctx context.Context, event *TrackingEventPayload) {
+	if p.client == nil {
+		return
+	}
+
+	event.Timestamp = time.Now()
+
+	attrs := map[string]string{
+		"user_id":     event.UserID,
+		"campaign_id": event.CampaignID,
+		"event_type":  string(event.EventType),
+	}
+
+	if err := p.client.Publish(ctx, TopicCampaignUpdate, event, attrs); err != nil {
 		// Log error but don't fail
 	}
 }

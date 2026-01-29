@@ -175,3 +175,96 @@ type EndpointUsage struct {
 	Endpoint string `json:"endpoint"`
 	Calls    int    `json:"calls"`
 }
+
+// Dashboard Analytics
+
+// DashboardAnalytics is the main dashboard overview combining multiple stats
+type DashboardAnalytics struct {
+	Period         string                 `json:"period"` // 7d, 30d, 90d
+	OverallStats   DashboardOverallStats  `json:"overall_stats"`
+	RecentActivity []RecentActivityItem   `json:"recent_activity"`
+	TopCampaigns   []TopCampaignStats     `json:"top_campaigns"`
+	AccountHealth  AccountHealthSummary   `json:"account_health"`
+	DailyTrend     []DashboardDailyStats  `json:"daily_trend"`
+}
+
+// DashboardOverallStats contains aggregate statistics for the dashboard
+type DashboardOverallStats struct {
+	TotalEmailsSent int     `json:"total_emails_sent"`
+	TotalOpens      int     `json:"total_opens"`
+	TotalClicks     int     `json:"total_clicks"`
+	TotalReplies    int     `json:"total_replies"`
+	TotalBounces    int     `json:"total_bounces"`
+	OpenRate        float64 `json:"open_rate"`
+	ClickRate       float64 `json:"click_rate"`
+	ReplyRate       float64 `json:"reply_rate"`
+	BounceRate      float64 `json:"bounce_rate"`
+	ActiveCampaigns int     `json:"active_campaigns"`
+	ActiveAccounts  int     `json:"active_accounts"`
+}
+
+// RecentActivityItem represents a single activity event
+type RecentActivityItem struct {
+	Type         string    `json:"type"` // opened, clicked, replied, bounced, sent
+	CampaignID   uuid.UUID `json:"campaign_id"`
+	CampaignName string    `json:"campaign_name"`
+	ContactEmail string    `json:"contact_email"`
+	ContactID    uuid.UUID `json:"contact_id,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+	Link         string    `json:"link,omitempty"` // For click events
+}
+
+// TopCampaignStats represents performance stats for a top campaign
+type TopCampaignStats struct {
+	CampaignID uuid.UUID `json:"campaign_id"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	EmailsSent int       `json:"emails_sent"`
+	OpenRate   float64   `json:"open_rate"`
+	ClickRate  float64   `json:"click_rate"`
+	ReplyRate  float64   `json:"reply_rate"`
+}
+
+// AccountHealthSummary provides a summary of all email account health
+type AccountHealthSummary struct {
+	TotalAccounts   int `json:"total_accounts"`
+	HealthyAccounts int `json:"healthy_accounts"`
+	WarningAccounts int `json:"warning_accounts"`
+	ErrorAccounts   int `json:"error_accounts"`
+}
+
+// DashboardDailyStats represents daily statistics for trend charts
+type DashboardDailyStats struct {
+	Date    string `json:"date"` // YYYY-MM-DD
+	Sent    int    `json:"sent"`
+	Opens   int    `json:"opens"`
+	Clicks  int    `json:"clicks"`
+	Replies int    `json:"replies"`
+}
+
+// CampaignHourlyStats represents hourly statistics for a campaign
+type CampaignHourlyStats struct {
+	Hour    int `json:"hour"` // 0-23
+	Sent    int `json:"sent"`
+	Opens   int `json:"opens"`
+	Clicks  int `json:"clicks"`
+	Replies int `json:"replies"`
+}
+
+// CampaignComparison allows comparing multiple campaigns
+type CampaignComparison struct {
+	Campaigns []CampaignComparisonItem `json:"campaigns"`
+	Period    DateRange                `json:"period"`
+}
+
+// CampaignComparisonItem represents a single campaign in a comparison
+type CampaignComparisonItem struct {
+	CampaignID uuid.UUID `json:"campaign_id"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	EmailsSent int       `json:"emails_sent"`
+	OpenRate   float64   `json:"open_rate"`
+	ClickRate  float64   `json:"click_rate"`
+	ReplyRate  float64   `json:"reply_rate"`
+	BounceRate float64   `json:"bounce_rate"`
+}

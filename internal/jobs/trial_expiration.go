@@ -59,16 +59,16 @@ func (j *TrialExpirationJob) Run(ctx context.Context) error {
 	}
 
 	for _, sub := range expiredSubs {
-		// Pause all active campaigns for this user
-		if err := repository.PauseCampaignsByUserID(ctx, j.db, sub.UserID, "paused_trial_expired"); err != nil {
+		// Pause all active campaigns for this organization
+		if err := repository.PauseCampaignsByOrganizationID(ctx, j.db, sub.OrganizationID, "paused_trial_expired"); err != nil {
 			sentry.CaptureException(err)
-			// Continue processing other users
+			// Continue processing other organizations
 		}
 
 		// Disable warmup on all email accounts (they're already blocked, but clean up)
-		if err := repository.DisableWarmupByUserID(ctx, j.db, sub.UserID); err != nil {
+		if err := repository.DisableWarmupByOrganizationID(ctx, j.db, sub.OrganizationID); err != nil {
 			sentry.CaptureException(err)
-			// Continue processing other users
+			// Continue processing other organizations
 		}
 
 		// Mark subscription as expired
@@ -78,17 +78,41 @@ func (j *TrialExpirationJob) Run(ctx context.Context) error {
 		}
 
 		// Send notification email to user
-		j.notifyTrialExpired(ctx, sub.UserID)
+		userEmail := ""
+		if sub.UserEmail != nil {
+			userEmail = *sub.UserEmail
+		}
+		j.notifyTrialExpired(ctx, sub.UserID, userEmail)
 	}
 
 	return nil
 }
 
 // notifyTrialExpired sends an email notification about trial expiration
-func (j *TrialExpirationJob) notifyTrialExpired(ctx context.Context, userID interface{}) {
-	// TODO: Implement email notification
-	// j.emailNotificationService.SendTrialExpiredNotification(ctx, userID)
-	fmt.Printf("Trial expired notification would be sent to user: %v\n", userID)
+func (j *TrialExpirationJob) notifyTrialExpired(ctx context.Context, userID interface{}, userEmail string) {
+	if j.emailNotificationService == nil || userEmail == "" {
+		return
+	}
+
+	subject := "Your Warmbly trial has expired"
+	body := `
+		<h2>Your trial has ended</h2>
+		<p>Thank you for trying Warmbly! Your free trial has now expired.</p>
+		<p>During your trial, your campaigns have been paused and warmup has been disabled to prevent any service interruptions.</p>
+		<h3>What happens now?</h3>
+		<ul>
+			<li>Your data is safe and will be preserved</li>
+			<li>Campaigns are paused but not deleted</li>
+			<li>Email accounts remain connected</li>
+		</ul>
+		<p>To resume your campaigns and continue using Warmbly, please upgrade to a paid plan:</p>
+		<p><a href="https://app.warmbly.com/settings/billing" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:white;text-decoration:none;border-radius:6px;">Choose a Plan</a></p>
+		<p>If you have any questions, our support team is here to help.</p>
+	`
+
+	if err := j.emailNotificationService.Send(ctx, []string{userEmail}, nil, nil, subject, body); err != nil {
+		sentry.CaptureException(err)
+	}
 }
 
 // TrialExpirationScheduler runs the trial expiration job on a schedule

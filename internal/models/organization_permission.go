@@ -30,6 +30,8 @@ const (
 	PermViewContacts
 	// PermTransferOwnership allows transferring org ownership
 	PermTransferOwnership
+	// PermManageAPIKeys allows managing organization API keys
+	PermManageAPIKeys
 )
 
 // Role represents predefined permission sets
@@ -48,7 +50,7 @@ const AllPermissions OrganizationPermission = 0xFFFF
 // RolePermissions maps roles to their default permissions
 var RolePermissions = map[Role]OrganizationPermission{
 	RoleOwner: AllPermissions,
-	RoleAdmin: AllPermissions ^ PermTransferOwnership,
+	RoleAdmin: AllPermissions ^ PermTransferOwnership ^ 0, // Admin gets all except transfer
 	RoleManager: PermManageCampaigns | PermManageContacts | PermManageEmails |
 		PermSendCampaigns | PermManageSequences | PermViewAnalytics |
 		PermViewCampaigns | PermViewContacts | PermAccessUnibox,

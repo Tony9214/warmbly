@@ -46,6 +46,9 @@ CREATE TABLE email_accounts (
     warmup_increase INT NOT NULL DEFAULT 1,
     warmup_reply_rate SMALLINT NOT NULL DEFAULT 30,
     warmup_tag TEXT NOT NULL,
+    warmup_start_time TIME NOT NULL DEFAULT '08:00',
+    warmup_end_time TIME NOT NULL DEFAULT '20:00',
+    warmup_days SMALLINT NOT NULL DEFAULT 0,
 
     created_at TIMESTAMP NOT NULL DEFAULT NOW (),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW (),
@@ -90,7 +93,7 @@ CREATE TABLE email_accounts_smtp_imap (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW ()
 );
 
-CREATE TABLE email_categories (
+CREATE TABLE categories (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
     title VARCHAR(255) NOT NULL,
@@ -131,6 +134,8 @@ CREATE TABLE campaigns (
     days SMALLINT NOT NULL,
     start_time TIME NOT NULL DEFAULT '08:00',
     end_time TIME NOT NULL DEFAULT '18:00',
+
+    last_status_change_at TIMESTAMPTZ,
 
     updated_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP NOT NULL,
@@ -224,3 +229,25 @@ CREATE TABLE campaign_folders (
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
     FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
 );
+
+CREATE TABLE contact_categories (
+    contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    category_id UUID NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    PRIMARY KEY (contact_id, category_id)
+);
+CREATE INDEX idx_contact_categories_cat ON contact_categories(category_id);
+
+-- Reply templates (org-scoped)
+CREATE TABLE reply_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    body_html TEXT NOT NULL DEFAULT '',
+    body_plain TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_reply_templates_org ON reply_templates(organization_id);

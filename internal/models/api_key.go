@@ -15,9 +15,10 @@ const (
 )
 
 type APIKey struct {
-	ID          uuid.UUID  `json:"id"`
-	UserID      uuid.UUID  `json:"user_id"`
-	Name        string     `json:"name"`
+	ID             uuid.UUID `json:"id"`
+	UserID         uuid.UUID `json:"user_id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
 	KeyPrefix   string     `json:"key_prefix"`
 	Permissions uint64     `json:"permissions"`
 

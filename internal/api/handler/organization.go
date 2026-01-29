@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -188,7 +189,37 @@ func (h *Handler) InviteMember(c *gin.Context) {
 		return
 	}
 
-	// TODO: Send invitation email with token
+	// Get organization name for email
+	org, _ := h.OrganizationService.Get(c.Request.Context(), *orgID)
+	orgName := "your organization"
+	if org != nil {
+		orgName = org.Name
+	}
+
+	// Get inviter name
+	inviter, _ := h.UserService.GetUser(c.Request.Context(), userID)
+	inviterName := "A team member"
+	if inviter != nil && inviter.FirstName != "" {
+		inviterName = inviter.FirstName
+		if inviter.LastName != "" {
+			inviterName += " " + inviter.LastName
+		}
+	}
+
+	// Send invitation email
+	if h.EmailNotificationService != nil {
+		subject := fmt.Sprintf("You've been invited to join %s on Warmbly", orgName)
+		body := fmt.Sprintf(`
+			<h2>You've been invited!</h2>
+			<p>%s has invited you to join <strong>%s</strong> on Warmbly.</p>
+			<p>Click the link below to accept the invitation:</p>
+			<p><a href="https://app.warmbly.com/invite?token=%s" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:white;text-decoration:none;border-radius:6px;">Accept Invitation</a></p>
+			<p>This invitation expires in 7 days.</p>
+			<p>If you don't have an account yet, you'll be able to create one when you accept the invitation.</p>
+		`, inviterName, orgName, inv.Token)
+
+		go h.EmailNotificationService.Send(c.Request.Context(), []string{req.Email}, nil, nil, subject, body)
+	}
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message":    "invitation sent",

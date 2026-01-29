@@ -18,33 +18,33 @@ const (
 )
 
 type FeatureGateService interface {
-	// CanSendCampaignEmail checks if a user can send campaign emails
-	CanSendCampaignEmail(ctx context.Context, userID uuid.UUID) (bool, *errx.Error)
+	// CanSendCampaignEmail checks if an organization can send campaign emails
+	CanSendCampaignEmail(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error)
 
-	// CanUseWarmup checks if a user can use the warmup feature
-	CanUseWarmup(ctx context.Context, userID uuid.UUID) (bool, *errx.Error)
+	// CanUseWarmup checks if an organization can use the warmup feature
+	CanUseWarmup(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error)
 
-	// CanUseUnibox checks if a user can use the unibox feature
-	CanUseUnibox(ctx context.Context, userID uuid.UUID) (bool, *errx.Error)
+	// CanUseUnibox checks if an organization can use the unibox feature
+	CanUseUnibox(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error)
 
-	// GetDailyEmailLimit returns the daily email limit for a user
+	// GetDailyEmailLimit returns the daily email limit for an organization
 	// Returns -1 for unlimited, 0 for blocked
-	GetDailyEmailLimit(ctx context.Context, userID uuid.UUID) (int, *errx.Error)
+	GetDailyEmailLimit(ctx context.Context, orgID uuid.UUID) (int, *errx.Error)
 
 	// GetSubscriptionStatus returns subscription info for feature checks
-	GetSubscriptionStatus(ctx context.Context, userID uuid.UUID) (*SubscriptionStatus, *errx.Error)
+	GetSubscriptionStatus(ctx context.Context, orgID uuid.UUID) (*SubscriptionStatus, *errx.Error)
 
-	// IsPaidUser checks if the user has an active paid subscription
-	IsPaidUser(ctx context.Context, userID uuid.UUID) (bool, *errx.Error)
+	// IsPaidOrganization checks if the organization has an active paid subscription
+	IsPaidOrganization(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error)
 }
 
 // SubscriptionStatus contains status info for feature gating
 type SubscriptionStatus struct {
-	HasSubscription    bool       `json:"has_subscription"`
-	IsInFreeTrial      bool       `json:"is_in_free_trial"`
-	IsFreeTrialExpired bool       `json:"is_free_trial_expired"`
-	IsPaidSubscriber   bool       `json:"is_paid_subscriber"`
-	DailyEmailLimit    int        `json:"daily_email_limit"`
+	HasSubscription    bool         `json:"has_subscription"`
+	IsInFreeTrial      bool         `json:"is_in_free_trial"`
+	IsFreeTrialExpired bool         `json:"is_free_trial_expired"`
+	IsPaidSubscriber   bool         `json:"is_paid_subscriber"`
+	DailyEmailLimit    int          `json:"daily_email_limit"`
 	Plan               *models.Plan `json:"plan,omitempty"`
 }
 
@@ -60,9 +60,9 @@ func NewService(subRepo repository.SubscriptionRepository, planRepo repository.P
 	}
 }
 
-// CanSendCampaignEmail checks if a user can send campaign emails
-func (s *featureGateService) CanSendCampaignEmail(ctx context.Context, userID uuid.UUID) (bool, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+// CanSendCampaignEmail checks if an organization can send campaign emails
+func (s *featureGateService) CanSendCampaignEmail(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return false, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -86,9 +86,9 @@ func (s *featureGateService) CanSendCampaignEmail(ctx context.Context, userID uu
 	return false, nil
 }
 
-// CanUseWarmup checks if a user can use the warmup feature
-func (s *featureGateService) CanUseWarmup(ctx context.Context, userID uuid.UUID) (bool, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+// CanUseWarmup checks if an organization can use the warmup feature
+func (s *featureGateService) CanUseWarmup(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return false, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -101,9 +101,9 @@ func (s *featureGateService) CanUseWarmup(ctx context.Context, userID uuid.UUID)
 	return sub.HasPaidSubscription(), nil
 }
 
-// CanUseUnibox checks if a user can use the unibox feature
-func (s *featureGateService) CanUseUnibox(ctx context.Context, userID uuid.UUID) (bool, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+// CanUseUnibox checks if an organization can use the unibox feature
+func (s *featureGateService) CanUseUnibox(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return false, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -116,9 +116,9 @@ func (s *featureGateService) CanUseUnibox(ctx context.Context, userID uuid.UUID)
 	return sub.HasPaidSubscription(), nil
 }
 
-// GetDailyEmailLimit returns the daily email limit for a user
-func (s *featureGateService) GetDailyEmailLimit(ctx context.Context, userID uuid.UUID) (int, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+// GetDailyEmailLimit returns the daily email limit for an organization
+func (s *featureGateService) GetDailyEmailLimit(ctx context.Context, orgID uuid.UUID) (int, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return 0, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -149,7 +149,7 @@ func (s *featureGateService) GetDailyEmailLimit(ctx context.Context, userID uuid
 }
 
 // GetSubscriptionStatus returns subscription info for feature checks
-func (s *featureGateService) GetSubscriptionStatus(ctx context.Context, userID uuid.UUID) (*SubscriptionStatus, *errx.Error) {
+func (s *featureGateService) GetSubscriptionStatus(ctx context.Context, orgID uuid.UUID) (*SubscriptionStatus, *errx.Error) {
 	status := &SubscriptionStatus{
 		HasSubscription:    false,
 		IsInFreeTrial:      false,
@@ -158,7 +158,7 @@ func (s *featureGateService) GetSubscriptionStatus(ctx context.Context, userID u
 		DailyEmailLimit:    0,
 	}
 
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -190,9 +190,9 @@ func (s *featureGateService) GetSubscriptionStatus(ctx context.Context, userID u
 	return status, nil
 }
 
-// IsPaidUser checks if the user has an active paid subscription
-func (s *featureGateService) IsPaidUser(ctx context.Context, userID uuid.UUID) (bool, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+// IsPaidOrganization checks if the organization has an active paid subscription
+func (s *featureGateService) IsPaidOrganization(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return false, errx.New(errx.Internal, "failed to get subscription")
 	}

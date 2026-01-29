@@ -15,14 +15,15 @@ type SubscriptionRepository interface {
 	Update(ctx context.Context, sub *models.Subscription) error
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error)
 	GetByUserID(ctx context.Context, userID uuid.UUID) (*models.Subscription, error)
+	GetByOrganizationID(ctx context.Context, orgID uuid.UUID) (*models.Subscription, error)
 	GetByStripeCustomerID(ctx context.Context, customerID string) (*models.Subscription, error)
 	GetByStripeSubscriptionID(ctx context.Context, subscriptionID string) (*models.Subscription, error)
 
 	// With limits - for realtime
-	GetWithLimits(ctx context.Context, userID uuid.UUID) (*models.SubscriptionWithLimits, error)
+	GetWithLimits(ctx context.Context, orgID uuid.UUID) (*models.SubscriptionWithLimits, error)
 
 	// Enterprise
-	SetEnterprise(ctx context.Context, userID uuid.UUID, isEnterprise bool) error
+	SetEnterprise(ctx context.Context, orgID uuid.UUID, isEnterprise bool) error
 
 	// Webhook idempotency
 	WebhookEventExists(ctx context.Context, eventID string) (bool, error)
@@ -98,7 +99,11 @@ func (r *subscriptionRepository) GetByID(ctx context.Context, id uuid.UUID) (*mo
 }
 
 func (r *subscriptionRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.Subscription, error) {
-	return r.scanSubscription(ctx, `SELECT * FROM subscriptions WHERE user_id = $1`, userID)
+	return r.scanSubscription(ctx, `SELECT * FROM subscriptions WHERE user_id = $1 LIMIT 1`, userID)
+}
+
+func (r *subscriptionRepository) GetByOrganizationID(ctx context.Context, orgID uuid.UUID) (*models.Subscription, error) {
+	return r.scanSubscription(ctx, `SELECT * FROM subscriptions WHERE organization_id = $1`, orgID)
 }
 
 func (r *subscriptionRepository) GetByStripeCustomerID(ctx context.Context, customerID string) (*models.Subscription, error) {
@@ -129,8 +134,7 @@ func (r *subscriptionRepository) scanSubscription(ctx context.Context, query str
 	return &sub, nil
 }
 
-func (r *subscriptionRepository) GetWithLimits(ctx context.Context, userID uuid.UUID) (*models.SubscriptionWithLimits, error) {
-	// First check if user has enterprise custom limits
+func (r *subscriptionRepository) GetWithLimits(ctx context.Context, orgID uuid.UUID) (*models.SubscriptionWithLimits, error) {
 	query := `
 		SELECT
 			s.id, s.user_id, s.organization_id, s.plan_id, s.stripe_customer_id, s.stripe_subscription_id,
@@ -145,10 +149,10 @@ func (r *subscriptionRepository) GetWithLimits(ctx context.Context, userID uuid.
 		FROM subscriptions s
 		LEFT JOIN plan_rate_limits prl ON prl.plan_id = s.plan_id
 		LEFT JOIN user_rate_limits url ON url.user_id = s.user_id AND s.is_enterprise = true
-		WHERE s.user_id = $1
+		WHERE s.organization_id = $1
 	`
 
-	row := r.db.QueryRow(ctx, query, userID)
+	row := r.db.QueryRow(ctx, query, orgID)
 
 	var result models.SubscriptionWithLimits
 	var limits models.RealtimeRateLimits
@@ -172,9 +176,9 @@ func (r *subscriptionRepository) GetWithLimits(ctx context.Context, userID uuid.
 	return &result, nil
 }
 
-func (r *subscriptionRepository) SetEnterprise(ctx context.Context, userID uuid.UUID, isEnterprise bool) error {
-	query := `UPDATE subscriptions SET is_enterprise = $2, updated_at = $3 WHERE user_id = $1`
-	_, err := r.db.Exec(ctx, query, userID, isEnterprise, time.Now())
+func (r *subscriptionRepository) SetEnterprise(ctx context.Context, orgID uuid.UUID, isEnterprise bool) error {
+	query := `UPDATE subscriptions SET is_enterprise = $2, updated_at = $3 WHERE organization_id = $1`
+	_, err := r.db.Exec(ctx, query, orgID, isEnterprise, time.Now())
 	return err
 }
 

@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -75,12 +76,14 @@ func AddSignature(body string, signature string, isHTML bool) string {
 }
 
 // AddOpenTrackingPixel adds an invisible tracking pixel to HTML email
+// The pixel URL points to the Rust tracking service endpoint: /t/o/{taskID}.png
 func AddOpenTrackingPixel(htmlBody string, taskID uuid.UUID, trackingDomain string) string {
 	if trackingDomain == "" {
 		trackingDomain = "track.warmbly.com"
 	}
 
-	pixelURL := fmt.Sprintf("https://%s/open/%s.png", trackingDomain, taskID.String())
+	// Use /t/o/ path to match Rust tracking service
+	pixelURL := fmt.Sprintf("https://%s/t/o/%s.png", trackingDomain, taskID.String())
 	pixel := fmt.Sprintf(`<img src="%s" width="1" height="1" style="display:none;" alt="" />`, pixelURL)
 
 	// Try to insert before closing body tag
@@ -93,6 +96,7 @@ func AddOpenTrackingPixel(htmlBody string, taskID uuid.UUID, trackingDomain stri
 }
 
 // WrapLinksForTracking wraps all links in HTML for click tracking
+// The tracking URL points to the Rust tracking service endpoint: /t/c/{taskID}?url={original_url}
 func WrapLinksForTracking(htmlBody string, taskID uuid.UUID, trackingDomain string) string {
 	if trackingDomain == "" {
 		trackingDomain = "track.warmbly.com"
@@ -107,15 +111,24 @@ func WrapLinksForTracking(htmlBody string, taskID uuid.UUID, trackingDomain stri
 
 		// Skip if already a tracking link or anchor link
 		if strings.HasPrefix(originalURL, "#") ||
-			strings.Contains(originalURL, trackingDomain) {
+			strings.Contains(originalURL, trackingDomain) ||
+			strings.HasPrefix(originalURL, "mailto:") ||
+			strings.HasPrefix(originalURL, "tel:") {
 			return match
 		}
 
-		// Create tracking URL
-		trackingURL := fmt.Sprintf("https://%s/click/%s?url=%s",
+		// Skip data URLs and javascript links
+		if strings.HasPrefix(originalURL, "data:") ||
+			strings.HasPrefix(originalURL, "javascript:") {
+			return match
+		}
+
+		// Use /t/c/ path to match Rust tracking service
+		// URL encode the original URL properly
+		trackingURL := fmt.Sprintf("https://%s/t/c/%s?url=%s",
 			trackingDomain,
 			taskID.String(),
-			strings.ReplaceAll(originalURL, "&", "%26"))
+			url.QueryEscape(originalURL))
 
 		return fmt.Sprintf(`href="%s"`, trackingURL)
 	})

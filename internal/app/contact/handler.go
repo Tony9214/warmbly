@@ -3,12 +3,33 @@ package contact
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
 func (s *contactService) Add(ctx context.Context, userID string, contacts []models.AddContact) ([]models.Contact, *errx.Error) {
+	// Enforce contact limit if subscription repos are available
+	if s.subRepo != nil && s.planRepo != nil {
+		uid, parseErr := uuid.Parse(userID)
+		if parseErr == nil {
+			sub, err := s.subRepo.GetByUserID(ctx, uid)
+			if err == nil && sub != nil {
+				plan, err := s.planRepo.GetByID(ctx, sub.PlanID)
+				if err == nil && plan != nil && plan.MaxContacts > 0 {
+					currentCount, xerr := s.contactRepository.GetContactCount(ctx, userID)
+					if xerr == nil {
+						newTotal := currentCount + len(contacts)
+						if newTotal > int(plan.MaxContacts) {
+							return nil, errx.New(errx.Forbidden, "contact limit reached for your plan")
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return s.contactRepository.Add(ctx, userID, contacts)
 }
 

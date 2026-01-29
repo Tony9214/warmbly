@@ -37,7 +37,7 @@ type StripeService interface {
 	GetCustomer(ctx context.Context, customerID string) (*stripe.Customer, *errx.Error)
 
 	// Checkout
-	CreateCheckoutSession(ctx context.Context, userID uuid.UUID, priceID, successURL, cancelURL string) (*stripe.CheckoutSession, *errx.Error)
+	CreateCheckoutSession(ctx context.Context, userID uuid.UUID, orgID uuid.UUID, priceID, successURL, cancelURL string) (*stripe.CheckoutSession, *errx.Error)
 	CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, *errx.Error)
 
 	// Subscriptions
@@ -45,8 +45,8 @@ type StripeService interface {
 	CancelSubscription(ctx context.Context, subscriptionID string, cancelAtPeriodEnd bool) *errx.Error
 
 	// Plan changes with proration
-	ChangePlan(ctx context.Context, userID uuid.UUID, newPlanID uuid.UUID, prorationBehavior string) (*stripe.Subscription, *errx.Error)
-	PreviewPlanChange(ctx context.Context, userID uuid.UUID, newPlanID uuid.UUID) (*ProrationPreview, *errx.Error)
+	ChangePlan(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID, prorationBehavior string) (*stripe.Subscription, *errx.Error)
+	PreviewPlanChange(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID) (*ProrationPreview, *errx.Error)
 
 	// Webhooks
 	VerifyWebhook(payload []byte, signature string) (*stripe.Event, *errx.Error)
@@ -100,9 +100,9 @@ func (s *stripeService) GetCustomer(ctx context.Context, customerID string) (*st
 	return cust, nil
 }
 
-func (s *stripeService) CreateCheckoutSession(ctx context.Context, userID uuid.UUID, priceID, successURL, cancelURL string) (*stripe.CheckoutSession, *errx.Error) {
+func (s *stripeService) CreateCheckoutSession(ctx context.Context, userID uuid.UUID, orgID uuid.UUID, priceID, successURL, cancelURL string) (*stripe.CheckoutSession, *errx.Error) {
 	// Get or create customer
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -124,10 +124,12 @@ func (s *stripeService) CreateCheckoutSession(ctx context.Context, userID uuid.U
 		CancelURL:  stripe.String(cancelURL),
 		Metadata: map[string]string{
 			"user_id": userID.String(),
+			"org_id":  orgID.String(),
 		},
 		SubscriptionData: &stripe.CheckoutSessionSubscriptionDataParams{
 			Metadata: map[string]string{
 				"user_id": userID.String(),
+				"org_id":  orgID.String(),
 			},
 		},
 	}
@@ -181,9 +183,9 @@ func (s *stripeService) CancelSubscription(ctx context.Context, subscriptionID s
 	return nil
 }
 
-// ChangePlan changes the user's subscription to a new plan with proration
-func (s *stripeService) ChangePlan(ctx context.Context, userID uuid.UUID, newPlanID uuid.UUID, prorationBehavior string) (*stripe.Subscription, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+// ChangePlan changes the organization's subscription to a new plan with proration
+func (s *stripeService) ChangePlan(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID, prorationBehavior string) (*stripe.Subscription, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -235,8 +237,8 @@ func (s *stripeService) ChangePlan(ctx context.Context, userID uuid.UUID, newPla
 }
 
 // PreviewPlanChange previews the proration for changing to a new plan
-func (s *stripeService) PreviewPlanChange(ctx context.Context, userID uuid.UUID, newPlanID uuid.UUID) (*ProrationPreview, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+func (s *stripeService) PreviewPlanChange(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID) (*ProrationPreview, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -366,8 +368,26 @@ func (s *stripeService) handleCheckoutCompleted(ctx context.Context, event *stri
 		return errx.New(errx.BadRequest, "invalid user_id format")
 	}
 
+	// Extract org_id from metadata
+	orgIDStr, hasOrgID := checkoutSession.Metadata["org_id"]
+	var orgID uuid.UUID
+	if hasOrgID {
+		orgID, err = uuid.Parse(orgIDStr)
+		if err != nil {
+			return errx.New(errx.BadRequest, "invalid org_id format")
+		}
+	}
+
 	// Get or create subscription record
-	sub, _ := s.subRepo.GetByUserID(ctx, userID)
+	var sub *models.Subscription
+	if hasOrgID {
+		sub, _ = s.subRepo.GetByOrganizationID(ctx, orgID)
+	}
+	// Fallback to user-based lookup for backward compatibility with in-flight checkouts
+	if sub == nil {
+		sub, _ = s.subRepo.GetByUserID(ctx, userID)
+	}
+
 	if sub == nil {
 		// Find plan by Stripe price ID
 		priceID := ""
@@ -387,6 +407,7 @@ func (s *stripeService) handleCheckoutCompleted(ctx context.Context, event *stri
 		newSub := &models.Subscription{
 			ID:               uuid.New(),
 			UserID:           userID,
+			OrganizationID:   orgID,
 			PlanID:           plan.ID,
 			StripeCustomerID: checkoutSession.Customer.ID,
 			Status:           models.SubscriptionStatusIncomplete,
@@ -485,7 +506,7 @@ func (s *stripeService) handleSubscriptionUpdated(ctx context.Context, event *st
 
 		// Trial user converting to paid - migrate to premium workers
 		if wasTrialOnly && isNowPaid {
-			go s.workerAssignment.MigrateUserToPremiumWorkers(ctx, sub.UserID)
+			go s.workerAssignment.MigrateOrgToPremiumWorkers(ctx, sub.OrganizationID)
 		}
 
 		// Handle dedicated worker migration on plan change
@@ -495,10 +516,10 @@ func (s *stripeService) handleSubscriptionUpdated(ctx context.Context, event *st
 
 			if !hadDedicated && needsDedicated {
 				// Upgrading to dedicated plan
-				go s.workerAssignment.MigrateUserToDedicated(ctx, sub.UserID, sub.ID)
+				go s.workerAssignment.MigrateOrgToDedicated(ctx, sub.OrganizationID, sub.ID)
 			} else if hadDedicated && !needsDedicated {
 				// Downgrading from dedicated to shared (but still premium)
-				go s.workerAssignment.MigrateUserToShared(ctx, sub.UserID)
+				go s.workerAssignment.MigrateOrgToShared(ctx, sub.OrganizationID)
 			}
 		}
 	}
@@ -517,7 +538,7 @@ func (s *stripeService) handleSubscriptionDeleted(ctx context.Context, event *st
 		return nil
 	}
 
-	// Check if user had dedicated workers
+	// Check if org had dedicated workers
 	oldPlan, _ := s.planRepo.GetByID(ctx, sub.PlanID)
 	hadDedicated := oldPlan != nil && oldPlan.DedicatedWorkers > 0
 
@@ -533,10 +554,10 @@ func (s *stripeService) handleSubscriptionDeleted(ctx context.Context, event *st
 	if s.workerAssignment != nil {
 		// If had dedicated workers, release them first
 		if hadDedicated {
-			go s.workerAssignment.MigrateUserToShared(ctx, sub.UserID)
+			go s.workerAssignment.MigrateOrgToShared(ctx, sub.OrganizationID)
 		}
 		// Migrate to free tier workers since subscription is cancelled
-		go s.workerAssignment.MigrateUserToFreeWorkers(ctx, sub.UserID)
+		go s.workerAssignment.MigrateOrgToFreeWorkers(ctx, sub.OrganizationID)
 	}
 
 	return nil

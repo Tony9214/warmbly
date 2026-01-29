@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v3"
@@ -14,18 +15,23 @@ import (
 	"github.com/warmbly/warmbly/internal/api"
 	"github.com/warmbly/warmbly/internal/api/handler"
 	"github.com/warmbly/warmbly/internal/api/middleware"
+	"github.com/warmbly/warmbly/internal/app/admin"
+	"github.com/warmbly/warmbly/internal/app/apikey"
 	"github.com/warmbly/warmbly/internal/app/auth"
 	"github.com/warmbly/warmbly/internal/app/campaign"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/contact"
+	"github.com/warmbly/warmbly/internal/app/crm"
 	"github.com/warmbly/warmbly/internal/app/email"
+	"github.com/warmbly/warmbly/internal/app/emailsend"
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/app/group"
-	"github.com/warmbly/warmbly/internal/app/role"
+	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/sequence"
 	"github.com/warmbly/warmbly/internal/app/socket"
 	"github.com/warmbly/warmbly/internal/app/stripe"
 	"github.com/warmbly/warmbly/internal/app/subscription"
+	"github.com/warmbly/warmbly/internal/app/template"
 	"github.com/warmbly/warmbly/internal/app/token"
 	"github.com/warmbly/warmbly/internal/app/trial"
 	"github.com/warmbly/warmbly/internal/app/tz"
@@ -33,12 +39,14 @@ import (
 	"github.com/warmbly/warmbly/internal/app/user"
 	"github.com/warmbly/warmbly/internal/app/worker"
 	"github.com/warmbly/warmbly/internal/config"
+	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/cdb"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/infrastructure/dynamo"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
+	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/infrastructure/secrets"
 	"github.com/warmbly/warmbly/internal/infrastructure/ssm"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
@@ -48,6 +56,7 @@ import (
 	"github.com/warmbly/warmbly/internal/pkg/captcha"
 	"github.com/warmbly/warmbly/internal/pkg/geo"
 	"github.com/warmbly/warmbly/internal/repository"
+	"github.com/warmbly/warmbly/internal/scheduler"
 )
 
 func main() {
@@ -66,7 +75,6 @@ func main() {
 	var campaignService campaign.CampaignService
 	var sequenceService sequence.SequenceService
 	var contactService contact.ContactService
-	var roleService role.RoleService
 	var socketService socket.SocketService
 	var uniboxService unibox.UniboxService
 	var cipherService cipher.CipherService
@@ -74,6 +82,8 @@ func main() {
 	var folderService group.GroupService
 	var tagService group.GroupService
 	var categoryService group.GroupService
+	var crmService crm.CRMService
+	var apiKeyService apikey.APIKeyService
 
 	// New services for trial, feature gates, and worker assignment
 	var trialService trial.TrialService
@@ -81,6 +91,20 @@ func main() {
 	var workerAssignmentService worker.WorkerAssignmentService
 	var subscriptionService subscription.SubscriptionService
 	var stripeService stripe.StripeService
+	var organizationService organization.OrganizationService
+
+	// Email send & templates
+	var templateService template.TemplateService
+	var emailSendService emailsend.EmailSendService
+
+	// Admin
+	var adminService admin.AdminService
+
+	// Notifications
+	var emailNotificationService notify.EmailNotificationService
+
+	// Pub/Sub for realtime streaming
+	var streamingPublisher *pubsub.StreamingPublisher
 
 	{
 		godotenv.Overload("cmd/backend/.env")
@@ -206,13 +230,25 @@ func main() {
 			log.Fatal(err)
 		}
 
+		// Google Pub/Sub for realtime streaming (optional)
+		gcpProjectID := os.Getenv("GCP_PROJECT_ID")
+		if gcpProjectID != "" {
+			pubsubClient, err := pubsub.NewClient(context.Background(), gcpProjectID)
+			if err != nil {
+				sentry.CaptureException(err)
+				log.Printf("Warning: Failed to initialize Pub/Sub client: %v", err)
+			} else {
+				streamingPublisher = pubsub.NewStreamingPublisher(pubsubClient)
+			}
+		}
+
 		emailCfg, err := cfg.LoadEmailConfig(context.Background())
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		emailNotificationService, err := notify.NewEmailNotficiationService(
+		emailNotificationService, err = notify.NewEmailNotficiationService(
 			context.Background(),
 			emailCfg.EmailName,
 			emailCfg.EmailAddress,
@@ -258,6 +294,18 @@ func main() {
 			log.Fatal(err)
 		}
 
+		schemaEndpoint, schemaKey, schemaSecret, err := cfg.LoadSchemaRegistryConfig(context.Background())
+		if err != nil {
+			sentry.CaptureException(err)
+			log.Fatal(err)
+		}
+
+		avrov2Client, err := kafka.NewAvrov2Client(schemaEndpoint, schemaKey, schemaSecret)
+		if err != nil {
+			sentry.CaptureException(err)
+			log.Fatal(err)
+		}
+
 		kafkaProducerConfig := kafka.NewProducer(kafkaBootstrapServers)
 		kafkaProducerConfig.WithSASL(kafkaSaslConfig)
 
@@ -266,6 +314,8 @@ func main() {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
+
+		kafkaProducer.WithAvrov2(avrov2Client)
 
 		captcha := captcha.NewTurnstile(authCfg.TurnstileSecret)
 
@@ -276,7 +326,6 @@ func main() {
 		campaignRepostory := repository.NewCampaignRepostory(primaryDB)
 		sequenceRepostory := repository.NewSequenceRepostory(primaryDB)
 		contactRepostory := repository.NewContactRepostory(primaryDB)
-		roleRepostory := repository.NewRoleRepostory(primaryDB)
 		uniboxRepository := repository.NewUniboxRepository(cassandraDB)
 		userEncryptedKeysRepository := repository.NewUserEncryptedKeysRepository(kms, dynamoDB)
 
@@ -288,14 +337,23 @@ func main() {
 		subscriptionRepository := repository.NewSubscriptionRepository(primaryDB.Pool)
 		planRepository := repository.NewPlanRepository(primaryDB.Pool)
 		workerRepository := repository.NewWorkerRepository(primaryDB.Pool)
+		organizationRepository := repository.NewOrganizationRepository(primaryDB.Pool)
+		taskRepository := repository.NewTaskRepository(primaryDB.Pool)
+		apiKeyRepository := repository.NewAPIKeyRepository(primaryDB)
+		crmRepository := repository.NewCRMRepository(primaryDB.Pool)
+		templateRepository := repository.NewTemplateRepository(primaryDB.Pool)
+		warmupRepository := repository.NewWarmupRepository(primaryDB.Pool)
+		campaignProgressRepository := repository.NewCampaignProgressRepository(primaryDB.Pool)
+		campaignLogRepository := repository.NewCampaignLogRepository(primaryDB)
 
 		tzService = tz.NewService()
 
 		// Initialize new services for trial, feature gates, and worker assignment
-		trialService = trial.NewService(subscriptionRepository)
+		trialService = trial.NewService(subscriptionRepository, userRepostory)
 		featureGateService = feature.NewService(subscriptionRepository, planRepository)
 		workerAssignmentService = worker.NewAssignmentService(workerRepository, subscriptionRepository, planRepository)
 		subscriptionService = subscription.NewService(subscriptionRepository, planRepository)
+		organizationService = organization.NewService(organizationRepository, subscriptionRepository, userRepostory)
 
 		// Load Stripe config and initialize service
 		stripeCfg, err := cfg.LoadStripeConfig(context.Background())
@@ -317,16 +375,28 @@ func main() {
 				AppleAuth:  appleAuth,
 			},
 			trialService,
+			organizationService,
 		)
 		userService = user.NewService(userRepostory, cache)
 		cipherService = cipher.NewService(kms, cache, userEncryptedKeysRepository)
-		emailService = email.NewService(emailRepostory, cipherService, kafkaProducer)
-		campaignService = campaign.NewService(campaignRepostory)
+		eventsPublisher := events.NewPublisher(kafkaProducer, s3, avrov2Client, cipherService)
+		emailService = email.NewServiceWithKafka(emailRepostory, cipherService, eventsPublisher, kafkaProducer, cache)
+		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, streamingPublisher)
 		sequenceService = sequence.NewService(sequenceRepostory)
-		contactService = contact.NewService(contactRepostory)
-		roleService = role.NewService(cache, roleRepostory)
+		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository)
+		apiKeyService = apikey.NewService(cache, apiKeyRepository)
+		crmService = crm.NewService(crmRepository)
 		socketService = socket.NewService(cache, tokenService)
 		uniboxService = unibox.NewService(cache, s3, uniboxRepository)
+
+		// Template & email send services
+		templateService = template.NewService(templateRepository)
+		schedulerService := scheduler.NewSchedulerService(taskRepository, warmupRepository, campaignProgressRepository, emailRepostory, campaignRepostory)
+		emailSendService = emailsend.NewService(taskRepository, emailRepostory, schedulerService, nil, featureGateService)
+
+		// Admin service
+		adminRepository := repository.NewAdminRepository(primaryDB.Pool)
+		adminService = admin.NewService(adminRepository)
 
 		folderService = group.NewService(folderRepostory)
 		tagService = group.NewService(tagRepostory)
@@ -349,7 +419,6 @@ func main() {
 		CampaignService: campaignService,
 		ContactService:  contactService,
 		SequenceService: sequenceService,
-		RoleService:     roleService,
 		UniboxService:   uniboxService,
 
 		FolderService:   folderService,
@@ -359,6 +428,9 @@ func main() {
 		TzService:     tzService,
 		SocketService: socketService,
 
+		// API Keys
+		APIKeyService: apiKeyService,
+
 		// Subscription & billing
 		SubscriptionService: subscriptionService,
 		StripeService:       stripeService,
@@ -367,10 +439,28 @@ func main() {
 		TrialService:            trialService,
 		FeatureGateService:      featureGateService,
 		WorkerAssignmentService: workerAssignmentService,
+
+		// Organization & IAM
+		OrganizationService: organizationService,
+
+		// CRM
+		CRMService: crmService,
+
+		// Email send & templates
+		TemplateService:  templateService,
+		EmailSendService: emailSendService,
+
+		// Admin
+		AdminService: adminService,
+
+		// Notifications
+		EmailNotificationService: emailNotificationService,
 	}
 
 	m := &middleware.Handler{
-		TokenService: tokenService,
+		TokenService:        tokenService,
+		APIKeyService:       apiKeyService,
+		OrganizationService: organizationService,
 	}
 
 	oidcH := &middleware.OidcHandler{

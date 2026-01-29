@@ -24,8 +24,15 @@ type CampaignRepository interface {
 	Search(ctx context.Context, userID, query string, cursor, folder *string, limit int32) (*models.CampaignsResult, error)
 	Update(ctx context.Context, userID, query string, data *models.UpdateCampaign) (*models.Campaign, *errx.Error)
 	UpdateStatus(ctx context.Context, campaignID uuid.UUID, status string) error
+	UpdateStatusWithLock(ctx context.Context, campaignID uuid.UUID, status string) error
 	PauseAllByUserID(ctx context.Context, userID uuid.UUID, reason string) error
 	Delete(ctx context.Context, userID, id string) error
+
+	// Campaign start/stop
+	StartCampaign(ctx context.Context, campaignID uuid.UUID) error
+	StopCampaign(ctx context.Context, campaignID uuid.UUID) error
+	ValidateCampaignReady(ctx context.Context, campaignID uuid.UUID) error
+	GetPendingCampaignTasks(ctx context.Context, campaignID uuid.UUID) ([]Task, error)
 }
 
 type campaignRepository struct {
@@ -81,13 +88,19 @@ func (r *campaignRepository) Create(ctx context.Context, userID string, data *mo
 		db.CaptureError(err, "", nil, "begin")
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+
+	var committed bool
+	defer func() {
+		if !committed {
+			tx.Rollback(ctx)
+		}
+	}()
 
 	var campaign models.Campaign
 	campaign.EmailTags = make([]string, 0)
 
 	query := fmt.Sprintf(
-		`INSERT INTO campaigns 
+		`INSERT INTO campaigns
 		  (id, name, description, user_id, days)
 		 VALUES
 		  (gen_random_uuid(), $1, $2, $3, $4)
@@ -117,6 +130,7 @@ func (r *campaignRepository) Create(ctx context.Context, userID string, data *mo
 		db.CaptureError(err, "", nil, "commit")
 		return nil, err
 	}
+	committed = true
 
 	return &campaign, nil
 }
@@ -317,6 +331,7 @@ func (r *campaignRepository) Update(ctx context.Context, userID, campaignID stri
 		validStatuses := map[string]bool{
 			"draft": true, "active": true, "paused": true,
 			"completed": true, "paused_trial_expired": true,
+			"paused_no_accounts": true,
 		}
 		if !validStatuses[status] {
 			return nil, errx.ErrInvalid
@@ -439,7 +454,13 @@ func (r *campaignRepository) Update(ctx context.Context, userID, campaignID stri
 		db.CaptureError(err, "", nil, "begin")
 		return nil, errx.InternalError()
 	}
-	defer tx.Rollback(ctx)
+
+	var committed bool
+	defer func() {
+		if !committed {
+			tx.Rollback(ctx)
+		}
+	}()
 
 	var query string
 	if argPos > 3 {
@@ -491,6 +512,7 @@ func (r *campaignRepository) Update(ctx context.Context, userID, campaignID stri
 		db.CaptureError(err, "", nil, "commit")
 		return nil, errx.InternalError()
 	}
+	committed = true
 
 	return &campaign, nil
 }
@@ -566,5 +588,123 @@ func (r *campaignRepository) UpdateStatus(ctx context.Context, campaignID uuid.U
 func (r *campaignRepository) PauseAllByUserID(ctx context.Context, userID uuid.UUID, reason string) error {
 	query := `UPDATE campaigns SET status = $1, updated_at = NOW() WHERE user_id = $2 AND status = 'active'`
 	_, err := r.DB.Exec(ctx, query, reason, userID)
+	return err
+}
+
+// StartCampaign sets campaign status to active and updates last_status_change_at
+func (r *campaignRepository) StartCampaign(ctx context.Context, campaignID uuid.UUID) error {
+	query := `UPDATE campaigns SET status = 'active', last_status_change_at = NOW(), updated_at = NOW() WHERE id = $1`
+	_, err := r.DB.Exec(ctx, query, campaignID)
+	return err
+}
+
+// StopCampaign sets campaign status to paused and updates last_status_change_at
+func (r *campaignRepository) StopCampaign(ctx context.Context, campaignID uuid.UUID) error {
+	query := `UPDATE campaigns SET status = 'paused', last_status_change_at = NOW(), updated_at = NOW() WHERE id = $1`
+	_, err := r.DB.Exec(ctx, query, campaignID)
+	return err
+}
+
+// ValidateCampaignReady checks if a campaign has sequences, contacts, and email tags
+func (r *campaignRepository) ValidateCampaignReady(ctx context.Context, campaignID uuid.UUID) error {
+	// Check sequences
+	var seqCount int
+	err := r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM sequences WHERE campaign_id = $1`, campaignID).Scan(&seqCount)
+	if err != nil {
+		return err
+	}
+	if seqCount == 0 {
+		return errx.New(errx.BadRequest, "campaign must have at least one sequence")
+	}
+
+	// Check contacts
+	var contactCount int
+	err = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_leads WHERE campaign = $1`, campaignID).Scan(&contactCount)
+	if err != nil {
+		return err
+	}
+	if contactCount == 0 {
+		return errx.New(errx.BadRequest, "campaign must have at least one contact")
+	}
+
+	// Check email tags
+	var tagCount int
+	err = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_email_tags WHERE campaign_id = $1`, campaignID).Scan(&tagCount)
+	if err != nil {
+		return err
+	}
+	if tagCount == 0 {
+		return errx.New(errx.BadRequest, "campaign must have at least one email tag")
+	}
+
+	return nil
+}
+
+// GetPendingCampaignTasks returns all pending tasks for a campaign
+func (r *campaignRepository) GetPendingCampaignTasks(ctx context.Context, campaignID uuid.UUID) ([]Task, error) {
+	query := `
+		SELECT t.id, t.task_type, t.email_account_id, t.status, t.message_id,
+		       t.scheduled_at, t.completed_at, t.cloud_task_name, t.created_at, t.updated_at
+		FROM tasks t
+		JOIN campaign_tasks ct ON ct.task_id = t.id
+		WHERE ct.campaign_id = $1 AND t.status = 'pending'
+	`
+
+	rows, err := r.DB.Query(ctx, query, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		var task Task
+		err := rows.Scan(
+			&task.ID, &task.TaskType, &task.EmailAccountID, &task.Status, &task.MessageID,
+			&task.ScheduledAt, &task.CompletedAt, &task.CloudTaskName, &task.CreatedAt, &task.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks, rows.Err()
+}
+
+// UpdateStatusWithLock updates campaign status using a PostgreSQL advisory lock to prevent concurrent updates.
+// The WHERE clause guards against races: only updates if the campaign is currently 'active'.
+func (r *campaignRepository) UpdateStatusWithLock(ctx context.Context, campaignID uuid.UUID, status string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		db.CaptureError(err, "", nil, "begin")
+		return err
+	}
+
+	var committed bool
+	defer func() {
+		if !committed {
+			tx.Rollback(ctx)
+		}
+	}()
+
+	// Acquire advisory lock scoped to this campaign's status updates
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('campaign_status_' || $1::text))`, campaignID)
+	if err != nil {
+		db.CaptureError(err, "", nil, "advisory_lock")
+		return err
+	}
+
+	query := `UPDATE campaigns SET status = $1, last_status_change_at = NOW(), updated_at = NOW() WHERE id = $2 AND status = 'active'`
+	_, err = tx.Exec(ctx, query, status, campaignID)
+	if err != nil {
+		db.CaptureError(err, query, []any{status, campaignID}, "exec")
+		return err
+	}
+
+	err = tx.Commit(ctx)
+	if err == nil {
+		committed = true
+	}
 	return err
 }

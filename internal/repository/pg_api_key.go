@@ -15,12 +15,12 @@ import (
 )
 
 type APIKeyRepository interface {
-	Create(ctx context.Context, userID uuid.UUID, data *models.CreateAPIKey, keyPrefix, keyHash string) (*models.APIKey, *errx.Error)
+	Create(ctx context.Context, orgID, userID uuid.UUID, data *models.CreateAPIKey, keyPrefix, keyHash string) (*models.APIKey, *errx.Error)
 	GetByHash(ctx context.Context, keyHash string) (*models.APIKey, *errx.Error)
-	GetByID(ctx context.Context, userID, keyID uuid.UUID) (*models.APIKey, *errx.Error)
-	List(ctx context.Context, userID uuid.UUID, limit int, cursor *uuid.UUID) (*models.APIKeysResult, *errx.Error)
-	Update(ctx context.Context, userID, keyID uuid.UUID, data *models.UpdateAPIKey) (*models.APIKey, *errx.Error)
-	Revoke(ctx context.Context, userID, keyID uuid.UUID, reason string) *errx.Error
+	GetByID(ctx context.Context, orgID, keyID uuid.UUID) (*models.APIKey, *errx.Error)
+	List(ctx context.Context, orgID uuid.UUID, limit int, cursor *uuid.UUID) (*models.APIKeysResult, *errx.Error)
+	Update(ctx context.Context, orgID, keyID uuid.UUID, data *models.UpdateAPIKey) (*models.APIKey, *errx.Error)
+	Revoke(ctx context.Context, orgID, keyID uuid.UUID, reason string) *errx.Error
 	UpdateLastUsed(ctx context.Context, keyID uuid.UUID) error
 	LogUsage(ctx context.Context, log *models.APIKeyUsageLog) error
 }
@@ -33,7 +33,7 @@ func NewAPIKeyRepository(db *db.DB) APIKeyRepository {
 	return &apiKeyRepository{DB: db}
 }
 
-const API_KEY_SELECT = `id, user_id, name, key_prefix, permissions,
+const API_KEY_SELECT = `id, user_id, organization_id, name, key_prefix, permissions,
 	allowed_ips, allowed_email_accounts,
 	status, last_used_at, expires_at, revoked_at, revoked_reason,
 	created_at, updated_at`
@@ -41,7 +41,7 @@ const API_KEY_SELECT = `id, user_id, name, key_prefix, permissions,
 func scanAPIKey(row db.Scannable, key *models.APIKey) error {
 	var allowedIPs, allowedAccounts []string
 	err := row.Scan(
-		&key.ID, &key.UserID, &key.Name, &key.KeyPrefix, &key.Permissions,
+		&key.ID, &key.UserID, &key.OrganizationID, &key.Name, &key.KeyPrefix, &key.Permissions,
 		&allowedIPs, &allowedAccounts,
 		&key.Status, &key.LastUsedAt, &key.ExpiresAt, &key.RevokedAt, &key.RevokedReason,
 		&key.CreatedAt, &key.UpdatedAt,
@@ -59,10 +59,10 @@ func scanAPIKey(row db.Scannable, key *models.APIKey) error {
 	return nil
 }
 
-func (r *apiKeyRepository) Create(ctx context.Context, userID uuid.UUID, data *models.CreateAPIKey, keyPrefix, keyHash string) (*models.APIKey, *errx.Error) {
+func (r *apiKeyRepository) Create(ctx context.Context, orgID, userID uuid.UUID, data *models.CreateAPIKey, keyPrefix, keyHash string) (*models.APIKey, *errx.Error) {
 	query := fmt.Sprintf(`
-		INSERT INTO api_keys (user_id, name, key_prefix, key_hash, permissions, allowed_ips, allowed_email_accounts, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO api_keys (user_id, organization_id, name, key_prefix, key_hash, permissions, allowed_ips, allowed_email_accounts, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING %s
 	`, API_KEY_SELECT)
 
@@ -73,6 +73,7 @@ func (r *apiKeyRepository) Create(ctx context.Context, userID uuid.UUID, data *m
 
 	params := []any{
 		userID,
+		orgID,
 		data.Name,
 		keyPrefix,
 		keyHash,
@@ -116,13 +117,13 @@ func (r *apiKeyRepository) GetByHash(ctx context.Context, keyHash string) (*mode
 	return &key, nil
 }
 
-func (r *apiKeyRepository) GetByID(ctx context.Context, userID, keyID uuid.UUID) (*models.APIKey, *errx.Error) {
+func (r *apiKeyRepository) GetByID(ctx context.Context, orgID, keyID uuid.UUID) (*models.APIKey, *errx.Error) {
 	query := fmt.Sprintf(`
 		SELECT %s FROM api_keys
-		WHERE user_id = $1 AND id = $2
+		WHERE organization_id = $1 AND id = $2
 	`, API_KEY_SELECT)
 
-	params := []any{userID, keyID}
+	params := []any{orgID, keyID}
 
 	var key models.APIKey
 	row := r.DB.QueryRow(ctx, query, params...)
@@ -137,10 +138,10 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, userID, keyID uuid.UUID)
 	return &key, nil
 }
 
-func (r *apiKeyRepository) List(ctx context.Context, userID uuid.UUID, limit int, cursor *uuid.UUID) (*models.APIKeysResult, *errx.Error) {
+func (r *apiKeyRepository) List(ctx context.Context, orgID uuid.UUID, limit int, cursor *uuid.UUID) (*models.APIKeysResult, *errx.Error) {
 	query := fmt.Sprintf(`
 		SELECT %s FROM api_keys
-		WHERE user_id = $1
+		WHERE organization_id = $1
 		  AND ($2::uuid IS NULL OR (created_at, id) < (
 			SELECT created_at, id FROM api_keys WHERE id = $2
 		  ))
@@ -148,7 +149,7 @@ func (r *apiKeyRepository) List(ctx context.Context, userID uuid.UUID, limit int
 		LIMIT $3
 	`, API_KEY_SELECT)
 
-	params := []any{userID, cursor, limit + 1}
+	params := []any{orgID, cursor, limit + 1}
 
 	rows, err := r.DB.Query(ctx, query, params...)
 	if err != nil {
@@ -184,9 +185,9 @@ func (r *apiKeyRepository) List(ctx context.Context, userID uuid.UUID, limit int
 	}, nil
 }
 
-func (r *apiKeyRepository) Update(ctx context.Context, userID, keyID uuid.UUID, data *models.UpdateAPIKey) (*models.APIKey, *errx.Error) {
+func (r *apiKeyRepository) Update(ctx context.Context, orgID, keyID uuid.UUID, data *models.UpdateAPIKey) (*models.APIKey, *errx.Error) {
 	setClauses := []string{}
-	args := []any{userID, keyID}
+	args := []any{orgID, keyID}
 	argPos := 3
 
 	if data.Name != nil {
@@ -222,7 +223,7 @@ func (r *apiKeyRepository) Update(ctx context.Context, userID, keyID uuid.UUID, 
 
 	query := fmt.Sprintf(`
 		UPDATE api_keys SET %s
-		WHERE user_id = $1 AND id = $2 AND status = 'active'
+		WHERE organization_id = $1 AND id = $2 AND status = 'active'
 		RETURNING %s
 	`, strings.Join(setClauses, ", "), API_KEY_SELECT)
 
@@ -239,14 +240,14 @@ func (r *apiKeyRepository) Update(ctx context.Context, userID, keyID uuid.UUID, 
 	return &key, nil
 }
 
-func (r *apiKeyRepository) Revoke(ctx context.Context, userID, keyID uuid.UUID, reason string) *errx.Error {
+func (r *apiKeyRepository) Revoke(ctx context.Context, orgID, keyID uuid.UUID, reason string) *errx.Error {
 	query := `
 		UPDATE api_keys
 		SET status = 'revoked', revoked_at = now(), revoked_reason = $3, updated_at = now()
-		WHERE user_id = $1 AND id = $2 AND status = 'active'
+		WHERE organization_id = $1 AND id = $2 AND status = 'active'
 	`
 
-	params := []any{userID, keyID, reason}
+	params := []any{orgID, keyID, reason}
 
 	cmd, err := r.DB.Exec(ctx, query, params...)
 	if err != nil {

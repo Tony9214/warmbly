@@ -34,6 +34,7 @@ func (c *Client) Send(
 	to, cc, bcc []string,
 	subject, bodyPlain, bodyHTML,
 	inReplyTo string,
+	customHeaders ...map[string]string,
 ) *errx.MailError {
 	from := mail.Address{Address: c.Email, Name: fmt.Sprintf("%s %s", c.FirstName, c.LastName)}
 
@@ -51,6 +52,13 @@ func (c *Client) Send(
 	if inReplyTo != "" {
 		headers["In-Reply-To"] = fmt.Sprintf("<%s>", inReplyTo)
 		headers["References"] = fmt.Sprintf("<%s>", inReplyTo)
+	}
+
+	// Add custom headers (e.g., X-Warmbly-Token for warmup)
+	if len(customHeaders) > 0 {
+		for k, v := range customHeaders[0] {
+			headers[k] = v
+		}
 	}
 
 	// ----- Multipart body -----

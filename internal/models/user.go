@@ -14,6 +14,9 @@ type User struct {
 	Email     string      `json:"email"`
 	Roles     []uuid.UUID `json:"roles"`
 
+	MaxOrganizations int  `json:"max_organizations"`
+	FreeTrialUsed    bool `json:"free_trial_used"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

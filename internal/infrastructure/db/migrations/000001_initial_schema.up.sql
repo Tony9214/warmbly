@@ -4,12 +4,25 @@ CREATE TABLE users (
     last_name VARCHAR(255) NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT,
+    max_organizations INT NOT NULL DEFAULT 5,
+    free_trial_used BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Admin fields
+    admin_permissions INT NOT NULL DEFAULT 0,
+    admin_granted_at TIMESTAMPTZ,
+    admin_granted_by UUID,
+    banned_at TIMESTAMPTZ,
+
     created_at TIMESTAMPTZ DEFAULT now (),
     updated_at TIMESTAMPTZ DEFAULT now (),
 
     PRIMARY KEY (id),
-    UNIQUE (email)
+    UNIQUE (email),
+    FOREIGN KEY (admin_granted_by) REFERENCES users(id)
 );
+
+CREATE INDEX idx_users_admin ON users(admin_permissions) WHERE admin_permissions > 0;
+CREATE INDEX idx_users_banned ON users(banned_at) WHERE banned_at IS NOT NULL;
 
 -- Organizations table
 CREATE TABLE organizations (

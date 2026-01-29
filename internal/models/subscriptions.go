@@ -80,7 +80,7 @@ type Offer struct {
 type Subscription struct {
 	ID             uuid.UUID  `json:"id"`
 	UserID         uuid.UUID  `json:"user_id"`
-	OrganizationID *uuid.UUID `json:"organization_id,omitempty"`
+	OrganizationID uuid.UUID `json:"organization_id"`
 	PlanID         uuid.UUID  `json:"plan_id"`
 
 	// Stripe identifiers
@@ -110,6 +110,9 @@ type Subscription struct {
 
 	// Joined data
 	Plan *Plan `json:"plan,omitempty"`
+
+	// User info (populated by joins)
+	UserEmail *string `json:"user_email,omitempty"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 	CreatedAt time.Time `json:"created_at"`

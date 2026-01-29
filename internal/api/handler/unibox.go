@@ -20,12 +20,15 @@ func (h *Handler) GetUniboxIncoming(c *gin.Context) {
 		return
 	}
 
-	// Check if user can use unibox (paid subscription required)
+	// Check if organization can use unibox (paid subscription required)
 	if h.FeatureGateService != nil {
-		canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), uid)
-		if !canUse {
-			errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
-			return
+		orgID := middleware.GetOrganizationID(c)
+		if orgID != nil {
+			canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
+			if !canUse {
+				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
+				return
+			}
 		}
 	}
 
@@ -92,12 +95,15 @@ func (h *Handler) GetUniboxEmail(c *gin.Context) {
 		return
 	}
 
-	// Check if user can use unibox
+	// Check if organization can use unibox
 	if h.FeatureGateService != nil {
-		canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), uid)
-		if !canUse {
-			errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
-			return
+		orgID := middleware.GetOrganizationID(c)
+		if orgID != nil {
+			canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
+			if !canUse {
+				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
+				return
+			}
 		}
 	}
 
@@ -128,12 +134,15 @@ func (h *Handler) GetUniboxThread(c *gin.Context) {
 		return
 	}
 
-	// Check if user can use unibox
+	// Check if organization can use unibox
 	if h.FeatureGateService != nil {
-		canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), uid)
-		if !canUse {
-			errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
-			return
+		orgID := middleware.GetOrganizationID(c)
+		if orgID != nil {
+			canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
+			if !canUse {
+				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
+				return
+			}
 		}
 	}
 

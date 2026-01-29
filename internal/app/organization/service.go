@@ -65,26 +65,51 @@ type OrganizationService interface {
 
 	// Enterprise inquiries
 	CreateEnterpriseInquiry(ctx context.Context, inquiry *models.EnterpriseInquiry) (*models.EnterpriseInquiry, *errx.Error)
+
+	// Admin permissions (for admin middleware)
+	GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error)
 }
 
 type organizationService struct {
-	orgRepo repository.OrganizationRepository
-	subRepo repository.SubscriptionRepository
+	orgRepo  repository.OrganizationRepository
+	subRepo  repository.SubscriptionRepository
+	userRepo repository.UserRepository
 }
 
 // NewService creates a new organization service
 func NewService(
 	orgRepo repository.OrganizationRepository,
 	subRepo repository.SubscriptionRepository,
+	userRepo repository.UserRepository,
 ) OrganizationService {
 	return &organizationService{
-		orgRepo: orgRepo,
-		subRepo: subRepo,
+		orgRepo:  orgRepo,
+		subRepo:  subRepo,
+		userRepo: userRepo,
 	}
 }
 
 // Create creates a new organization and adds the user as owner
 func (s *organizationService) Create(ctx context.Context, userID uuid.UUID, name string) (*models.Organization, *errx.Error) {
+	// Check organization limit
+	user, userErr := s.userRepo.GetUser(ctx, userID)
+	if userErr != nil {
+		sentry.CaptureException(userErr)
+		return nil, errx.New(errx.Internal, "failed to get user")
+	}
+	if user == nil {
+		return nil, errx.New(errx.NotFound, "user not found")
+	}
+
+	ownedCount, countErr := s.orgRepo.GetUserOwnedOrganizationCount(ctx, userID)
+	if countErr != nil {
+		sentry.CaptureException(countErr)
+		return nil, errx.New(errx.Internal, "failed to get organization count")
+	}
+	if ownedCount >= user.MaxOrganizations {
+		return nil, errx.New(errx.Forbidden, "maximum organization limit reached")
+	}
+
 	org := &models.Organization{
 		ID:          uuid.New(),
 		Name:        name,
@@ -561,18 +586,7 @@ func (s *organizationService) GetCampaignCounts(ctx context.Context, orgID uuid.
 
 // GetOrganizationLimits retrieves the organization's plan limits
 func (s *organizationService) GetOrganizationLimits(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimits, *errx.Error) {
-	// Get the organization's subscription through the owner
-	org, err := s.orgRepo.GetByID(ctx, orgID)
-	if err != nil {
-		sentry.CaptureException(err)
-		return nil, errx.New(errx.Internal, "failed to get organization")
-	}
-	if org == nil {
-		return nil, errx.ErrNotFound
-	}
-
-	// Get subscription - first try by organization_id, then by owner
-	sub, err := s.subRepo.GetByUserID(ctx, org.OwnerUserID)
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to get subscription")
@@ -663,4 +677,9 @@ func generateInvitationToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(bytes), nil
+}
+
+// GetUserAdminPermissions retrieves the admin permissions for a user
+func (s *organizationService) GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error) {
+	return s.orgRepo.GetUserAdminPermissions(ctx, userID)
 }

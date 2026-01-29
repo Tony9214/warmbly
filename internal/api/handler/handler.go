@@ -1,28 +1,32 @@
 package handler
 
 import (
+	"github.com/warmbly/warmbly/internal/app/admin"
 	"github.com/warmbly/warmbly/internal/app/analytics"
 	"github.com/warmbly/warmbly/internal/app/apikey"
 	"github.com/warmbly/warmbly/internal/app/audit"
 	"github.com/warmbly/warmbly/internal/app/auth"
 	"github.com/warmbly/warmbly/internal/app/campaign"
 	"github.com/warmbly/warmbly/internal/app/contact"
+	"github.com/warmbly/warmbly/internal/app/crm"
 	"github.com/warmbly/warmbly/internal/app/email"
+	"github.com/warmbly/warmbly/internal/app/emailsend"
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/app/group"
 	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/ratelimit"
-	"github.com/warmbly/warmbly/internal/app/role"
 	"github.com/warmbly/warmbly/internal/app/sequence"
 	"github.com/warmbly/warmbly/internal/app/socket"
 	"github.com/warmbly/warmbly/internal/app/stripe"
 	"github.com/warmbly/warmbly/internal/app/subscription"
+	"github.com/warmbly/warmbly/internal/app/template"
 	"github.com/warmbly/warmbly/internal/app/token"
 	"github.com/warmbly/warmbly/internal/app/trial"
 	"github.com/warmbly/warmbly/internal/app/tz"
 	"github.com/warmbly/warmbly/internal/app/unibox"
 	"github.com/warmbly/warmbly/internal/app/user"
 	"github.com/warmbly/warmbly/internal/app/worker"
+	"github.com/warmbly/warmbly/internal/notify"
 	"github.com/warmbly/warmbly/internal/tasks"
 )
 
@@ -34,7 +38,6 @@ type Handler struct {
 	CampaignService campaign.CampaignService
 	ContactService  contact.ContactService
 	SequenceService sequence.SequenceService
-	RoleService     role.RoleService
 	UniboxService   unibox.UniboxService
 
 	FolderService   group.GroupService
@@ -62,4 +65,17 @@ type Handler struct {
 
 	// Organization & IAM
 	OrganizationService organization.OrganizationService
+
+	// CRM
+	CRMService crm.CRMService
+
+	// Email send & templates
+	TemplateService  template.TemplateService
+	EmailSendService emailsend.EmailSendService
+
+	// Admin
+	AdminService admin.AdminService
+
+	// Notifications
+	EmailNotificationService notify.EmailNotificationService
 }

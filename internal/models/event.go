@@ -7,11 +7,12 @@ const (
 	WorkerEventTypeAddEmail        WorkerEventType = "ADD_EMAIL"
 	WorkerEventTypeRemoveEmail     WorkerEventType = "REMOVE_EMAIL"
 	WorkerEventTypeEmailValidation WorkerEventType = "EMAIL_VALIDATION"
+	WorkerEventTypeWarmupAction    WorkerEventType = "WARMUP_ACTION"
 )
 
 type WorkerEvent struct {
-	Type WorkerEventType `json:"type"`
-	Body any             `json:"body"`
+	Type WorkerEventType `json:"type" avro:"type"`
+	Body any             `json:"body" avro:"body"`
 }
 
 type JobEventType string
@@ -40,22 +41,22 @@ const (
 )
 
 type JobEvent struct {
-	Type JobEventType `json:"type"`
-	Body any          `json:"body"`
+	Type JobEventType `json:"type" avro:"type"`
+	Body any          `json:"body" avro:"body"`
 }
 
 // EmailErrorEvent represents an email error event sent from worker to jobsService
 type EmailErrorEvent struct {
-	TaskID         string `json:"task_id"`
-	EmailAccountID string `json:"email_account_id"`
-	UserID         string `json:"user_id"`
-	ErrorCode      string `json:"error_code"`
-	ErrorType      string `json:"error_type"`
-	ResolveMethod  string `json:"resolve_method"`
-	Message        string `json:"message"`
-	UserVisible    bool   `json:"user_visible"`
-	UserTitle      string `json:"user_title,omitempty"`
-	UserMessage    string `json:"user_message,omitempty"`
-	ActionRequired string `json:"action_required,omitempty"`
-	Timestamp      int64  `json:"timestamp"`
+	TaskID         string `json:"task_id" avro:"task_id"`
+	EmailAccountID string `json:"email_account_id" avro:"email_account_id"`
+	UserID         string `json:"user_id" avro:"user_id"`
+	ErrorCode      string `json:"error_code" avro:"error_code"`
+	ErrorType      string `json:"error_type" avro:"error_type"`
+	ResolveMethod  string `json:"resolve_method" avro:"resolve_method"`
+	Message        string `json:"message" avro:"message"`
+	UserVisible    bool   `json:"user_visible" avro:"user_visible"`
+	UserTitle      string `json:"user_title,omitempty" avro:"user_title"`
+	UserMessage    string `json:"user_message,omitempty" avro:"user_message"`
+	ActionRequired string `json:"action_required,omitempty" avro:"action_required"`
+	Timestamp      int64  `json:"timestamp" avro:"timestamp"`
 }

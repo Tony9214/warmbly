@@ -10,15 +10,15 @@ import (
 )
 
 type SubscriptionService interface {
-	// Get subscription for a user
-	Get(ctx context.Context, userID uuid.UUID) (*models.Subscription, *errx.Error)
-	GetWithLimits(ctx context.Context, userID uuid.UUID) (*models.SubscriptionWithLimits, *errx.Error)
+	// Get subscription for an organization
+	Get(ctx context.Context, orgID uuid.UUID) (*models.Subscription, *errx.Error)
+	GetWithLimits(ctx context.Context, orgID uuid.UUID) (*models.SubscriptionWithLimits, *errx.Error)
 
 	// Check if subscription is active
-	IsActive(ctx context.Context, userID uuid.UUID) (bool, *errx.Error)
+	IsActive(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error)
 
-	// Get realtime limits for a user
-	GetRealtimeLimits(ctx context.Context, userID uuid.UUID) (*models.RealtimeRateLimits, *errx.Error)
+	// Get realtime limits for an organization
+	GetRealtimeLimits(ctx context.Context, orgID uuid.UUID) (*models.RealtimeRateLimits, *errx.Error)
 
 	// List available plans
 	ListPlans(ctx context.Context, publicOnly bool) ([]*models.Plan, *errx.Error)
@@ -37,8 +37,8 @@ func NewService(subRepo repository.SubscriptionRepository, planRepo repository.P
 	}
 }
 
-func (s *subscriptionService) Get(ctx context.Context, userID uuid.UUID) (*models.Subscription, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+func (s *subscriptionService) Get(ctx context.Context, orgID uuid.UUID) (*models.Subscription, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -53,8 +53,8 @@ func (s *subscriptionService) Get(ctx context.Context, userID uuid.UUID) (*model
 	return sub, nil
 }
 
-func (s *subscriptionService) GetWithLimits(ctx context.Context, userID uuid.UUID) (*models.SubscriptionWithLimits, *errx.Error) {
-	sub, err := s.subRepo.GetWithLimits(ctx, userID)
+func (s *subscriptionService) GetWithLimits(ctx context.Context, orgID uuid.UUID) (*models.SubscriptionWithLimits, *errx.Error) {
+	sub, err := s.subRepo.GetWithLimits(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -64,8 +64,8 @@ func (s *subscriptionService) GetWithLimits(ctx context.Context, userID uuid.UUI
 	return sub, nil
 }
 
-func (s *subscriptionService) IsActive(ctx context.Context, userID uuid.UUID) (bool, *errx.Error) {
-	sub, err := s.subRepo.GetByUserID(ctx, userID)
+func (s *subscriptionService) IsActive(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
+	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return false, errx.New(errx.Internal, "failed to get subscription")
 	}
@@ -75,8 +75,8 @@ func (s *subscriptionService) IsActive(ctx context.Context, userID uuid.UUID) (b
 	return sub.Status.IsActive(), nil
 }
 
-func (s *subscriptionService) GetRealtimeLimits(ctx context.Context, userID uuid.UUID) (*models.RealtimeRateLimits, *errx.Error) {
-	sub, err := s.subRepo.GetWithLimits(ctx, userID)
+func (s *subscriptionService) GetRealtimeLimits(ctx context.Context, orgID uuid.UUID) (*models.RealtimeRateLimits, *errx.Error) {
+	sub, err := s.subRepo.GetWithLimits(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription limits")
 	}
