@@ -9,6 +9,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
+	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
 )
 
@@ -39,8 +40,18 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		return xerr
 	}
 
-	// STEP 4: Mark task as active
-	if err := s.taskRepo.UpdateTaskStatus(ctx, taskID, "active"); err != nil {
+	// STEP 3.5: Check if organization can use warmup (only paid orgs)
+	if s.featureGate != nil && account.OrganizationID != nil {
+		canWarmup, _ := s.featureGate.CanUseWarmup(ctx, *account.OrganizationID)
+		if !canWarmup {
+			// Organization cannot use warmup - skip this task
+			s.taskRepo.UpdateTaskStatus(ctx, taskID, "skipped_no_warmup_access")
+			return nil
+		}
+	}
+
+	// STEP 4: Mark task as active (with advisory lock)
+	if err := s.taskRepo.UpdateTaskStatusWithLock(ctx, taskID, "active"); err != nil {
 		sentry.CaptureException(err)
 		return errx.InternalError()
 	}
@@ -102,17 +113,36 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	// STEP 9: Generate Message-ID
 	messageID := generateMessageID(account.Email)
 
+	// STEP 9.5: Generate warmup verification token
+	var warmupTokenStr string
+	warmupToken := uuid.New()
+	tokenRecord := &models.WarmupToken{
+		Token:              warmupToken,
+		TaskID:             taskID,
+		SenderAccountID:    account.ID,
+		RecipientAccountID: partner.ID,
+		ExpiresAt:          time.Now().Add(7 * 24 * time.Hour),
+	}
+	if err := s.warmupRepo.CreateWarmupToken(ctx, tokenRecord); err != nil {
+		// Non-fatal: log but continue sending
+		fmt.Printf("Failed to create warmup token: %v\n", err)
+	} else {
+		warmupTokenStr = warmupToken.String()
+	}
+
 	// STEP 10: Send warmup email to worker via Kafka
 	emailMsg := EmailMessage{
-		From:      account.Email,
-		To:        []string{partner.Email},
-		Subject:   subject,
-		BodyHTML:  "",          // Warmup emails are plaintext only
-		BodyPlain: emailBody,
-		InReplyTo: inReplyTo,
-		MessageID: messageID,
-		IsWarmup:  true,
-		Tracking:  nil, // No tracking for warmup
+		From:        account.Email,
+		To:          []string{partner.Email},
+		Subject:     subject,
+		BodyHTML:    "",          // Warmup emails are plaintext only
+		BodyPlain:   emailBody,
+		InReplyTo:   inReplyTo,
+		MessageID:   messageID,
+		IsWarmup:    true,
+		Tracking:    nil, // No tracking for warmup
+		WarmupToken: warmupTokenStr,
+		UserID:      userUUID,
 	}
 
 	if err := s.emailSender.Send(ctx, taskID, emailMsg, *account); err != nil {
@@ -129,8 +159,8 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		fmt.Printf("Failed to increment daily count: %v\n", err)
 	}
 
-	// STEP 13: Mark task completed
-	if err := s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed"); err != nil {
+	// STEP 13: Mark task completed (with advisory lock)
+	if err := s.taskRepo.UpdateTaskStatusWithLock(ctx, taskID, "completed"); err != nil {
 		sentry.CaptureException(err)
 		return errx.InternalError()
 	}
@@ -155,8 +185,17 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 // selectWarmupPartner selects a warmup partner from the pool
 func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (*Email, error) {
 	// Determine pool type based on user subscription
-	// TODO: Check user subscription
-	poolType := "free"
+	// Only paid users can reach here (free users blocked in HandleEmailTask)
+	// All paid users use premium pool
+	poolType := "premium"
+
+	// Check if organization is paid to determine pool type
+	if s.featureGate != nil && account.OrganizationID != nil {
+		isPaid, _ := s.featureGate.IsPaidOrganization(ctx, *account.OrganizationID)
+		if !isPaid {
+			poolType = "free"
+		}
+	}
 
 	// Get all participants in the pool
 	participantIDs, err := s.warmupRepo.GetPoolParticipants(ctx, poolType, true)

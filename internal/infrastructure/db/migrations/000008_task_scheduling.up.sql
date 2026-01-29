@@ -25,3 +25,8 @@ ALTER TABLE email_accounts ADD CONSTRAINT fk_email_accounts_worker
 
 -- Add index for worker lookups
 CREATE INDEX idx_email_accounts_worker ON email_accounts(worker_id) WHERE worker_id IS NOT NULL;
+
+-- Index for counting campaign-only emails (excluding warmup)
+CREATE INDEX idx_tasks_campaign_completed_today
+ON tasks(email_account_id, completed_at)
+WHERE status = 'completed' AND task_type = 'campaign';

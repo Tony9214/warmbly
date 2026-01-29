@@ -120,9 +120,9 @@ type EmailMessageStoreDataPreview struct {
 }
 
 type EmailParent struct { // used to get information from the parent email
-	ID        uuid.UUID `json:"id"`
-	MessageID string    `json:"message_id"`
-	ThreadID  string    `json:"thread_id"`
+	ID        uuid.UUID `json:"id" avro:"id"`
+	MessageID string    `json:"message_id" avro:"message_id"`
+	ThreadID  string    `json:"thread_id" avro:"thread_id"`
 }
 
 type MailThreadResult struct {

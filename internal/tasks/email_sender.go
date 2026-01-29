@@ -13,17 +13,19 @@ import (
 
 // EmailMessage represents an email to be sent
 type EmailMessage struct {
-	From      string
-	To        []string
-	CC        []string
-	BCC       []string
-	Subject   string
-	BodyHTML  string
-	BodyPlain string
-	InReplyTo string
-	MessageID string
-	IsWarmup  bool
-	Tracking  *models.TrackingInfo
+	From        string
+	To          []string
+	CC          []string
+	BCC         []string
+	Subject     string
+	BodyHTML    string
+	BodyPlain   string
+	InReplyTo   string
+	MessageID   string
+	IsWarmup    bool
+	Tracking    *models.TrackingInfo
+	WarmupToken string
+	UserID      uuid.UUID
 }
 
 // EmailSender interface for sending emails via workers
@@ -62,6 +64,7 @@ func (s *emailSender) Send(ctx context.Context, taskID uuid.UUID, msg EmailMessa
 	params := &events.SendEmailParams{
 		TaskID:       taskID,
 		EmailID:      account.ID,
+		UserID:       msg.UserID,
 		To:           msg.To,
 		CC:           msg.CC,
 		BCC:          msg.BCC,
@@ -72,6 +75,7 @@ func (s *emailSender) Send(ctx context.Context, taskID uuid.UUID, msg EmailMessa
 		BodyHTML:     bodyHTML,
 		IsWarmup:     msg.IsWarmup,
 		TrackingInfo: msg.Tracking,
+		WarmupToken:  msg.WarmupToken,
 	}
 
 	// Publish send email event to worker

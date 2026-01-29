@@ -26,6 +26,7 @@ type ContactRepository interface {
 	Update(ctx context.Context, userID, contactID string, data *models.UpdateContact) (*models.Contact, *errx.Error)
 	BulkDelete(ctx context.Context, userID string, contactIDs []string) *errx.Error
 	Delete(ctx context.Context, userID string, contactID string) *errx.Error
+	GetContactCount(ctx context.Context, userID string) (int, *errx.Error)
 }
 
 type contactRepository struct {
@@ -980,4 +981,15 @@ func (r *contactRepository) Delete(ctx context.Context, userID, ID string) *errx
 		return errx.ErrNotFound
 	}
 	return nil
+}
+
+func (r *contactRepository) GetContactCount(ctx context.Context, userID string) (int, *errx.Error) {
+	query := `SELECT COUNT(*) FROM contacts WHERE user_id = $1`
+	var count int
+	err := r.DB.QueryRow(ctx, query, userID).Scan(&count)
+	if err != nil {
+		db.CaptureError(err, query, []any{userID}, "queryrow")
+		return 0, errx.InternalError()
+	}
+	return count, nil
 }

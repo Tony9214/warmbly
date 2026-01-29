@@ -1,9 +1,9 @@
-defmodule WarmblyWs.MixProject do
+defmodule Realtime.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :warmbly_ws,
+      app: :realtime,
       version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
@@ -13,20 +13,40 @@ defmodule WarmblyWs.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
-      mod: {WarmblyWs.Application, []}
+      extra_applications: [:logger, :runtime_tools],
+      mod: {Realtime.Application, []}
     ]
   end
 
   defp deps do
     [
-      {:cowboy, "~> 2.9"},
-      {:plug_cowboy, "~> 2.5"},
-      {:redix, "~> 1.2"},
+      # Phoenix
+      {:phoenix, "~> 1.7"},
+      {:phoenix_pubsub, "~> 2.1"},
+      {:plug_cowboy, "~> 2.7"},
       {:jason, "~> 1.4"},
-      {:httpoison, "~> 2.0"},
-      {:uuid, "~> 1.1.8" },
-      {:ex_limit, "~> 0.1.0"}
+
+      # Google Pub/Sub
+      {:broadway, "~> 1.0"},
+      {:broadway_cloud_pub_sub, "~> 0.9"},
+      {:goth, "~> 1.4"},
+
+      # Database
+      {:ecto_sql, "~> 3.10"},
+      {:postgrex, "~> 0.17"},
+
+      # Redis
+      {:redix, "~> 1.3"},
+
+      # Authentication
+      {:jose, "~> 1.11"},
+
+      # Error tracking
+      {:sentry, "~> 10.0"},
+      {:hackney, "~> 1.8"},
+
+      # Utilities
+      {:uuid, "~> 1.1"}
     ]
   end
 end

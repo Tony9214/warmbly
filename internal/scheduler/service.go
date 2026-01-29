@@ -17,6 +17,9 @@ type SchedulerService interface {
 
 	// Campaign scheduling
 	CalculateNextCampaignTime(ctx context.Context, campaignID uuid.UUID) (time.Time, *repository.ContactSequencePair, uuid.UUID, error)
+
+	// Email scheduling (smart send)
+	CalculateNextEmailTime(ctx context.Context, accountID uuid.UUID) (time.Time, error)
 }
 
 type schedulerService struct {

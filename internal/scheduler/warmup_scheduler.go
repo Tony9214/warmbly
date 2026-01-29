@@ -20,6 +20,25 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 		return time.Time{}, ErrWarmupNotEnabled
 	}
 
+	// STEP 1.5: Ensure today is a valid warmup day
+	if account.WarmupDays > 0 {
+		loc := loadLocation(account.Timezone)
+		now := time.Now().In(loc)
+		candidateDay := findNextValidDay(now, uint8(account.WarmupDays), loc)
+		if candidateDay.Day() != now.Day() || candidateDay.Month() != now.Month() || candidateDay.Year() != now.Year() {
+			// Today is not a valid warmup day, schedule for next valid day's start time
+			startMinutes := parseTimeOfDay(account.WarmupStartTime)
+			if startMinutes == 0 {
+				startMinutes = 8 * 60
+			}
+			nextDay := candidateDay.In(loc)
+			firstSlot := time.Date(nextDay.Year(), nextDay.Month(), nextDay.Day(),
+				startMinutes/60, startMinutes%60, 0, 0, loc)
+			jitter := randomJitter(0, 60)
+			return firstSlot.Add(time.Minute * time.Duration(jitter)), nil
+		}
+	}
+
 	// STEP 2: Calculate target volume for today based on progression
 	daysSinceStart := time.Since(*account.Warmup).Hours() / 24
 	targetVolume := min(
@@ -36,17 +55,17 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 	// STEP 4: Check if we've hit today's limit
 	if emailsSentToday >= targetVolume {
 		// Move to tomorrow's first slot (8am-9am local time)
-		return calculateFirstSlotTomorrow(account.Timezone), nil
+		return calculateFirstSlotTomorrowAt(account.Timezone, account.WarmupStartTime), nil
 	}
 
 	// STEP 5: Calculate ideal spacing
 	// Distribute remaining emails across remaining business hours
 	remainingSlots := targetVolume - emailsSentToday
-	hoursRemaining := calculateBusinessHoursRemaining(account.Timezone)
+	hoursRemaining := calculateHoursRemainingUntil(account.Timezone, account.WarmupEndTime)
 
 	// If business hours are over, move to tomorrow
 	if hoursRemaining <= 0 {
-		return calculateFirstSlotTomorrow(account.Timezone), nil
+		return calculateFirstSlotTomorrowAt(account.Timezone, account.WarmupStartTime), nil
 	}
 
 	idealIntervalHours := hoursRemaining / float64(remainingSlots)
@@ -85,8 +104,8 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 	// STEP 9: Avoid exact round times (10:00, 11:00)
 	candidateTime = avoidRoundTimes(candidateTime)
 
-	// STEP 10: Ensure within business hours (8am-8pm)
-	candidateTime = ensureBusinessHours(candidateTime, account.Timezone)
+	// STEP 10: Ensure within configured warmup time window
+	candidateTime = ensureTimeWindow(candidateTime, account.WarmupStartTime, account.WarmupEndTime, loadLocation(account.Timezone))
 
 	// STEP 11: Check conflicts with other tasks on this account
 	scheduledTasks, err := s.taskRepo.GetScheduledTasksToday(ctx, accountID)
@@ -99,6 +118,24 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 	// STEP 12: Apply human-like distribution curve
 	loc := loadLocation(account.Timezone)
 	candidateTime = applyDistributionCurve(candidateTime, loc)
+
+	// STEP 13: Final day-of-week guard — conflict resolution or jitter may have pushed
+	// the candidate into a day that isn't a valid warmup day.
+	if account.WarmupDays > 0 {
+		validDay := findNextValidDay(candidateTime, uint8(account.WarmupDays), loc)
+		candidateLocal := candidateTime.In(loc)
+		validLocal := validDay.In(loc)
+		if candidateLocal.Day() != validLocal.Day() || candidateLocal.Month() != validLocal.Month() || candidateLocal.Year() != validLocal.Year() {
+			startMinutes := parseTimeOfDay(account.WarmupStartTime)
+			if startMinutes == 0 {
+				startMinutes = 8 * 60
+			}
+			candidateTime = time.Date(validLocal.Year(), validLocal.Month(), validLocal.Day(),
+				startMinutes/60, startMinutes%60, 0, 0, loc)
+			jitter := randomJitter(0, 60)
+			candidateTime = candidateTime.Add(time.Minute * time.Duration(jitter))
+		}
+	}
 
 	return candidateTime, nil
 }

@@ -24,6 +24,7 @@ func (w *WorkerService) InitEvents() {
 	Register(w, models.WorkerEventTypeAddEmail, w.HandleAddEmail)
 	Register(w, models.WorkerEventTypeRemoveEmail, w.HandleRemoveEmail)
 	Register(w, models.WorkerEventTypeEmailValidation, w.HandleEmailValidation)
+	Register(w, models.WorkerEventTypeWarmupAction, w.HandleWarmupAction)
 }
 
 func Register[T any](w *WorkerService, eventType models.WorkerEventType, handler EventHandler[T]) {

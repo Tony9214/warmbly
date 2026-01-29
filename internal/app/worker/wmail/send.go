@@ -12,17 +12,18 @@ import (
 
 // SendRequest contains all parameters needed to send an email
 type SendRequest struct {
-	TaskID    uuid.UUID
-	To        []string
-	Cc        []string
-	Bcc       []string
-	MessageID string
-	Subject   string
-	BodyPlain string
-	BodyHTML  string
-	InReplyTo string
-	Parent    *models.EmailParent
-	IsWarmup  bool
+	TaskID      uuid.UUID
+	To          []string
+	Cc          []string
+	Bcc         []string
+	MessageID   string
+	Subject     string
+	BodyPlain   string
+	BodyHTML    string
+	InReplyTo   string
+	Parent      *models.EmailParent
+	IsWarmup    bool
+	WarmupToken string
 }
 
 // SendResult contains the result of a send operation
@@ -92,6 +93,14 @@ func (w *WMail) sendViaGmail(ctx context.Context, req *SendRequest, bodyHTML str
 		}
 	}
 
+	// Build custom headers for warmup token
+	var customHeaders map[string]string
+	if req.WarmupToken != "" {
+		customHeaders = map[string]string{
+			"X-Warmbly-Token": req.WarmupToken,
+		}
+	}
+
 	// Send via Gmail API
 	gmailMsg, err := w.GoogleData.Client.SendMessage(
 		ctx,
@@ -103,6 +112,7 @@ func (w *WMail) sendViaGmail(ctx context.Context, req *SendRequest, bodyHTML str
 		req.BodyPlain,
 		bodyHTML,
 		parent,
+		customHeaders,
 	)
 	if err != nil {
 		// Convert to MailError using goog.HandleError
@@ -143,17 +153,40 @@ func (w *WMail) sendViaSMTP(ctx context.Context, req *SendRequest, bodyHTML stri
 		return result
 	}
 
+	// Build custom headers for warmup token
+	var smtpCustomHeaders map[string]string
+	if req.WarmupToken != "" {
+		smtpCustomHeaders = map[string]string{
+			"X-Warmbly-Token": req.WarmupToken,
+		}
+	}
+
 	// Send via SMTP
-	merr := w.SmtpImapData.SmtpClient.Send(
-		ctx,
-		req.To,
-		req.Cc,
-		req.Bcc,
-		req.Subject,
-		req.BodyPlain,
-		bodyHTML,
-		req.InReplyTo,
-	)
+	var merr *errx.MailError
+	if smtpCustomHeaders != nil {
+		merr = w.SmtpImapData.SmtpClient.Send(
+			ctx,
+			req.To,
+			req.Cc,
+			req.Bcc,
+			req.Subject,
+			req.BodyPlain,
+			bodyHTML,
+			req.InReplyTo,
+			smtpCustomHeaders,
+		)
+	} else {
+		merr = w.SmtpImapData.SmtpClient.Send(
+			ctx,
+			req.To,
+			req.Cc,
+			req.Bcc,
+			req.Subject,
+			req.BodyPlain,
+			bodyHTML,
+			req.InReplyTo,
+		)
+	}
 	if merr != nil {
 		result.Error = merr
 		return result

@@ -42,6 +42,18 @@ func (w *WorkerService) HandleSendEmail(ctx context.Context, body any) error {
 		return err
 	}
 
+	// Decrypt subject
+	subject := sendEmail.Subject
+	if w.CipherService != nil {
+		c, cerr := w.CipherService.Cipher(ctx, sendEmail.UserID)
+		if cerr == nil {
+			decSubject, cerr := c.Decrypt(ctx, sendEmail.Subject)
+			if cerr == nil {
+				subject = decSubject
+			}
+		}
+	}
+
 	// Fetch email body from S3
 	bodyPlain, bodyHTML, err := w.fetchEmailBody(ctx, sendEmail.BodyS3Key)
 	if err != nil {
@@ -52,17 +64,18 @@ func (w *WorkerService) HandleSendEmail(ctx context.Context, body any) error {
 
 	// Use unified Send method
 	result := mail.Send(ctx, &wmail.SendRequest{
-		TaskID:    sendEmail.TaskID,
-		To:        sendEmail.To,
-		Cc:        sendEmail.Cc,
-		Bcc:       sendEmail.Bcc,
-		MessageID: sendEmail.MessageID,
-		Subject:   sendEmail.Subject,
-		BodyPlain: bodyPlain,
-		BodyHTML:  bodyHTML,
-		InReplyTo: sendEmail.InReplyTo,
-		Parent:    sendEmail.Parent,
-		IsWarmup:  sendEmail.IsWarmup,
+		TaskID:      sendEmail.TaskID,
+		To:          sendEmail.To,
+		Cc:          sendEmail.Cc,
+		Bcc:         sendEmail.Bcc,
+		MessageID:   sendEmail.MessageID,
+		Subject:     subject,
+		BodyPlain:   bodyPlain,
+		BodyHTML:    bodyHTML,
+		InReplyTo:   sendEmail.InReplyTo,
+		Parent:      sendEmail.Parent,
+		IsWarmup:    sendEmail.IsWarmup,
+		WarmupToken: sendEmail.WarmupToken,
 	})
 
 	if result.Success {

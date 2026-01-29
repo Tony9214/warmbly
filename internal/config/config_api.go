@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,19 +15,22 @@ type ApiConfig struct {
 }
 
 func (c *Config) LoadApiConfig(ctx context.Context) (*ApiConfig, error) {
-	hostName, err := c.params.Get(ctx, c.GetKeyID("api/host"))
+	// For API host, check env vars first with sensible defaults
+	hostName := c.GetStringOptional(ctx, "API_HOST", "api/host", "0.0.0.0:8080")
+
+	websocketUri, err := c.GetString(ctx, "WEBSOCKET_URL", "api/websocket_uri")
 	if err != nil {
 		return nil, err
 	}
 
-	websocketUri, err := c.params.Get(ctx, c.GetKeyID("api/websocket_uri"))
-	if err != nil {
-		return nil, err
-	}
-
-	var ginMode string = gin.DebugMode
-	if c.Env == "prod" {
-		ginMode = gin.ReleaseMode
+	// GIN_MODE from env, or derive from APP_ENV
+	ginMode := os.Getenv("GIN_MODE")
+	if ginMode == "" {
+		if c.Env == "prod" {
+			ginMode = gin.ReleaseMode
+		} else {
+			ginMode = gin.DebugMode
+		}
 	}
 
 	return &ApiConfig{

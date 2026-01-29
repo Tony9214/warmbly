@@ -19,10 +19,18 @@ type ContactService interface {
 
 type contactService struct {
 	contactRepository repository.ContactRepository
+	subRepo           repository.SubscriptionRepository
+	planRepo          repository.PlanRepository
 }
 
-func NewService(contactRepository repository.ContactRepository) ContactService {
+func NewService(
+	contactRepository repository.ContactRepository,
+	subRepo repository.SubscriptionRepository,
+	planRepo repository.PlanRepository,
+) ContactService {
 	return &contactService{
 		contactRepository: contactRepository,
+		subRepo:           subRepo,
+		planRepo:          planRepo,
 	}
 }

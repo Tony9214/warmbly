@@ -2,13 +2,17 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
+	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/repository"
+	"github.com/warmbly/warmbly/internal/scheduler"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
 )
 
@@ -33,8 +37,8 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		return errx.ErrNotFound
 	}
 
-	// STEP 3: Mark task as active
-	if err := s.taskRepo.UpdateTaskStatus(ctx, taskID, "active"); err != nil {
+	// STEP 3: Mark task as active (with advisory lock)
+	if err := s.taskRepo.UpdateTaskStatusWithLock(ctx, taskID, "active"); err != nil {
 		sentry.CaptureException(err)
 		return errx.InternalError()
 	}
@@ -63,10 +67,46 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		return nil // Don't create next task
 	}
 
+	// STEP 5.5: Check if organization can send campaign emails (trial expired, etc.)
+	if s.featureGate != nil && campaign.OrganizationID != nil {
+		canSend, _ := s.featureGate.CanSendCampaignEmail(ctx, *campaign.OrganizationID)
+		if !canSend {
+			// Organization cannot send - pause campaign
+			s.campaignRepo.UpdateStatus(ctx, campaign.ID, "paused_trial_expired")
+			s.taskRepo.UpdateTaskStatus(ctx, taskID, "skipped_trial_expired")
+			return nil
+		}
+
+		// Check daily limit
+		limit, _ := s.featureGate.GetDailyEmailLimit(ctx, *campaign.OrganizationID)
+		if limit >= 0 {
+			// TODO: Check sentToday from stats repository
+			// For now, we'll just track that there's a limit
+			// sentToday, _ := s.statsRepo.GetSentToday(ctx, orgID)
+			// if sentToday >= limit {
+			//     s.taskRepo.UpdateTaskStatus(ctx, taskID, "skipped_daily_limit")
+			//     return nil
+			// }
+		}
+	}
+
 	// STEP 6: Calculate next email to send
 	nextTime, nextPair, accountID, err := s.scheduler.CalculateNextCampaignTime(ctx, *campaignTask.CampaignID)
 	if err != nil {
-		// Campaign might be completed or ended
+		if errors.Is(err, scheduler.ErrNoEmailAccounts) {
+			s.autoPauseCampaign(ctx, *campaignTask.CampaignID, taskID)
+			return nil
+		}
+		if errors.Is(err, scheduler.ErrCampaignCompleted) {
+			s.campaignRepo.UpdateStatus(ctx, campaign.ID, "completed")
+			if s.campaignLogRepo != nil {
+				s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+					CampaignID: campaign.ID,
+					EventType:  "completed",
+					Message:    "Campaign completed: all emails sent",
+				})
+			}
+		}
 		s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
 		return nil
 	}
@@ -81,6 +121,14 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	if err != nil {
 		sentry.CaptureException(err)
 		return errx.InternalError()
+	}
+
+	// STEP 7.5: Update campaign task with contact_id and sequence_id for tracking
+	// This allows the tracking consumer to find the correct contact/sequence when
+	// processing open/click events from the tracking pixel service
+	if err := s.taskRepo.UpdateCampaignTaskTracking(ctx, taskID, contact.ID, sequence.ID); err != nil {
+		// Log but don't fail - tracking can still work via fallback methods
+		fmt.Printf("Failed to update campaign task tracking: %v\n", err)
 	}
 
 	// STEP 8: Check stop_on_reply
@@ -180,11 +228,31 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		MessageID: messageID,
 		IsWarmup:  false,
 		Tracking:  tracking,
+		UserID:    userUUID,
 	}
 
 	if err := s.emailSender.Send(ctx, taskID, emailMsg, *account); err != nil {
 		// Failed to send to worker, record failure
 		s.taskRepo.RecordTaskFailure(ctx, taskID, "Send failed", err.Error())
+		if s.campaignLogRepo != nil {
+			s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+				CampaignID: campaign.ID,
+				EventType:  "email_failed",
+				Message:    fmt.Sprintf("Failed to send to %s", contact.Email),
+				Metadata: map[string]interface{}{
+					"contact_id": contact.ID.String(),
+					"error":      err.Error(),
+				},
+			})
+		}
+		// Publish task failure to Pub/Sub
+		if s.streamingPublisher != nil {
+			s.streamingPublisher.PublishTaskStatus(ctx, campaign.UserID, taskID, pubsub.EventTaskFailed, "Failed to send email", map[string]string{
+				"campaign_id": campaign.ID.String(),
+				"contact_id":  contact.ID.String(),
+				"error":       err.Error(),
+			})
+		}
 		return nil
 	}
 
@@ -199,10 +267,32 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		fmt.Printf("Failed to record email sent: %v\n", err)
 	}
 
-	// STEP 18: Mark task as completed
-	if err := s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed"); err != nil {
+	// Log email sent
+	if s.campaignLogRepo != nil {
+		s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+			CampaignID: campaign.ID,
+			EventType:  "email_sent",
+			Message:    fmt.Sprintf("Email sent to %s", contact.Email),
+			Metadata: map[string]interface{}{
+				"contact_id":  contact.ID.String(),
+				"sequence_id": sequence.ID.String(),
+				"account_id":  account.ID.String(),
+			},
+		})
+	}
+
+	// STEP 18: Mark task as completed (with advisory lock)
+	if err := s.taskRepo.UpdateTaskStatusWithLock(ctx, taskID, "completed"); err != nil {
 		sentry.CaptureException(err)
 		return errx.InternalError()
+	}
+
+	// Publish task completion to Pub/Sub
+	if s.streamingPublisher != nil {
+		s.streamingPublisher.PublishTaskStatus(ctx, campaign.UserID, taskID, pubsub.EventTaskCompleted, "Email sent successfully", map[string]string{
+			"campaign_id": campaign.ID.String(),
+			"contact_id":  contact.ID.String(),
+		})
 	}
 
 	// STEP 19: Publish events to Kafka
@@ -217,9 +307,23 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	return nil
 }
 
+// autoPauseCampaign pauses a campaign when no active email accounts are available.
+// Uses advisory lock to prevent concurrent auto-pause from multiple tasks.
+func (s *tasksService) autoPauseCampaign(ctx context.Context, campaignID, taskID uuid.UUID) {
+	s.campaignRepo.UpdateStatusWithLock(ctx, campaignID, "paused_no_accounts")
+	s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
+	if s.campaignLogRepo != nil {
+		s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+			CampaignID: campaignID,
+			EventType:  "auto_paused",
+			Message:    "Campaign auto-paused: no active email accounts available",
+		})
+	}
+}
+
 // createCampaignTask creates a new campaign task in GCP Cloud Tasks
 func (s *tasksService) createCampaignTask(ctx context.Context, campaignID uuid.UUID, scheduleTime time.Time) error {
-	// Create task in database
+	// Create task in database with advisory lock
 	newTaskID := uuid.New()
 	newTask := &Task{
 		ID:          newTaskID,
@@ -228,17 +332,12 @@ func (s *tasksService) createCampaignTask(ctx context.Context, campaignID uuid.U
 		ScheduledAt: &scheduleTime,
 	}
 
-	if err := s.taskRepo.CreateTask(ctx, newTask); err != nil {
-		return err
-	}
-
-	// Create campaign task entry
 	campaignTask := &CampaignTask{
 		TaskID:     newTaskID,
 		CampaignID: &campaignID,
 	}
 
-	if err := s.taskRepo.CreateCampaignTask(ctx, campaignTask); err != nil {
+	if err := s.taskRepo.CreateTaskWithLock(ctx, newTask, campaignTask); err != nil {
 		return err
 	}
 

@@ -3,39 +3,19 @@ package config
 import "context"
 
 func (c *Config) LoadGeoDBPath(ctx context.Context) (string, error) {
-	val, err := c.params.Get(ctx, c.GetKeyID("geodb_path"))
-	if err != nil {
-		return "", err
-	}
-
-	return val, nil
+	return c.GetString(ctx, "GEODB_PATH", "geodb_path")
 }
 
 func (c *Config) LoadPrimaryDBEndpoint(ctx context.Context) (string, error) {
-	val, err := c.secrets.Get(ctx, c.GetKeyID("postgres/primary"))
-	if err != nil {
-		return "", err
-	}
-
-	return val, nil
+	return c.GetSecret(ctx, "PRIMARY_DB", "postgres/primary")
 }
 
 func (c *Config) LoadPrimaryRedisEndpoint(ctx context.Context) (string, error) {
-	val, err := c.secrets.Get(ctx, c.GetKeyID("redis/primary"))
-	if err != nil {
-		return "", err
-	}
-
-	return val, nil
+	return c.GetSecret(ctx, "REDIS", "redis/primary")
 }
 
 func (c *Config) LoadKafkaClusterEndpoint(ctx context.Context) (string, error) {
-	val, err := c.secrets.Get(ctx, c.GetKeyID("kafka_cluster"))
-	if err != nil {
-		return "", err
-	}
-
-	return val, nil
+	return c.GetSecret(ctx, "KAFKA_CLUSTER", "kafka_cluster")
 }
 
 // Cassandra (NoSQL)
@@ -48,22 +28,22 @@ type AstraConfig struct {
 }
 
 func (c *Config) LoadAstraConfig(ctx context.Context) (*AstraConfig, error) {
-	astraDBID, err := c.params.Get(ctx, c.GetKeyID("astra/db_id"))
+	astraDBID, err := c.GetString(ctx, "ASTRA_DB_ID", "astra/db_id")
 	if err != nil {
 		return nil, err
 	}
 
-	astraDBRegion, err := c.params.Get(ctx, c.GetKeyID("astra/db_region"))
+	astraDBRegion, err := c.GetString(ctx, "ASTRA_DB_REGION", "astra/db_region")
 	if err != nil {
 		return nil, err
 	}
 
-	astraDBKeyspaceName, err := c.params.Get(ctx, c.GetKeyID("astra/keyspace_name"))
+	astraDBKeyspaceName, err := c.GetString(ctx, "ASTRA_KEYSPACE_NAME", "astra/keyspace_name")
 	if err != nil {
 		return nil, err
 	}
 
-	applicationToken, err := c.secrets.Get(ctx, c.GetKeyID("astra/application_token"))
+	applicationToken, err := c.GetSecret(ctx, "ASTRA_APPLICATION_TOKEN", "astra/application_token")
 	if err != nil {
 		return nil, err
 	}

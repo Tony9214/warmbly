@@ -16,6 +16,7 @@ func (c *Client) SendMessage(
 	messageID,
 	subject, bodyPlain, bodyHTML string,
 	parent *models.EmailMessageData,
+	customHeaders ...map[string]string,
 ) (*gmail.Message, error) {
 	// Compose headers
 	headers := []*gmail.MessagePartHeader{
@@ -44,6 +45,13 @@ func (c *Client) SendMessage(
 			&gmail.MessagePartHeader{Name: "In-Reply-To", Value: fmt.Sprintf("<%s>", parent.MessageID)},
 			&gmail.MessagePartHeader{Name: "References", Value: fmt.Sprintf("<%s>", parent.MessageID)},
 		)
+	}
+
+	// Add custom headers (e.g., X-Warmbly-Token for warmup)
+	if len(customHeaders) > 0 {
+		for k, v := range customHeaders[0] {
+			headers = append(headers, &gmail.MessagePartHeader{Name: k, Value: v})
+		}
 	}
 
 	// Compose parts

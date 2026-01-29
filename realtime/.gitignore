@@ -17,11 +17,21 @@ erl_crash.dump
 *.ez
 
 # Ignore package tarball (built via "mix hex.build").
-warmbly_ws-*.tar
+realtime-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
 
+# IDE
 /.elixir_ls/
+.idea/
+*.swp
+*.swo
 
-/config/*.secret.exs
+# GCP credentials
+/config/gcp-credentials.json
+
+# Environment files
+.env
+.env.local
+.env.*.local

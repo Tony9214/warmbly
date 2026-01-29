@@ -81,25 +81,77 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	// STEP 7: Ensure within campaign time window (start_time to end_time)
 	candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
 
-	// STEP 8: Select email account (round-robin or least loaded)
-	account := selectAccountForSend(accounts, candidateTime)
-	if account == nil {
-		return time.Time{}, nil, uuid.Nil, ErrNoEmailAccounts
+	// STEP 8: Build weighted account candidates
+	var candidates []AccountCandidate
+	for _, acct := range accounts {
+		sentToday, err := s.taskRepo.CountCampaignEmailsSentToday(ctx, acct.ID)
+		if err != nil {
+			return time.Time{}, nil, uuid.Nil, err
+		}
+
+		acctLimit := min(acct.CampaignLimit, campaign.DailyLimit)
+		remaining := acctLimit - sentToday
+
+		warmupAgeDays := 0
+		if acct.Warmup != nil {
+			warmupAgeDays = int(time.Since(*acct.Warmup).Hours() / 24)
+		}
+
+		candidates = append(candidates, AccountCandidate{
+			Account:        acct,
+			RemainingToday: remaining,
+			WarmupAgeDays:  warmupAgeDays,
+			Weight:         computeWeight(remaining, warmupAgeDays),
+		})
 	}
 
-	// STEP 9: Check account daily limits
-	emailsSentToday, err := s.taskRepo.CountEmailsSentToday(ctx, account.ID)
-	if err != nil {
-		return time.Time{}, nil, uuid.Nil, err
-	}
-
-	accountLimit := min(account.CampaignLimit, campaign.DailyLimit)
-
-	if emailsSentToday >= accountLimit {
-		// Move to next day and retry time window
+	// STEP 8.5: Select best account via weighted random selection
+	selected := selectAccountWeighted(candidates)
+	if selected == nil {
+		// ALL accounts at capacity today — push to next day and pick highest-weight account (all reset tomorrow)
 		candidateTime = candidateTime.Add(24 * time.Hour)
 		candidateTime = findNextValidDay(candidateTime, uint8(campaign.Days), campaignTZ)
 		candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
+
+		// Recompute with full capacity for tomorrow
+		var bestCandidate *AccountCandidate
+		for i := range candidates {
+			warmupAgeDays := candidates[i].WarmupAgeDays
+			acctLimit := min(candidates[i].Account.CampaignLimit, campaign.DailyLimit)
+			candidates[i].RemainingToday = acctLimit
+			candidates[i].Weight = computeWeight(acctLimit, warmupAgeDays)
+			if bestCandidate == nil || candidates[i].Weight > bestCandidate.Weight {
+				bestCandidate = &candidates[i]
+			}
+		}
+		if bestCandidate == nil {
+			return time.Time{}, nil, uuid.Nil, ErrNoEmailAccounts
+		}
+		selected = bestCandidate
+	}
+
+	account := &selected.Account
+
+	// STEP 9: Even distribution across today's time window
+	endMinutes := parseTimeOfDay(campaign.EndTime)
+	nowLocal := time.Now().In(campaignTZ)
+	currentMinutes := nowLocal.Hour()*60 + nowLocal.Minute()
+
+	remainingEmails := selected.RemainingToday
+	if remainingEmails > 0 {
+		startMinutes := parseTimeOfDay(campaign.StartTime)
+		remainingMinutes := endMinutes - max(currentMinutes, startMinutes)
+		if remainingMinutes > 0 {
+			idealInterval := time.Minute * time.Duration(remainingMinutes/remainingEmails)
+			minInterval := time.Second * time.Duration(account.MinWaitTime)
+			if idealInterval < minInterval {
+				idealInterval = minInterval
+			}
+			distributedTime := time.Now().Add(idealInterval)
+			if distributedTime.After(candidateTime) {
+				candidateTime = distributedTime
+			}
+		}
 	}
 
 	// STEP 10: Respect minimum wait time from account's last email
