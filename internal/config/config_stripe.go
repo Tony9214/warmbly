@@ -9,17 +9,17 @@ type StripeConfig struct {
 }
 
 func (c *Config) LoadStripeConfig(ctx context.Context) (*StripeConfig, error) {
-	secretKey, err := c.secrets.Get(ctx, c.GetKeyID("stripe/secret_key"))
+	secretKey, err := c.GetSecret(ctx, "STRIPE_SECRET_KEY", "stripe/secret_key")
 	if err != nil {
 		return nil, err
 	}
 
-	webhookSecret, err := c.secrets.Get(ctx, c.GetKeyID("stripe/webhook_secret"))
+	webhookSecret, err := c.GetSecret(ctx, "STRIPE_WEBHOOK_SECRET", "stripe/webhook_secret")
 	if err != nil {
 		return nil, err
 	}
 
-	publishableKey, err := c.params.Get(ctx, c.GetKeyID("stripe/publishable_key"))
+	publishableKey, err := c.GetString(ctx, "STRIPE_PUBLISHABLE_KEY", "stripe/publishable_key")
 	if err != nil {
 		return nil, err
 	}

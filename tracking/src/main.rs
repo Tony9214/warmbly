@@ -27,14 +27,11 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Determine environment (only env var needed - for AWS path prefix)
-    let env = std::env::var("APP_ENV").unwrap_or_else(|_| "dev".to_string());
-
-    // Load configuration from AWS
-    let config = match Config::from_aws(&env).await {
+    // Load configuration with env-first approach
+    let config = match Config::load().await {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!("Failed to load config from AWS: {}", e);
+            tracing::error!("Failed to load config: {}", e);
             std::process::exit(1);
         }
     };

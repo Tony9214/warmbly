@@ -17,47 +17,47 @@ type AuthConfig struct {
 }
 
 func (c *Config) LoadAuthConfig(ctx context.Context) (*AuthConfig, error) {
-	googleClientID, err := c.params.Get(ctx, c.GetKeyID("google-auth/client_id"))
+	googleClientID, err := c.GetString(ctx, "GOOGLE_CLIENT_ID", "google-auth/client_id")
 	if err != nil {
 		return nil, err
 	}
 
-	googleRedirectURI, err := c.params.Get(ctx, c.GetKeyID("google-auth/redirect_uri"))
+	googleRedirectURI, err := c.GetString(ctx, "GOOGLE_REDIRECT_URI", "google-auth/redirect_uri")
 	if err != nil {
 		return nil, err
 	}
 
-	googleClientSecret, err := c.secrets.Get(ctx, c.GetKeyID("google-auth/client_secret"))
+	googleClientSecret, err := c.GetSecret(ctx, "GOOGLE_CLIENT_SECRET", "google-auth/client_secret")
 	if err != nil {
 		return nil, err
 	}
 
-	appleAppID, err := c.params.Get(ctx, c.GetKeyID("apple-auth/app_id"))
+	appleAppID, err := c.GetString(ctx, "APPLE_APP_ID", "apple-auth/app_id")
 	if err != nil {
 		return nil, err
 	}
 
-	appleTeamID, err := c.params.Get(ctx, c.GetKeyID("apple-auth/team_id"))
+	appleTeamID, err := c.GetString(ctx, "APPLE_TEAM_ID", "apple-auth/team_id")
 	if err != nil {
 		return nil, err
 	}
 
-	appleKeyID, err := c.params.Get(ctx, c.GetKeyID("apple-auth/key_id"))
+	appleKeyID, err := c.GetString(ctx, "APPLE_KEY_ID", "apple-auth/key_id")
 	if err != nil {
 		return nil, err
 	}
 
-	appleKeySecret, err := c.secrets.Get(ctx, c.GetKeyID("apple-auth/key_secret"))
+	appleKeySecret, err := c.GetSecret(ctx, "APPLE_KEY_SECRET", "apple-auth/key_secret")
 	if err != nil {
 		return nil, err
 	}
 
-	authSecret, err := c.secrets.Get(ctx, c.GetKeyID("auth_secret"))
+	authSecret, err := c.GetSecret(ctx, "AUTH_SECRET", "auth_secret")
 	if err != nil {
 		return nil, err
 	}
 
-	turnstileSecret, err := c.secrets.Get(ctx, c.GetKeyID("turnstile/secret"))
+	turnstileSecret, err := c.GetSecret(ctx, "TURNSTILE_SECRET", "turnstile/secret")
 	if err != nil {
 		return nil, err
 	}

@@ -9,7 +9,6 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	awsconf "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/getsentry/sentry-go"
-	"github.com/joho/godotenv"
 	"github.com/meszmate/apple-go"
 	"github.com/meszmate/google-go"
 	"github.com/warmbly/warmbly/internal/api"
@@ -47,8 +46,6 @@ import (
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
-	"github.com/warmbly/warmbly/internal/infrastructure/secrets"
-	"github.com/warmbly/warmbly/internal/infrastructure/ssm"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/jobs"
 	"github.com/warmbly/warmbly/internal/models"
@@ -107,27 +104,16 @@ func main() {
 	var streamingPublisher *pubsub.StreamingPublisher
 
 	{
-		godotenv.Overload("cmd/backend/.env")
+		ctx := context.Background()
 
-		awscfg, err := awsconf.LoadDefaultConfig(context.Background())
+		// Load config with env-first approach
+		cfg, err := config.NewConfig(ctx)
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		secrets, err := secrets.NewSecretsManagerClient(context.Background(), awscfg)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		params, err := ssm.NewSSMParameterStore(context.Background(), awscfg)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		cfg := config.Load(params, secrets)
 
 		if cfg.Env == "prod" {
-			sentryDsn, err := cfg.LoadSentryDSNBackend(context.Background())
+			sentryDsn, err := cfg.LoadSentryDSNBackend(ctx)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -141,19 +127,26 @@ func main() {
 			}
 		}
 
-		serviceAccount, err = cfg.LoadGoogleServiceAccount(context.Background())
+		serviceAccount, err = cfg.LoadGoogleServiceAccount(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		keySet, err = keyfunc.NewDefaultCtx(context.Background(), []string{"https://www.googleapis.com/oauth2/v3/certs"})
+		keySet, err = keyfunc.NewDefaultCtx(ctx, []string{"https://www.googleapis.com/oauth2/v3/certs"})
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		apiCfg, err := cfg.LoadApiConfig(context.Background())
+		apiCfg, err := cfg.LoadApiConfig(ctx)
+		if err != nil {
+			sentry.CaptureException(err)
+			log.Fatal(err)
+		}
+
+		// AWS config for services that need it (KMS, S3, DynamoDB)
+		awscfg, err := awsconf.LoadDefaultConfig(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -164,13 +157,13 @@ func main() {
 			masterKey += "-dev"
 		}
 
-		kms, err := kms.New(context.Background(), awscfg, masterKey)
+		kms, err := kms.New(ctx, awscfg, masterKey)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		geoPath, err := cfg.LoadGeoDBPath(context.Background())
+		geoPath, err := cfg.LoadGeoDBPath(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -182,25 +175,25 @@ func main() {
 			log.Fatal(err)
 		}
 
-		s3, err := storage.NewClient(context.Background(), awscfg, "main")
+		s3, err := storage.NewClient(ctx, awscfg, "main")
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		primaryDBEndpoint, err := cfg.LoadPrimaryDBEndpoint(context.Background())
+		primaryDBEndpoint, err := cfg.LoadPrimaryDBEndpoint(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		primaryDB, err := db.New(context.Background(), primaryDBEndpoint)
+		primaryDB, err := db.New(ctx, primaryDBEndpoint)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		astraConfig, err := cfg.LoadAstraConfig(context.Background())
+		astraConfig, err := cfg.LoadAstraConfig(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -212,13 +205,13 @@ func main() {
 			log.Fatal(err)
 		}
 
-		dynamoDB, err := dynamo.NewClient(context.Background(), awscfg)
+		dynamoDB, err := dynamo.NewClient(ctx, awscfg)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		primaryRedis, err := cfg.LoadPrimaryRedisEndpoint(context.Background())
+		primaryRedis, err := cfg.LoadPrimaryRedisEndpoint(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -233,7 +226,7 @@ func main() {
 		// Google Pub/Sub for realtime streaming (optional)
 		gcpProjectID := os.Getenv("GCP_PROJECT_ID")
 		if gcpProjectID != "" {
-			pubsubClient, err := pubsub.NewClient(context.Background(), gcpProjectID)
+			pubsubClient, err := pubsub.NewClient(ctx, gcpProjectID)
 			if err != nil {
 				sentry.CaptureException(err)
 				log.Printf("Warning: Failed to initialize Pub/Sub client: %v", err)
@@ -242,14 +235,14 @@ func main() {
 			}
 		}
 
-		emailCfg, err := cfg.LoadEmailConfig(context.Background())
+		emailCfg, err := cfg.LoadEmailConfig(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
 		emailNotificationService, err = notify.NewEmailNotficiationService(
-			context.Background(),
+			ctx,
 			emailCfg.EmailName,
 			emailCfg.EmailAddress,
 		)
@@ -258,7 +251,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		authCfg, err := cfg.LoadAuthConfig(context.Background())
+		authCfg, err := cfg.LoadAuthConfig(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -282,19 +275,19 @@ func main() {
 			log.Fatal(err)
 		}
 
-		kafkaBootstrapServers, err := cfg.LoadKafkaBootstrapServers(context.Background())
+		kafkaBootstrapServers, err := cfg.LoadKafkaBootstrapServers(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		kafkaSaslConfig, err := cfg.LoadKafkaConfigSasl(context.Background())
+		kafkaSaslConfig, err := cfg.LoadKafkaConfigSasl(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 
-		schemaEndpoint, schemaKey, schemaSecret, err := cfg.LoadSchemaRegistryConfig(context.Background())
+		schemaEndpoint, schemaKey, schemaSecret, err := cfg.LoadSchemaRegistryConfig(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -356,7 +349,7 @@ func main() {
 		organizationService = organization.NewService(organizationRepository, subscriptionRepository, userRepostory)
 
 		// Load Stripe config and initialize service
-		stripeCfg, err := cfg.LoadStripeConfig(context.Background())
+		stripeCfg, err := cfg.LoadStripeConfig(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -405,7 +398,7 @@ func main() {
 		// Start trial expiration job in background
 		trialExpirationJob := jobs.NewTrialExpirationJobWithDB(subscriptionRepository, primaryDB.Pool, emailNotificationService)
 		trialScheduler := jobs.NewTrialExpirationScheduler(trialExpirationJob, 1*time.Hour)
-		go trialScheduler.Start(context.Background())
+		go trialScheduler.Start(ctx)
 
 		addr = apiCfg.Hostname
 		ginMode = apiCfg.GinMode

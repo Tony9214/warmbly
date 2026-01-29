@@ -9,17 +9,17 @@ type EmailConfig struct {
 }
 
 func (c *Config) LoadEmailConfig(ctx context.Context) (*EmailConfig, error) {
-	emailName, err := c.params.Get(ctx, "email/name")
+	emailName, err := c.GetStringRaw(ctx, "EMAIL_NAME", "email/name")
 	if err != nil {
 		return nil, err
 	}
 
-	emailAddress, err := c.params.Get(ctx, "email/address")
+	emailAddress, err := c.GetStringRaw(ctx, "EMAIL_ADDRESS", "email/address")
 	if err != nil {
 		return nil, err
 	}
 
-	trackingDomain, err := c.params.Get(ctx, "tracking_domain")
+	trackingDomain, err := c.GetStringRaw(ctx, "TRACKING_DOMAIN", "tracking_domain")
 	if err != nil {
 		return nil, err
 	}

@@ -9,7 +9,6 @@ import (
 
 	awsconf "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/getsentry/sentry-go"
-	"github.com/joho/godotenv"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	jobs "github.com/warmbly/warmbly/internal/app/consumer"
 	"github.com/warmbly/warmbly/internal/config"
@@ -21,36 +20,19 @@ import (
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
-	"github.com/warmbly/warmbly/internal/infrastructure/secrets"
-	"github.com/warmbly/warmbly/internal/infrastructure/ssm"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/repository"
 )
 
 func main() {
-	godotenv.Overload("cmd/consumer/.env")
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// AWS config
-	awscfg, err := awsconf.LoadDefaultConfig(ctx)
+	// Load config with env-first approach
+	cfg, err := config.NewConfig(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// Secrets & SSM
-	secretsClient, err := secrets.NewSecretsManagerClient(ctx, awscfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	params, err := ssm.NewSSMParameterStore(ctx, awscfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	cfg := config.Load(params, secretsClient)
 
 	// Sentry
 	if cfg.Env == "prod" {
@@ -64,6 +46,12 @@ func main() {
 		}); err != nil {
 			log.Fatal(err)
 		}
+	}
+
+	// AWS config for services that need it (KMS, S3, DynamoDB)
+	awscfg, err := awsconf.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// PostgreSQL
