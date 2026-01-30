@@ -119,18 +119,19 @@ warmbly/
 ├── deploy/
 │   ├── docker/           # Docker Compose and Dockerfiles
 │   └── kubernetes/       # Kubernetes manifests
-└── docs/                 # Technical documentation
+└── resources/                 # Technical documentation
 ```
 
 ## Documentation
 
-- [Deployment Guide](docs/deployment-guide.md) - Step-by-step deployment instructions
-- [CI/CD Pipeline](docs/cicd.md) - CI/CD technical details
-- [Architecture](docs/architecture.md) - System architecture overview
-- [Events](docs/Events.md) - Kafka event system
-- [EMSG Format](docs/EMSG.md) - Email message blob format
-- [Gmail Integration](docs/gmail.md) - Gmail API usage
-- [IMAP Integration](docs/imap.md) - IMAP/SMTP integration
+- [Local Development](resources/local-development.md) - Docker Compose setup for local development
+- [Deployment Guide](resources/deployment-guide.md) - Step-by-step deployment instructions
+- [CI/CD Pipeline](resources/cicd.md) - CI/CD technical details
+- [Architecture](resources/architecture.md) - System architecture overview
+- [Events](resources/Events.md) - Kafka event system
+- [EMSG Format](resources/EMSG.md) - Email message blob format
+- [Gmail Integration](resources/gmail.md) - Gmail API usage
+- [IMAP Integration](resources/imap.md) - IMAP/SMTP integration
 
 ## Building
 

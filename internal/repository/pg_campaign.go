@@ -21,6 +21,7 @@ type CampaignRepository interface {
 	Get(ctx context.Context, userID, id string) (*models.Campaign, error)
 	GetByID(ctx context.Context, campaignID uuid.UUID) (*models.Campaign, error)
 	GetSequenceByID(ctx context.Context, sequenceID uuid.UUID) (*models.Sequence, error)
+	GetSequencesByCampaignID(ctx context.Context, campaignID uuid.UUID) ([]models.Sequence, error)
 	Search(ctx context.Context, userID, query string, cursor, folder *string, limit int32) (*models.CampaignsResult, error)
 	Update(ctx context.Context, userID, query string, data *models.UpdateCampaign) (*models.Campaign, *errx.Error)
 	UpdateStatus(ctx context.Context, campaignID uuid.UUID, status string) error
@@ -50,6 +51,7 @@ const CAMPAIGN_SELECT = `id, name, description, status,
 		  text_only, daily_limit, unsubscribe_header, risky_emails,
 		  cc_addr, bcc_addr, start_date, end_date, timezone, days,
 		  start_time, end_time,
+		  contact_order_by, contact_order_dir, contact_order_field,
 		  updated_at, created_at`
 
 func getCampaign(rows db.Scannable, campaign *models.Campaign, extra ...any) error {
@@ -59,6 +61,7 @@ func getCampaign(rows db.Scannable, campaign *models.Campaign, extra ...any) err
 		&campaign.TextOnly, &campaign.DailyLimit, &campaign.UnsubscribeHeader, &campaign.RiskyEmails,
 		&campaign.CC, &campaign.BCC, &campaign.StartDate, &campaign.EndDate, &campaign.Timezone, &campaign.Days,
 		&campaign.StartTime, &campaign.EndTime,
+		&campaign.ContactOrderBy, &campaign.ContactOrderDir, &campaign.ContactOrderField,
 		&campaign.UpdatedAt, &campaign.CreatedAt,
 	}
 	dest = append(dest, extra...)
@@ -73,6 +76,7 @@ const CAMPAIGN_SELECT_FULL = `
 	c.text_only, c.daily_limit, c.unsubscribe_header, c.risky_emails,
 	c.cc_addr, c.bcc_addr, c.start_date, c.end_date, c.timezone, c.days,
 	c.start_time, c.end_time,
+	c.contact_order_by, c.contact_order_dir, c.contact_order_field,
 	c.updated_at, c.created_at,
 	COALESCE(array_agg(cet.tag_id) FILTER (WHERE cet.tag IS NOT NULL), '{}') AS email_tag_ids,
 	COALESCE(array_agg(cec.folder_id) FILTER (WHERE cec.folder IS NOT NULL), '{}') AS email_folder_ids
@@ -442,6 +446,31 @@ func (r *campaignRepository) Update(ctx context.Context, userID, campaignID stri
 		args = append(args, *data.EndTime)
 		argPos++
 	}
+	if data.ContactOrderBy != nil {
+		validOrderBy := map[string]bool{
+			"created_at": true, "email": true, "name": true,
+			"custom_field": true, "manual": true,
+		}
+		if !validOrderBy[*data.ContactOrderBy] {
+			return nil, errx.ErrInvalid
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "contact_order_by", argPos))
+		args = append(args, *data.ContactOrderBy)
+		argPos++
+	}
+	if data.ContactOrderDir != nil {
+		if *data.ContactOrderDir != "asc" && *data.ContactOrderDir != "desc" {
+			return nil, errx.ErrInvalid
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "contact_order_dir", argPos))
+		args = append(args, *data.ContactOrderDir)
+		argPos++
+	}
+	if data.ContactOrderField != nil {
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "contact_order_field", argPos))
+		args = append(args, *data.ContactOrderField)
+		argPos++
+	}
 
 	if argPos == 3 && data.EmailTags == nil {
 		return nil, errx.ErrNotEnough
@@ -539,6 +568,7 @@ func (r *campaignRepository) GetByID(ctx context.Context, campaignID uuid.UUID) 
 		&campaign.TextOnly, &campaign.DailyLimit, &campaign.UnsubscribeHeader, &campaign.RiskyEmails,
 		&campaign.CC, &campaign.BCC, &campaign.StartDate, &campaign.EndDate, &campaign.Timezone, &campaign.Days,
 		&campaign.StartTime, &campaign.EndTime,
+		&campaign.ContactOrderBy, &campaign.ContactOrderDir, &campaign.ContactOrderField,
 		&campaign.UpdatedAt, &campaign.CreatedAt,
 		&campaign.EmailTags, &campaign.Folders,
 	)
@@ -575,6 +605,39 @@ func (r *campaignRepository) GetSequenceByID(ctx context.Context, sequenceID uui
 	}
 
 	return &seq, nil
+}
+
+// GetSequencesByCampaignID retrieves all sequences for a campaign ordered by created_at
+func (r *campaignRepository) GetSequencesByCampaignID(ctx context.Context, campaignID uuid.UUID) ([]models.Sequence, error) {
+	query := `
+		SELECT id, name, subject, body_plain, body_html, body_sync, body_code, wait_after, updated_at, created_at
+		FROM sequences
+		WHERE campaign_id = $1
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.DB.Query(ctx, query, campaignID)
+	if err != nil {
+		db.CaptureError(err, query, []any{campaignID}, "query")
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sequences []models.Sequence
+	for rows.Next() {
+		var seq models.Sequence
+		err := rows.Scan(
+			&seq.ID, &seq.Name, &seq.Subject, &seq.BodyPlain, &seq.BodyHTML,
+			&seq.BodySync, &seq.BodyCode, &seq.WaitAfter, &seq.UpdatedAt, &seq.CreatedAt,
+		)
+		if err != nil {
+			db.CaptureError(err, "", nil, "scan")
+			return nil, err
+		}
+		sequences = append(sequences, seq)
+	}
+
+	return sequences, rows.Err()
 }
 
 // UpdateStatus updates only the status of a campaign

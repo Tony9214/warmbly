@@ -54,6 +54,14 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		return errx.ErrNotFound
 	}
 
+	// Get campaign progress for task progress events
+	campaignProgress, _ := s.campaignProgressRepo.GetCampaignProgress(ctx, *campaignTask.CampaignID)
+	var totalContacts, processedCount int
+	if campaignProgress != nil {
+		totalContacts = campaignProgress.TotalContacts
+		processedCount = campaignProgress.EmailsSent
+	}
+
 	// STEP 5: Load campaign
 	campaign, err := s.campaignRepo.GetByID(ctx, *campaignTask.CampaignID)
 	if err != nil {
@@ -65,6 +73,23 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	if campaign.Status != "active" {
 		s.taskRepo.UpdateTaskStatus(ctx, taskID, "cancelled")
 		return nil // Don't create next task
+	}
+
+	// Publish task started progress event
+	if s.streamingPublisher != nil {
+		progress := 0
+		if totalContacts > 0 {
+			progress = (processedCount * 100) / totalContacts
+		}
+		s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
+			BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+			CampaignID:     campaign.ID.String(),
+			TaskID:         taskID.String(),
+			Status:         "active",
+			Progress:       progress,
+			TotalContacts:  totalContacts,
+			ProcessedCount: processedCount,
+		})
 	}
 
 	// STEP 5.5: Check if organization can send campaign emails (trial expired, etc.)
@@ -252,6 +277,30 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 				"contact_id":  contact.ID.String(),
 				"error":       err.Error(),
 			})
+
+			// Publish detailed task progress event for failure
+			progress := 0
+			if totalContacts > 0 {
+				progress = (processedCount * 100) / totalContacts
+			}
+			contactName := contact.FirstName
+			if contact.LastName != "" {
+				contactName = contactName + " " + contact.LastName
+			}
+			s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
+				BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+				CampaignID:     campaign.ID.String(),
+				TaskID:         taskID.String(),
+				Status:         "failed",
+				ContactID:      contact.ID.String(),
+				ContactEmail:   contact.Email,
+				ContactName:    contactName,
+				SequenceID:     sequence.ID.String(),
+				SequenceName:   sequence.Name,
+				Progress:       progress,
+				TotalContacts:  totalContacts,
+				ProcessedCount: processedCount,
+			})
 		}
 		return nil
 	}
@@ -292,6 +341,41 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		s.streamingPublisher.PublishTaskStatus(ctx, campaign.UserID, taskID, pubsub.EventTaskCompleted, "Email sent successfully", map[string]string{
 			"campaign_id": campaign.ID.String(),
 			"contact_id":  contact.ID.String(),
+		})
+
+		// Publish detailed task progress event
+		newProcessedCount := processedCount + 1
+		progress := 0
+		if totalContacts > 0 {
+			progress = (newProcessedCount * 100) / totalContacts
+		}
+		contactName := contact.FirstName
+		if contact.LastName != "" {
+			contactName = contactName + " " + contact.LastName
+		}
+		// Get sequence index
+		sequences, _ := s.campaignRepo.GetSequencesByCampaignID(ctx, campaign.ID)
+		seqIndex := 0
+		for i, seq := range sequences {
+			if seq.ID == sequence.ID {
+				seqIndex = i + 1
+				break
+			}
+		}
+		s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
+			BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+			CampaignID:     campaign.ID.String(),
+			TaskID:         taskID.String(),
+			Status:         "completed",
+			ContactID:      contact.ID.String(),
+			ContactEmail:   contact.Email,
+			ContactName:    contactName,
+			SequenceID:     sequence.ID.String(),
+			SequenceName:   sequence.Name,
+			SequenceIndex:  seqIndex,
+			Progress:       progress,
+			TotalContacts:  totalContacts,
+			ProcessedCount: newProcessedCount,
 		})
 	}
 

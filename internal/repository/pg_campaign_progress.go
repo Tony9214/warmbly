@@ -55,7 +55,7 @@ type CampaignProgressRepository interface {
 	CheckContactHasReplied(ctx context.Context, contactID, campaignID uuid.UUID) (bool, error)
 
 	// Find next email to send
-	FindNextContactSequence(ctx context.Context, campaignID uuid.UUID) (*ContactSequencePair, error)
+	FindNextContactSequence(ctx context.Context, campaignID uuid.UUID, orderBy, orderDir, orderField string) (*ContactSequencePair, error)
 }
 
 type campaignProgressRepository struct {
@@ -263,15 +263,44 @@ func (r *campaignProgressRepository) CheckContactHasReplied(ctx context.Context,
 }
 
 // FindNextContactSequence finds the next contact/sequence pair that needs to be sent
-func (r *campaignProgressRepository) FindNextContactSequence(ctx context.Context, campaignID uuid.UUID) (*ContactSequencePair, error) {
+// orderBy: "created_at", "email", "name", "custom_field", "manual"
+// orderDir: "asc", "desc"
+// orderField: custom field name (used when orderBy is "custom_field")
+func (r *campaignProgressRepository) FindNextContactSequence(ctx context.Context, campaignID uuid.UUID, orderBy, orderDir, orderField string) (*ContactSequencePair, error) {
+	// Build the ORDER BY clause based on ordering settings
+	var contactOrder string
+	switch orderBy {
+	case "email":
+		contactOrder = "c.email"
+	case "name":
+		contactOrder = "c.first_name, c.last_name"
+	case "custom_field":
+		if orderField != "" {
+			contactOrder = "c.custom_fields->>'" + orderField + "'"
+		} else {
+			contactOrder = "c.created_at"
+		}
+	case "manual":
+		contactOrder = "cl.position NULLS LAST, c.created_at"
+	default: // created_at
+		contactOrder = "c.created_at"
+	}
+
+	// Apply direction
+	dir := "ASC"
+	if orderDir == "desc" {
+		dir = "DESC"
+	}
+
 	query := `
 		WITH all_pairs AS (
 			-- Generate all possible contact-sequence combinations for this campaign
 			SELECT
 				cl.contact_id,
 				s.id as sequence_id,
-				ROW_NUMBER() OVER (ORDER BY cl.contact_id, s.created_at) as pair_order
+				ROW_NUMBER() OVER (ORDER BY ` + contactOrder + ` ` + dir + `, s.created_at) as pair_order
 			FROM campaign_leads cl
+			JOIN contacts c ON c.id = cl.contact_id
 			CROSS JOIN sequences s
 			WHERE cl.campaign_id = $1
 			  AND s.campaign_id = $1

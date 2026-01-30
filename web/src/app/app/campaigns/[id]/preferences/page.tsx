@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import CampaignEmails from "@/components/app/campaigns/preferences/CampaignEmails";
+import CampaignContactOrder from "@/components/app/campaigns/preferences/CampaignContactOrder";
 
 export default function CampaignPreferences() {
     const campaign = useCampaign()
@@ -36,6 +37,10 @@ export default function CampaignPreferences() {
                 title: "Campaign Emails",
                 content: <CampaignEmails campaign={campaign} newCampaign={newData} setNewCampaign={setNewData} />,
             },
+            tab3: {
+                title: "Contact Order",
+                content: <CampaignContactOrder campaign={campaign} newCampaign={newData} setNewCampaign={setNewData} />,
+            },
         }),
     };
 
@@ -57,6 +62,10 @@ export default function CampaignPreferences() {
 
             ...(newData.cc !== campaign.cc && { cc: newData.cc }),
             ...(newData.bcc !== campaign.bcc && { cc: newData.bcc }),
+
+            ...(newData.contact_order_by !== campaign.contact_order_by && { contact_order_by: newData.contact_order_by }),
+            ...(newData.contact_order_dir !== campaign.contact_order_dir && { contact_order_dir: newData.contact_order_dir }),
+            ...(newData.contact_order_field !== campaign.contact_order_field && { contact_order_field: newData.contact_order_field }),
         }
     }
 

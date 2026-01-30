@@ -32,7 +32,17 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	}
 
 	// STEP 3: Get campaign progress - find next contact/sequence to send
-	nextPair, err := s.campaignProgressRepo.FindNextContactSequence(ctx, campaignID)
+	orderField := ""
+	if campaign.ContactOrderField != nil {
+		orderField = *campaign.ContactOrderField
+	}
+	nextPair, err := s.campaignProgressRepo.FindNextContactSequence(
+		ctx,
+		campaignID,
+		campaign.ContactOrderBy,
+		campaign.ContactOrderDir,
+		orderField,
+	)
 	if err != nil {
 		return time.Time{}, nil, uuid.Nil, err
 	}

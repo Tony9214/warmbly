@@ -25,6 +25,10 @@ export default interface Campaign {
 
     email_tags: string[];
 
+    contact_order_by: 'created_at' | 'email' | 'name' | 'custom_field' | 'manual';
+    contact_order_dir: 'asc' | 'desc';
+    contact_order_field?: string;
+
     updated_at: Date;
     created_at: Date;
 

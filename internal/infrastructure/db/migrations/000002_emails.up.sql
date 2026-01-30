@@ -251,3 +251,11 @@ CREATE TABLE reply_templates (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_reply_templates_org ON reply_templates(organization_id);
+
+-- Contact ordering settings for campaigns
+ALTER TABLE campaigns ADD COLUMN contact_order_by VARCHAR(20) DEFAULT 'created_at';
+ALTER TABLE campaigns ADD COLUMN contact_order_dir VARCHAR(4) DEFAULT 'asc';
+ALTER TABLE campaigns ADD COLUMN contact_order_field TEXT;
+
+-- Position column for manual contact ordering
+ALTER TABLE campaign_leads ADD COLUMN position INTEGER;
