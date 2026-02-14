@@ -1,0 +1,8 @@
+./config.go
+./email.go
+./incoming.go
+./search.go
+./seen.go
+./service.go
+./storage.go
+./thread.go

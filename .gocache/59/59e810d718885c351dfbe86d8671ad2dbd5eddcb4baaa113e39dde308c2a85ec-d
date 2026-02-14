@@ -1,0 +1,5 @@
+./campaign.go
+./common.go
+./email.go
+./role.go
+./uuid.go

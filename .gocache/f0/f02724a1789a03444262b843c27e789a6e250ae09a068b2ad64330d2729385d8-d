@@ -1,0 +1,7 @@
+./address.go
+./attachment.go
+./header.go
+./inline.go
+./mail.go
+./reader.go
+./writer.go

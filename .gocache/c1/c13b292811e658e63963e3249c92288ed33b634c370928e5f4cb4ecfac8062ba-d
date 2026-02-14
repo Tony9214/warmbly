@@ -1,0 +1,16 @@
+./auth.go
+./clientconn.go
+./cluster.go
+./codecs.go
+./conn.go
+./connpool.go
+./endpoint.go
+./errors.go
+./host.go
+./lb.go
+./log.go
+./mockcluster.go
+./reconnpolicy.go
+./requests.go
+./resultset.go
+./session.go

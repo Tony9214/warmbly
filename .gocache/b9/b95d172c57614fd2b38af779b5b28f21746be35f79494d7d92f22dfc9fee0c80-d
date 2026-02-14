@@ -1,0 +1,8 @@
+./algorithm.go
+./cache.go
+./claims.go
+./doc.go
+./errors.go
+./header.go
+./jwt.go
+./key.go

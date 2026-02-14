@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	awsconf "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/worker"
@@ -18,6 +17,7 @@ import (
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
+	"github.com/warmbly/warmbly/internal/observability"
 	"github.com/warmbly/warmbly/internal/repository"
 )
 
@@ -46,17 +46,8 @@ func main() {
 	}
 
 	// Sentry
-	if cfg.Env == "prod" {
-		sentryDsn, err := cfg.LoadSentryDSNBackend(ctx)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := sentry.Init(sentry.ClientOptions{
-			Dsn:            sentryDsn,
-			SendDefaultPII: true,
-		}); err != nil {
-			log.Fatal(err)
-		}
+	if err := observability.InitSentry(ctx, cfg, "worker"); err != nil {
+		log.Fatal(err)
 	}
 
 	// AWS config for services that need it (KMS, S3, DynamoDB)

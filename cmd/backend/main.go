@@ -51,6 +51,7 @@ import (
 	"github.com/warmbly/warmbly/internal/jobs"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/notify"
+	"github.com/warmbly/warmbly/internal/observability"
 	"github.com/warmbly/warmbly/internal/pkg/captcha"
 	"github.com/warmbly/warmbly/internal/pkg/geo"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -113,19 +114,8 @@ func main() {
 			log.Fatal(err)
 		}
 
-		if cfg.Env == "prod" {
-			sentryDsn, err := cfg.LoadSentryDSNBackend(ctx)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			err = sentry.Init(sentry.ClientOptions{
-				Dsn:            sentryDsn,
-				SendDefaultPII: true,
-			})
-			if err != nil {
-				log.Fatal(err)
-			}
+		if err := observability.InitSentry(ctx, cfg, "backend"); err != nil {
+			log.Fatal(err)
 		}
 
 		serviceAccount, err = cfg.LoadGoogleServiceAccount(ctx)

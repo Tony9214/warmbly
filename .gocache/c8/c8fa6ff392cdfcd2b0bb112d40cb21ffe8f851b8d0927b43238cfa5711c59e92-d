@@ -1,0 +1,14 @@
+./email_sync.go
+./err.go
+./event_email_error.go
+./event_flags_update.go
+./event_history_id_update.go
+./event_mailbox_delete.go
+./event_mailbox_update.go
+./event_new_email.go
+./event_token_update.go
+./event_tracking.go
+./event_update_email.go
+./events.go
+./receive.go
+./service.go

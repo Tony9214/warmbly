@@ -1,0 +1,13 @@
+./identifier.go
+./lexer.go
+./metadata.go
+./parse_batch.go
+./parse_delete.go
+./parse_insert.go
+./parse_relation.go
+./parse_select.go
+./parse_term.go
+./parse_update.go
+./parse_updateop.go
+./parser.go
+./parser_utils.go

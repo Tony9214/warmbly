@@ -1,0 +1,3 @@
+./config.go
+./hash.go
+./verify.go

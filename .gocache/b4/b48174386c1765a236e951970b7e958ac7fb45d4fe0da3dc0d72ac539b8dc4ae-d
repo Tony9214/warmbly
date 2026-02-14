@@ -1,0 +1,3 @@
+./client.go
+./pagination.go
+./types.go

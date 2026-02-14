@@ -1,0 +1,8 @@
+./changer.go
+./collections.go
+./doc.go
+./errors.go
+./ringbuffer.go
+./sets.go
+./stacks.go
+./tree.go

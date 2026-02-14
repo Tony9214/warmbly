@@ -1,0 +1,3 @@
+./conversation.go
+./generation.go
+./model.go

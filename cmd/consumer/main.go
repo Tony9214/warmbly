@@ -21,6 +21,7 @@ import (
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
+	"github.com/warmbly/warmbly/internal/observability"
 	"github.com/warmbly/warmbly/internal/repository"
 )
 
@@ -35,17 +36,8 @@ func main() {
 	}
 
 	// Sentry
-	if cfg.Env == "prod" {
-		sentryDsn, err := cfg.LoadSentryDSNBackend(ctx)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := sentry.Init(sentry.ClientOptions{
-			Dsn:            sentryDsn,
-			SendDefaultPII: true,
-		}); err != nil {
-			log.Fatal(err)
-		}
+	if err := observability.InitSentry(ctx, cfg, "consumer"); err != nil {
+		log.Fatal(err)
 	}
 
 	// AWS config for services that need it (KMS, S3, DynamoDB)

@@ -1,0 +1,8 @@
+./codec.go
+./compressor.go
+./convert.go
+./decode.go
+./deepcopy_generated.go
+./doc.go
+./encode.go
+./frame.go

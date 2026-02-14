@@ -1,0 +1,4 @@
+./config.go
+./mock_schemaregistry_client.go
+./schemaregistry_client.go
+./testhelpers.go

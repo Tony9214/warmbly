@@ -1,0 +1,10 @@
+./custom.go
+./datatype.go
+./deepcopy_generated.go
+./doc.go
+./list.go
+./map.go
+./primitive.go
+./set.go
+./tuple.go
+./udt.go
