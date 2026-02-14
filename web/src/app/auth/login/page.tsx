@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import toast from "react-hot-toast";
 import { ArrowLeft } from "lucide-react";
+import { usePasswordStrength } from "@/hooks/usePasswordStrength";
 
 import Turnstile from "react-turnstile";
 import AuthButton from "@/components/auth/button";
@@ -33,10 +34,7 @@ const signInSchema = z.object({
 
 const signUpSchema = z.object({
     password: z.string()
-        .min(8, "At least 8 characters")
-        .regex(/[A-Z]/, "One uppercase letter required")
-        .regex(/[a-z]/, "One lowercase letter required")
-        .regex(/[0-9]/, "One number required"),
+        .min(8, "Password must be at least 8 characters"),
     confirmPassword: z.string(),
     acceptTerms: z.boolean(),
 }).refine((d) => d.password === d.confirmPassword, {
@@ -66,32 +64,29 @@ const INPUT = "w-full h-11 rounded-lg border border-sky-200 bg-white px-4 text-[
 
 /* ── Password strength ─────────────────────── */
 
-function PasswordStrength({ password }: { password: string }) {
-    if (!password) return null;
+const strengthConfig = [
+    { label: "Weak", color: "bg-red-400", width: "25%" },
+    { label: "Weak", color: "bg-red-400", width: "25%" },
+    { label: "Fair", color: "bg-amber-400", width: "50%" },
+    { label: "Good", color: "bg-sky-400", width: "75%" },
+    { label: "Strong", color: "bg-emerald-400", width: "100%" },
+] as const;
 
-    let score = 0;
-    if (password.length >= 8) score++;
-    if (password.length >= 12) score++;
-    if (/[A-Z]/.test(password)) score++;
-    if (/[a-z]/.test(password)) score++;
-    if (/[0-9]/.test(password)) score++;
-
-    const level = score <= 2 ? "weak" : score <= 3 ? "fair" : score <= 4 ? "good" : "strong";
-    const colors = { weak: "bg-red-400", fair: "bg-amber-400", good: "bg-sky-400", strong: "bg-emerald-400" };
-    const widths = { weak: "25%", fair: "50%", good: "75%", strong: "100%" };
-    const labels = { weak: "Weak", fair: "Fair", good: "Good", strong: "Strong" };
+function PasswordStrength({ score, warning }: { score: 0 | 1 | 2 | 3 | 4; warning: string }) {
+    const cfg = strengthConfig[score];
 
     return (
         <div className="space-y-1">
             <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
                 <motion.div
-                    className={`h-full rounded-full ${colors[level]}`}
+                    className={`h-full rounded-full ${cfg.color}`}
                     initial={{ width: 0 }}
-                    animate={{ width: widths[level] }}
+                    animate={{ width: cfg.width }}
                     transition={{ duration: 0.35, ease: "easeOut" }}
                 />
             </div>
-            <p className="text-xs text-slate-400">{labels[level]} password</p>
+            <p className="text-xs text-slate-400">{cfg.label} password</p>
+            {warning && <p className="text-xs text-rose-500">{warning}</p>}
         </div>
     );
 }
@@ -480,6 +475,7 @@ function EmailStep({
                         type="email"
                         placeholder="name@company.com"
                         className={INPUT}
+                        autoComplete="email"
                         autoFocus
                         {...register("email")}
                     />
@@ -540,6 +536,7 @@ function SignInStep({
                         type="password"
                         placeholder="Enter your password"
                         className={INPUT}
+                        autoComplete="current-password"
                         autoFocus
                         {...register("password")}
                     />
@@ -567,12 +564,31 @@ function SignUpStep({
     onBack: () => void;
     onSubmit: (data: z.infer<typeof signUpSchema>) => void;
 }) {
-    const { register, handleSubmit, watch, formState: { errors } } = useForm<z.infer<typeof signUpSchema>>({
+    const { register, handleSubmit, watch, setError, formState: { errors } } = useForm<z.infer<typeof signUpSchema>>({
         resolver: zodResolver(signUpSchema),
         defaultValues: { password: "", confirmPassword: "", acceptTerms: false },
     });
     const pw = watch("password");
     const termsChecked = watch("acceptTerms");
+
+    const { evaluate } = usePasswordStrength();
+    const [strength, setStrength] = useState<{ score: 0 | 1 | 2 | 3 | 4; warning: string }>({ score: 0, warning: "" });
+
+    useEffect(() => {
+        if (!pw) { setStrength({ score: 0, warning: "" }); return; }
+        let cancelled = false;
+        evaluate(pw).then((r) => { if (!cancelled) setStrength({ score: r.score, warning: r.warning }); });
+        return () => { cancelled = true; };
+    }, [pw, evaluate]);
+
+    const onFormSubmit = handleSubmit(async (data) => {
+        const result = await evaluate(data.password);
+        if (result.score < 2) {
+            setError("password", { message: result.warning || "Please choose a stronger password." });
+            return;
+        }
+        onSubmit(data);
+    });
 
     return (
         <div>
@@ -584,19 +600,21 @@ function SignUpStep({
                 </p>
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={onFormSubmit} className="space-y-4">
                 <div>
                     <label className="text-sm font-medium text-slate-600 pl-0.5">Password</label>
-                    <input type="password" placeholder="Create a password" className={INPUT} autoFocus {...register("password")} />
+                    <input type="password" placeholder="Create a password" className={INPUT} autoComplete="new-password" autoFocus {...register("password")} />
                     <FieldError message={errors.password?.message} />
-                    <div className="mt-2">
-                        <PasswordStrength password={pw} />
-                    </div>
+                    {pw && (
+                        <div className="mt-2">
+                            <PasswordStrength score={strength.score} warning={strength.warning} />
+                        </div>
+                    )}
                 </div>
 
                 <div>
                     <label className="text-sm font-medium text-slate-600 pl-0.5">Confirm password</label>
-                    <input type="password" placeholder="Confirm your password" className={INPUT} {...register("confirmPassword")} />
+                    <input type="password" placeholder="Confirm your password" className={INPUT} autoComplete="new-password" {...register("confirmPassword")} />
                     <FieldError message={errors.confirmPassword?.message} />
                 </div>
 

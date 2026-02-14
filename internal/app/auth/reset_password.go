@@ -11,6 +11,7 @@ import (
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/notify/templates"
+	"github.com/warmbly/warmbly/internal/pkg/argon2"
 	"github.com/warmbly/warmbly/internal/pkg/crypt"
 )
 
@@ -101,7 +102,17 @@ func (s *authService) ResetPasswordConfirm(ctx context.Context, data *ResetPassw
 		return err
 	}
 
-	if err := s.authRepository.ResetPassword(ctx, sess.UserID, data.Password); err != nil {
+	if !crypt.ValidatePassword(data.Password) {
+		return errx.ErrPassword
+	}
+
+	passwordHash, hashErr := argon2.Hash(data.Password)
+	if hashErr != nil {
+		sentry.CaptureException(hashErr)
+		return errx.InternalError()
+	}
+
+	if err := s.authRepository.ResetPassword(ctx, sess.UserID, passwordHash); err != nil {
 		return err
 	}
 

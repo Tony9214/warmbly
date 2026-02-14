@@ -3,7 +3,12 @@ import type Category from "../app/Category";
 import type Folder from "../app/Folder";
 
 export default interface User {
+    first_name: string;
+    last_name: string;
     email: string;
+
+    referral_source: string;
+    onboarding_completed_at: Date | null;
 
     tags: Tag[];
     categories: Category[];

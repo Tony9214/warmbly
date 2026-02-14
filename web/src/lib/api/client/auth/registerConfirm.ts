@@ -4,7 +4,7 @@ import Request from "../Request";
 export default async function registerConfirm(data: RegisterConfirm): Promise<void> {
     return await Request<void>({
         method: "POST",
-        url: "/auth/register",
+        url: "/auth/register/confirm",
         data,
     })
 }

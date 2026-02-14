@@ -39,6 +39,10 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
         return <Navigate to="/auth/login" replace />;
     }
 
+    if (user.data && !user.data.onboarding_completed_at) {
+        return <Navigate to="/onboarding" replace />;
+    }
+
     return (
         <>
             {(user.data && access.data && timezones.data) &&

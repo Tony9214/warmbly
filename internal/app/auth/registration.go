@@ -20,6 +20,10 @@ func (s *authService) RegistrationStart(ctx context.Context, data *AuthData, ipa
 		return nil, errx.InternalError()
 	}
 
+	if !crypt.ValidatePassword(data.Password) {
+		return nil, errx.ErrPassword
+	}
+
 	if err := s.canSendEmail(ctx, data.Email); err != nil {
 		return nil, err
 	}

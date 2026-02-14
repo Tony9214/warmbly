@@ -105,6 +105,30 @@ docker compose exec backend sh
 go run cmd/migrate/main.go up
 ```
 
+### Seed Sample Data
+
+The database starts empty. To create a test user for login:
+
+```bash
+# Running natively (with postgres on localhost)
+go run ./cmd/seed/
+
+# Or via Docker
+docker compose --profile seed run --rm seed
+```
+
+This creates:
+
+| Field | Value |
+|-------|-------|
+| Email | dev@warmbly.com |
+| Password | password123 |
+| Organization | Dev's Organization |
+
+The seed is idempotent — it skips if the user already exists.
+
+To test **registration**, use any email address. Mailpit catches all outbound emails so the verification code will appear at http://localhost:8025.
+
 ### Connect to Database
 
 ```bash

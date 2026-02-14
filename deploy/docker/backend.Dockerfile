@@ -12,6 +12,7 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -tags musl -ldflags="-s -w" -o /backend ./cmd/backend
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /seed ./cmd/seed
 
 # Runtime stage
 FROM alpine:3.23
@@ -20,6 +21,7 @@ RUN apk add --no-cache ca-certificates tzdata librdkafka
 RUN adduser -D -u 1000 warmbly
 
 COPY --from=builder /backend /app/backend
+COPY --from=builder /seed /app/seed
 
 USER warmbly
 EXPOSE 8080

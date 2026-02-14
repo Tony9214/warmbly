@@ -52,6 +52,8 @@ import LoginConfirmPage from './app/auth/login/confirm/page';
 import ResetPasswordLayout from './app/auth/reset-password/layout';
 import ResetPasswordPage from './app/auth/reset-password/page';
 import ResetPasswordConfirmPage from './app/auth/reset-password/confirm/page';
+import OnboardingLayout from './app/onboarding/layout';
+import OnboardingPage from './app/onboarding/page';
 
 const queryClient = new QueryClient();
 
@@ -109,6 +111,16 @@ const router = createBrowserRouter([
                 element: <ResetPasswordConfirmPage />,
               }
             ]
+          }
+        ]
+      },
+      {
+        path: "onboarding",
+        element: <OnboardingLayout />,
+        children: [
+          {
+            index: true,
+            element: <OnboardingPage />,
           }
         ]
       },

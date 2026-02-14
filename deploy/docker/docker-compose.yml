@@ -123,7 +123,7 @@ services:
       APPLE_TEAM_ID: local-apple-team-id
       APPLE_KEY_ID: local-apple-key-id
       APPLE_KEY_SECRET: local-apple-key-secret-base64
-      TURNSTILE_SECRET: local-turnstile-secret
+      TURNSTILE_SECRET: 1x0000000000000000000000000000000AA
 
       # === Stripe ===
       STRIPE_SECRET_KEY: sk_test_local
@@ -294,6 +294,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # One-off: seed dev database with sample user
+  seed:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/backend.Dockerfile
+    command: ["/app/seed"]
+    environment:
+      PRIMARY_DB: postgres://warmbly:warmbly@postgres:5432/warmbly_dev?sslmode=disable
+    depends_on:
+      backend:
+        condition: service_healthy
+    profiles:
+      - seed
 
 volumes:
   postgres_data:

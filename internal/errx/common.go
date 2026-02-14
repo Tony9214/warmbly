@@ -28,7 +28,7 @@ var (
 	ErrAuth  = New(BadRequest, "Missing or invalid Authorization header.")
 
 	ErrUser        = New(BadRequest, "User doesn't exists.")
-	ErrPassword    = New(BadRequest, "The password must be between 8 and 50 characters long and contain both uppercase and lowercase letters, as well as a number.")
+	ErrPassword    = New(BadRequest, "Password must be at least 8 characters long.")
 	ErrEmail       = New(BadRequest, "Invalid email address.")
 	ErrCredentials = New(BadRequest, "Invalid email or password.")
 	ErrSession     = New(BadRequest, "Invalid or expired session.")

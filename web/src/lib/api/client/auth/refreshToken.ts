@@ -8,7 +8,7 @@ export default async function refreshToken(refresh_token: string): Promise<Token
     }
 
     const res = await Request<Token>({
-        method: "GET",
+        method: "POST",
         url: "/auth/refresh",
         data,
     })

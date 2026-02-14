@@ -36,21 +36,22 @@ func Run(
 
 	auth := r.Group("/auth")
 	{
-		r.POST("/login/start", h.LoginStart)
-		r.POST("/login/confirm", h.LoginConfirm)
-		r.POST("/register/start", h.RegistrationStart)
-		r.POST("/register/confirm", h.RegistrationConfirm)
-		r.POST("/refresh", h.RefreshToken)
-		r.POST("/reset-password/start", h.ResetPasswordStart)
-		r.POST("/reset-password/confirm", h.ResetPasswordStart)
+		auth.POST("/login", h.LoginStart)
+		auth.POST("/login/confirm", h.LoginConfirm)
+		auth.POST("/register", h.RegistrationStart)
+		auth.POST("/register/confirm", h.RegistrationConfirm)
+		auth.POST("/refresh", h.RefreshToken)
+		auth.POST("/reset-password", h.ResetPasswordStart)
+		auth.POST("/reset-password/confirm", h.ResetPasswordConfirm)
 	}
 
 	protectedAuth := auth.Group("")
 	protectedAuth.Use(m.AuthMiddleware())
 	{
-		r.POST("/logout", h.Logout)
-		r.POST("/logout-all", h.LogoutAll)
-		r.GET("/me", h.GetUser)
+		protectedAuth.POST("/logout", h.Logout)
+		protectedAuth.POST("/logout-all", h.LogoutAll)
+		protectedAuth.GET("/me", h.GetUser)
+		protectedAuth.PATCH("/me/onboarding", h.CompleteOnboarding)
 	}
 
 	protected := r.Group("")

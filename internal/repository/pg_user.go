@@ -21,6 +21,7 @@ type UserRepository interface {
 	GetUser(ctx context.Context, id uuid.UUID) (*models.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
 	SetFreeTrialUsed(ctx context.Context, userID uuid.UUID) error
+	UpdateOnboarding(ctx context.Context, userID uuid.UUID, firstName, lastName, referralSource string) error
 }
 
 type userRepository struct {
@@ -54,7 +55,6 @@ func (r *userRepository) CreateUser(ctx context.Context, email *mail.Address, pa
 		INSERT INTO users (
 			id, email, password_hash,
 			first_name, last_name,
-			encrypted_data_key,
 			created_at, updated_at
 		)
 		VALUES (
@@ -96,7 +96,8 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 	var u models.User
 
 	q := fmt.Sprintf(
-		`SELECT u.email, u.max_organizations, u.free_trial_used, u.updated_at, u.created_at,
+		`SELECT u.id, u.email, u.first_name, u.last_name, u.referral_source, u.onboarding_completed_at,
+		   u.max_organizations, u.free_trial_used, u.updated_at, u.created_at,
 		   COALESCE(array_agg(ur.role_id) FILTER (WHERE ur.role_id IS NOT NULL), '{}') AS role_ids
 		  FROM users u
 		  LEFT JOIN user_roles ur ON ur.user_id = u.id
@@ -113,7 +114,8 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 		ctx,
 		q,
 		params...,
-	).Scan(&u.Email, &u.MaxOrganizations, &u.FreeTrialUsed, &u.UpdatedAt, &u.CreatedAt, &u.Roles)
+	).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.ReferralSource, &u.OnboardingCompletedAt,
+		&u.MaxOrganizations, &u.FreeTrialUsed, &u.UpdatedAt, &u.CreatedAt, &u.Roles)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errx.ErrUser
@@ -135,5 +137,11 @@ func (r *userRepository) GetUserByEmail(ctx context.Context, email string) (*mod
 func (r *userRepository) SetFreeTrialUsed(ctx context.Context, userID uuid.UUID) error {
 	const q = `UPDATE users SET free_trial_used = TRUE, updated_at = NOW() WHERE id = $1`
 	_, err := r.DB.Exec(ctx, q, userID)
+	return err
+}
+
+func (r *userRepository) UpdateOnboarding(ctx context.Context, userID uuid.UUID, firstName, lastName, referralSource string) error {
+	const q = `UPDATE users SET first_name=$2, last_name=$3, referral_source=$4, onboarding_completed_at=NOW(), updated_at=NOW() WHERE id=$1`
+	_, err := r.DB.Exec(ctx, q, userID, firstName, lastName, referralSource)
 	return err
 }

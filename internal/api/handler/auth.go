@@ -31,14 +31,12 @@ func (h *Handler) LoginStart(c *gin.Context) {
 func (h *Handler) LoginConfirm(c *gin.Context) {
 	var data auth.ConfirmData
 
-	sessionToken := c.Query("session")
-
 	if err := c.ShouldBindJSON(&data); err != nil {
 		errx.Handle(c, err)
 		return
 	}
 
-	resp, err := h.AuthService.LoginConfirm(c.Request.Context(), &data, sessionToken, c.ClientIP(), c.Request.UserAgent())
+	resp, err := h.AuthService.LoginConfirm(c.Request.Context(), &data, data.Session, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
 		errx.Handle(c, err)
 		return
@@ -67,14 +65,12 @@ func (h *Handler) RegistrationStart(c *gin.Context) {
 func (h *Handler) RegistrationConfirm(c *gin.Context) {
 	var data auth.ConfirmData
 
-	sessionToken := c.Query("session")
-
 	if err := c.ShouldBindJSON(&data); err != nil {
 		errx.Handle(c, err)
 		return
 	}
 
-	if err := h.AuthService.RegistrationConfirm(c.Request.Context(), &data, sessionToken, c.ClientIP()); err != nil {
+	if err := h.AuthService.RegistrationConfirm(c.Request.Context(), &data, data.Session, c.ClientIP()); err != nil {
 		errx.Handle(c, err)
 		return
 	}
@@ -149,7 +145,7 @@ func (h *Handler) GetUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusNoContent, u)
+	c.JSON(http.StatusOK, u)
 }
 
 func (h *Handler) ResetPasswordStart(c *gin.Context) {
@@ -171,14 +167,12 @@ func (h *Handler) ResetPasswordStart(c *gin.Context) {
 func (h *Handler) ResetPasswordConfirm(c *gin.Context) {
 	var data auth.ResetPasswordConfirm
 
-	sessionToken := c.Query("session")
-
 	if err := c.ShouldBindJSON(&data); err != nil {
 		errx.Handle(c, errx.ErrInvalid)
 		return
 	}
 
-	if err := h.AuthService.ResetPasswordConfirm(c.Request.Context(), &data, sessionToken, c.ClientIP()); err != nil {
+	if err := h.AuthService.ResetPasswordConfirm(c.Request.Context(), &data, data.Session, c.ClientIP()); err != nil {
 		errx.Handle(c, err)
 		return
 	}
