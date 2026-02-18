@@ -18,7 +18,7 @@ import (
 func (s *authService) ResetPasswordStart(ctx context.Context, data *ResetPasswordStart, ipaddr string) *errx.Error {
 	if err := s.captcha.Verify(ctx, data.Turnstile, ipaddr); err != nil {
 		sentry.CaptureException(err)
-		return errx.InternalError()
+		return err
 	}
 
 	user, err := s.userRepository.GetUserByEmail(ctx, data.Email)
@@ -77,7 +77,7 @@ func (s *authService) ResetPasswordStart(ctx context.Context, data *ResetPasswor
 func (s *authService) ResetPasswordConfirm(ctx context.Context, data *ResetPasswordConfirm, session, ipaddr string) *errx.Error {
 	if err := s.captcha.Verify(ctx, data.Turnstile, ipaddr); err != nil {
 		sentry.CaptureException(err)
-		return errx.InternalError()
+		return err
 	}
 
 	sess, err := s.tokenService.VerifyToken(session)

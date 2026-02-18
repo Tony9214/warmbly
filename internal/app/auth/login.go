@@ -17,7 +17,7 @@ import (
 func (s *authService) LoginStart(ctx context.Context, data *AuthData, ipaddr string) (*models.AuthSession, *errx.Error) {
 	if xerr := s.captcha.Verify(ctx, data.Turnstile, ipaddr); xerr != nil {
 		sentry.CaptureException(xerr)
-		return nil, errx.InternalError()
+		return nil, xerr
 	}
 
 	uid, err := s.authRepository.IsValidCredentials(ctx, data.Email, data.Password)

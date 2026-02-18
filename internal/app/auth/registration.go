@@ -17,7 +17,7 @@ import (
 func (s *authService) RegistrationStart(ctx context.Context, data *AuthData, ipaddr string) (*models.AuthSession, *errx.Error) {
 	if xerr := s.captcha.Verify(ctx, data.Turnstile, ipaddr); xerr != nil {
 		sentry.CaptureException(xerr)
-		return nil, errx.InternalError()
+		return nil, xerr
 	}
 
 	if !crypt.ValidatePassword(data.Password) {
@@ -124,7 +124,7 @@ func (s *authService) RegistrationConfirm(ctx context.Context, data *ConfirmData
 
 	u, xerr := s.userRepository.CreateUser(ctx, email, sess.PasswordHash)
 	if xerr != nil {
-		sentry.CaptureException(err)
+		sentry.CaptureException(xerr)
 		return errx.InternalError()
 	}
 
