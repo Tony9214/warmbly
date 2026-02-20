@@ -11,6 +11,7 @@ This guide explains how to set up and run Warmbly locally for development using 
   - Rust (for tracking service)
   - Elixir 1.18+ (for realtime service)
   - Node.js 20+ (for frontend)
+  - pnpm 10+ (for frontend)
 
 ## Quick Start
 
@@ -176,8 +177,8 @@ go run cmd/backend/main.go
 
 ```bash
 cd web
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Frontend runs at http://localhost:5173 by default.

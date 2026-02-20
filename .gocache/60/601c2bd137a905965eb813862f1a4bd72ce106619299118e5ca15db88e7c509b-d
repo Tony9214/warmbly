@@ -1,5 +1,0 @@
-./base.go
-./login_code.go
-./registration_code.go
-./reset_password.go
-./welcome.go

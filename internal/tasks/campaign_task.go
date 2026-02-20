@@ -105,13 +105,31 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		// Check daily limit
 		limit, _ := s.featureGate.GetDailyEmailLimit(ctx, *campaign.OrganizationID)
 		if limit >= 0 {
-			// TODO: Check sentToday from stats repository
-			// For now, we'll just track that there's a limit
-			// sentToday, _ := s.statsRepo.GetSentToday(ctx, orgID)
-			// if sentToday >= limit {
-			//     s.taskRepo.UpdateTaskStatus(ctx, taskID, "skipped_daily_limit")
-			//     return nil
-			// }
+			sentToday, err := s.campaignProgressRepo.CountEmailsSentTodayByOrganization(ctx, *campaign.OrganizationID)
+			if err == nil && sentToday >= limit {
+				s.taskRepo.UpdateTaskStatus(ctx, taskID, "skipped_daily_limit")
+				if s.campaignLogRepo != nil {
+					s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+						CampaignID: campaign.ID,
+						EventType:  "daily_limit_reached",
+						Message:    "Campaign paused for today: organization daily email limit reached",
+						Metadata: map[string]interface{}{
+							"sent_today": sentToday,
+							"limit":      limit,
+						},
+					})
+				}
+
+				// Reschedule to the next day to keep campaign progression alive.
+				nextDay := time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour).Add(5 * time.Minute)
+				_, _, nextAccountID, calcErr := s.scheduler.CalculateNextCampaignTime(ctx, *campaignTask.CampaignID)
+				if calcErr == nil {
+					if err := s.createCampaignTask(ctx, campaign.ID, nextAccountID, nextDay); err != nil {
+						fmt.Printf("Failed to create next campaign task after daily limit: %v\n", err)
+					}
+				}
+				return nil
+			}
 		}
 	}
 
@@ -163,7 +181,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 			// Contact has replied, skip
 			s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
 			// Create next task anyway for next contact
-			s.createCampaignTask(ctx, campaign.ID, nextTime)
+			s.createCampaignTask(ctx, campaign.ID, accountID, nextTime)
 			return nil
 		}
 	}
@@ -380,10 +398,10 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	}
 
 	// STEP 19: Publish events to Kafka
-	s.publishEmailSentEvent(ctx, taskRecord, account, campaign)
+	s.publishEmailSentEvent(ctx, taskRecord, account, campaign, contact, sequence)
 
 	// STEP 20: Create next campaign task
-	if err := s.createCampaignTask(ctx, campaign.ID, nextTime); err != nil {
+	if err := s.createCampaignTask(ctx, campaign.ID, account.ID, nextTime); err != nil {
 		// Log but don't fail the current task
 		fmt.Printf("Failed to create next campaign task: %v\n", err)
 	}
@@ -406,14 +424,15 @@ func (s *tasksService) autoPauseCampaign(ctx context.Context, campaignID, taskID
 }
 
 // createCampaignTask creates a new campaign task in GCP Cloud Tasks
-func (s *tasksService) createCampaignTask(ctx context.Context, campaignID uuid.UUID, scheduleTime time.Time) error {
+func (s *tasksService) createCampaignTask(ctx context.Context, campaignID, accountID uuid.UUID, scheduleTime time.Time) error {
 	// Create task in database with advisory lock
 	newTaskID := uuid.New()
 	newTask := &Task{
-		ID:          newTaskID,
-		TaskType:    "campaign",
-		Status:      "pending",
-		ScheduledAt: &scheduleTime,
+		ID:             newTaskID,
+		TaskType:       "campaign",
+		EmailAccountID: accountID,
+		Status:         "pending",
+		ScheduledAt:    &scheduleTime,
 	}
 
 	campaignTask := &CampaignTask{
@@ -444,9 +463,19 @@ func (s *tasksService) createCampaignTask(ctx context.Context, campaignID uuid.U
 }
 
 // publishEmailSentEvent publishes email sent event to Kafka
-func (s *tasksService) publishEmailSentEvent(ctx context.Context, task *Task, account *Email, campaign *Campaign) {
-	// TODO: Implement Kafka event publishing
-	// This will be implemented in Phase 5
-	fmt.Printf("Email sent: task=%s, account=%s, campaign=%s\n", task.ID, account.ID, campaign.ID)
-}
+func (s *tasksService) publishEmailSentEvent(
+	ctx context.Context,
+	task *Task,
+	account *Email,
+	campaign *Campaign,
+	contact *Contact,
+	sequence *Sequence,
+) {
+	if s.eventsPublisher == nil {
+		return
+	}
 
+	if err := s.eventsPublisher.PublishEmailSent(ctx, task, account, campaign, contact, sequence); err != nil {
+		fmt.Printf("Failed to publish email sent event: %v\n", err)
+	}
+}

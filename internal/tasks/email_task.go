@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -56,33 +57,41 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		return errx.InternalError()
 	}
 
-	// STEP 5: Determine if this should be a reply or new email
-	replyRate := account.WarmupReplyRate
-	shouldReply := rand.Float64()*100 < float64(replyRate)
-
-	var subject, emailBody string
-	var inReplyTo string
-
-	if shouldReply {
-		// TODO: Find warmup email to reply to from Cassandra
-		// For now, just send new email
-		shouldReply = false
-	}
-
-	// STEP 6: Generate warmup email content
-	if !shouldReply {
-		// Get random conversation from database
-		// TODO: Implement conversation retrieval
-		// For now, generate simple warmup email
-		subject = generateWarmupSubject()
-		emailBody = generateWarmupBody(account.Name)
-	}
-
-	// STEP 7: Select warmup partner from pool
+	// STEP 5: Select warmup partner from pool
 	partner, err := s.selectWarmupPartner(ctx, *account)
 	if err != nil {
 		s.taskRepo.RecordTaskFailure(ctx, taskID, "No warmup partner", err.Error())
 		return nil
+	}
+
+	// STEP 6: Determine if this should be a reply or a new warmup email
+	replyRate := account.WarmupReplyRate
+	shouldReply := rand.Float64()*100 < float64(replyRate)
+	var subject, emailBody string
+	var inReplyTo string
+
+	if shouldReply {
+		candidate, replyErr := s.warmupRepo.GetLatestReplyCandidate(ctx, partner.ID, account.ID)
+		if replyErr == nil && candidate != nil && candidate.MessageID != "" {
+			inReplyTo = candidate.MessageID
+			subject = strings.TrimSpace(candidate.Subject)
+			if subject == "" {
+				subject = generateWarmupSubject()
+			}
+			if !strings.HasPrefix(strings.ToLower(subject), "re:") {
+				subject = "Re: " + subject
+			}
+			emailBody = GenerateConversationEmail(randomWarmupConversation(), *account, true)
+		} else {
+			shouldReply = false
+		}
+	}
+
+	// STEP 7: Build a new warmup message when not replying
+	if !shouldReply {
+		conversation := randomWarmupConversation()
+		subject = generateWarmupSubject()
+		emailBody = GenerateConversationEmail(conversation, *account, false)
 	}
 
 	// STEP 8: Encrypt content
@@ -135,7 +144,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		From:        account.Email,
 		To:          []string{partner.Email},
 		Subject:     subject,
-		BodyHTML:    "",          // Warmup emails are plaintext only
+		BodyHTML:    "", // Warmup emails are plaintext only
 		BodyPlain:   emailBody,
 		InReplyTo:   inReplyTo,
 		MessageID:   messageID,
@@ -166,7 +175,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	}
 
 	// STEP 14: Publish events
-	s.publishWarmupEmailSentEvent(ctx, taskRecord, account)
+	s.publishWarmupEmailSentEvent(ctx, taskRecord, account, partner, shouldReply)
 
 	// STEP 15: Calculate next warmup time and create new task
 	nextTime, err := s.scheduler.CalculateNextWarmupTime(ctx, account.ID)
@@ -207,13 +216,28 @@ func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (
 		return nil, fmt.Errorf("no warmup partners available")
 	}
 
-	// Filter out sender's own accounts and recently used partners
+	// Filter out sender's own account and recently used partners.
+	recentPartnerSet := map[uuid.UUID]struct{}{}
+	recentPartnerIDs, err := s.warmupRepo.GetRecentlyUsedPartners(ctx, account.ID, time.Now().Add(-24*time.Hour))
+	if err == nil {
+		for _, pid := range recentPartnerIDs {
+			recentPartnerSet[pid] = struct{}{}
+		}
+	}
+
 	var availablePartners []uuid.UUID
+	var fallbackPartners []uuid.UUID
 	for _, id := range participantIDs {
 		if id != account.ID {
-			// TODO: Check if not recently used
-			availablePartners = append(availablePartners, id)
+			fallbackPartners = append(fallbackPartners, id)
+			if _, recentlyUsed := recentPartnerSet[id]; !recentlyUsed {
+				availablePartners = append(availablePartners, id)
+			}
 		}
+	}
+
+	if len(availablePartners) == 0 && len(fallbackPartners) > 0 {
+		availablePartners = fallbackPartners
 	}
 
 	if len(availablePartners) == 0 {
@@ -276,9 +300,14 @@ func (s *tasksService) createWarmupTask(ctx context.Context, accountID uuid.UUID
 }
 
 // publishWarmupEmailSentEvent publishes warmup email sent event
-func (s *tasksService) publishWarmupEmailSentEvent(ctx context.Context, task *Task, account *Email) {
-	// TODO: Implement Kafka event publishing
-	fmt.Printf("Warmup email sent: task=%s, account=%s\n", task.ID, account.ID)
+func (s *tasksService) publishWarmupEmailSentEvent(ctx context.Context, task *Task, account *Email, partner *Email, isReply bool) {
+	if s.eventsPublisher == nil {
+		return
+	}
+
+	if err := s.eventsPublisher.PublishWarmupEmailSent(ctx, task, account, partner, isReply); err != nil {
+		fmt.Printf("Failed to publish warmup email sent event: %v\n", err)
+	}
 }
 
 // generateWarmupSubject generates a random warmup email subject
@@ -293,13 +322,27 @@ func generateWarmupSubject() string {
 	return subjects[rand.Intn(len(subjects))]
 }
 
-// generateWarmupBody generates a simple warmup email body
-func generateWarmupBody(senderName string) string {
-	bodies := []string{
-		fmt.Sprintf("Hi,\n\nI wanted to reach out and see how things are going.\n\nBest regards,\n%s", senderName),
-		fmt.Sprintf("Hello,\n\nJust checking in to see if you had any questions.\n\nThanks,\n%s", senderName),
-		fmt.Sprintf("Hi there,\n\nI hope this email finds you well.\n\nBest,\n%s", senderName),
+func randomWarmupConversation() Conversation {
+	conversations := []Conversation{
+		{
+			ID:          uuid.New(),
+			Theme:       "productivity",
+			Description: "I have been trying a few workflow changes and wondered what worked best for your week.",
+			Messages:    []string{"How do you structure focused work blocks?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "learning",
+			Description: "I came across a useful article and it got me curious about what resources you rely on lately.",
+			Messages:    []string{"Any newsletter or podcast you consistently recommend?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "collaboration",
+			Description: "I was thinking about how teams keep communication clear when work gets busy.",
+			Messages:    []string{"What has helped your team keep projects moving smoothly?"},
+		},
 	}
-	return bodies[rand.Intn(len(bodies))]
-}
 
+	return conversations[rand.Intn(len(conversations))]
+}

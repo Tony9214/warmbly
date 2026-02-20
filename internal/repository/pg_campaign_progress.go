@@ -23,14 +23,14 @@ type CampaignContactProgress struct {
 
 // CampaignProgress represents overall campaign progress
 type CampaignProgress struct {
-	TotalContacts   int
-	TotalSequences  int
-	EmailsSent      int
-	EmailsPending   int
-	EmailsOpened    int
-	EmailsClicked   int
-	EmailsReplied   int
-	EmailsBounced   int
+	TotalContacts  int
+	TotalSequences int
+	EmailsSent     int
+	EmailsPending  int
+	EmailsOpened   int
+	EmailsClicked  int
+	EmailsReplied  int
+	EmailsBounced  int
 }
 
 // ContactSequencePair represents a contact and sequence combination
@@ -53,6 +53,7 @@ type CampaignProgressRepository interface {
 	GetContactProgress(ctx context.Context, campaignID, contactID uuid.UUID) ([]CampaignContactProgress, error)
 	GetContactLastSequenceTime(ctx context.Context, contactID, campaignID uuid.UUID) (*time.Time, error)
 	CheckContactHasReplied(ctx context.Context, contactID, campaignID uuid.UUID) (bool, error)
+	CountEmailsSentTodayByOrganization(ctx context.Context, organizationID uuid.UUID) (int, error)
 
 	// Find next email to send
 	FindNextContactSequence(ctx context.Context, campaignID uuid.UUID, orderBy, orderDir, orderField string) (*ContactSequencePair, error)
@@ -260,6 +261,22 @@ func (r *campaignProgressRepository) CheckContactHasReplied(ctx context.Context,
 	var hasReplied bool
 	err := r.db.QueryRow(ctx, query, contactID, campaignID).Scan(&hasReplied)
 	return hasReplied, err
+}
+
+// CountEmailsSentTodayByOrganization returns how many campaign emails were sent today by an organization.
+func (r *campaignProgressRepository) CountEmailsSentTodayByOrganization(ctx context.Context, organizationID uuid.UUID) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM campaign_contact_progress ccp
+		JOIN campaigns c ON c.id = ccp.campaign_id
+		WHERE c.organization_id = $1
+		  AND ccp.sent_at IS NOT NULL
+		  AND DATE(ccp.sent_at) = CURRENT_DATE
+	`
+
+	var count int
+	err := r.db.QueryRow(ctx, query, organizationID).Scan(&count)
+	return count, err
 }
 
 // FindNextContactSequence finds the next contact/sequence pair that needs to be sent

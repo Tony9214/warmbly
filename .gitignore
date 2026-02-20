@@ -42,3 +42,6 @@ go.work.sum
 
 # MCP servers
 .mcp.json
+
+# Local Go build cache
+.gocache/

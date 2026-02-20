@@ -56,6 +56,7 @@ import (
 	"github.com/warmbly/warmbly/internal/pkg/geo"
 	"github.com/warmbly/warmbly/internal/repository"
 	"github.com/warmbly/warmbly/internal/scheduler"
+	"github.com/warmbly/warmbly/internal/tasks"
 )
 
 func main() {
@@ -77,6 +78,7 @@ func main() {
 	var socketService socket.SocketService
 	var uniboxService unibox.UniboxService
 	var cipherService cipher.CipherService
+	var tasksService tasks.TasksService
 
 	var folderService group.GroupService
 	var tagService group.GroupService
@@ -428,6 +430,25 @@ func main() {
 		templateService = template.NewService(templateRepository)
 		schedulerService := scheduler.NewSchedulerService(taskRepository, warmupRepository, campaignProgressRepository, emailRepostory, campaignRepostory)
 		emailSendService = emailsend.NewService(taskRepository, emailRepostory, schedulerService, tasksClient, featureGateService)
+		emailSender := tasks.NewEmailSender(emailRepostory, eventsPublisher)
+		tasksService = tasks.NewService(
+			tasksClient,
+			kafkaProducer,
+			nil, // AI generation client is optional for task execution
+			streamingPublisher,
+			eventsPublisher,
+			schedulerService,
+			cipherService,
+			emailSender,
+			featureGateService,
+			taskRepository,
+			warmupRepository,
+			campaignProgressRepository,
+			emailRepostory,
+			campaignRepostory,
+			contactRepostory,
+			campaignLogRepository,
+		)
 
 		// Admin service
 		adminRepository := repository.NewAdminRepository(primaryDB.Pool)
@@ -462,6 +483,7 @@ func main() {
 
 		TzService:     tzService,
 		SocketService: socketService,
+		TasksService:  tasksService,
 
 		// API Keys
 		APIKeyService: apiKeyService,

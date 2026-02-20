@@ -49,6 +49,13 @@ type WarmupStatistic struct {
 	TargetVolume   int
 }
 
+// WarmupReplyCandidate describes a previously sent warmup message that can be replied to.
+type WarmupReplyCandidate struct {
+	MessageID string
+	Subject   string
+	ThreadID  *string
+}
+
 // WarmupRepository defines methods for warmup data access
 type WarmupRepository interface {
 	// Pool management
@@ -77,6 +84,10 @@ type WarmupRepository interface {
 	ConsumeWarmupToken(ctx context.Context, tokenID uuid.UUID) error
 	RecordInvalidTokenAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string) error
 	CountRecentInvalidAttempts(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error)
+
+	// Warmup conversation support
+	GetRecentlyUsedPartners(ctx context.Context, accountID uuid.UUID, since time.Time) ([]uuid.UUID, error)
+	GetLatestReplyCandidate(ctx context.Context, senderAccountID, recipientAccountID uuid.UUID) (*WarmupReplyCandidate, error)
 }
 
 type warmupRepository struct {
@@ -412,4 +423,63 @@ func (r *warmupRepository) CountRecentInvalidAttempts(ctx context.Context, accou
 	var count int
 	err := r.db.QueryRow(ctx, query, accountID, since).Scan(&count)
 	return count, err
+}
+
+// GetRecentlyUsedPartners returns partner account IDs the sender has targeted since the provided timestamp.
+func (r *warmupRepository) GetRecentlyUsedPartners(ctx context.Context, accountID uuid.UUID, since time.Time) ([]uuid.UUID, error) {
+	query := `
+		SELECT DISTINCT recipient_account_id
+		FROM warmup_tokens
+		WHERE sender_account_id = $1
+		  AND created_at >= $2
+	`
+
+	rows, err := r.db.Query(ctx, query, accountID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var partnerIDs []uuid.UUID
+	for rows.Next() {
+		var partnerID uuid.UUID
+		if err := rows.Scan(&partnerID); err != nil {
+			return nil, err
+		}
+		partnerIDs = append(partnerIDs, partnerID)
+	}
+
+	return partnerIDs, rows.Err()
+}
+
+// GetLatestReplyCandidate finds the latest completed warmup email from sender to recipient.
+func (r *warmupRepository) GetLatestReplyCandidate(ctx context.Context, senderAccountID, recipientAccountID uuid.UUID) (*WarmupReplyCandidate, error) {
+	query := `
+		SELECT t.message_id, COALESCE(et.subject, ''), et.thread_id
+		FROM warmup_tokens wt
+		JOIN tasks t ON t.id = wt.task_id
+		LEFT JOIN email_tasks et ON et.task_id = t.id
+		WHERE wt.sender_account_id = $1
+		  AND wt.recipient_account_id = $2
+		  AND t.status = 'completed'
+		  AND t.message_id <> ''
+		  AND t.completed_at IS NOT NULL
+		ORDER BY t.completed_at DESC
+		LIMIT 1
+	`
+
+	candidate := &WarmupReplyCandidate{}
+	err := r.db.QueryRow(ctx, query, senderAccountID, recipientAccountID).Scan(
+		&candidate.MessageID,
+		&candidate.Subject,
+		&candidate.ThreadID,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return candidate, nil
 }

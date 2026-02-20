@@ -117,6 +117,7 @@ func Run(
 			unibox.GET("/count", h.GetUnseenCount)
 			unibox.GET("/thread", h.GetUniboxThread)
 			unibox.PATCH("/seen", h.UniboxMarkSeen)
+			unibox.POST("/reply", m.RequireOrganization(), h.UniboxReply)
 			unibox.GET("/:id", h.GetUniboxEmail)
 		}
 

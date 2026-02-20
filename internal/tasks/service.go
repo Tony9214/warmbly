@@ -4,6 +4,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/errx"
+	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
@@ -42,6 +43,7 @@ type tasksService struct {
 	producerClient     *kafka.Producer
 	generationClient   *generation.GenerationClient
 	streamingPublisher *pubsub.StreamingPublisher
+	eventsPublisher    events.Publisher
 
 	// Services
 	scheduler     scheduler.SchedulerService
@@ -64,6 +66,7 @@ func NewService(
 	producerClient *kafka.Producer,
 	generationClient *generation.GenerationClient,
 	streamingPublisher *pubsub.StreamingPublisher,
+	eventsPublisher events.Publisher,
 	scheduler scheduler.SchedulerService,
 	cipherService cipher.CipherService,
 	emailSender EmailSender,
@@ -81,6 +84,7 @@ func NewService(
 		producerClient:       producerClient,
 		generationClient:     generationClient,
 		streamingPublisher:   streamingPublisher,
+		eventsPublisher:      eventsPublisher,
 		scheduler:            scheduler,
 		cipherService:        cipherService,
 		emailSender:          emailSender,

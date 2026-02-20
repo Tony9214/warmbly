@@ -1,7 +1,0 @@
-./builder.go
-./doc.go
-./errors.go
-./nodes.go
-./reader.go
-./sml.go
-./writer.go

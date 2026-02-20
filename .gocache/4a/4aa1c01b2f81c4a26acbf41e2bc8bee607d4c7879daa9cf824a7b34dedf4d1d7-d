@@ -1,7 +1,0 @@
-./admin.go
-./apikey.go
-./auth.go
-./handler.go
-./oidc.go
-./organization.go
-./ratelimit.go

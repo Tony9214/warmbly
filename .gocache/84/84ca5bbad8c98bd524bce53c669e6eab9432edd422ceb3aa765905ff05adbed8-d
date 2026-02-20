@@ -1,5 +1,0 @@
-./cloudtasks.pb.go
-./cloudtasks_grpc.pb.go
-./queue.pb.go
-./target.pb.go
-./task.pb.go

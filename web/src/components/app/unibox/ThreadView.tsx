@@ -8,9 +8,9 @@ interface ThreadViewProps {
 
 export function ThreadView({ threadId }: ThreadViewProps) {
   const emails = useAppStore((s) => s.uniboxEmails)
-  const threadEmails = emails.filter(
-    (e) => e.thread_id === threadId || e.id === threadId
-  )
+  const threadEmails = emails
+    .filter((e) => e.thread_id === threadId || e.id === threadId)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
   if (threadEmails.length === 0) {
     return (
@@ -35,7 +35,7 @@ export function ThreadView({ threadId }: ThreadViewProps) {
           <MessageBubble key={email.id} email={email} />
         ))}
       </div>
-      <ReplyComposer threadId={threadId} />
+      <ReplyComposer threadId={threadId} threadEmails={threadEmails} />
     </div>
   )
 }
