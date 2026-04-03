@@ -64,6 +64,7 @@ func main() {
 	var addr string
 	var ginMode string
 	var websocketURI string
+	var allowedOrigins []string
 
 	var tzService tz.TzService
 
@@ -482,6 +483,7 @@ func main() {
 		addr = apiCfg.Hostname
 		ginMode = apiCfg.GinMode
 		websocketURI = apiCfg.WebsocketURI
+		allowedOrigins = apiCfg.AllowedOrigins
 	}
 
 	h := &handler.Handler{
@@ -550,5 +552,5 @@ func main() {
 
 	sentry.CaptureMessage("Starting the backend on " + addr)
 
-	api.Run(h, m, oidcH, addr, ginMode)
+	api.Run(h, m, oidcH, addr, ginMode, allowedOrigins)
 }

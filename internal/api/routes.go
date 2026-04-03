@@ -16,6 +16,7 @@ func Run(
 	m *middleware.Handler,
 	oidcm *middleware.OidcHandler,
 	addr, ginMode string,
+	allowedOrigins []string,
 ) {
 	gin.SetMode(ginMode)
 
@@ -25,14 +26,32 @@ func Run(
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"POST", "GET", "PATCH", "OPTIONS", "DELETE"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	corsConfig := cors.Config{
+		AllowMethods:  []string{"POST", "GET", "PATCH", "OPTIONS", "DELETE"},
+		AllowHeaders:  []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders: []string{"Content-Length"},
+		MaxAge:        12 * time.Hour,
+	}
+	switch {
+	case len(allowedOrigins) == 0 && ginMode != gin.ReleaseMode:
+		corsConfig.AllowOrigins = []string{
+			"http://localhost:3000",
+			"http://127.0.0.1:3000",
+			"http://localhost:4173",
+			"http://127.0.0.1:4173",
+			"http://localhost:5173",
+			"http://127.0.0.1:5173",
+		}
+		corsConfig.AllowCredentials = true
+	case len(allowedOrigins) == 1 && allowedOrigins[0] == "*":
+		corsConfig.AllowAllOrigins = true
+		corsConfig.AllowCredentials = false
+	default:
+		corsConfig.AllowOrigins = allowedOrigins
+		corsConfig.AllowCredentials = true
+	}
+
+	r.Use(cors.New(corsConfig))
 
 	auth := r.Group("/auth")
 	{

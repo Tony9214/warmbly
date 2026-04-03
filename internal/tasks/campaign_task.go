@@ -8,6 +8,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
@@ -146,7 +147,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 				_, _, nextAccountID, calcErr := s.scheduler.CalculateNextCampaignTime(ctx, *campaignTask.CampaignID)
 				if calcErr == nil {
 					if err := s.createCampaignTask(ctx, campaign.ID, nextAccountID, nextDay); err != nil {
-						fmt.Printf("Failed to create next campaign task after daily limit: %v\n", err)
+						log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to create next campaign task after daily limit")
 					}
 				}
 				executionStatus = "completed"
@@ -218,7 +219,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	// processing open/click events from the tracking pixel service
 	if err := s.taskRepo.UpdateCampaignTaskTracking(ctx, taskID, contact.ID, sequence.ID); err != nil {
 		// Log but don't fail - tracking can still work via fallback methods
-		fmt.Printf("Failed to update campaign task tracking: %v\n", err)
+		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to update campaign task tracking")
 	}
 
 	// STEP 8: Check stop_on_reply
@@ -399,7 +400,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	// STEP 17: Update campaign progress
 	if err := s.campaignProgressRepo.RecordEmailSent(ctx, campaign.ID, contact.ID, sequence.ID); err != nil {
 		// Log but don't fail
-		fmt.Printf("Failed to record email sent: %v\n", err)
+		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to record email sent")
 	}
 
 	// Log email sent
@@ -478,7 +479,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 
 	if err := s.createCampaignTask(ctx, campaign.ID, account.ID, scheduledNext); err != nil {
 		// Log but don't fail the current task
-		fmt.Printf("Failed to create next campaign task: %v\n", err)
+		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to create next campaign task")
 	}
 
 	executionStatus = "completed"
@@ -552,6 +553,6 @@ func (s *tasksService) publishEmailSentEvent(
 	}
 
 	if err := s.eventsPublisher.PublishEmailSent(ctx, task, account, campaign, contact, sequence); err != nil {
-		fmt.Printf("Failed to publish email sent event: %v\n", err)
+		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", task.ID.String()).Msg("Failed to publish email sent event")
 	}
 }

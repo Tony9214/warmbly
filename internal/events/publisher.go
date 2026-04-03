@@ -21,7 +21,7 @@ import (
 // Publisher handles event publishing to Kafka and S3 storage
 type Publisher interface {
 	// Storage
-	StoreEmailBody(ctx context.Context, taskID uuid.UUID, plainText, htmlBody string) (string, error)
+	StoreEmailBody(ctx context.Context, taskID, userID uuid.UUID, plainText, htmlBody string) (string, error)
 
 	// Email events - sends to worker via Kafka
 	PublishSendEmail(ctx context.Context, workerID uuid.UUID, params *SendEmailParams) error
@@ -83,7 +83,7 @@ func NewPublisher(producer *kafka.Producer, storageClient *storage.Client, avrov
 // PublishSendEmail stores email body in S3 and publishes a send email event to the worker
 func (p *publisher) PublishSendEmail(ctx context.Context, workerID uuid.UUID, params *SendEmailParams) error {
 	// Store email body in S3
-	s3Key, err := p.StoreEmailBody(ctx, params.TaskID, params.BodyPlain, params.BodyHTML)
+	s3Key, err := p.StoreEmailBody(ctx, params.TaskID, params.UserID, params.BodyPlain, params.BodyHTML)
 	if err != nil {
 		return fmt.Errorf("failed to store email body: %w", err)
 	}
@@ -130,15 +130,36 @@ func (p *publisher) PublishSendEmail(ctx context.Context, workerID uuid.UUID, pa
 }
 
 // StoreEmailBody stores email body in S3 and returns the S3 key
-func (p *publisher) StoreEmailBody(ctx context.Context, taskID uuid.UUID, plainText, htmlBody string) (string, error) {
+func (p *publisher) StoreEmailBody(ctx context.Context, taskID, userID uuid.UUID, plainText, htmlBody string) (string, error) {
 	if p.storageClient == nil {
 		return "", nil
 	}
 
+	encPlainText := plainText
+	encHTMLBody := htmlBody
+	if p.cipherService != nil {
+		c, err := p.cipherService.Cipher(ctx, userID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get cipher: %w", err)
+		}
+		if plainText != "" {
+			encPlainText, err = c.Encrypt(ctx, plainText)
+			if err != nil {
+				return "", fmt.Errorf("failed to encrypt plain body: %w", err)
+			}
+		}
+		if htmlBody != "" {
+			encHTMLBody, err = c.Encrypt(ctx, htmlBody)
+			if err != nil {
+				return "", fmt.Errorf("failed to encrypt html body: %w", err)
+			}
+		}
+	}
+
 	// Create email blob
 	blob := &emsg.EmailBlob{
-		PlainText: []byte(plainText),
-		HTMLBody:  []byte(htmlBody),
+		PlainText: []byte(encPlainText),
+		HTMLBody:  []byte(encHTMLBody),
 	}
 
 	data, err := blob.EncodeBinary()

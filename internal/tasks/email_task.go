@@ -9,6 +9,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
@@ -191,8 +192,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		ExpiresAt:          time.Now().Add(7 * 24 * time.Hour),
 	}
 	if err := s.warmupRepo.CreateWarmupToken(ctx, tokenRecord); err != nil {
-		// Non-fatal: log but continue sending
-		fmt.Printf("Failed to create warmup token: %v\n", err)
+		log.Warn().Err(err).Str("task_id", taskID.String()).Str("email_account_id", account.ID.String()).Msg("Failed to create warmup token")
 	} else {
 		warmupTokenStr = warmupToken.String()
 	}
@@ -229,7 +229,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 
 	// STEP 12: Update warmup statistics
 	if err := s.warmupRepo.IncrementDailyCount(ctx, account.ID, time.Now()); err != nil {
-		fmt.Printf("Failed to increment daily count: %v\n", err)
+		log.Warn().Err(err).Str("task_id", taskID.String()).Str("email_account_id", account.ID.String()).Msg("Failed to increment warmup daily count")
 	}
 
 	// STEP 13: Mark task completed (with advisory lock)
@@ -244,12 +244,12 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	// STEP 15: Calculate next warmup time and create new task
 	nextTime, err := s.scheduler.CalculateNextWarmupTime(ctx, account.ID)
 	if err != nil {
-		fmt.Printf("Failed to calculate next warmup time: %v\n", err)
+		log.Warn().Err(err).Str("task_id", taskID.String()).Str("email_account_id", account.ID.String()).Msg("Failed to calculate next warmup time")
 		return nil
 	}
 
 	if err := s.createWarmupTask(ctx, account.ID, nextTime); err != nil {
-		fmt.Printf("Failed to create next warmup task: %v\n", err)
+		log.Warn().Err(err).Str("task_id", taskID.String()).Str("email_account_id", account.ID.String()).Msg("Failed to create next warmup task")
 	}
 
 	executionStatus = "completed"
@@ -340,7 +340,7 @@ func (s *tasksService) scheduleWarmupRecovery(ctx context.Context, accountID uui
 	}
 
 	if err := s.createWarmupTask(ctx, accountID, *health.BlockedUntil); err != nil {
-		fmt.Printf("Failed to create warmup recovery task: %v\n", err)
+		log.Warn().Err(err).Str("email_account_id", accountID.String()).Str("pool_type", poolType).Msg("Failed to create warmup recovery task")
 	}
 }
 
@@ -394,7 +394,7 @@ func (s *tasksService) publishWarmupEmailSentEvent(ctx context.Context, task *Ta
 	}
 
 	if err := s.eventsPublisher.PublishWarmupEmailSent(ctx, task, account, partner, isReply); err != nil {
-		fmt.Printf("Failed to publish warmup email sent event: %v\n", err)
+		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("Failed to publish warmup email sent event")
 	}
 }
 
