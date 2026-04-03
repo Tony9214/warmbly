@@ -1,20 +1,12 @@
 import { useLocation } from 'react-router-dom'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb'
 import { Fragment } from 'react'
 
 const labelMap: Record<string, string> = {
   app: 'Dashboard',
-  emails: 'Email Accounts',
+  emails: 'Accounts',
   contacts: 'Contacts',
   campaigns: 'Campaigns',
-  unibox: 'Unibox',
+  unibox: 'Inbox',
   analytics: 'Analytics',
   crm: 'CRM',
   pipelines: 'Pipelines',
@@ -34,44 +26,33 @@ const labelMap: Record<string, string> = {
 export function DynamicBreadcrumb() {
   const location = useLocation()
   const segments = location.pathname.split('/').filter(Boolean)
-
-  // Remove "app" prefix for cleaner breadcrumbs
   const breadcrumbSegments = segments.filter((s) => s !== 'app')
 
   if (breadcrumbSegments.length === 0) {
     return (
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbPage>Dashboard</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
+      <div className="flex items-center gap-2 text-sm">
+        <span className="font-medium text-zinc-900">Dashboard</span>
+      </div>
     )
   }
 
   return (
-    <Breadcrumb>
-      <BreadcrumbList>
-        {breadcrumbSegments.map((segment, index) => {
-          const isLast = index === breadcrumbSegments.length - 1
-          const label = labelMap[segment] || segment.charAt(0).toUpperCase() + segment.slice(1)
-          const path = '/app/' + segments.slice(1, segments.indexOf(segment) + 1).join('/')
+    <div className="flex items-center gap-1.5 text-sm min-w-0">
+      {breadcrumbSegments.map((segment, index) => {
+        const isLast = index === breadcrumbSegments.length - 1
+        const label = labelMap[segment] || segment.charAt(0).toUpperCase() + segment.slice(1)
 
-          return (
-            <Fragment key={segment + index}>
-              {index > 0 && <BreadcrumbSeparator />}
-              <BreadcrumbItem>
-                {isLast ? (
-                  <BreadcrumbPage>{label}</BreadcrumbPage>
-                ) : (
-                  <BreadcrumbLink href={path}>{label}</BreadcrumbLink>
-                )}
-              </BreadcrumbItem>
-            </Fragment>
-          )
-        })}
-      </BreadcrumbList>
-    </Breadcrumb>
+        return (
+          <Fragment key={segment + index}>
+            {index > 0 && <span className="text-zinc-300">/</span>}
+            {isLast ? (
+              <span className="font-medium text-zinc-900 truncate">{label}</span>
+            ) : (
+              <span className="text-zinc-400 truncate">{label}</span>
+            )}
+          </Fragment>
+        )
+      })}
+    </div>
   )
 }

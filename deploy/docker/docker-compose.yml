@@ -41,17 +41,18 @@ services:
     depends_on:
       - zookeeper
     ports:
-      - "19092:9092"
+      - "19092:19092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:19092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:19092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -85,7 +86,7 @@ services:
       context: ../..
       dockerfile: deploy/docker/backend.Dockerfile
     ports:
-      - "18080:8080"
+      - "8080:8080"
     environment:
       # === General ===
       APP_ENV: dev
@@ -95,7 +96,7 @@ services:
       # === API ===
       API_HOST: "0.0.0.0:8080"
       GIN_MODE: debug
-      WEBSOCKET_URL: ws://realtime:4000/socket
+      WEBSOCKET_URL: ws://localhost:14000/socket/websocket
 
       # === Database ===
       PRIMARY_DB: postgres://warmbly:warmbly@postgres:5432/warmbly_dev?sslmode=disable
@@ -124,6 +125,7 @@ services:
       APPLE_KEY_ID: local-apple-key-id
       APPLE_KEY_SECRET: local-apple-key-secret-base64
       TURNSTILE_SECRET: 1x0000000000000000000000000000000AA
+      TURNSTILE_BYPASS_TOKEN: warmbly-local-turnstile-bypass
 
       # === Stripe ===
       STRIPE_SECRET_KEY: sk_test_local
@@ -274,7 +276,7 @@ services:
       REDIS_URL: redis://redis:6379
 
       # === Auth ===
-      JWT_SECRET: local-development-jwt-secret-minimum-64-characters-long-for-testing
+      JWT_SECRET: local-dev-auth-secret-minimum-32-characters-long
       SECRET_KEY_BASE: local-development-secret-key-base-minimum-64-characters-for-phoenix
 
       # === Realtime ===
@@ -302,13 +304,20 @@ services:
       - ../../web:/app
       - web_node_modules:/app/node_modules
     ports:
+      - "5173:5173"
       - "15173:5173"
-    command: sh -c "corepack enable && pnpm install && pnpm dev --host"
+    command: >
+      sh -c '
+      until corepack enable; do echo "corepack retry..."; sleep 2; done;
+      until pnpm install; do echo "pnpm install retry..."; sleep 3; done;
+      pnpm dev --host
+      '
     environment:
       VITE_APP_URL: "http://localhost:15173"
       VITE_API_URL: "http://localhost:18080"
       VITE_TRACKING_DOMAIN: "localhost:13000"
       VITE_TURNSTILE_KEY: "1x00000000000000000000AA"
+      VITE_TURNSTILE_BYPASS_TOKEN: "warmbly-local-turnstile-bypass"
     depends_on:
       backend:
         condition: service_healthy
@@ -318,7 +327,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/backend.Dockerfile
-    command: ["/app/seed"]
+    entrypoint: ["/app/seed"]
     environment:
       PRIMARY_DB: postgres://warmbly:warmbly@postgres:5432/warmbly_dev?sslmode=disable
     depends_on:

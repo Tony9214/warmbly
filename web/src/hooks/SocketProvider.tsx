@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import type SocketProviderProps from "@/lib/socket/models/SocketProviderProps";
-import useSocketURL from '@/lib/api/hooks/app/socket/useSocketURL';
+import getSocket from '@/lib/api/client/app/socket/getSocket';
 import type { AppError } from '@/lib/api/client/normalizeError';
 import {
     SocketContext,
@@ -39,6 +39,7 @@ export default function SocketProvider({
     // Connection state
     const [isConnected, setIsConnected] = useState(false);
     const [reconnectAttempt, setReconnectAttempt] = useState(0);
+    const reconnectAttemptRef = useRef(0);
 
     // Refs
     const wsRef = useRef<WebSocket | null>(null);
@@ -51,8 +52,9 @@ export default function SocketProvider({
     // Legacy handlers for backwards compatibility
     const legacyHandlersRef = useRef<Map<string, Set<(msg: unknown) => void>>>(new Map());
 
-    // Fetch WS URL
-    const fetchWsUrl = useSocketURL();
+    useEffect(() => {
+        reconnectAttemptRef.current = reconnectAttempt;
+    }, [reconnectAttempt]);
 
     // Generate unique ref for messages
     const getRef = useCallback(() => {
@@ -366,7 +368,7 @@ export default function SocketProvider({
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
         try {
-            const urlData = await fetchWsUrl.mutateAsync();
+            const urlData = await getSocket();
             // Append vsn=2.0.0 for Phoenix protocol version
             const url = new URL(urlData.url);
             url.searchParams.set('vsn', '2.0.0');
@@ -399,7 +401,7 @@ export default function SocketProvider({
 
                 // Reconnect with exponential backoff
                 if (!ev.wasClean) {
-                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempt), RECONNECT_MAX_DELAY);
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), RECONNECT_MAX_DELAY);
                     reconnectTimerRef.current = setTimeout(() => {
                         setReconnectAttempt((a) => a + 1);
                         connect();
@@ -418,8 +420,6 @@ export default function SocketProvider({
             setTimeout(connect, 15000);
         }
     }, [
-        fetchWsUrl,
-        reconnectAttempt,
         onOpen,
         onClose,
         onError,

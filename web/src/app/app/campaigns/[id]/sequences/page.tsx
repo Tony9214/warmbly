@@ -1,6 +1,5 @@
 import React from "react";
 import { useCampaign } from "@/hooks/context/campaign";
-import { RiDiscussLine } from "@remixicon/react";
 import { Loading } from "@/components/loader";
 import SequenceBox from "@/components/app/campaigns/sequences/SequenceBox";
 import SequenceView from "@/components/app/campaigns/sequences/SequenceView";
@@ -10,6 +9,7 @@ import toast from "react-hot-toast";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import type Sequence from "@/lib/api/models/app/campaigns/sequences/Sequence";
+import { FileTextIcon, PlusIcon } from "lucide-react";
 
 export default function CampaignSequences() {
     const campaign = useCampaign();
@@ -43,8 +43,8 @@ export default function CampaignSequences() {
     }
 
     return !sequencesData.isLoading ? (
-        <div className="flex flex-col md:flex-row mt-3 gap-10">
-            <div className="md:w-60 xl:w-80 shrink-0 space-y-3">
+        <div className="flex flex-col md:flex-row gap-4">
+            <div className="md:w-56 xl:w-64 shrink-0 space-y-2">
                 {sequencesData.data.map((seq, i) => {
                     if (!campaign.sequences || !newSequences || campaign.sequences.length !== newSequences.length) return null;
                     return (
@@ -74,30 +74,33 @@ export default function CampaignSequences() {
                 )}
                 {sequencesData.data.length < 5 && (
                     <button
-                        className={`flex rounded-lg transition text-blue-700 items-center justify-center w-full p-2.5 ${load ? "bg-blue-200" : "bg-blue-100 hover:bg-blue-200 cursor-pointer"}`}
+                        className={`flex items-center justify-center gap-1.5 w-full rounded-lg text-[13px] font-medium transition-colors duration-100 px-3 py-1.5 ${load ? "bg-zinc-100 text-zinc-400" : "text-zinc-500 hover:text-zinc-900 border border-zinc-200 rounded-lg cursor-pointer"}`}
                         onClick={CreateSequence}
                     >
-                        {load ? <Loading className="h-6" /> : "New Sequence"}
+                        {load ? <Loading className="h-4" /> : <><PlusIcon className="w-3.5 h-3.5" />New Sequence</>}
                     </button>
                 )}
             </div>
-            <div className="grow">
+            <div className="flex-1 min-w-0">
                 {(() => {
                     const seq = sequencesData.data.find((v) => v.id === select)
                     const seq2 = newSequences?.find((v) => v.id === select)
                     if (!seq || !seq2 || !campaign.sequences) {
                         return (
-                            <div className="min-h-100 flex items-center justify-center">
-                                <div className="flex flex-col items-center gap-10">
-                                    <RiDiscussLine className="w-20 h-20 text-slate-200" />
-                                    <h1 className="text-slate-600 font-bold text-3xl max-w-lg">Let's create your first sequence</h1>
-                                    <button
-                                        className={`flex items-center justify-center py-2.5 px-3 font-sans w-30 rounded-lg text-slate-50 transition ${load ? "bg-blue-600" : "bg-blue-500 hover:bg-blue-600 cursor-pointer"}`}
-                                        onClick={CreateSequence}
-                                    >
-                                        {load ? <Loading className="h-6" /> : "Create Now"}
-                                    </button>
+                            <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-zinc-200">
+                                <div className="w-10 h-10 rounded-xl bg-zinc-100 flex items-center justify-center mb-3">
+                                    <FileTextIcon className="w-4 h-4 text-zinc-400" />
                                 </div>
+                                <h2 className="text-sm font-medium text-zinc-900 mb-1">Create your first sequence</h2>
+                                <p className="text-xs text-zinc-400 text-center max-w-xs mb-4">
+                                    Add email sequences to automate your outreach flow.
+                                </p>
+                                <button
+                                    className="bg-zinc-900 text-white hover:bg-zinc-800 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-100 flex items-center gap-1.5"
+                                    onClick={CreateSequence}
+                                >
+                                    {load ? <Loading className="h-4" /> : <><PlusIcon className="w-3.5 h-3.5" />Create Sequence</>}
+                                </button>
                             </div>
                         )
                     }
@@ -135,10 +138,10 @@ export default function CampaignSequences() {
             </div>
         </div>
     ) : (
-        <div className="mt-3 animate-pulse space-y-3">
-            <div className="bg-gray-300 h-40 rounded-lg" />
+        <div className="space-y-2">
+            {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-12 bg-zinc-100 animate-pulse rounded-lg" />
+            ))}
         </div>
     )
 }
-
-

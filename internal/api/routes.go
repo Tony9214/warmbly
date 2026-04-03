@@ -257,6 +257,7 @@ func Run(
 
 		// Plans (public info but auth required for consistency)
 		protected.GET("/plans", h.ListPlans)
+		protected.GET("/timezones", h.GetTimezones)
 
 		// Reply templates (org-scoped)
 		templates := protected.Group("/templates")

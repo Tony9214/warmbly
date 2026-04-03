@@ -4,6 +4,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/advanced"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/feature"
+	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
@@ -52,6 +53,7 @@ type tasksService struct {
 	emailSender   EmailSender
 	featureGate   feature.FeatureGateService
 	advanced      advanced.Service
+	warmupHealth  warmupapp.Service
 
 	// Repositories
 	taskRepo             repository.TaskRepository
@@ -73,6 +75,7 @@ func NewService(
 	cipherService cipher.CipherService,
 	emailSender EmailSender,
 	featureGate feature.FeatureGateService,
+	warmupHealth warmupapp.Service,
 	taskRepo repository.TaskRepository,
 	warmupRepo repository.WarmupRepository,
 	campaignProgressRepo repository.CampaignProgressRepository,
@@ -93,6 +96,7 @@ func NewService(
 		emailSender:          emailSender,
 		featureGate:          featureGate,
 		advanced:             advanced,
+		warmupHealth:         warmupHealth,
 		taskRepo:             taskRepo,
 		warmupRepo:           warmupRepo,
 		campaignProgressRepo: campaignProgressRepo,

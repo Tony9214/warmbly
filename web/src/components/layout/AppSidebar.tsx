@@ -1,184 +1,191 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
+  SearchIcon,
+  InboxIcon,
+  HomeIcon,
   MailIcon,
   UsersIcon,
   MegaphoneIcon,
-  InboxIcon,
   BarChart3Icon,
   GitBranchIcon,
   CircleDollarSignIcon,
   CheckSquareIcon,
   FileTextIcon,
   KeyIcon,
-  HelpCircleIcon,
   SettingsIcon,
-  CreditCardIcon,
-  Users2Icon,
+  HelpCircleIcon,
+  ChevronDownIcon,
+  PlusIcon,
+  MoreHorizontalIcon,
 } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
   SidebarRail,
-  SidebarSeparator,
 } from '@/components/ui/sidebar'
 import { OrgSwitcher } from './OrgSwitcher'
 import { UserNav } from './UserNav'
-import { ThemeToggle } from './ThemeToggle'
 import { useAppStore } from '@/stores'
 import { cn } from '@/lib/utils'
+import React from 'react'
+
+/* ── Types ────────────────────────────────── */
 
 interface NavItem {
   title: string
   url: string
   icon: React.ComponentType<{ className?: string }>
-  shortcut?: string
 }
 
-interface NavGroup {
+interface NavSection {
   label: string
   items: NavItem[]
 }
 
-const mainNavItems: NavItem[] = [
-  { title: 'Email Accounts', url: '/app/emails', icon: MailIcon, shortcut: 'g e' },
-  { title: 'Contacts', url: '/app/contacts', icon: UsersIcon, shortcut: 'g c' },
-  { title: 'Campaigns', url: '/app/campaigns', icon: MegaphoneIcon, shortcut: 'g m' },
-  { title: 'Unibox', url: '/app/unibox', icon: InboxIcon, shortcut: 'g u' },
-  { title: 'Analytics', url: '/app/analytics', icon: BarChart3Icon, shortcut: 'g a' },
+/* ── Data ─────────────────────────────────── */
+
+const topItems: NavItem[] = [
+  { title: 'Home', url: '/app/emails', icon: HomeIcon },
+  { title: 'Inbox', url: '/app/unibox', icon: InboxIcon },
+  { title: 'Search', url: '#search', icon: SearchIcon },
 ]
 
-const crmNavItems: NavItem[] = [
-  { title: 'Pipelines', url: '/app/crm/pipelines', icon: GitBranchIcon, shortcut: 'g p' },
-  { title: 'Deals', url: '/app/crm/deals', icon: CircleDollarSignIcon, shortcut: 'g d' },
-  { title: 'Tasks', url: '/app/crm/tasks', icon: CheckSquareIcon, shortcut: 'g t' },
+const sections: NavSection[] = [
+  {
+    label: 'Email',
+    items: [
+      { title: 'Accounts', url: '/app/emails', icon: MailIcon },
+      { title: 'Campaigns', url: '/app/campaigns', icon: MegaphoneIcon },
+      { title: 'Contacts', url: '/app/contacts', icon: UsersIcon },
+      { title: 'Analytics', url: '/app/analytics', icon: BarChart3Icon },
+    ],
+  },
+  {
+    label: 'CRM',
+    items: [
+      { title: 'Pipelines', url: '/app/crm/pipelines', icon: GitBranchIcon },
+      { title: 'Deals', url: '/app/crm/deals', icon: CircleDollarSignIcon },
+      { title: 'Tasks', url: '/app/crm/tasks', icon: CheckSquareIcon },
+    ],
+  },
+  {
+    label: 'Resources',
+    items: [
+      { title: 'Templates', url: '/app/templates', icon: FileTextIcon },
+      { title: 'API Keys', url: '/app/api-keys', icon: KeyIcon },
+    ],
+  },
 ]
 
-const resourceNavItems: NavItem[] = [
-  { title: 'Templates', url: '/app/templates', icon: FileTextIcon, shortcut: 'g l' },
-  { title: 'API Keys', url: '/app/api-keys', icon: KeyIcon, shortcut: 'g k' },
-]
+/* ── Components ───────────────────────────── */
 
-const bottomNavItems: NavItem[] = [
-  { title: 'Settings', url: '/app/settings', icon: SettingsIcon, shortcut: 'g s' },
-  { title: 'Billing', url: '/app/billing', icon: CreditCardIcon },
-  { title: 'Team', url: '/app/team', icon: Users2Icon },
-]
+function NavLink({ item, badge }: { item: NavItem; badge?: number }) {
+  const location = useLocation()
+  const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen)
 
-const navGroups: NavGroup[] = [
-  { label: 'Main', items: mainNavItems },
-  { label: 'CRM', items: crmNavItems },
-  { label: 'Resources', items: resourceNavItems },
-]
+  const isSearch = item.url === '#search'
+  const isActive = !isSearch && (location.pathname === item.url || location.pathname.startsWith(item.url + '/'))
 
-function ShortcutBadge({ shortcut }: { shortcut: string }) {
   return (
-    <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/menu-item:opacity-60">
-      {shortcut.split(' ').map((key, i) => (
-        <kbd
-          key={i}
-          className="inline-flex h-5 min-w-5 items-center justify-center border border-border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground"
-        >
-          {key}
-        </kbd>
-      ))}
+    <Link
+      to={isSearch ? '#' : item.url}
+      onClick={isSearch ? (e) => { e.preventDefault(); setCommandPaletteOpen(true) } : undefined}
+      className={cn(
+        'flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13.5px] transition-colors duration-100',
+        isActive
+          ? 'bg-zinc-100 text-zinc-900 font-medium'
+          : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700'
+      )}
+    >
+      <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={isActive ? 2 : 1.75} />
+      <span className="truncate group-data-[collapsible=icon]:hidden">{item.title}</span>
+      {badge != null && badge > 0 && (
+        <span className="ml-auto text-[11px] font-medium bg-blue-500 text-white rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5 group-data-[collapsible=icon]:hidden">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
+    </Link>
+  )
+}
+
+function SectionGroup({ section }: { section: NavSection }) {
+  const [open, setOpen] = React.useState(true)
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 px-2.5 mb-1 text-[11.5px] font-medium text-zinc-400 hover:text-zinc-500 transition-colors duration-100 cursor-pointer select-none"
+      >
+        <span>{section.label}</span>
+        <ChevronDownIcon className={cn('w-3 h-3 transition-transform duration-100', !open && '-rotate-90')} />
+      </button>
+      {open && (
+        <div className="space-y-px">
+          {section.items.map((item) => (
+            <NavLink key={item.url} item={item} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-function NavItemComponent({ item }: { item: NavItem }) {
-  const location = useLocation()
-  const isActive = location.pathname === item.url || location.pathname.startsWith(item.url + '/')
+/* ── Main Sidebar ─────────────────────────── */
+
+export function AppSidebar() {
   const unseenCount = useAppStore((s) => s.unseenCount)
 
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        asChild
-        isActive={isActive}
-        tooltip={item.title}
-        className={cn(
-          isActive && 'border-l-3 border-primary bg-sidebar-accent font-medium'
-        )}
-      >
-        <Link to={item.url}>
-          <item.icon className="size-4" />
-          <span>{item.title}</span>
-          {item.title === 'Unibox' && unseenCount > 0 && (
-            <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center bg-primary px-1.5 text-[10px] font-bold text-primary-foreground">
-              {unseenCount > 99 ? '99+' : unseenCount}
-            </span>
-          )}
-          {item.shortcut && <ShortcutBadge shortcut={item.shortcut} />}
-        </Link>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  )
-}
-
-export function AppSidebar() {
-  const setShortcutsModalOpen = useAppStore((state) => state.setShortcutsModalOpen)
-
-  return (
-    <Sidebar collapsible="icon">
-      <SidebarHeader>
+    <Sidebar collapsible="icon" className="border-r border-zinc-200 bg-white">
+      <SidebarHeader className="px-3 pt-4 pb-2">
         <OrgSwitcher />
       </SidebarHeader>
 
-      <SidebarContent>
-        {navGroups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.items.map((item) => (
-                  <NavItemComponent key={item.url} item={item} />
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
+      <SidebarContent className="px-3 pt-1 overflow-y-auto">
+        {/* Primary action — like Ghost's "New Task" button */}
+        <Link
+          to="/app/campaigns"
+          className="flex items-center justify-center gap-2 w-full px-3 py-2 mb-3 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-800 transition-colors duration-100 group-data-[collapsible=icon]:p-2"
+        >
+          <PlusIcon className="w-4 h-4" />
+          <span className="group-data-[collapsible=icon]:hidden">New Campaign</span>
+        </Link>
 
-        <SidebarSeparator className="mt-auto" />
+        {/* Top nav — no section label */}
+        <div className="space-y-px">
+          {topItems.map((item) => (
+            <NavLink
+              key={item.url + item.title}
+              item={item}
+              badge={item.title === 'Inbox' ? unseenCount : undefined}
+            />
+          ))}
+        </div>
 
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {bottomNavItems.map((item) => (
-                <NavItemComponent key={item.url} item={item} />
-              ))}
-              <SidebarMenuItem>
-                <div className="flex items-center gap-2 px-2 py-1.5">
-                  <ThemeToggle />
-                  <span className="text-sm text-muted-foreground group-data-[collapsible=icon]:hidden">
-                    Theme
-                  </span>
-                </div>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => setShortcutsModalOpen(true)}>
-                  <HelpCircleIcon className="size-4" />
-                  <span>Help</span>
-                  <div className="ml-auto opacity-60 group-data-[collapsible=icon]:hidden">
-                    <kbd className="inline-flex h-5 min-w-5 items-center justify-center border border-border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground">
-                      ?
-                    </kbd>
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {/* Collapsible sections */}
+        <div className="mt-6 space-y-5">
+          {sections.map((section) => (
+            <SectionGroup key={section.label} section={section} />
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Bottom items */}
+        <div className="mt-6 pt-3 border-t border-zinc-100 space-y-px">
+          <NavLink item={{ title: 'Settings', url: '/app/settings', icon: SettingsIcon }} />
+          <NavLink item={{ title: 'Support', url: '#', icon: HelpCircleIcon }} />
+          <button className="flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13.5px] text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700 transition-colors duration-100 w-full">
+            <MoreHorizontalIcon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
+            <span className="group-data-[collapsible=icon]:hidden">More</span>
+          </button>
+        </div>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="px-3 py-3 border-t border-zinc-100">
         <UserNav />
       </SidebarFooter>
 

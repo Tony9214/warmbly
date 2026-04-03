@@ -37,11 +37,11 @@ import (
 	"github.com/warmbly/warmbly/internal/app/tz"
 	"github.com/warmbly/warmbly/internal/app/unibox"
 	"github.com/warmbly/warmbly/internal/app/user"
+	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/app/worker"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
-	"github.com/warmbly/warmbly/internal/infrastructure/cdb"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/infrastructure/dynamo"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
@@ -63,6 +63,7 @@ import (
 func main() {
 	var addr string
 	var ginMode string
+	var websocketURI string
 
 	var tzService tz.TzService
 
@@ -205,18 +206,6 @@ func main() {
 		}
 		log.Println("Database migrations completed")
 
-		astraConfig, err := cfg.LoadAstraConfig(ctx)
-		if err != nil {
-			sentry.CaptureException(err)
-			log.Fatal(err)
-		}
-
-		cassandraDB, err := cdb.NewClient(astraConfig)
-		if err != nil {
-			sentry.CaptureException(err)
-			log.Fatal(err)
-		}
-
 		dynamoDB, err := dynamo.NewClient(ctx, awscfg)
 		if err != nil {
 			sentry.CaptureException(err)
@@ -341,7 +330,18 @@ func main() {
 
 		kafkaProducer.WithAvrov2(avrov2Client)
 
-		captcha := captcha.NewTurnstile(authCfg.TurnstileSecret)
+		turnstileBypassToken := ""
+		if cfg.Env == "dev" {
+			turnstileBypassToken = authCfg.TurnstileBypass
+			if turnstileBypassToken == "" {
+				turnstileBypassToken = "warmbly-local-turnstile-bypass"
+			}
+		}
+
+		captcha := captcha.NewTurnstileFromConfig(captcha.TurnstileConfig{
+			Secret:      authCfg.TurnstileSecret,
+			BypassToken: turnstileBypassToken,
+		})
 
 		userRepostory := repository.NewUserRepostory(primaryDB, kms)
 		authRepostory := repository.NewAuthRepostory(primaryDB)
@@ -350,7 +350,7 @@ func main() {
 		campaignRepostory := repository.NewCampaignRepostory(primaryDB)
 		sequenceRepostory := repository.NewSequenceRepostory(primaryDB)
 		contactRepostory := repository.NewContactRepostory(primaryDB)
-		uniboxRepository := repository.NewUniboxRepository(cassandraDB)
+		uniboxRepository := repository.NewUniboxRepository(primaryDB)
 		userEncryptedKeysRepository := repository.NewUserEncryptedKeysRepository(kms, dynamoDB)
 
 		folderRepostory := repository.NewGroupRepostory(primaryDB, models.Folders)
@@ -370,6 +370,7 @@ func main() {
 		warmupRepository := repository.NewWarmupRepository(primaryDB.Pool)
 		campaignProgressRepository := repository.NewCampaignProgressRepository(primaryDB.Pool)
 		campaignLogRepository := repository.NewCampaignLogRepository(primaryDB)
+		warmupService := warmupapp.NewService(warmupRepository)
 
 		tzService = tz.NewService()
 
@@ -407,7 +408,7 @@ func main() {
 		)
 		cipherService = cipher.NewService(kms, cache, userEncryptedKeysRepository)
 		eventsPublisher := events.NewPublisher(kafkaProducer, s3, avrov2Client, cipherService)
-		emailService = email.NewServiceWithKafka(emailRepostory, cipherService, eventsPublisher, kafkaProducer, cache)
+		emailService = email.NewServiceWithKafka(emailRepostory, cipherService, featureGateService, warmupService, eventsPublisher, kafkaProducer, cache)
 		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, streamingPublisher)
 		sequenceService = sequence.NewService(sequenceRepostory)
 		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository)
@@ -454,6 +455,7 @@ func main() {
 			cipherService,
 			emailSender,
 			featureGateService,
+			warmupService,
 			taskRepository,
 			warmupRepository,
 			campaignProgressRepository,
@@ -479,6 +481,7 @@ func main() {
 
 		addr = apiCfg.Hostname
 		ginMode = apiCfg.GinMode
+		websocketURI = apiCfg.WebsocketURI
 	}
 
 	h := &handler.Handler{
@@ -529,6 +532,8 @@ func main() {
 
 		// Advanced outreach controls
 		AdvancedService: advancedService,
+
+		WebsocketURI: websocketURI,
 	}
 
 	m := &middleware.Handler{

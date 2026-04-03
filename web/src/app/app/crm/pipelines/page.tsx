@@ -1,35 +1,27 @@
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { PlusIcon, GitBranchIcon } from "lucide-react"
 
 export default function PipelinesPage() {
   return (
-    <div className="space-y-6">
+    <div className="p-5 space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Pipelines</h1>
-          <p className="text-muted-foreground">Manage your sales pipelines.</p>
+          <h1 className="text-xl font-semibold text-zinc-900">Pipelines</h1>
+          <p className="text-[13px] text-zinc-400 mt-1">Track your sales pipelines.</p>
         </div>
-        <Button>
-          <PlusIcon className="mr-2 h-4 w-4" />
+        <button className="bg-zinc-900 text-white hover:bg-zinc-800 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-100 flex items-center gap-1.5">
+          <PlusIcon className="w-3.5 h-3.5" />
           New Pipeline
-        </Button>
+        </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Card className="border-dashed">
-          <CardHeader className="flex flex-col items-center justify-center space-y-2 py-8">
-            <GitBranchIcon className="h-8 w-8 text-muted-foreground" />
-            <CardTitle className="text-sm font-medium">No pipelines yet</CardTitle>
-            <CardDescription className="text-center">
-              Create your first pipeline to start tracking deals.
-            </CardDescription>
-            <Button variant="secondary" size="sm" className="mt-2">
-              <PlusIcon className="mr-2 h-4 w-4" />
-              Create Pipeline
-            </Button>
-          </CardHeader>
-        </Card>
+      <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-zinc-200">
+        <div className="w-10 h-10 rounded-xl bg-zinc-100 flex items-center justify-center mb-3">
+          <GitBranchIcon className="w-4 h-4 text-zinc-400" />
+        </div>
+        <h2 className="text-sm font-medium text-zinc-900 mb-1">No pipelines</h2>
+        <p className="text-xs text-zinc-400 text-center max-w-xs">
+          Create your first pipeline to start tracking deals.
+        </p>
       </div>
     </div>
   )

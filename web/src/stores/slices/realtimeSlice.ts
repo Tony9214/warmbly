@@ -22,9 +22,12 @@ export const createRealtimeSlice: StateCreator<RealtimeSlice, [], [], RealtimeSl
   connectionQuality: 'disconnected',
   joinedChannels: [],
 
-  setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
-  setReconnectAttempt: (reconnectAttempt) => set({ reconnectAttempt }),
-  setConnectionQuality: (connectionQuality) => set({ connectionQuality }),
+  setConnectionStatus: (connectionStatus) =>
+    set((state) => (state.connectionStatus === connectionStatus ? state : { connectionStatus })),
+  setReconnectAttempt: (reconnectAttempt) =>
+    set((state) => (state.reconnectAttempt === reconnectAttempt ? state : { reconnectAttempt })),
+  setConnectionQuality: (connectionQuality) =>
+    set((state) => (state.connectionQuality === connectionQuality ? state : { connectionQuality })),
   addJoinedChannel: (channel) =>
     set((state) => ({
       joinedChannels: state.joinedChannels.includes(channel)
@@ -32,8 +35,18 @@ export const createRealtimeSlice: StateCreator<RealtimeSlice, [], [], RealtimeSl
         : [...state.joinedChannels, channel],
     })),
   removeJoinedChannel: (channel) =>
-    set((state) => ({
-      joinedChannels: state.joinedChannels.filter((c) => c !== channel),
-    })),
-  setJoinedChannels: (joinedChannels) => set({ joinedChannels }),
+    set((state) => {
+      const next = state.joinedChannels.filter((c) => c !== channel)
+      return next.length === state.joinedChannels.length ? state : { joinedChannels: next }
+    }),
+  setJoinedChannels: (joinedChannels) =>
+    set((state) => {
+      if (
+        state.joinedChannels.length === joinedChannels.length &&
+        state.joinedChannels.every((c, i) => c === joinedChannels[i])
+      ) {
+        return state
+      }
+      return { joinedChannels }
+    }),
 })

@@ -10,7 +10,7 @@ export default function HeadButton({
     white?: boolean,
 }) {
     return (
-        <button onClick={onClick} className={`ripple px-4 py-2 cursor-pointer shadow-md rounded-md font-sans transition flex item-center gap-1 select-none ${white ? "border border-gray-200 bg-white hover:bg-slate-50 text-slate-600" : "text-gray-50 bg-blue-500 hover:bg-blue-600"}`}>
+        <button onClick={onClick} className={`px-3 py-1.5 cursor-pointer rounded-md text-sm transition-colors duration-150 ease-in-out flex items-center gap-1.5 select-none ${white ? "text-muted-foreground hover:text-foreground" : "bg-zinc-900 text-white hover:bg-zinc-800"}`}>
             {children}
         </button>
     )

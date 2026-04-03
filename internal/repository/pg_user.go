@@ -65,7 +65,7 @@ func (r *userRepository) CreateUser(ctx context.Context, email *mail.Address, pa
 	`
 
 	var params = []any{
-		id, email, passwordHash,
+		id, email.Address, passwordHash,
 		firstName, lastName,
 		now,
 	}

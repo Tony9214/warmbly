@@ -66,22 +66,31 @@ export const createUISlice: StateCreator<UISlice, [], [], UISlice> = (set, get) 
 
   // Actions - Sidebar
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-  setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
-  setSidebarMobileOpen: (sidebarMobileOpen) => set({ sidebarMobileOpen }),
+  setSidebarCollapsed: (sidebarCollapsed) =>
+    set((state) => (state.sidebarCollapsed === sidebarCollapsed ? state : { sidebarCollapsed })),
+  setSidebarMobileOpen: (sidebarMobileOpen) =>
+    set((state) => (state.sidebarMobileOpen === sidebarMobileOpen ? state : { sidebarMobileOpen })),
 
   // Actions - Theme
   setTheme: (theme) => {
+    if (get().theme === theme) return
     localStorage.setItem('theme', theme)
     const resolvedTheme = getResolvedTheme(theme)
     document.documentElement.classList.toggle('dark', resolvedTheme === 'dark')
     set({ theme, resolvedTheme })
   },
-  setResolvedTheme: (resolvedTheme) => set({ resolvedTheme }),
+  setResolvedTheme: (resolvedTheme) =>
+    set((state) => (state.resolvedTheme === resolvedTheme ? state : { resolvedTheme })),
 
   // Actions - Modals
-  setTagsModalOpen: (tagsModalOpen) => set({ tagsModalOpen }),
-  setFoldersModalOpen: (foldersModalOpen) => set({ foldersModalOpen }),
-  setAddEmailModalOpen: (addEmailModalOpen) => set({ addEmailModalOpen }),
-  setShortcutsModalOpen: (shortcutsModalOpen) => set({ shortcutsModalOpen }),
-  setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
+  setTagsModalOpen: (tagsModalOpen) =>
+    set((state) => (state.tagsModalOpen === tagsModalOpen ? state : { tagsModalOpen })),
+  setFoldersModalOpen: (foldersModalOpen) =>
+    set((state) => (state.foldersModalOpen === foldersModalOpen ? state : { foldersModalOpen })),
+  setAddEmailModalOpen: (addEmailModalOpen) =>
+    set((state) => (state.addEmailModalOpen === addEmailModalOpen ? state : { addEmailModalOpen })),
+  setShortcutsModalOpen: (shortcutsModalOpen) =>
+    set((state) => (state.shortcutsModalOpen === shortcutsModalOpen ? state : { shortcutsModalOpen })),
+  setCommandPaletteOpen: (commandPaletteOpen) =>
+    set((state) => (state.commandPaletteOpen === commandPaletteOpen ? state : { commandPaletteOpen })),
 })

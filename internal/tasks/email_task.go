@@ -59,13 +59,45 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	if xerr != nil {
 		return xerr
 	}
+	if account == nil {
+		return errx.ErrNotFound
+	}
+	if account.Status != "active" || account.Warmup == nil {
+		if s.warmupHealth != nil {
+			_ = s.warmupHealth.RemovePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+		}
+		_ = s.taskRepo.UpdateTaskStatus(ctx, taskID, "cancelled")
+		executionStatus = "completed"
+		return nil
+	}
 
 	// STEP 3.5: Check if organization can use warmup (only paid orgs)
 	if s.featureGate != nil && account.OrganizationID != nil {
 		canWarmup, _ := s.featureGate.CanUseWarmup(ctx, *account.OrganizationID)
 		if !canWarmup {
+			if s.warmupHealth != nil {
+				_ = s.warmupHealth.RemovePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+			}
 			// Organization cannot use warmup - skip this task
 			s.taskRepo.UpdateTaskStatus(ctx, taskID, "skipped_no_warmup_access")
+			executionStatus = "completed"
+			return nil
+		}
+	}
+
+	poolType := s.resolveWarmupPoolType(ctx, account)
+	if s.warmupHealth != nil {
+		if err := s.warmupHealth.EnsurePoolMembership(ctx, account.ID, poolType); err != nil {
+			return err
+		}
+
+		canParticipate, _, err := s.warmupHealth.CanParticipate(ctx, account.ID, poolType)
+		if err != nil {
+			return err
+		}
+		if !canParticipate {
+			_ = s.taskRepo.UpdateTaskStatus(ctx, taskID, "skipped_warmup_protected")
+			s.scheduleWarmupRecovery(ctx, account.ID, poolType)
 			executionStatus = "completed"
 			return nil
 		}
@@ -226,18 +258,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 
 // selectWarmupPartner selects a warmup partner from the pool
 func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (*Email, error) {
-	// Determine pool type based on user subscription
-	// Only paid users can reach here (free users blocked in HandleEmailTask)
-	// All paid users use premium pool
-	poolType := "premium"
-
-	// Check if organization is paid to determine pool type
-	if s.featureGate != nil && account.OrganizationID != nil {
-		isPaid, _ := s.featureGate.IsPaidOrganization(ctx, *account.OrganizationID)
-		if !isPaid {
-			poolType = "free"
-		}
-	}
+	poolType := s.resolveWarmupPoolType(ctx, &account)
 
 	// Get all participants in the pool
 	participantIDs, err := s.warmupRepo.GetPoolParticipants(ctx, poolType, true)
@@ -287,6 +308,40 @@ func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (
 	}
 
 	return partner, nil
+}
+
+func (s *tasksService) resolveWarmupPoolType(ctx context.Context, account *Email) string {
+	if account == nil {
+		return "premium"
+	}
+	if account.WarmupPoolType != "" {
+		return account.WarmupPoolType
+	}
+	if s.featureGate != nil && account.OrganizationID != nil {
+		isPaid, xerr := s.featureGate.IsPaidOrganization(ctx, *account.OrganizationID)
+		if xerr == nil && !isPaid {
+			return "free"
+		}
+	}
+	return "premium"
+}
+
+func (s *tasksService) scheduleWarmupRecovery(ctx context.Context, accountID uuid.UUID, poolType string) {
+	if s.warmupRepo == nil {
+		return
+	}
+
+	health, err := s.warmupRepo.GetParticipantHealth(ctx, accountID, poolType)
+	if err != nil || health == nil || health.BlockedUntil == nil {
+		return
+	}
+	if !health.BlockedUntil.After(time.Now()) {
+		return
+	}
+
+	if err := s.createWarmupTask(ctx, accountID, *health.BlockedUntil); err != nil {
+		fmt.Printf("Failed to create warmup recovery task: %v\n", err)
+	}
 }
 
 // createWarmupTask creates a new warmup task in GCP Cloud Tasks

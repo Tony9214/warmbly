@@ -12,10 +12,10 @@ import (
 	"github.com/warmbly/warmbly/internal/app/advanced"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	jobs "github.com/warmbly/warmbly/internal/app/consumer"
+	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
-	"github.com/warmbly/warmbly/internal/infrastructure/cdb"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/infrastructure/dynamo"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
@@ -53,16 +53,6 @@ func main() {
 		log.Fatal(err)
 	}
 	primaryDB, err := db.New(ctx, primaryDBEndpoint)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Cassandra
-	astraConfig, err := cfg.LoadAstraConfig(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	cassandraDB, err := cdb.NewClient(astraConfig)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -167,11 +157,12 @@ func main() {
 
 	// Repositories
 	emailRepo := repository.NewEmailRepostory(primaryDB)
-	uniboxRepo := repository.NewUniboxRepository(cassandraDB)
-	mailboxRepo := repository.NewMailboxRepostory(cassandraDB)
+	uniboxRepo := repository.NewUniboxRepository(primaryDB)
+	mailboxRepo := repository.NewMailboxRepository(primaryDB)
 	emailHistoryIDRepo := repository.NewEmailHistoryIDRepository(dynamoDB)
 	emailAccountErrorRepo := repository.NewEmailAccountErrorRepository(primaryDB)
 	warmupRepo := repository.NewWarmupRepository(primaryDB.Pool)
+	warmupService := warmupapp.NewService(warmupRepo)
 	campaignRepo := repository.NewCampaignRepostory(primaryDB)
 	taskRepo := repository.NewTaskRepository(primaryDB.Pool)
 	contactRepo := repository.NewContactRepostory(primaryDB)
@@ -202,6 +193,7 @@ func main() {
 		EmailHistoryIDRepository:    emailHistoryIDRepo,
 		EmailAccountErrorRepository: emailAccountErrorRepo,
 		WarmupRepo:                  warmupRepo,
+		WarmupService:               warmupService,
 		Publisher:                   eventsPublisher,
 		StreamingPublisher:          streamingPublisher,
 		AdvancedService:             advancedService,

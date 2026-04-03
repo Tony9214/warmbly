@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/warmbly/warmbly/internal/app/advanced"
+	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
@@ -19,6 +20,7 @@ type JobsService struct {
 	EmailHistoryIDRepository    repository.EmailHistoryIDRepository
 	EmailAccountErrorRepository repository.EmailAccountErrorRepository
 	WarmupRepo                  repository.WarmupRepository
+	WarmupService               warmupapp.Service
 
 	// Publisher for sending events to workers
 	Publisher events.Publisher

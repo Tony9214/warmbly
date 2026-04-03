@@ -57,7 +57,7 @@ func (s *tokenService) RefreshToken(ctx context.Context, refreshToken string) (*
 		return nil, errx.InternalError()
 	}
 
-	if err := s.tokenRepository.RefreshToken(ctx, sess.ID, refreshToken, accessNonce, refreshNonce, issuedAt); err != nil {
+	if err := s.tokenRepository.RefreshToken(ctx, sess.ID, t.Nonce, accessNonce, refreshNonce, issuedAt); err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.InternalError()
 	}

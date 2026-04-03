@@ -7,6 +7,10 @@ interface Props {
 }
 
 export function TurnstileModal({ visible, onToken }: Props) {
+    const defaultDevBypassToken = "warmbly-local-turnstile-bypass";
+    const bypassToken = import.meta.env.DEV
+        ? (import.meta.env.VITE_TURNSTILE_BYPASS_TOKEN?.trim() || defaultDevBypassToken)
+        : "";
     const tokenRef = useRef("");
     const waitingRef = useRef(false);
     const turnstileRef = useRef<{ reset(): void } | null>(null);
@@ -28,6 +32,11 @@ export function TurnstileModal({ visible, onToken }: Props) {
     }, [deliver]);
 
     useEffect(() => {
+        if (visible && bypassToken) {
+            onTokenRef.current(bypassToken);
+            return;
+        }
+
         if (visible) {
             if (tokenRef.current) {
                 const t = tokenRef.current;
@@ -39,7 +48,9 @@ export function TurnstileModal({ visible, onToken }: Props) {
         } else {
             waitingRef.current = false;
         }
-    }, [visible, deliver]);
+    }, [visible, bypassToken, deliver]);
+
+    if (bypassToken) return null;
 
     return (
         <Turnstile

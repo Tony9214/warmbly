@@ -6,7 +6,7 @@ export default function HeadMenu({
     children: React.ReactNode,
 }) {
     return (
-        <div className="flex gap-5">
+        <div className="flex items-center gap-2">
             {children}
         </div>
     )

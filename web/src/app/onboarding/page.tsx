@@ -73,7 +73,7 @@ export default function OnboardingPage() {
     const onSubmit = async (data: OnboardingForm) => {
         try {
             await mutation.mutateAsync(data);
-            await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+            queryClient.removeQueries({ queryKey: ["auth", "me"] });
             navigate("/app/emails");
         } catch (e) {
             toast.error(buildError(e as AppError));

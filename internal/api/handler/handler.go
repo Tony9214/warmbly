@@ -82,4 +82,7 @@ type Handler struct {
 
 	// Advanced outreach controls
 	AdvancedService advanced.Service
+
+	// Public websocket URL used by frontend clients
+	WebsocketURI string
 }

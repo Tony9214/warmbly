@@ -19,39 +19,42 @@ export default function CampaignLayout() {
     return (
         <>
             {!campaignData.isLoading ? (
-                <div className="animate-pulse w-full space-y-3 md:px-4">
-                    <div className="bg-gray-300 h-7 rounded-lg mb-4" />
-                    <div className="bg-gray-300 h-12 rounded-lg" />
-                    <div className="bg-gray-300 h-12 rounded-lg" />
-                    <div className="bg-gray-300 h-12 rounded-lg" />
-                    <div className="bg-gray-300 h-12 rounded-lg" />
+                <div className="p-5 space-y-3">
+                    {[...Array(5)].map((_, i) => (
+                        <div key={i} className="h-10 bg-zinc-100 animate-pulse rounded-lg" />
+                    ))}
                 </div>
             ) : (
                 <CampaignContext.Provider value={campaignData.data}>
-                    <div className="md:px-4">
-                        <div className="mb-5">
-                            <h1 className="text-slate-600 font-bold font-inter text-2xl mb-4">{campaignData.data.name}</h1>
-                            <p className="text-slate-400 text-sm font-inter">ID: {campaignData.data.id}</p>
+                    <div>
+                        <div className="px-5 pt-5 pb-0">
+                            <h1 className="text-xl font-semibold text-zinc-900 mb-0.5">{campaignData.data.name}</h1>
+                            <p className="text-[13px] text-zinc-400 font-mono">{campaignData.data.id}</p>
                         </div>
-                        <div className="flex space-x-4 pb-3 border-b border-gray-200 mb-4 overflow-x-scroll no-scrollbar">
-                            {Object.entries(tabData).map((key) => {
-                                const fullPath = `/app/campaigns/${id}${key[1]}`;
+                        <div className="flex items-center gap-0.5 px-5 pt-3 pb-0 border-b border-zinc-200 overflow-x-auto no-scrollbar">
+                            {Object.entries(tabData).map(([label, path]) => {
+                                const fullPath = `/app/campaigns/${id}${path}`;
                                 const isActive = pathname.replaceAll("/", "") === fullPath.replaceAll("/", "");
                                 return (
                                     <Link
-                                        key={key[1]}
+                                        key={path}
                                         to={fullPath}
-                                        className={`py-1 px-3 font-medium cursor-pointer rounded-lg transition ${isActive
-                                            ? "bg-blue-100 text-blue-600"
-                                            : "hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                                        className={`relative px-3 py-2 text-[13px] font-medium transition-colors duration-100 ${isActive
+                                            ? "text-zinc-900"
+                                            : "text-zinc-400 hover:text-zinc-900"
                                             }`}
                                     >
-                                        {key[0]}
+                                        {label}
+                                        {isActive && (
+                                            <span className="absolute bottom-0 left-3 right-3 h-0.5 border-b-2 border-zinc-900" />
+                                        )}
                                     </Link>
                                 );
                             })}
                         </div>
-                        <Outlet />
+                        <div className="p-5">
+                            <Outlet />
+                        </div>
                     </div>
                 </CampaignContext.Provider>
             )}

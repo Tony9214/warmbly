@@ -1,4 +1,4 @@
-import { ChevronsUpDownIcon, PlusIcon } from 'lucide-react'
+import { ChevronDownIcon, PlusIcon } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,13 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  useSidebar,
-} from '@/components/ui/sidebar'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { useSidebar } from '@/components/ui/sidebar'
 import { useAppStore } from '@/stores'
 
 export function OrgSwitcher() {
@@ -21,91 +15,53 @@ export function OrgSwitcher() {
   const organizations = useAppStore((state) => state.organizations)
   const currentOrganization = useAppStore((state) => state.currentOrganization)
   const switchOrganization = useAppStore((state) => state.switchOrganization)
-  const subscription = useAppStore((state) => state.subscription)
 
-  if (!currentOrganization) {
-    return (
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton size="lg" className="cursor-default">
-            <Avatar className="size-8">
-              <AvatarFallback>W</AvatarFallback>
-            </Avatar>
-            <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-medium">Warmbly</span>
-              <span className="truncate text-xs text-muted-foreground">Personal</span>
-            </div>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    )
-  }
+  const name = currentOrganization?.name || 'Warmbly'
 
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map((word) => word[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2)
-  }
+  const getInitials = (name: string) =>
+    name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2)
 
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton
-              size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-            >
-              <Avatar className="size-8">
-                <AvatarImage src={currentOrganization.avatar} alt={currentOrganization.name} />
-                <AvatarFallback>
-                  {getInitials(currentOrganization.name)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{currentOrganization.name}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {subscription?.plan_name || currentOrganization.role}
-                </span>
-              </div>
-              <ChevronsUpDownIcon className="ml-auto size-4" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            className="w-[--radix-dropdown-menu-trigger-width] min-w-56"
-            side={isMobile ? 'bottom' : 'right'}
-            align="start"
-            sideOffset={4}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className="flex items-center gap-2 px-1 py-0.5 rounded-md hover:bg-zinc-50 transition-colors duration-150 w-full group cursor-pointer">
+          {/* Small workspace icon — like the reference's colored icon */}
+          <div className="w-5 h-5 rounded bg-zinc-900 flex items-center justify-center shrink-0">
+            <span className="text-[9px] font-bold text-white leading-none">{getInitials(name)}</span>
+          </div>
+          <span className="text-sm font-semibold text-zinc-900 truncate group-data-[collapsible=icon]:hidden">
+            {name}
+          </span>
+          <ChevronDownIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0 group-data-[collapsible=icon]:hidden" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        className="min-w-56"
+        side={isMobile ? 'bottom' : 'bottom'}
+        align="start"
+        sideOffset={4}
+      >
+        <DropdownMenuLabel className="text-xs text-zinc-400 font-normal">
+          Organizations
+        </DropdownMenuLabel>
+        {organizations.map((org) => (
+          <DropdownMenuItem
+            key={org.id}
+            onClick={() => switchOrganization(org.id)}
+            className={org.id === currentOrganization?.id ? 'bg-zinc-50' : ''}
           >
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Organizations
-            </DropdownMenuLabel>
-            {organizations.map((org) => (
-              <DropdownMenuItem
-                key={org.id}
-                onClick={() => switchOrganization(org.id)}
-                className={org.id === currentOrganization.id ? 'bg-accent' : ''}
-              >
-                <Avatar className="size-6">
-                  <AvatarImage src={org.avatar} alt={org.name} />
-                  <AvatarFallback className="text-xs">
-                    {getInitials(org.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="ml-2">{org.name}</span>
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <PlusIcon className="size-4" />
-              <span className="ml-2">Create Organization</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    </SidebarMenu>
+            <div className="w-4 h-4 rounded bg-zinc-200 flex items-center justify-center shrink-0">
+              <span className="text-[8px] font-bold text-zinc-600">{getInitials(org.name)}</span>
+            </div>
+            <span className="ml-2 text-sm">{org.name}</span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem>
+          <PlusIcon className="w-4 h-4" />
+          <span className="ml-2 text-sm">Create Organization</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

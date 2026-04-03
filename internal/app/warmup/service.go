@@ -1,0 +1,302 @@
+package warmup
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/errx"
+	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/repository"
+)
+
+const (
+	minSpamPlacementSample = 20
+
+	spamPlacementWatchPct        = 10.0
+	spamPlacementQuarantinePct   = 20.0
+	spamPlacementBlockPct        = 40.0
+	spamPlacementCatastrophicPct = 80.0
+
+	invalidTokenBlockThreshold = 3
+
+	warmupQuarantineDuration = 7 * 24 * time.Hour
+	warmupBlockDuration      = 30 * 24 * time.Hour
+	warmupCatastrophicBlock  = 90 * 24 * time.Hour
+)
+
+type Service interface {
+	EnsurePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error
+	RemovePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error
+	CanParticipate(ctx context.Context, accountID uuid.UUID, poolType string) (bool, string, *errx.Error)
+	ApplySpamReport(ctx context.Context, reporterAccountID, reportedAccountID uuid.UUID, messageID, reportType string) (*models.WarmupParticipantHealth, *errx.Error)
+	ApplyInvalidTokenAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string, scoreDelta int) (*models.WarmupParticipantHealth, *errx.Error)
+	ApplyRateLimitExceeded(ctx context.Context, accountID uuid.UUID, reason string) (*models.WarmupParticipantHealth, *errx.Error)
+}
+
+type service struct {
+	repo repository.WarmupRepository
+	now  func() time.Time
+}
+
+func NewService(repo repository.WarmupRepository) Service {
+	return &service{
+		repo: repo,
+		now:  time.Now,
+	}
+}
+
+func (s *service) EnsurePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error {
+	pool, err := s.repo.GetPoolByType(ctx, poolType)
+	if err != nil {
+		return errx.InternalError()
+	}
+	if pool == nil {
+		return errx.New(errx.BadRequest, "warmup pool not found")
+	}
+	if err := s.repo.JoinPool(ctx, pool.ID, accountID); err != nil {
+		return errx.InternalError()
+	}
+	return nil
+}
+
+func (s *service) RemovePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error {
+	pool, err := s.repo.GetPoolByType(ctx, poolType)
+	if err != nil {
+		return errx.InternalError()
+	}
+	if pool == nil {
+		return nil
+	}
+	if err := s.repo.LeavePool(ctx, pool.ID, accountID); err != nil {
+		return errx.InternalError()
+	}
+	return nil
+}
+
+func (s *service) CanParticipate(ctx context.Context, accountID uuid.UUID, poolType string) (bool, string, *errx.Error) {
+	health, err := s.repo.GetParticipantHealth(ctx, accountID, poolType)
+	if err != nil {
+		return false, "", errx.InternalError()
+	}
+	if health == nil {
+		return false, "not_in_pool", nil
+	}
+
+	now := s.now().UTC()
+	if health.BlockedUntil != nil && !health.BlockedUntil.After(now) {
+		health, xerr := s.evaluateAndPersist(ctx, accountID, poolType)
+		if xerr != nil {
+			return false, "", xerr
+		}
+		if health == nil {
+			return false, "not_in_pool", nil
+		}
+	}
+
+	switch health.HealthState {
+	case models.WarmupHealthQuarantined, models.WarmupHealthBlocked:
+		if health.BlockedUntil == nil || health.BlockedUntil.After(now) {
+			if health.BlockedReason != nil && *health.BlockedReason != "" {
+				return false, *health.BlockedReason, nil
+			}
+			return false, string(health.HealthState), nil
+		}
+	}
+
+	return true, "", nil
+}
+
+func (s *service) ApplySpamReport(ctx context.Context, reporterAccountID, reportedAccountID uuid.UUID, messageID, reportType string) (*models.WarmupParticipantHealth, *errx.Error) {
+	inserted, err := s.repo.RecordSpamReport(ctx, &repository.SpamReport{
+		ID:                uuid.New(),
+		ReporterAccountID: reporterAccountID,
+		ReportedAccountID: reportedAccountID,
+		MessageID:         messageID,
+		ReportType:        reportType,
+	})
+	if err != nil {
+		return nil, errx.InternalError()
+	}
+	if !inserted {
+		return s.getParticipantForAnyPool(ctx, reportedAccountID)
+	}
+
+	if _, err := s.repo.IncrementSpamScore(ctx, reportedAccountID, 10); err != nil {
+		return nil, errx.InternalError()
+	}
+
+	return s.evaluateAndPersistAnyPool(ctx, reportedAccountID)
+}
+
+func (s *service) ApplyInvalidTokenAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string, scoreDelta int) (*models.WarmupParticipantHealth, *errx.Error) {
+	if err := s.repo.RecordInvalidTokenAttempt(ctx, accountID, attemptedToken); err != nil {
+		return nil, errx.InternalError()
+	}
+	if scoreDelta > 0 {
+		if _, err := s.repo.IncrementSpamScore(ctx, accountID, scoreDelta); err != nil {
+			return nil, errx.InternalError()
+		}
+	}
+	return s.evaluateAndPersistAnyPool(ctx, accountID)
+}
+
+func (s *service) ApplyRateLimitExceeded(ctx context.Context, accountID uuid.UUID, reason string) (*models.WarmupParticipantHealth, *errx.Error) {
+	blockedUntil := s.now().UTC().Add(warmupBlockDuration)
+	if err := s.repo.UpdateParticipantHealth(ctx, accountID, models.WarmupHealthBlocked, &blockedUntil, reason, 100); err != nil {
+		return nil, errx.InternalError()
+	}
+	return s.getParticipantForAnyPool(ctx, accountID)
+}
+
+func (s *service) evaluateAndPersistAnyPool(ctx context.Context, accountID uuid.UUID) (*models.WarmupParticipantHealth, *errx.Error) {
+	for _, poolType := range []string{"premium", "free"} {
+		health, err := s.repo.GetParticipantHealth(ctx, accountID, poolType)
+		if err != nil {
+			return nil, errx.InternalError()
+		}
+		if health == nil {
+			continue
+		}
+		return s.evaluateAndPersist(ctx, accountID, poolType)
+	}
+	return nil, nil
+}
+
+func (s *service) getParticipantForAnyPool(ctx context.Context, accountID uuid.UUID) (*models.WarmupParticipantHealth, *errx.Error) {
+	for _, poolType := range []string{"premium", "free"} {
+		health, err := s.repo.GetParticipantHealth(ctx, accountID, poolType)
+		if err != nil {
+			return nil, errx.InternalError()
+		}
+		if health != nil {
+			return health, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *service) evaluateAndPersist(ctx context.Context, accountID uuid.UUID, poolType string) (*models.WarmupParticipantHealth, *errx.Error) {
+	metrics, err := s.loadMetrics(ctx, accountID)
+	if err != nil {
+		return nil, errx.InternalError()
+	}
+
+	decision := evaluateMetrics(metrics, s.now().UTC())
+	if err := s.repo.UpdateParticipantHealth(ctx, accountID, decision.State, decision.BlockedUntil, decision.Reason, decision.Score); err != nil {
+		return nil, errx.InternalError()
+	}
+
+	health, err := s.repo.GetParticipantHealth(ctx, accountID, poolType)
+	if err != nil {
+		return nil, errx.InternalError()
+	}
+	return health, nil
+}
+
+func (s *service) loadMetrics(ctx context.Context, accountID uuid.UUID) (*models.WarmupHealthMetrics, error) {
+	now := s.now().UTC()
+	sentLast7d, err := s.repo.SumWarmupSentSince(ctx, accountID, now.Add(-7*24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
+
+	spamReportsLast7d, err := s.repo.CountSpamReportsSince(ctx, accountID, now.Add(-7*24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
+
+	invalidAttemptsLast24h, err := s.repo.CountRecentInvalidAttempts(ctx, accountID, now.Add(-24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
+
+	spamScore, err := s.repo.GetSpamScore(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+
+	rate := 0.0
+	if sentLast7d > 0 {
+		rate = float64(spamReportsLast7d) / float64(sentLast7d) * 100
+	}
+
+	return &models.WarmupHealthMetrics{
+		SentLast7d:            sentLast7d,
+		SpamReportsLast7d:     spamReportsLast7d,
+		SpamPlacementRate:     rate,
+		InvalidAttemptsLast24: invalidAttemptsLast24h,
+		SpamScore:             spamScore,
+	}, nil
+}
+
+type evaluationDecision struct {
+	State        models.WarmupHealthState
+	BlockedUntil *time.Time
+	Reason       string
+	Score        float64
+}
+
+func evaluateMetrics(metrics *models.WarmupHealthMetrics, now time.Time) evaluationDecision {
+	decision := evaluationDecision{
+		State: models.WarmupHealthHealthy,
+		Score: metrics.SpamPlacementRate,
+	}
+
+	if metrics.InvalidAttemptsLast24 >= invalidTokenBlockThreshold {
+		until := now.Add(warmupBlockDuration)
+		return evaluationDecision{
+			State:        models.WarmupHealthBlocked,
+			BlockedUntil: &until,
+			Reason:       fmt.Sprintf("invalid warmup token attempts exceeded threshold: %d in 24h", metrics.InvalidAttemptsLast24),
+			Score:        maxFloat(100, metrics.SpamPlacementRate),
+		}
+	}
+
+	if metrics.SentLast7d < minSpamPlacementSample {
+		return decision
+	}
+
+	switch {
+	case metrics.SpamPlacementRate >= spamPlacementCatastrophicPct:
+		until := now.Add(warmupCatastrophicBlock)
+		return evaluationDecision{
+			State:        models.WarmupHealthBlocked,
+			BlockedUntil: &until,
+			Reason:       fmt.Sprintf("catastrophic warmup spam placement %.1f%% over %d sends", metrics.SpamPlacementRate, metrics.SentLast7d),
+			Score:        metrics.SpamPlacementRate,
+		}
+	case metrics.SpamPlacementRate >= spamPlacementBlockPct:
+		until := now.Add(warmupBlockDuration)
+		return evaluationDecision{
+			State:        models.WarmupHealthBlocked,
+			BlockedUntil: &until,
+			Reason:       fmt.Sprintf("warmup spam placement %.1f%% exceeded block threshold", metrics.SpamPlacementRate),
+			Score:        metrics.SpamPlacementRate,
+		}
+	case metrics.SpamPlacementRate >= spamPlacementQuarantinePct:
+		until := now.Add(warmupQuarantineDuration)
+		return evaluationDecision{
+			State:        models.WarmupHealthQuarantined,
+			BlockedUntil: &until,
+			Reason:       fmt.Sprintf("warmup spam placement %.1f%% exceeded quarantine threshold", metrics.SpamPlacementRate),
+			Score:        metrics.SpamPlacementRate,
+		}
+	case metrics.SpamPlacementRate >= spamPlacementWatchPct:
+		return evaluationDecision{
+			State:  models.WarmupHealthWatch,
+			Reason: fmt.Sprintf("warmup spam placement %.1f%% in watch band", metrics.SpamPlacementRate),
+			Score:  metrics.SpamPlacementRate,
+		}
+	default:
+		return decision
+	}
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}

@@ -1,4 +1,4 @@
-import { saveTokens, TOKENS } from "./auth";
+import { saveTokens, TOKENS, clearTokens } from "./auth";
 import { API_URL } from "./information";
 
 export const isAuthenticated = (): boolean => {
@@ -26,7 +26,7 @@ export const LogoutAll = async () => {
 }
 
 export const deleteTokens = () => {
-  TOKENS.forEach(k => localStorage.removeItem(k));
+  clearTokens();
 };
 
 export const isTokenExpired = () => {

@@ -24,8 +24,8 @@ var (
 	ErrLimit     = New(BadRequest, "Limit must be between 10 and 200.")
 
 	// Authorization
-	ErrToken = New(BadRequest, "Invalid or expired token.")
-	ErrAuth  = New(BadRequest, "Missing or invalid Authorization header.")
+	ErrToken = New(Unauthorized, "Invalid or expired token.")
+	ErrAuth  = New(Unauthorized, "Missing or invalid Authorization header.")
 
 	ErrUser        = New(BadRequest, "User doesn't exists.")
 	ErrPassword    = New(BadRequest, "Password must be at least 8 characters long.")

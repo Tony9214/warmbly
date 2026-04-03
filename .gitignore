@@ -45,3 +45,11 @@ go.work.sum
 
 # Local Go build cache
 .gocache/
+
+# Local pnpm store created by dockerized frontend installs
+web/.pnpm-store/
+
+# Temp/test output directories
+.tmp-tests/
+test-results/
+web/.tmp/

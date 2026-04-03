@@ -1,6 +1,7 @@
 import useClickOutside from "@/hooks/useClickOutside";
 import React from "react";
 import SelectMenu from "../popup/select/SelectMenu";
+import { ChevronDownIcon } from "lucide-react";
 
 export default function HeadSelectMenu({
     children,
@@ -21,12 +22,12 @@ export default function HeadSelectMenu({
     }, [title])
 
     return (
-
         <div className="relative" ref={ref}>
-            <div onClickCapture={() => setShow(true)} className="ripple w-60 px-4 py-2 cursor-pointer shadow-md rounded-md font-sans transition text-gray-500 border border-gray-200 flex item-center gap-2 bg-white hover:bg-gray-100">
+            <button onClickCapture={() => setShow(true)} className="px-2 py-1 cursor-pointer rounded-md text-sm text-muted-foreground transition-colors duration-150 ease-in-out border border-border flex items-center gap-1.5">
                 {icon}
-                <div>{title}</div>
-            </div>
+                <span className="max-w-[120px] truncate">{title}</span>
+                <ChevronDownIcon className="w-4 h-4 text-muted-foreground" />
+            </button>
             <SelectMenu show={show}>
                 {children}
             </SelectMenu>

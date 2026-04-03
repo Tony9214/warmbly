@@ -1,7 +1,7 @@
 import React from "react"
 import Search from "../Search";
 import { Loading } from "@/components/loader";
-import { RiSendPlaneLine } from "@remixicon/react";
+import { SearchIcon } from "lucide-react";
 
 export default function HeadSearch({
     loading,
@@ -14,15 +14,15 @@ export default function HeadSearch({
 
     return (
         <div>
-            <form className="w-full flex gap-2 h-full" onSubmit={(e) => onSubmit(e, search)}>
+            <form className="w-full flex gap-1.5 h-full" onSubmit={(e) => onSubmit(e, search)}>
                 <Search
                     value={search}
                     onChange={(e) => setSearch(e)}
                 />
                 <button
                     type="submit"
-                    className="bg-blue-500 hover:bg-blue-600 ripple cursor-pointer transition rounded-lg w-20 flex items-center justify-center text-white shadow-md border border-transparent">
-                    {loading ? <Loading className="h-4" /> : <RiSendPlaneLine className="h-4" />}
+                    className="flex items-center justify-center h-8 w-8 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors duration-150 ease-in-out cursor-pointer">
+                    {loading ? <Loading className="h-3.5" /> : <SearchIcon className="w-4 h-4" />}
                 </button>
             </form>
         </div>

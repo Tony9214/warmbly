@@ -94,10 +94,10 @@ WebSocket gateway for real-time frontend updates.
 
 | Store | Purpose |
 |-------|---------|
-| PostgreSQL | Primary database (users, accounts, campaigns) |
+| PostgreSQL | Primary database (users, accounts, campaigns, unibox emails, mailboxes) |
 | Redis | Caching, rate limiting, session storage |
-| Cassandra (Astra) | Time-series analytics data |
-| DynamoDB | Key-value lookups |
+| Cassandra (Astra) | Audit logs |
+| DynamoDB | Key-value lookups (message ID maps, history IDs, encrypted keys) |
 | S3 | Email bodies (EMSG format) |
 
 ## Communication Patterns

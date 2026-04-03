@@ -8,7 +8,7 @@ import toast from "react-hot-toast";
 import { ArrowLeft } from "lucide-react";
 import { usePasswordStrength } from "@/hooks/usePasswordStrength";
 
-import Turnstile from "react-turnstile";
+import Turnstile, { type BoundTurnstileObject } from "react-turnstile";
 import AuthButton from "@/components/auth/button";
 import ExternalLogin from "@/components/auth/external";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
@@ -134,6 +134,10 @@ type Step = "email" | "signin" | "signup" | "verify";
 export default function LoginPage() {
     const navigate = useNavigate();
     const location = useLocation();
+    const defaultDevBypassToken = "warmbly-local-turnstile-bypass";
+    const turnstileBypassToken = import.meta.env.DEV
+        ? (import.meta.env.VITE_TURNSTILE_BYPASS_TOKEN?.trim() || defaultDevBypassToken)
+        : "";
 
     /* State */
     const [step, setStep] = useState<Step>("email");
@@ -152,7 +156,7 @@ export default function LoginPage() {
     const [direction, setDirection] = useState(0);
     const pendingRef = useRef<((token: string) => void) | null>(null);
     const tokenRef = useRef<string>("");
-    const turnstileRef = useRef<{ reset(): void } | null>(null);
+    const turnstileRef = useRef<BoundTurnstileObject | null>(null);
     const [captchaLoading, setCaptchaLoading] = useState(false);
     const captchaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -171,6 +175,11 @@ export default function LoginPage() {
 
     /* Captcha helper — invisible Turnstile with loading + timeout */
     const withCaptcha = (fn: (token: string) => Promise<void>) => {
+        if (turnstileBypassToken) {
+            void fn(turnstileBypassToken);
+            return;
+        }
+
         if (captchaTimeoutRef.current) {
             clearTimeout(captchaTimeoutRef.current);
             captchaTimeoutRef.current = null;
@@ -196,10 +205,13 @@ export default function LoginPage() {
                     turnstileRef.current?.reset();
                 }
             }, 10000);
+            // Invisible Turnstile requires explicit execution per action.
+            turnstileRef.current?.execute();
         }
     };
 
-    const onTurnstileVerify = (token: string) => {
+    const onTurnstileVerify = (token: string, bound?: BoundTurnstileObject) => {
+        if (bound) turnstileRef.current = bound;
         if (captchaTimeoutRef.current) {
             clearTimeout(captchaTimeoutRef.current);
             captchaTimeoutRef.current = null;
@@ -213,7 +225,12 @@ export default function LoginPage() {
         }
     };
 
-    const onTurnstileError = () => {
+    const onTurnstileError = (_error?: unknown, bound?: BoundTurnstileObject) => {
+        if (bound) turnstileRef.current = bound;
+        if (captchaTimeoutRef.current) {
+            clearTimeout(captchaTimeoutRef.current);
+            captchaTimeoutRef.current = null;
+        }
         if (pendingRef.current) {
             pendingRef.current = null;
             setCaptchaLoading(false);
@@ -342,15 +359,21 @@ export default function LoginPage() {
                 )}
             </AnimatePresence>
 
-            <Turnstile
-                ref={turnstileRef as React.RefObject<never>}
-                sitekey={import.meta.env.VITE_TURNSTILE_KEY!}
-                onVerify={onTurnstileVerify}
-                onError={onTurnstileError}
-                onTimeout={onTurnstileError}
-                onExpire={() => { tokenRef.current = ""; turnstileRef.current?.reset(); }}
-                size="invisible"
-            />
+            {!turnstileBypassToken && (
+                <Turnstile
+                    sitekey={import.meta.env.VITE_TURNSTILE_KEY!}
+                    execution="execute"
+                    onLoad={(_widgetId, bound) => {
+                        turnstileRef.current = bound;
+                        if (pendingRef.current) bound.execute();
+                    }}
+                    onVerify={onTurnstileVerify}
+                    onError={onTurnstileError}
+                    onTimeout={onTurnstileError}
+                    onExpire={() => { tokenRef.current = ""; turnstileRef.current?.reset(); }}
+                    size="invisible"
+                />
+            )}
         </div>
     );
 }

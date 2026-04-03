@@ -85,9 +85,11 @@ export default function CampaignSchedule() {
 
     if (!campaign || !newData) return null;
 
+    const hasChanges = Object.keys(getChanges() || {}).length > 0;
+
     return (<>
-        <div className="flex flex-col md:flex-row">
-            <div className="md:w-70 shrink-0 space-y-3">
+        <div className="flex flex-col md:flex-row gap-4">
+            <div className="md:w-60 shrink-0 space-y-3">
                 <DateSelect
                     title="Start Date"
                     value={newData.start_date ?? null}
@@ -105,7 +107,7 @@ export default function CampaignSchedule() {
                     }) : null)}
                 />
             </div>
-            <div className="grow space-y-4 px-8">
+            <div className="flex-1 space-y-4">
                 <div>
                     <SubTitle>Timezone</SubTitle>
                     <div ref={tzRef} className="relative">
@@ -136,7 +138,7 @@ export default function CampaignSchedule() {
                                         }}
                                         selected={tz.name === newData.timezone}
                                     >
-                                        <RiHistoryLine className="w-4" />
+                                        <RiHistoryLine className="w-4 h-4" />
                                         <span>{tz.display_name}</span>
                                     </SelectOption>
                                 ))}
@@ -148,7 +150,7 @@ export default function CampaignSchedule() {
                         </SelectMenu>
                     </div>
                 </div>
-                <div className="grid md:grid-cols-2 gap-5">
+                <div className="grid md:grid-cols-2 gap-4">
                     <div>
                         <SubTitle>Active Days</SubTitle>
                         <div className="space-y-1">
@@ -162,7 +164,7 @@ export default function CampaignSchedule() {
                             />
                         </div>
                     </div>
-                    <div className="space-y-5">
+                    <div className="space-y-4">
                         <div>
                             <SubTitle>Start Time</SubTitle>
                             <TimeSelector
@@ -187,22 +189,19 @@ export default function CampaignSchedule() {
                 </div>
             </div>
         </div>
-        <div className="flex relative justify-end gap-2 md:px-8 mt-4">
+        <div className={`flex justify-end gap-2 mt-4 transition-opacity duration-100 ${hasChanges ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
             <button
-                className={`bg-slate-200 select-none ripple transition flex justify-center items-center cursor-pointer ${!loading && "hover:bg-slate-300"} px-3 py-2 rounded-lg text-slate-600`}
-                onClick={() => {
-                    setNewData(campaign)
-                }}
+                className="text-[13px] font-medium text-zinc-600 hover:text-zinc-900 border border-zinc-200 rounded-lg px-3 py-1.5 transition-colors duration-100"
+                onClick={() => setNewData(campaign)}
             >
                 Reset
             </button>
             <button
-                className={`bg-blue-500 select-none ripple transition w-33 flex justify-center items-center cursor-pointer ${!loading && "hover:bg-blue-600"} px-3 py-2 rounded-lg text-slate-50`}
+                className="bg-zinc-900 text-white hover:bg-zinc-800 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-100 min-w-[100px] flex items-center justify-center"
                 onClick={submit}
             >
-                {loading ? <Loading className="h-6" /> : "Save Changes"}
+                {loading ? <Loading className="h-4" /> : "Save Changes"}
             </button>
-            <div className={`bg-gray-50 absolute transition select-none left-0 top-0 w-full h-full ${Object.keys(getChanges() || {}).length === 0 ? "opacity-60 visible" : "opacity-0 invisible"}`} />
         </div>
     </>);
 }

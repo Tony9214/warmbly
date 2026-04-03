@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { devtools, persist } from 'zustand/middleware'
+import { useShallow } from 'zustand/react/shallow'
 import { createUserSlice, type UserSlice } from './slices/userSlice'
 import { createOrganizationSlice, type OrganizationSlice } from './slices/organizationSlice'
 import { createUISlice, type UISlice } from './slices/uiSlice'
@@ -51,24 +52,25 @@ export const useAppStore = create<AppStore>()(
 // Selectors for commonly used state combinations
 export const useUser = () => useAppStore((state) => state.user)
 export const useIsAuthenticated = () => useAppStore((state) => state.isAuthenticated)
-export const useTheme = () => useAppStore((state) => ({ theme: state.theme, resolvedTheme: state.resolvedTheme }))
+export const useTheme = () =>
+  useAppStore(useShallow((state) => ({ theme: state.theme, resolvedTheme: state.resolvedTheme })))
 export const useSidebar = () =>
-  useAppStore((state) => ({
+  useAppStore(useShallow((state) => ({
     collapsed: state.sidebarCollapsed,
     mobileOpen: state.sidebarMobileOpen,
     toggle: state.toggleSidebar,
     setCollapsed: state.setSidebarCollapsed,
     setMobileOpen: state.setSidebarMobileOpen,
-  }))
+  })))
 export const useCurrentOrg = () => useAppStore((state) => state.currentOrganization)
 export const useOrganizations = () =>
-  useAppStore((state) => ({
+  useAppStore(useShallow((state) => ({
     organizations: state.organizations,
     current: state.currentOrganization,
     switch: state.switchOrganization,
-  }))
+  })))
 export const useKeyboardNavigation = () =>
-  useAppStore((state) => ({
+  useAppStore(useShallow((state) => ({
     sequence: state.keySequence,
     addToSequence: state.addToSequence,
     clearSequence: state.clearSequence,
@@ -77,19 +79,19 @@ export const useKeyboardNavigation = () =>
     listLength: state.listLength,
     setListLength: state.setListLength,
     moveSelection: state.moveSelection,
-  }))
+  })))
 export const useCachedData = () =>
-  useAppStore((state) => ({
+  useAppStore(useShallow((state) => ({
     campaigns: state.campaigns,
     emails: state.emails,
     tags: state.tags,
     folders: state.folders,
     categories: state.categories,
-  }))
+  })))
 export const useConnectionStatus = () =>
-  useAppStore((state) => ({
+  useAppStore(useShallow((state) => ({
     status: state.connectionStatus,
     quality: state.connectionQuality,
     reconnectAttempt: state.reconnectAttempt,
-  }))
+  })))
 export const useUnseenCount = () => useAppStore((state) => state.unseenCount)

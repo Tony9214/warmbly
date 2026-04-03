@@ -30,6 +30,15 @@ export function normalizeError(error: unknown): AppError {
         const status = error.response.status;
         const data = error.response.data;
 
+        if (status === 401) {
+            return {
+                error: data.error || "Unauthorized",
+                message: data.message || "Your session is invalid or expired.",
+                status,
+                redirect: true,
+            };
+        }
+
         return {
             error: data.error || "Unknown Error",
             message: data.message || "Unexpected error occured.",
@@ -42,4 +51,3 @@ export function normalizeError(error: unknown): AppError {
         message: "Unexpected error occurred.",
     };
 }
-

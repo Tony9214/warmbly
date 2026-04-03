@@ -12,10 +12,10 @@ export function ConnectionIndicator() {
     <div className="flex items-center gap-2">
       <span
         className={cn(
-          'size-2.5 border border-foreground/20',
-          status === 'connected' && quality === 'degraded' && 'bg-yellow-500 animate-pulse',
+          'w-2 h-2 rounded-full',
+          status === 'connected' && quality === 'degraded' && 'bg-amber-500',
           status === 'connected' && quality === 'poor' && 'bg-red-500',
-          status === 'connecting' && 'bg-yellow-500 animate-pulse',
+          status === 'connecting' && 'bg-amber-500',
           status === 'disconnected' && 'bg-red-500',
         )}
       />

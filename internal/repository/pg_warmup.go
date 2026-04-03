@@ -22,12 +22,17 @@ type WarmupPool struct {
 
 // WarmupPoolParticipant represents a participant in a warmup pool
 type WarmupPoolParticipant struct {
-	PoolID         uuid.UUID
-	EmailAccountID uuid.UUID
-	JoinedAt       time.Time
-	BlockedAt      *time.Time
-	BlockedReason  *string
-	SpamScore      int
+	PoolID                uuid.UUID
+	EmailAccountID        uuid.UUID
+	JoinedAt              time.Time
+	BlockedAt             *time.Time
+	BlockedUntil          *time.Time
+	BlockedReason         *string
+	SpamScore             int
+	HealthState           models.WarmupHealthState
+	LastHealthScore       float64
+	LastHealthReason      *string
+	LastHealthEvaluatedAt *time.Time
 }
 
 // SpamReport represents a spam report
@@ -66,9 +71,13 @@ type WarmupRepository interface {
 	BlockFromPool(ctx context.Context, accountID uuid.UUID, reason string) error
 	UnblockFromPool(ctx context.Context, accountID uuid.UUID) error
 	IsInPool(ctx context.Context, accountID uuid.UUID, poolType string) (bool, error)
+	GetParticipantHealth(ctx context.Context, accountID uuid.UUID, poolType string) (*models.WarmupParticipantHealth, error)
+	UpdateParticipantHealth(ctx context.Context, accountID uuid.UUID, state models.WarmupHealthState, blockedUntil *time.Time, reason string, score float64) error
+	CountSpamReportsSince(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error)
+	SumWarmupSentSince(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error)
 
 	// Spam tracking
-	RecordSpamReport(ctx context.Context, report *SpamReport) error
+	RecordSpamReport(ctx context.Context, report *SpamReport) (bool, error)
 	GetSpamScore(ctx context.Context, accountID uuid.UUID) (int, error)
 	IncrementSpamScore(ctx context.Context, accountID uuid.UUID, amount int) (int, error)
 	ResetSpamScore(ctx context.Context, accountID uuid.UUID) error
@@ -81,6 +90,7 @@ type WarmupRepository interface {
 	// Warmup token management
 	CreateWarmupToken(ctx context.Context, token *models.WarmupToken) error
 	GetWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error)
+	FindWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error)
 	ConsumeWarmupToken(ctx context.Context, tokenID uuid.UUID) error
 	RecordInvalidTokenAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string) error
 	CountRecentInvalidAttempts(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error)
@@ -135,7 +145,20 @@ func (r *warmupRepository) GetPoolParticipants(ctx context.Context, poolType str
 	`
 
 	if excludeBlocked {
-		query += ` AND wpp.blocked_at IS NULL`
+		query += `
+		 AND (
+		  wpp.health_state IN ('healthy', 'watch')
+		  OR (
+		   wpp.health_state IN ('quarantined', 'blocked')
+		   AND wpp.blocked_until IS NOT NULL
+		   AND wpp.blocked_until <= NOW()
+		  )
+		 )
+		 AND (
+		  wpp.blocked_at IS NULL
+		  OR (wpp.blocked_until IS NOT NULL AND wpp.blocked_until <= NOW())
+		 )
+		`
 	}
 
 	rows, err := r.db.Query(ctx, query, poolType)
@@ -161,7 +184,8 @@ func (r *warmupRepository) JoinPool(ctx context.Context, poolID, accountID uuid.
 	query := `
 		INSERT INTO warmup_pool_participants (pool_id, email_account_id, joined_at, spam_score)
 		VALUES ($1, $2, NOW(), 0)
-		ON CONFLICT (pool_id, email_account_id) DO NOTHING
+		ON CONFLICT (pool_id, email_account_id) DO UPDATE
+		SET joined_at = warmup_pool_participants.joined_at
 	`
 
 	_, err := r.db.Exec(ctx, query, poolID, accountID)
@@ -184,7 +208,11 @@ func (r *warmupRepository) BlockFromPool(ctx context.Context, accountID uuid.UUI
 	query := `
 		UPDATE warmup_pool_participants
 		SET blocked_at = NOW(),
-		    blocked_reason = $1
+		    blocked_until = NULL,
+		    blocked_reason = $1,
+		    health_state = 'blocked',
+		    last_health_reason = $1,
+		    last_health_evaluated_at = NOW()
 		WHERE email_account_id = $2
 		  AND blocked_at IS NULL
 	`
@@ -198,7 +226,12 @@ func (r *warmupRepository) UnblockFromPool(ctx context.Context, accountID uuid.U
 	query := `
 		UPDATE warmup_pool_participants
 		SET blocked_at = NULL,
-		    blocked_reason = NULL
+		    blocked_until = NULL,
+		    blocked_reason = NULL,
+		    health_state = 'healthy',
+		    last_health_reason = NULL,
+		    last_health_score = 0,
+		    last_health_evaluated_at = NOW()
 		WHERE email_account_id = $1
 	`
 
@@ -215,7 +248,18 @@ func (r *warmupRepository) IsInPool(ctx context.Context, accountID uuid.UUID, po
 			JOIN warmup_pools wp ON wpp.pool_id = wp.id
 			WHERE wpp.email_account_id = $1
 			  AND wp.pool_type = $2
-			  AND wpp.blocked_at IS NULL
+			  AND (
+			   wpp.health_state IN ('healthy', 'watch')
+			   OR (
+			    wpp.health_state IN ('quarantined', 'blocked')
+			    AND wpp.blocked_until IS NOT NULL
+			    AND wpp.blocked_until <= NOW()
+			   )
+			  )
+			  AND (
+			   wpp.blocked_at IS NULL
+			   OR (wpp.blocked_until IS NOT NULL AND wpp.blocked_until <= NOW())
+			  )
 		)
 	`
 
@@ -225,14 +269,14 @@ func (r *warmupRepository) IsInPool(ctx context.Context, accountID uuid.UUID, po
 }
 
 // RecordSpamReport records a spam report
-func (r *warmupRepository) RecordSpamReport(ctx context.Context, report *SpamReport) error {
+func (r *warmupRepository) RecordSpamReport(ctx context.Context, report *SpamReport) (bool, error) {
 	query := `
 		INSERT INTO warmup_spam_reports (id, reporter_account_id, reported_account_id, message_id, report_type, created_at)
 		VALUES ($1, $2, $3, $4, $5, NOW())
 		ON CONFLICT (reporter_account_id, message_id) DO NOTHING
 	`
 
-	_, err := r.db.Exec(ctx, query,
+	cmd, err := r.db.Exec(ctx, query,
 		report.ID,
 		report.ReporterAccountID,
 		report.ReportedAccountID,
@@ -240,7 +284,11 @@ func (r *warmupRepository) RecordSpamReport(ctx context.Context, report *SpamRep
 		report.ReportType,
 	)
 
-	return err
+	if err != nil {
+		return false, err
+	}
+
+	return cmd.RowsAffected() > 0, nil
 }
 
 // GetSpamScore retrieves the spam score for an account
@@ -254,6 +302,104 @@ func (r *warmupRepository) GetSpamScore(ctx context.Context, accountID uuid.UUID
 	var score int
 	err := r.db.QueryRow(ctx, query, accountID).Scan(&score)
 	return score, err
+}
+
+func (r *warmupRepository) GetParticipantHealth(ctx context.Context, accountID uuid.UUID, poolType string) (*models.WarmupParticipantHealth, error) {
+	query := `
+		SELECT
+			wpp.pool_id,
+			wp.pool_type,
+			wpp.email_account_id,
+			wpp.joined_at,
+			wpp.blocked_at,
+			wpp.blocked_until,
+			wpp.blocked_reason,
+			wpp.spam_score,
+			wpp.health_state,
+			wpp.last_health_score,
+			wpp.last_health_reason,
+			wpp.last_health_evaluated_at
+		FROM warmup_pool_participants wpp
+		JOIN warmup_pools wp ON wp.id = wpp.pool_id
+		WHERE wpp.email_account_id = $1
+		  AND wp.pool_type = $2
+		LIMIT 1
+	`
+
+	var out models.WarmupParticipantHealth
+	var state string
+	if err := r.db.QueryRow(ctx, query, accountID, poolType).Scan(
+		&out.PoolID,
+		&out.PoolType,
+		&out.EmailAccountID,
+		&out.JoinedAt,
+		&out.BlockedAt,
+		&out.BlockedUntil,
+		&out.BlockedReason,
+		&out.SpamScore,
+		&state,
+		&out.LastHealthScore,
+		&out.LastHealthReason,
+		&out.LastHealthEvaluatedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out.HealthState = models.WarmupHealthState(state)
+	return &out, nil
+}
+
+func (r *warmupRepository) UpdateParticipantHealth(ctx context.Context, accountID uuid.UUID, state models.WarmupHealthState, blockedUntil *time.Time, reason string, score float64) error {
+	query := `
+		UPDATE warmup_pool_participants
+		SET
+			health_state = $1,
+			blocked_until = $2,
+			blocked_at = CASE
+				WHEN $2 IS NOT NULL AND (blocked_at IS NULL OR blocked_until IS DISTINCT FROM $2) THEN NOW()
+				WHEN $2 IS NULL AND blocked_until IS NOT NULL THEN NULL
+				ELSE blocked_at
+			END,
+			blocked_reason = CASE
+				WHEN $2 IS NOT NULL OR $1 = 'blocked' THEN $3
+				WHEN $1 = 'healthy' THEN NULL
+				ELSE COALESCE($3, blocked_reason)
+			END,
+			last_health_score = $4,
+			last_health_reason = NULLIF($3, ''),
+			last_health_evaluated_at = NOW()
+		WHERE email_account_id = $5
+		  AND NOT (blocked_at IS NOT NULL AND blocked_until IS NULL AND health_state = 'blocked')
+	`
+	_, err := r.db.Exec(ctx, query, state, blockedUntil, reason, score, accountID)
+	return err
+}
+
+func (r *warmupRepository) CountSpamReportsSince(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM warmup_spam_reports
+		WHERE reported_account_id = $1
+		  AND created_at >= $2
+		  AND report_type IN ('spam', 'spam_folder')
+	`
+	var count int
+	err := r.db.QueryRow(ctx, query, accountID, since).Scan(&count)
+	return count, err
+}
+
+func (r *warmupRepository) SumWarmupSentSince(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error) {
+	query := `
+		SELECT COALESCE(SUM(emails_sent), 0)
+		FROM warmup_statistics
+		WHERE email_account_id = $1
+		  AND date >= DATE($2)
+	`
+	var total int
+	err := r.db.QueryRow(ctx, query, accountID, since).Scan(&total)
+	return total, err
 }
 
 // IncrementSpamScore increments the spam score for an account
@@ -375,6 +521,31 @@ func (r *warmupRepository) GetWarmupToken(ctx context.Context, tokenID uuid.UUID
 		SELECT token, task_id, sender_account_id, recipient_account_id, created_at, consumed_at, expires_at
 		FROM warmup_tokens
 		WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW()
+	`
+
+	t := &models.WarmupToken{}
+	err := r.db.QueryRow(ctx, query, tokenID).Scan(
+		&t.Token,
+		&t.TaskID,
+		&t.SenderAccountID,
+		&t.RecipientAccountID,
+		&t.CreatedAt,
+		&t.ConsumedAt,
+		&t.ExpiresAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+
+	return t, err
+}
+
+func (r *warmupRepository) FindWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error) {
+	query := `
+		SELECT token, task_id, sender_account_id, recipient_account_id, created_at, consumed_at, expires_at
+		FROM warmup_tokens
+		WHERE token = $1
 	`
 
 	t := &models.WarmupToken{}

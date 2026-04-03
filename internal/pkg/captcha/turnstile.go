@@ -20,6 +20,7 @@ type TurnstileConfig struct {
 	SiteVerifyURL string
 	HTTPClient    *http.Client
 	ExpectedHost  string // optional: verify hostname
+	BypassToken   string // optional: local/dev bypass token
 }
 
 type Response struct {
@@ -58,6 +59,10 @@ func NewTurnstileFromConfig(cfg TurnstileConfig) *Turnstile {
 }
 
 func (t *Turnstile) Verify(ctx context.Context, token, remoteIP string) *errx.Error {
+	if t.cfg.BypassToken != "" && token == t.cfg.BypassToken {
+		return nil
+	}
+
 	if token == "" {
 		return errx.ErrCaptcha
 	}
