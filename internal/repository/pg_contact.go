@@ -76,8 +76,16 @@ func (r *contactRepository) Add(ctx context.Context, userID string, contacts []m
 			`INSERT INTO contacts (
 			 id, user_id, first_name, last_name, email, company, phone, custom_fields
 			 ) VALUES (
-			  gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
-			 ) RETURNING id, first_name, last_name, email, company, phone, custom_fields, subscribed, updated_at, created_at`,
+			  gen_random_uuid(), $1, $2, $3, LOWER($4), $5, $6, $7
+			 )
+			 ON CONFLICT (user_id, LOWER(email)) DO UPDATE SET
+			  first_name = EXCLUDED.first_name,
+			  last_name = EXCLUDED.last_name,
+			  company = EXCLUDED.company,
+			  phone = EXCLUDED.phone,
+			  custom_fields = contacts.custom_fields || EXCLUDED.custom_fields,
+			  updated_at = NOW()
+			 RETURNING id, first_name, last_name, email, company, phone, custom_fields, subscribed, updated_at, created_at`,
 			userID, lead.FirstName, lead.LastName, lead.Email, lead.Company, lead.Phone, lead.CustomFields,
 		)
 	}
