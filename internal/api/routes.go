@@ -121,6 +121,7 @@ func Run(
 			campaigns.DELETE("/:id/ab-variants/:variantId", m.RequireOrganization(), m.RequirePermission(models.PermManageSettings), h.DeleteCampaignABVariant)
 			campaigns.POST("/:id/preflight", m.RequireOrganization(), m.RequirePermission(models.PermSendCampaigns), h.RunCampaignPreflight)
 			campaigns.GET("/:id/ab-analysis", m.RequireOrganization(), h.GetCampaignABAnalysis)
+			campaigns.POST("/:id/test-email", m.RequireOrganization(), m.RequirePermission(models.PermSendCampaigns), h.SendTestEmail)
 
 			// Campaign start/stop
 			campaigns.POST("/:id/start", m.RequireOrganization(), m.RequirePermission(models.PermSendCampaigns), h.StartCampaign)

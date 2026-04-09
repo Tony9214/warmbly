@@ -1,6 +1,9 @@
 package tasks
 
 import (
+	"context"
+
+	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/app/advanced"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/feature"
@@ -37,6 +40,10 @@ type TasksService interface {
 	HandleCampaignTask(task *proto.ProcessTask) *errx.Error
 	HandleEmailTask(task *proto.ProcessTask) *errx.Error
 	HandleUserEmailTask(task *proto.ProcessTask) *errx.Error
+
+	// Test email support
+	SendTestEmail(ctx context.Context, userID string, accountID uuid.UUID, recipient string, campaign *models.Campaign, sequence *models.Sequence) *errx.Error
+	GetCampaignSequences(ctx context.Context, campaignID uuid.UUID) ([]models.Sequence, error)
 }
 
 type tasksService struct {
