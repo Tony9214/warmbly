@@ -13,6 +13,7 @@ import (
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
+	"github.com/warmbly/warmbly/internal/infrastructure/metrics"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
@@ -47,6 +48,9 @@ type Service interface {
 
 	ProcessIncomingReply(ctx context.Context, emailAccountID uuid.UUID, msg *models.EmailMessageStoreData) *errx.Error
 	GetABWinnerAnalysis(ctx context.Context, organizationID, campaignID uuid.UUID) (*models.ABWinnerAnalysis, *errx.Error)
+
+	// DLQ auto-retry
+	ProcessRetryableDeadLetters(ctx context.Context) (int, *errx.Error)
 }
 
 type service struct {
@@ -607,6 +611,8 @@ func (s *service) IngestDeliverabilityEvent(ctx context.Context, organizationID 
 		return toErrx(err)
 	}
 
+	metrics.DeliverabilityEvents.WithLabelValues(string(eventType)).Inc()
+
 	settings, err := s.repo.GetOutreachSettings(ctx, organizationID)
 	if err != nil {
 		return toErrx(err)
@@ -1048,4 +1054,51 @@ func (s *service) GetABWinnerAnalysis(ctx context.Context, organizationID, campa
 	}
 
 	return analysis, nil
+}
+
+func (s *service) ProcessRetryableDeadLetters(ctx context.Context) (int, *errx.Error) {
+	if s.tasksClient == nil {
+		return 0, nil
+	}
+
+	items, err := s.repo.ListRetryableDeadLetters(ctx, 10)
+	if err != nil {
+		return 0, toErrx(err)
+	}
+
+	retried := 0
+	for _, dlq := range items {
+		task, err := s.taskRepo.GetTask(ctx, dlq.TaskID)
+		if err != nil || task == nil {
+			// Mark as exhausted if the task no longer exists
+			_ = s.repo.MarkTaskDeadLetterReplayed(ctx, dlq.ID)
+			continue
+		}
+
+		// Check if attempts exceeded
+		if dlq.Attempts >= dlq.MaxAttempts {
+			_ = s.repo.IncrementDeadLetterAttempt(ctx, dlq.ID, nil)
+			continue
+		}
+
+		// Schedule retry via Cloud Tasks
+		scheduleAt := time.Now().UTC().Add(10 * time.Second)
+		cloudTaskName, err := s.tasksClient.CreateTask(ctx, &proto.ProcessTask{TaskId: task.ID.String()}, scheduleAt)
+		if err != nil {
+			// Compute next retry with exponential backoff
+			backoff := time.Duration(30*(1<<uint(dlq.Attempts+1))) * time.Second
+			nextRetry := time.Now().UTC().Add(backoff)
+			_ = s.repo.IncrementDeadLetterAttempt(ctx, dlq.ID, &nextRetry)
+			continue
+		}
+
+		if err := s.taskRepo.UpdateTaskScheduledAt(ctx, task.ID, scheduleAt, cloudTaskName); err != nil {
+			continue
+		}
+		_ = s.taskRepo.UpdateTaskStatus(ctx, task.ID, "pending")
+		_ = s.repo.MarkTaskDeadLetterReplayed(ctx, dlq.ID)
+		retried++
+	}
+
+	return retried, nil
 }

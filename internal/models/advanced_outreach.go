@@ -13,7 +13,7 @@ type BouncePipelineSettings struct {
 	AutoSuppressOnUnsubscribe  bool    `json:"auto_suppress_on_unsubscribe"`
 	AutoPauseCampaignOnSpike   bool    `json:"auto_pause_campaign_on_spike"`
 	PauseBounceRateThreshold   float64 `json:"pause_bounce_rate_threshold"`
-	PauseComplaintRateThresold float64 `json:"pause_complaint_rate_threshold"`
+	PauseComplaintRateThreshold float64 `json:"pause_complaint_rate_threshold"`
 }
 
 type TaskReliabilitySettings struct {
@@ -289,7 +289,7 @@ func DefaultAdvancedOutreachSettings() AdvancedOutreachSettings {
 			AutoSuppressOnUnsubscribe:  true,
 			AutoPauseCampaignOnSpike:   true,
 			PauseBounceRateThreshold:   8,
-			PauseComplaintRateThresold: 1.5,
+			PauseComplaintRateThreshold: 1.5,
 		},
 		TaskReliability: TaskReliabilitySettings{
 			Enabled:                true,

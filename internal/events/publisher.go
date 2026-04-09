@@ -30,13 +30,6 @@ type Publisher interface {
 	PublishEmailSent(ctx context.Context, task *repository.Task, account *models.Email, campaign *models.Campaign, contact *models.Contact, sequence *models.Sequence) error
 	PublishWarmupEmailSent(ctx context.Context, task *repository.Task, senderAccount *models.Email, targetAccount *models.Email, isReply bool) error
 
-	// Campaign events
-	PublishCampaignProgress(ctx context.Context, campaignID uuid.UUID, progress *repository.CampaignProgress) error
-
-	// Task events
-	PublishTaskCreated(ctx context.Context, task *repository.Task) error
-	PublishTaskCompleted(ctx context.Context, task *repository.Task) error
-
 	// Warmup action events
 	PublishWarmupAction(ctx context.Context, workerID uuid.UUID, action *models.WarmupEmailAction) error
 
@@ -228,68 +221,6 @@ func (p *publisher) PublishWarmupEmailSent(
 	}
 
 	return p.publish(TopicWarmupEvents, task.ID.String(), event)
-}
-
-// PublishCampaignProgress publishes a campaign progress update
-func (p *publisher) PublishCampaignProgress(
-	ctx context.Context,
-	campaignID uuid.UUID,
-	progress *repository.CampaignProgress,
-) error {
-	event := CampaignProgressEvent{
-		EventType:     EventTypeCampaignProgress,
-		CampaignID:    campaignID,
-		TotalContacts: progress.TotalContacts,
-		EmailsSent:    progress.EmailsSent,
-		EmailsPending: progress.EmailsPending,
-		EmailsOpened:  progress.EmailsOpened,
-		EmailsClicked: progress.EmailsClicked,
-		EmailsReplied: progress.EmailsReplied,
-		EmailsBounced: progress.EmailsBounced,
-		UpdatedAt:     time.Now(),
-	}
-
-	return p.publish(TopicCampaignEvents, campaignID.String(), event)
-}
-
-// PublishTaskCreated publishes a task created event
-func (p *publisher) PublishTaskCreated(ctx context.Context, task *repository.Task) error {
-	scheduledAt := time.Time{}
-	if task.ScheduledAt != nil {
-		scheduledAt = *task.ScheduledAt
-	}
-
-	event := TaskEvent{
-		EventType:      EventTypeTaskCreated,
-		TaskID:         task.ID,
-		TaskType:       task.TaskType,
-		EmailAccountID: task.EmailAccountID,
-		Status:         task.Status,
-		ScheduledAt:    scheduledAt,
-		Timestamp:      time.Now(),
-	}
-
-	return p.publish(TopicTaskEvents, task.ID.String(), event)
-}
-
-// PublishTaskCompleted publishes a task completed event
-func (p *publisher) PublishTaskCompleted(ctx context.Context, task *repository.Task) error {
-	scheduledAt := time.Time{}
-	if task.ScheduledAt != nil {
-		scheduledAt = *task.ScheduledAt
-	}
-
-	event := TaskEvent{
-		EventType:      EventTypeTaskCompleted,
-		TaskID:         task.ID,
-		TaskType:       task.TaskType,
-		EmailAccountID: task.EmailAccountID,
-		Status:         task.Status,
-		ScheduledAt:    scheduledAt,
-		Timestamp:      time.Now(),
-	}
-
-	return p.publish(TopicTaskEvents, task.ID.String(), event)
 }
 
 // PublishWarmupAction publishes a warmup action event to the worker

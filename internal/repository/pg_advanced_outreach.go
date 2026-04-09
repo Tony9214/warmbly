@@ -46,6 +46,10 @@ type AdvancedOutreachRepository interface {
 	CreatePreflightReport(ctx context.Context, report *models.PreflightReport) error
 
 	GetABVariantStats(ctx context.Context, campaignID uuid.UUID) ([]models.ABVariantStats, error)
+
+	// DLQ auto-retry
+	ListRetryableDeadLetters(ctx context.Context, limit int) ([]models.TaskDeadLetter, error)
+	IncrementDeadLetterAttempt(ctx context.Context, id uuid.UUID, nextRetryAt *time.Time) error
 }
 
 type advancedOutreachRepository struct {
@@ -513,16 +517,34 @@ func (r *advancedOutreachRepository) GetDeliverabilityDashboard(ctx context.Cont
 	return out, nil
 }
 
+// executionLockTTL is the maximum time an in_progress execution lock is considered valid.
+// If a lock has been in_progress longer than this, it is treated as expired (worker crash).
+const executionLockTTL = 5 * time.Minute
+
 func (r *advancedOutreachRepository) StartTaskExecution(ctx context.Context, taskID uuid.UUID, executionKey string, metadata map[string]interface{}) (bool, error) {
-	// Existing key: treat in-progress or completed as duplicate executions.
 	var existingStatus string
+	var lastSeenAt time.Time
 	err := r.db.QueryRow(ctx,
-		`SELECT status FROM task_execution_keys WHERE task_id = $1 AND execution_key = $2`,
+		`SELECT status, last_seen_at FROM task_execution_keys WHERE task_id = $1 AND execution_key = $2`,
 		taskID, executionKey,
-	).Scan(&existingStatus)
+	).Scan(&existingStatus, &lastSeenAt)
 	if err == nil {
 		switch existingStatus {
-		case "in_progress", "completed":
+		case "completed":
+			_, _ = r.db.Exec(ctx, `UPDATE task_execution_keys SET attempts = attempts + 1, last_seen_at = NOW() WHERE task_id = $1 AND execution_key = $2`, taskID, executionKey)
+			return true, nil
+		case "in_progress":
+			// Check if the lock has expired (worker likely crashed)
+			if time.Since(lastSeenAt) > executionLockTTL {
+				// Expired lock - reclaim it
+				meta, _ := marshalJSON(metadata)
+				_, err := r.db.Exec(ctx, `
+					UPDATE task_execution_keys
+					SET attempts = attempts + 1, last_seen_at = NOW(), status = 'in_progress', metadata = $3
+					WHERE task_id = $1 AND execution_key = $2
+				`, taskID, executionKey, meta)
+				return false, err
+			}
 			_, _ = r.db.Exec(ctx, `UPDATE task_execution_keys SET attempts = attempts + 1, last_seen_at = NOW() WHERE task_id = $1 AND execution_key = $2`, taskID, executionKey)
 			return true, nil
 		default:
@@ -751,4 +773,48 @@ func (r *advancedOutreachRepository) GetABVariantStats(ctx context.Context, camp
 		stats = append(stats, s)
 	}
 	return stats, rows.Err()
+}
+
+func (r *advancedOutreachRepository) ListRetryableDeadLetters(ctx context.Context, limit int) ([]models.TaskDeadLetter, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	query := `
+		SELECT id, task_id, task_type, payload, last_error, attempts, max_attempts, status, next_retry_at, replayed_at, created_at, updated_at
+		FROM task_dead_letters
+		WHERE status = 'pending'
+		  AND next_retry_at IS NOT NULL
+		  AND next_retry_at <= NOW()
+		  AND attempts < max_attempts
+		ORDER BY next_retry_at ASC
+		LIMIT $1
+	`
+	rows, err := r.db.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []models.TaskDeadLetter
+	for rows.Next() {
+		var d models.TaskDeadLetter
+		var payload []byte
+		if err := rows.Scan(&d.ID, &d.TaskID, &d.TaskType, &payload, &d.LastError, &d.Attempts, &d.MaxAttempts, &d.Status, &d.NextRetryAt, &d.ReplayedAt, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if len(payload) > 0 {
+			_ = json.Unmarshal(payload, &d.Payload)
+		}
+		items = append(items, d)
+	}
+	return items, rows.Err()
+}
+
+func (r *advancedOutreachRepository) IncrementDeadLetterAttempt(ctx context.Context, id uuid.UUID, nextRetryAt *time.Time) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE task_dead_letters
+		SET attempts = attempts + 1, next_retry_at = $2, updated_at = NOW()
+		WHERE id = $1
+	`, id, nextRetryAt)
+	return err
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	awsconf "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/getsentry/sentry-go"
@@ -69,7 +70,7 @@ func main() {
 
 	// KMS + DynamoDB → CipherService
 	var masterKey string = "alias/master-key"
-	if cfg.Env == "prod" {
+	if cfg.Env != "prod" {
 		masterKey += "-dev"
 	}
 
@@ -211,6 +212,9 @@ func main() {
 		log.Println("Shutting down consumer...")
 		cancel()
 	}()
+
+	// Start DLQ auto-retry loop in background (every 60 seconds)
+	go jobsService.StartDLQRetryLoop(ctx, 60*time.Second)
 
 	log.Println("Consumer started, listening on", kafka.TopicWorkerEvents)
 	jobsService.Start(ctx)

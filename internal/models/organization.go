@@ -128,11 +128,12 @@ type AcceptInvitationRequest struct {
 
 // OrganizationCounts represents resource counts for an organization
 type OrganizationCounts struct {
-	TotalCampaigns  int `json:"total_campaigns"`
-	ActiveCampaigns int `json:"active_campaigns"`
-	TotalContacts   int `json:"total_contacts"`
-	TotalMembers    int `json:"total_members"`
-	EmailAccounts   int `json:"email_accounts"`
+	TotalCampaigns     int `json:"total_campaigns"`
+	ActiveCampaigns    int `json:"active_campaigns"`
+	TotalContacts      int `json:"total_contacts"`
+	TotalMembers       int `json:"total_members"`
+	EmailAccounts      int `json:"email_accounts"`
+	EmailsSentToday    int `json:"emails_sent_today"`
 }
 
 // OrganizationLimits represents the limits for an organization based on their plan
@@ -142,6 +143,7 @@ type OrganizationLimits struct {
 	MaxTeamMembers     *int `json:"max_team_members,omitempty"`
 	MaxEmailAccounts   *int `json:"max_email_accounts,omitempty"`
 	MaxContacts        *int `json:"max_contacts,omitempty"`
+	DailyCampaignLimit *int `json:"daily_campaign_limit,omitempty"`
 }
 
 // OrganizationWithLimits combines organization with its limits and counts

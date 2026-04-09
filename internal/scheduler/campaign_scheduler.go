@@ -73,7 +73,9 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	}
 
 	// STEP 5: Apply campaign schedule constraints
-	campaignTZ := loadLocation(campaign.Timezone)
+	// Fall back to UTC if campaign has no timezone set (account timezone checked later)
+	campaignTZName := campaign.Timezone
+	campaignTZ := loadLocation(campaignTZName)
 	candidateTime := baseTime
 
 	// Check campaign date range
@@ -92,6 +94,7 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
 
 	// STEP 8: Build weighted account candidates
+	// Skip accounts whose local time falls outside business hours (8am-8pm)
 	var candidates []AccountCandidate
 	for _, acct := range accounts {
 		sentToday, err := s.taskRepo.CountCampaignEmailsSentToday(ctx, acct.ID)
@@ -101,6 +104,21 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 
 		acctLimit := min(acct.CampaignLimit, campaign.DailyLimit)
 		remaining := acctLimit - sentToday
+
+		// Skip accounts that have reached their daily limit
+		if remaining <= 0 {
+			continue
+		}
+
+		// If the account has its own timezone, check it is within business hours
+		if acct.Timezone != "" && acct.Timezone != campaign.Timezone {
+			acctTZ := loadLocation(acct.Timezone)
+			acctLocal := candidateTime.In(acctTZ)
+			acctHour := acctLocal.Hour()
+			if acctHour < 8 || acctHour >= 20 {
+				continue // outside account's business hours
+			}
+		}
 
 		warmupAgeDays := 0
 		if acct.Warmup != nil {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/warmbly/warmbly/internal/api/handler"
 	"github.com/warmbly/warmbly/internal/api/handler/grouph"
 	"github.com/warmbly/warmbly/internal/api/middleware"
@@ -17,7 +18,7 @@ func Run(
 	oidcm *middleware.OidcHandler,
 	addr, ginMode string,
 	allowedOrigins []string,
-) {
+) *gin.Engine {
 	gin.SetMode(ginMode)
 
 	r := gin.Default()
@@ -25,6 +26,9 @@ func Run(
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+
+	// Prometheus metrics endpoint
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	corsConfig := cors.Config{
 		AllowMethods:  []string{"POST", "GET", "PATCH", "OPTIONS", "DELETE"},
@@ -52,6 +56,7 @@ func Run(
 	}
 
 	r.Use(cors.New(corsConfig))
+	r.Use(middleware.MetricsMiddleware())
 
 	auth := r.Group("/auth")
 	{
@@ -421,5 +426,5 @@ func Run(
 	// Stripe webhook (no auth - uses signature verification)
 	r.POST("/webhook/stripe", h.HandleStripeWebhook)
 
-	r.Run(addr)
+	return r
 }

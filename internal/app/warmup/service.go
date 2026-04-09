@@ -97,12 +97,24 @@ func (s *service) CanParticipate(ctx context.Context, accountID uuid.UUID, poolT
 
 	now := s.now().UTC()
 	if health.BlockedUntil != nil && !health.BlockedUntil.After(now) {
+		// Block period expired. Instead of snapping back to healthy, enter probation
+		// (throttled state with a 3-day window at reduced volume).
+		wasBlocked := health.HealthState == models.WarmupHealthQuarantined || health.HealthState == models.WarmupHealthBlocked
 		health, xerr := s.evaluateAndPersist(ctx, accountID, poolType)
 		if xerr != nil {
 			return false, "", xerr
 		}
 		if health == nil {
 			return false, "not_in_pool", nil
+		}
+		// If metrics are clean and the mailbox was previously blocked, force probation
+		if wasBlocked && health.HealthState == models.WarmupHealthHealthy {
+			probationEnd := now.Add(warmupThrottleDuration)
+			reason := "re-entry probation after block expiry"
+			if err := s.repo.UpdateParticipantHealth(ctx, accountID, models.WarmupHealthThrottled, &probationEnd, reason, 0); err != nil {
+				return false, "", errx.InternalError()
+			}
+			return true, "throttled", nil
 		}
 	}
 

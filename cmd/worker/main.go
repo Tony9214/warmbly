@@ -68,7 +68,7 @@ func main() {
 
 	// KMS + DynamoDB → CipherService
 	var masterKey string = "alias/master-key"
-	if cfg.Env == "prod" {
+	if cfg.Env != "prod" {
 		masterKey += "-dev"
 	}
 

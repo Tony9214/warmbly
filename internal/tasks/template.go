@@ -151,15 +151,28 @@ func GenerateConversationEmail(conversation Conversation, account models.Email, 
 		return conversation.Messages[rand.Intn(len(conversation.Messages))]
 	}
 
+	greetings := []string{"Hi,", "Hey,", "Hi there,", "Hello,", "Hey there,"}
+	greeting := greetings[rand.Intn(len(greetings))]
+
+	signoffs := []string{"Best regards,", "Best,", "Cheers,", "Thanks,", "Talk soon,", "All the best,"}
+	signoff := signoffs[rand.Intn(len(signoffs))]
+
 	description := strings.TrimSpace(conversation.Description)
 	message := strings.TrimSpace(pickMessage())
 
 	if isReply {
-		replyLine := "Thanks for your message."
+		replyStarters := []string{
+			"Thanks for your message.",
+			"Appreciate you getting back to me.",
+			"Good to hear from you.",
+			"Thanks for the reply.",
+			"Great to hear back.",
+		}
+		replyLine := replyStarters[rand.Intn(len(replyStarters))]
 		if message != "" {
 			replyLine = message
 		}
-		return fmt.Sprintf("%s\n\nBest regards,\n%s", replyLine, signature)
+		return fmt.Sprintf("%s\n\n%s\n%s", replyLine, signoff, signature)
 	}
 
 	body := description
@@ -170,7 +183,7 @@ func GenerateConversationEmail(conversation Conversation, account models.Email, 
 		body = body + "\n\n" + message
 	}
 
-	return fmt.Sprintf("Hi,\n\n%s\n\nBest regards,\n%s", body, signature)
+	return fmt.Sprintf("%s\n\n%s\n\n%s\n%s", greeting, body, signoff, signature)
 }
 
 // ExtractPlainTextFromHTML converts HTML to plain text (basic implementation)

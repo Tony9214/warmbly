@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"github.com/warmbly/warmbly/internal/errx"
+	"github.com/warmbly/warmbly/internal/infrastructure/metrics"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -19,6 +20,7 @@ import (
 
 func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	ctx := context.Background()
+	start := time.Now()
 
 	// STEP 1: Parse task ID
 	taskID, err := uuid.Parse(task.TaskId)
@@ -29,6 +31,13 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 
 	executionKey := "campaign:" + taskID.String()
 	executionStatus := "failed"
+	defer func() {
+		metrics.TasksProcessed.WithLabelValues("campaign", executionStatus).Inc()
+		metrics.EmailSendDuration.WithLabelValues("campaign").Observe(time.Since(start).Seconds())
+		if executionStatus == "completed" {
+			metrics.EmailsSentTotal.WithLabelValues("campaign").Inc()
+		}
+	}()
 	if s.advanced != nil {
 		duplicate, xerr := s.advanced.StartTaskExecution(ctx, taskID, executionKey, map[string]interface{}{
 			"task_type": "campaign",
@@ -401,6 +410,13 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	if err := s.campaignProgressRepo.RecordEmailSent(ctx, campaign.ID, contact.ID, sequence.ID); err != nil {
 		// Log but don't fail
 		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to record email sent")
+	}
+
+	// Publish campaign progress summary to Pub/Sub for real-time dashboard updates
+	if s.streamingPublisher != nil {
+		if progress, pErr := s.campaignProgressRepo.GetCampaignProgress(ctx, campaign.ID); pErr == nil && progress != nil {
+			s.streamingPublisher.PublishCampaignProgress(ctx, campaign.UserID, campaign.ID, progress)
+		}
 	}
 
 	// Log email sent

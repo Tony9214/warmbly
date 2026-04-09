@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v3"
@@ -111,8 +114,10 @@ func main() {
 	// Pub/Sub for realtime streaming
 	var streamingPublisher *pubsub.StreamingPublisher
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	{
-		ctx := context.Background()
 
 		// Load config with env-first approach
 		cfg, err := config.NewConfig(ctx)
@@ -154,7 +159,7 @@ func main() {
 		}
 
 		var masterKey string = "alias/master-key"
-		if cfg.Env == "prod" {
+		if cfg.Env != "prod" {
 			masterKey += "-dev"
 		}
 
@@ -553,5 +558,36 @@ func main() {
 
 	sentry.CaptureMessage("Starting the backend on " + addr)
 
-	api.Run(h, m, oidcH, addr, ginMode, allowedOrigins)
+	router := api.Run(h, m, oidcH, addr, ginMode, allowedOrigins)
+
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
+
+	// Start server in a goroutine
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	log.Println("Backend started on", addr)
+
+	// Wait for interrupt signal for graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	log.Println("Shutting down backend...")
+	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	log.Println("Backend stopped")
 }

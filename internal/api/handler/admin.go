@@ -498,7 +498,10 @@ func (h *Handler) AdminApproveAppeal(c *gin.Context) {
 	}
 
 	var req models.ReviewAppealRequest
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errx.JSON(c, errx.ErrInvalid)
+		return
+	}
 
 	xerr := h.AdminService.ReviewAppeal(c.Request.Context(), *adminID, appealID, true, req.Notes, c.ClientIP(), c.GetHeader("User-Agent"))
 	if xerr != nil {
@@ -524,7 +527,10 @@ func (h *Handler) AdminRejectAppeal(c *gin.Context) {
 	}
 
 	var req models.ReviewAppealRequest
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errx.JSON(c, errx.ErrInvalid)
+		return
+	}
 
 	xerr := h.AdminService.ReviewAppeal(c.Request.Context(), *adminID, appealID, false, req.Notes, c.ClientIP(), c.GetHeader("User-Agent"))
 	if xerr != nil {

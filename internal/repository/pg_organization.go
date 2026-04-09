@@ -49,6 +49,7 @@ type OrganizationRepository interface {
 	GetMemberCounts(ctx context.Context, orgID uuid.UUID) (int, error)
 	GetEmailAccountCount(ctx context.Context, orgID uuid.UUID) (int, error)
 	GetContactCount(ctx context.Context, orgID uuid.UUID) (int, error)
+	GetEmailsSentTodayCount(ctx context.Context, orgID uuid.UUID) (int, error)
 
 	// Ownership counts
 	GetUserOwnedOrganizationCount(ctx context.Context, userID uuid.UUID) (int, error)
@@ -494,6 +495,21 @@ func (r *organizationRepository) GetEmailAccountCount(ctx context.Context, orgID
 func (r *organizationRepository) GetContactCount(ctx context.Context, orgID uuid.UUID) (int, error) {
 	var count int
 	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM contacts WHERE organization_id = $1`, orgID).Scan(&count)
+	return count, err
+}
+
+// GetEmailsSentTodayCount counts campaign emails sent today by an organization.
+func (r *organizationRepository) GetEmailsSentTodayCount(ctx context.Context, orgID uuid.UUID) (int, error) {
+	var count int
+	err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM tasks t
+		JOIN email_accounts ea ON ea.id = t.email_account_id
+		WHERE ea.organization_id = $1
+		  AND t.task_type = 'campaign'
+		  AND t.status = 'completed'
+		  AND t.completed_at >= CURRENT_DATE
+	`, orgID).Scan(&count)
 	return count, err
 }
 
