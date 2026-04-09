@@ -511,10 +511,14 @@ func (s *stripeService) handleSubscriptionUpdated(ctx context.Context, event *st
 	if s.workerAssignment != nil {
 		isNowPaid := sub.HasPaidSubscription()
 
-		// Trial user converting to paid - migrate to premium workers
-		// Use background context since these goroutines outlive the HTTP request.
+		// Trial user converting to paid - migrate to premium workers.
+		// Use a bounded timeout context since these goroutines outlive the HTTP request.
 		if wasTrialOnly && isNowPaid {
-			go s.workerAssignment.MigrateOrgToPremiumWorkers(context.Background(), sub.OrganizationID)
+			go func() {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				s.workerAssignment.MigrateOrgToPremiumWorkers(bgCtx, sub.OrganizationID)
+			}()
 		}
 
 		// Handle dedicated worker migration on plan change
@@ -523,11 +527,17 @@ func (s *stripeService) handleSubscriptionUpdated(ctx context.Context, event *st
 			needsDedicated := newPlan.DedicatedWorkers > 0
 
 			if !hadDedicated && needsDedicated {
-				// Upgrading to dedicated plan
-				go s.workerAssignment.MigrateOrgToDedicated(context.Background(), sub.OrganizationID, sub.ID)
+				go func() {
+					bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					s.workerAssignment.MigrateOrgToDedicated(bgCtx, sub.OrganizationID, sub.ID)
+				}()
 			} else if hadDedicated && !needsDedicated {
-				// Downgrading from dedicated to shared (but still premium)
-				go s.workerAssignment.MigrateOrgToShared(context.Background(), sub.OrganizationID)
+				go func() {
+					bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					s.workerAssignment.MigrateOrgToShared(bgCtx, sub.OrganizationID)
+				}()
 			}
 		}
 	}
@@ -559,14 +569,21 @@ func (s *stripeService) handleSubscriptionDeleted(ctx context.Context, event *st
 	}
 
 	// Handle worker migration - move back to free tier workers.
-	// Use background context since these goroutines outlive the HTTP request.
+	// Use bounded timeout context since these goroutines outlive the HTTP request.
 	if s.workerAssignment != nil {
-		// If had dedicated workers, release them first
+		orgID := sub.OrganizationID
 		if hadDedicated {
-			go s.workerAssignment.MigrateOrgToShared(context.Background(), sub.OrganizationID)
+			go func() {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				s.workerAssignment.MigrateOrgToShared(bgCtx, orgID)
+			}()
 		}
-		// Migrate to free tier workers since subscription is cancelled
-		go s.workerAssignment.MigrateOrgToFreeWorkers(context.Background(), sub.OrganizationID)
+		go func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			s.workerAssignment.MigrateOrgToFreeWorkers(bgCtx, orgID)
+		}()
 	}
 
 	return nil
