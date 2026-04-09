@@ -114,6 +114,8 @@ func (s *authService) RegistrationConfirm(ctx context.Context, data *ConfirmData
 	}
 
 	if !v {
+		sess.Tries++
+		_ = s.saveRegistrationSession(ctx, token.SessionID, sess, token.ExpiresAt.Time)
 		return errx.ErrCode
 	}
 

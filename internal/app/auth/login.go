@@ -109,6 +109,8 @@ func (s *authService) LoginConfirm(ctx context.Context, data *ConfirmData, sessi
 	}
 
 	if !v {
+		sess.Tries++
+		_ = s.saveLoginSession(ctx, atoken.SessionID, sess, atoken.ExpiresAt.Time)
 		return nil, errx.ErrCode
 	}
 
