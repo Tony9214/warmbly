@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -61,6 +62,12 @@ func Run(
 
 	r.Use(cors.New(corsConfig))
 	r.Use(middleware.MetricsMiddleware())
+
+	// Limit request body size to 10MB to prevent OOM
+	r.Use(func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+		c.Next()
+	})
 
 	auth := r.Group("/auth")
 	{
