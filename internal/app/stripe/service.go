@@ -404,12 +404,17 @@ func (s *stripeService) handleCheckoutCompleted(ctx context.Context, event *stri
 		}
 
 		// Create subscription
+		var customerID string
+		if checkoutSession.Customer != nil {
+			customerID = checkoutSession.Customer.ID
+		}
+
 		newSub := &models.Subscription{
 			ID:               uuid.New(),
 			UserID:           userID,
 			OrganizationID:   orgID,
 			PlanID:           plan.ID,
-			StripeCustomerID: checkoutSession.Customer.ID,
+			StripeCustomerID: customerID,
 			Status:           models.SubscriptionStatusIncomplete,
 		}
 
@@ -422,7 +427,9 @@ func (s *stripeService) handleCheckoutCompleted(ctx context.Context, event *stri
 		}
 	} else {
 		// Update existing
-		sub.StripeCustomerID = checkoutSession.Customer.ID
+		if checkoutSession.Customer != nil {
+			sub.StripeCustomerID = checkoutSession.Customer.ID
+		}
 		if checkoutSession.Subscription != nil {
 			sub.StripeSubscriptionID = &checkoutSession.Subscription.ID
 		}
@@ -505,8 +512,9 @@ func (s *stripeService) handleSubscriptionUpdated(ctx context.Context, event *st
 		isNowPaid := sub.HasPaidSubscription()
 
 		// Trial user converting to paid - migrate to premium workers
+		// Use background context since these goroutines outlive the HTTP request.
 		if wasTrialOnly && isNowPaid {
-			go s.workerAssignment.MigrateOrgToPremiumWorkers(ctx, sub.OrganizationID)
+			go s.workerAssignment.MigrateOrgToPremiumWorkers(context.Background(), sub.OrganizationID)
 		}
 
 		// Handle dedicated worker migration on plan change
@@ -516,10 +524,10 @@ func (s *stripeService) handleSubscriptionUpdated(ctx context.Context, event *st
 
 			if !hadDedicated && needsDedicated {
 				// Upgrading to dedicated plan
-				go s.workerAssignment.MigrateOrgToDedicated(ctx, sub.OrganizationID, sub.ID)
+				go s.workerAssignment.MigrateOrgToDedicated(context.Background(), sub.OrganizationID, sub.ID)
 			} else if hadDedicated && !needsDedicated {
 				// Downgrading from dedicated to shared (but still premium)
-				go s.workerAssignment.MigrateOrgToShared(ctx, sub.OrganizationID)
+				go s.workerAssignment.MigrateOrgToShared(context.Background(), sub.OrganizationID)
 			}
 		}
 	}
@@ -550,14 +558,15 @@ func (s *stripeService) handleSubscriptionDeleted(ctx context.Context, event *st
 		return errx.New(errx.Internal, "failed to update subscription")
 	}
 
-	// Handle worker migration - move back to free tier workers
+	// Handle worker migration - move back to free tier workers.
+	// Use background context since these goroutines outlive the HTTP request.
 	if s.workerAssignment != nil {
 		// If had dedicated workers, release them first
 		if hadDedicated {
-			go s.workerAssignment.MigrateOrgToShared(ctx, sub.OrganizationID)
+			go s.workerAssignment.MigrateOrgToShared(context.Background(), sub.OrganizationID)
 		}
 		// Migrate to free tier workers since subscription is cancelled
-		go s.workerAssignment.MigrateOrgToFreeWorkers(ctx, sub.OrganizationID)
+		go s.workerAssignment.MigrateOrgToFreeWorkers(context.Background(), sub.OrganizationID)
 	}
 
 	return nil
