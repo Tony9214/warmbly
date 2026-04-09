@@ -406,6 +406,21 @@ func generateWarmupSubject() string {
 		"Checking in",
 		"Quick update",
 		"Thought you might find this interesting",
+		"Re: our conversation",
+		"One more thing",
+		"Wanted to share this",
+		"Any thoughts on this?",
+		"Circling back",
+		"Hope your week is going well",
+		"A quick favor",
+		"Good read I came across",
+		"When you get a chance",
+		"Heads up",
+		"Just a thought",
+		"Touching base",
+		"Saw this and thought of you",
+		"Small update",
+		"Worth a look",
 	}
 	return subjects[rand.Intn(len(subjects))]
 }
@@ -429,6 +444,60 @@ func randomWarmupConversation() Conversation {
 			Theme:       "collaboration",
 			Description: "I was thinking about how teams keep communication clear when work gets busy.",
 			Messages:    []string{"What has helped your team keep projects moving smoothly?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "industry",
+			Description: "I noticed a shift in how people are approaching this topic and wanted to get your take.",
+			Messages:    []string{"Have you seen any changes in how your industry handles this?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "tools",
+			Description: "I recently switched up a few tools in my daily workflow and the difference has been noticeable.",
+			Messages:    []string{"What tools have made the biggest impact for you this year?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "networking",
+			Description: "It has been a while since we last connected and I wanted to see how things are going on your end.",
+			Messages:    []string{"Any new projects or goals you are excited about?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "feedback",
+			Description: "I have been working on something and would really value a second opinion before moving forward.",
+			Messages:    []string{"Would you mind taking a quick look when you have a moment?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "planning",
+			Description: "I am mapping out priorities for the next quarter and trying to stay realistic about what is achievable.",
+			Messages:    []string{"How do you decide what to focus on when everything feels urgent?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "reading",
+			Description: "I just finished a great book that changed how I think about a few things at work.",
+			Messages:    []string{"Read anything good lately that stuck with you?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "travel",
+			Description: "I am starting to plan a trip and looking for recommendations from people who have been there.",
+			Messages:    []string{"Any travel tips or favorite destinations you would suggest?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "wellness",
+			Description: "I have been trying to be more intentional about work-life balance and curious how others handle it.",
+			Messages:    []string{"What do you do to recharge after a busy stretch?"},
+		},
+		{
+			ID:          uuid.New(),
+			Theme:       "events",
+			Description: "I saw a conference coming up that might be relevant and wanted to flag it for you.",
+			Messages:    []string{"Are you attending any events or meetups soon?"},
 		},
 	}
 
