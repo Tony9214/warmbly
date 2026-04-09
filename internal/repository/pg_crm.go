@@ -346,6 +346,7 @@ func (r *crmRepository) ListPipelines(ctx context.Context, orgID uuid.UUID) ([]m
 		FROM pipelines
 		WHERE organization_id = $1
 		ORDER BY position ASC
+		LIMIT 100
 	`
 	rows, err := r.db.Query(ctx, query, orgID)
 	if err != nil {
