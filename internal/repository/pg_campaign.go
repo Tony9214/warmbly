@@ -682,7 +682,7 @@ func (r *campaignRepository) ValidateCampaignReady(ctx context.Context, campaign
 
 	// Check contacts
 	var contactCount int
-	err = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_leads WHERE campaign = $1`, campaignID).Scan(&contactCount)
+	err = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_leads WHERE campaign_id = $1`, campaignID).Scan(&contactCount)
 	if err != nil {
 		return err
 	}

@@ -101,7 +101,7 @@ func (r *contactRepository) Add(ctx context.Context, userID string, contacts []m
 
 		if len(lead.Campaigns) > 0 {
 			const stmt = `
-			INSERT INTO campaign_leads (contact, campaign)
+			INSERT INTO campaign_leads (contact_id, campaign_id)
 			SELECT $1, campaigns.id
 			FROM   campaigns
 			WHERE  campaigns.id = ANY($2)
@@ -337,11 +337,11 @@ func (r *contactRepository) Search(
 		}
 		campaignClause := fmt.Sprintf(`
 			c.id IN (
-				SELECT contact
+				SELECT contact_id
 				FROM campaign_leads
-				WHERE campaign IN (%s)
-				GROUP BY contact
-				HAVING COUNT(DISTINCT campaign) = %d
+				WHERE campaign_id IN (%s)
+				GROUP BY contact_id
+				HAVING COUNT(DISTINCT campaign_id) = %d
 			)
 		`, strings.Join(placeholders, ","), len(filters.CampaignIDs))
 		whereClauses = append(whereClauses, campaignClause)
@@ -443,9 +443,9 @@ func (r *contactRepository) Search(
 			) AS campaigns
 		FROM contacts c
 		LEFT JOIN (
-			SELECT contact_id, COUNT(campaign) AS campaign_count
+			SELECT contact_id, COUNT(campaign_id) AS campaign_count
 			FROM campaign_leads
-			GROUP BY contact
+			GROUP BY contact_id
 		) cl ON c.id = cl.contact_id
 		%s
 		ORDER BY %s %s, c.id ASC
@@ -461,10 +461,10 @@ func (r *contactRepository) Search(
 			SELECT COUNT(*)
 			FROM contacts c
 			LEFT JOIN (
-				SELECT contact, COUNT(campaign) AS campaign_count
+				SELECT contact_id, COUNT(campaign_id) AS campaign_count
 				FROM campaign_leads
-				GROUP BY contact
-			) cl ON c.id = cl.contact
+				GROUP BY contact_id
+			) cl ON c.id = cl.contact_id
 			%s
 		`, whereSQL)
 		var tmp int64
@@ -560,8 +560,8 @@ func (r *contactRepository) Update(ctx context.Context, userID, contactID string
 				(
 					SELECT json_agg(json_build_object('id', cam.id, 'name', cam.name))
 					FROM campaign_leads cl2
-					JOIN campaigns cam ON cl2.campaign = cam.id
-					WHERE cl2.contact = c.id AND cam.user_id = $2
+					JOIN campaigns cam ON cl2.campaign_id = cam.id
+					WHERE cl2.contact_id = c.id AND cam.user_id = $2
 				),
 				'[]'::json
 			) AS campaigns
@@ -710,7 +710,7 @@ func (r *contactRepository) Update(ctx context.Context, userID, contactID string
 		// Delete removed campaigns
 		query = `
 			DELETE FROM campaign_leads
-			WHERE contact = $1 AND campaign = $2
+			WHERE contact_id = $1 AND campaign_id = $2
 		`
 		for _, campaignID := range toDelete {
 			params := []any{
@@ -730,7 +730,7 @@ func (r *contactRepository) Update(ctx context.Context, userID, contactID string
 
 		// Insert new campaigns
 		query = `
-			INSERT INTO campaign_leads (contact, campaign)
+			INSERT INTO campaign_leads (contact_id, campaign_id)
 			SELECT $1, id
 			FROM campaigns
 			WHERE id = $2 AND user_id = $3
@@ -761,8 +761,8 @@ func (r *contactRepository) Update(ctx context.Context, userID, contactID string
 				(
 					SELECT json_agg(json_build_object('id', cam.id, 'name', cam.name))
 					FROM campaign_leads cl
-					JOIN campaigns cam ON cl.campaign = cam.id
-					WHERE cl.contact = $1 AND cam.user_id = $2
+					JOIN campaigns cam ON cl.campaign_id = cam.id
+					WHERE cl.contact_id =$1 AND cam.user_id = $2
 				),
 				'[]'::json
 			)
@@ -830,15 +830,15 @@ func (r *contactRepository) BulkUpdate(ctx context.Context, userID string, data 
 	if len(data.RemoveCampaigns) > 0 {
 		b.Queue(`DELETE FROM campaign_leads cl
 		         USING contacts c
-		         WHERE cl.contact = c.id
+		         WHERE cl.contact_id =c.id
 		           AND c.user_id = $1
-		           AND cl.contact = ANY($2)
-		           AND cl.campaign = ANY($3)`,
+		           AND cl.contact_id =ANY($2)
+		           AND cl.campaign_id = ANY($3)`,
 			userID, data.Contacts, data.RemoveCampaigns)
 	}
 
 	if len(data.AddCampaigns) > 0 {
-		b.Queue(`INSERT INTO campaign_leads (contact, campaign)
+		b.Queue(`INSERT INTO campaign_leads (contact_id, campaign_id)
 		         SELECT c.id, UNNEST($3::uuid[])
 		         FROM contacts c
 		         WHERE c.user_id = $1 AND c.id = ANY($2)
@@ -896,8 +896,8 @@ func (r *contactRepository) BulkUpdate(ctx context.Context, userID string, data 
 				(
 					SELECT json_agg(json_build_object('id', cam.id, 'name', cam.name))
 					FROM campaign_leads cl
-					JOIN campaigns cam ON cl.campaign = cam.id
-					WHERE cl.contact = c.id AND cam.user_id = $2
+					JOIN campaigns cam ON cl.campaign_id = cam.id
+					WHERE cl.contact_id =c.id AND cam.user_id = $2
 				),
 				'[]'::json
 			) AS campaigns
