@@ -84,6 +84,7 @@ func main() {
 
 	userEncryptedKeysRepo := repository.NewUserEncryptedKeysRepository(kmsClient, dynamoDB)
 	cipherService := cipher.NewService(kmsClient, redisCache, userEncryptedKeysRepo)
+	emailMessageMapRepo := repository.NewEmailMessageMapRepository(dynamoDB)
 
 	// S3
 	s3Client, err := storage.NewClient(ctx, awscfg, "main")
@@ -144,12 +145,13 @@ func main() {
 
 	// WorkerService
 	workerService := &worker.WorkerService{
-		ID:            workerID.String(),
-		CipherService: cipherService,
-		KafkaProducer: kafkaProducer,
-		KafkaConsumer: kafkaConsumer,
-		Cache:         redisCache,
-		Storage:       s3Client,
+		ID:                        workerID.String(),
+		CipherService:             cipherService,
+		KafkaProducer:             kafkaProducer,
+		KafkaConsumer:             kafkaConsumer,
+		Cache:                     redisCache,
+		Storage:                   s3Client,
+		EmailMessageMapRepository: emailMessageMapRepo,
 	}
 
 	if err := workerService.Init(); err != nil {
