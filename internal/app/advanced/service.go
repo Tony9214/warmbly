@@ -634,6 +634,15 @@ func (s *service) IngestDeliverabilityEvent(ctx context.Context, organizationID 
 		_ = s.repo.MarkVariantEvent(ctx, *req.CampaignID, *req.ContactID, string(eventType))
 	}
 
+	// Record bounces in campaign progress so analytics and auto-pause work correctly
+	if req.CampaignID != nil && req.ContactID != nil && req.TaskID != nil &&
+		eventType == models.DeliverabilityEventBounce {
+		campaignTask, cErr := s.taskRepo.GetCampaignTask(ctx, *req.TaskID)
+		if cErr == nil && campaignTask != nil && campaignTask.SequenceID != nil {
+			_ = s.campaignProgressRepo.RecordEmailBounced(ctx, *req.CampaignID, *req.ContactID, *campaignTask.SequenceID)
+		}
+	}
+
 	if req.CampaignID != nil && settings.BouncePipeline.AutoPauseCampaignOnSpike &&
 		(eventType == models.DeliverabilityEventBounce || eventType == models.DeliverabilityEventComplaint) {
 		progress, pErr := s.campaignProgressRepo.GetCampaignProgress(ctx, *req.CampaignID)
