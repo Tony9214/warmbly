@@ -16,6 +16,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -74,6 +75,10 @@ func (h *Handler) AdminCreateAWSCreds(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionCreate, models.AuditEntityAWSCredentials, &id, map[string]string{
+		"name":   body.Name,
+		"region": body.Region,
+	})
 	c.JSON(http.StatusCreated, gin.H{"id": id})
 }
 
@@ -125,6 +130,11 @@ func (h *Handler) AdminUpdateAWSCreds(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	changes := map[string]string{}
+	if enc != "" {
+		changes["secret_access_key"] = "rotated"
+	}
+	h.audit(c, models.AuditActionUpdate, models.AuditEntityAWSCredentials, &id, changes)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -137,6 +147,7 @@ func (h *Handler) AdminDeleteAWSCreds(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionDelete, models.AuditEntityAWSCredentials, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -185,6 +196,10 @@ func (h *Handler) AdminCreateProfile(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionCreate, models.AuditEntityWorkerProfile, &id, map[string]string{
+		"name":    body.Name,
+		"app_env": body.AppEnv,
+	})
 	c.JSON(http.StatusCreated, gin.H{"id": id})
 }
 
@@ -223,6 +238,18 @@ func (h *Handler) AdminUpdateProfile(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	// Record which secret fields were rotated (we don't log the values, only that they changed).
+	changes := map[string]string{}
+	if body.KafkaSASLPassword != "" {
+		changes["kafka_sasl_password"] = "rotated"
+	}
+	if body.SchemaRegistrySecret != "" {
+		changes["schema_registry_secret"] = "rotated"
+	}
+	if body.RedisURL != "" {
+		changes["redis_url"] = "rotated"
+	}
+	h.audit(c, models.AuditActionUpdate, models.AuditEntityWorkerProfile, &id, changes)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -235,6 +262,7 @@ func (h *Handler) AdminDeleteProfile(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionDelete, models.AuditEntityWorkerProfile, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -279,6 +307,15 @@ func (h *Handler) AdminApplyProfile(c *gin.Context) {
 		}
 		results = append(results, r)
 	}
+	okCount := 0
+	for _, r := range results {
+		if v, _ := r["ok"].(bool); v {
+			okCount++
+		}
+	}
+	h.audit(c, models.AuditActionApply, models.AuditEntityWorkerProfile, &id, map[string]string{
+		"workers_applied": fmt.Sprintf("%d/%d", okCount, len(results)),
+	})
 	c.JSON(http.StatusOK, gin.H{"results": results})
 }
 
@@ -311,6 +348,13 @@ func (h *Handler) AdminAssignWorkerProfile(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	meta := map[string]string{}
+	if pid != nil {
+		meta["profile_id"] = pid.String()
+	} else {
+		meta["profile_id"] = "(none)"
+	}
+	h.audit(c, models.AuditActionAssign, models.AuditEntityWorker, &id, meta)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -326,6 +370,7 @@ func (h *Handler) AdminApplyWorkerConfig(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionApply, models.AuditEntityWorker, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

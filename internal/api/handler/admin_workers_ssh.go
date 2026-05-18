@@ -30,6 +30,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/api/middleware"
 	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
@@ -142,6 +143,11 @@ func (h *Handler) AdminCreateWorker(c *gin.Context) {
 		resp.EnrollmentToken = enrollToken
 		resp.EnrollmentTokenTTL = int(2 * time.Hour / time.Second)
 	}
+	h.audit(c, models.AuditActionCreate, models.AuditEntityWorker, &workerID, map[string]string{
+		"name":     req.Name,
+		"ssh_host": req.SSHHost,
+		"tier":     req.WorkerType,
+	})
 	c.JSON(http.StatusCreated, resp)
 }
 
@@ -179,9 +185,11 @@ func (h *Handler) AdminTestWorker(c *gin.Context) {
 		return
 	}
 	if err := h.WorkerOrchestrator.TestConnection(c.Request.Context(), id); err != nil {
+		h.audit(c, models.AuditActionTest, models.AuditEntityWorker, &id, map[string]string{"ok": "false", "error": err.Error()})
 		c.JSON(http.StatusOK, gin.H{"ok": false, "error": err.Error()})
 		return
 	}
+	h.audit(c, models.AuditActionTest, models.AuditEntityWorker, &id, map[string]string{"ok": "true"})
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -193,9 +201,11 @@ func (h *Handler) AdminInstallWorker(c *gin.Context) {
 		return
 	}
 	if err := h.WorkerOrchestrator.Install(c.Request.Context(), id); err != nil {
+		h.audit(c, models.AuditActionInstall, models.AuditEntityWorker, &id, map[string]string{"ok": "false", "error": err.Error()})
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionInstall, models.AuditEntityWorker, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -208,6 +218,7 @@ func (h *Handler) AdminRestartWorker(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionRestart, models.AuditEntityWorker, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -220,6 +231,7 @@ func (h *Handler) AdminUpdateWorkerImage(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionUpgrade, models.AuditEntityWorker, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -232,6 +244,7 @@ func (h *Handler) AdminUninstallWorker(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionUninstall, models.AuditEntityWorker, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -272,6 +285,7 @@ func (h *Handler) AdminRotateWorkerKeys(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionRotateKeys, models.AuditEntityWorker, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ssh_public_key": newPub})
 }
 
@@ -286,6 +300,11 @@ func (h *Handler) AdminSystemUpdate(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	meta := map[string]string{}
+	if r != nil && r.RebootRequired {
+		meta["reboot_required"] = "true"
+	}
+	h.audit(c, models.AuditActionSystemUpdate, models.AuditEntityWorker, &id, meta)
 	c.JSON(http.StatusOK, r)
 }
 
@@ -298,6 +317,7 @@ func (h *Handler) AdminRebootWorker(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionReboot, models.AuditEntityWorker, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -313,6 +333,7 @@ func (h *Handler) AdminDeleteSSHWorker(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionDelete, models.AuditEntityWorker, &id, nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -325,6 +346,30 @@ func (h *Handler) parseID(c *gin.Context) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+// audit fires an audit log entry for the admin action. Fire-and-forget — the
+// audit service spawns its own goroutine so this never blocks the response.
+// Safe to call with nil entityID and/or nil metadata.
+func (h *Handler) audit(c *gin.Context, action models.AuditAction, entity models.AuditEntityType, entityID *uuid.UUID, metadata map[string]string) {
+	if h.AuditService == nil {
+		return
+	}
+	adminID := middleware.GetAdminUserID(c)
+	if adminID == nil {
+		return
+	}
+	h.AuditService.LogAction(
+		c.Request.Context(),
+		*adminID,
+		action,
+		entity,
+		entityID,
+		c.ClientIP(),
+		c.GetHeader("User-Agent"),
+		nil,
+		metadata,
+	)
 }
 
 func (h *Handler) parseAndFetch(c *gin.Context) (*models.Worker, error) {

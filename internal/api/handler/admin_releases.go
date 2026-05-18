@@ -13,6 +13,7 @@
 package handler
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 
@@ -51,6 +52,9 @@ func (h *Handler) AdminCheckReleases(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionCheckReleases, models.AuditEntityRelease, nil, map[string]string{
+		"changed_profiles": fmt.Sprintf("%d", len(changed)),
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"state":   h.ReleasesService.GetState(),
 		"changed": changed,
@@ -84,6 +88,10 @@ func (h *Handler) AdminSetProfileRelease(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	h.audit(c, models.AuditActionUpdate, models.AuditEntityWorkerProfile, &id, map[string]string{
+		"release_channel": body.Channel,
+		"auto_update":     fmt.Sprintf("%t", body.AutoUpdate),
+	})
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
