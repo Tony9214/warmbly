@@ -25,8 +25,52 @@ type Worker struct {
 	WorkerType   WorkerType `json:"worker_type"`
 	AccountCount int        `json:"account_count"`
 
+	// SSH management (none of these expose secret material — the encrypted
+	// private key is fetched separately via GetWorkerSSHCredentials).
+	SSHHost            string              `json:"ssh_host,omitempty"`
+	SSHPort            int                 `json:"ssh_port,omitempty"`
+	SSHUser            string              `json:"ssh_user,omitempty"`
+	SSHPublicKey       string              `json:"ssh_public_key,omitempty"`
+	SSHHostFingerprint string              `json:"ssh_host_fingerprint,omitempty"`
+	InstallState       WorkerInstallState  `json:"install_state"`
+	LastSeenAt         *time.Time          `json:"last_seen_at,omitempty"`
+	LastError          string              `json:"last_error,omitempty"`
+
+	// Profile assignment. Nil means "use backend env defaults".
+	ProfileID       *uuid.UUID `json:"profile_id,omitempty"`
+	ConfigAppliedAt *time.Time `json:"config_applied_at,omitempty"`
+
+	// Image tag the worker is currently running, captured on every successful
+	// Update. Used for the "v1.2.3 → v1.2.4" badge in the dashboard.
+	ImageVersion string `json:"image_version,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// WorkerInstallState mirrors the worker_install_state enum.
+type WorkerInstallState string
+
+const (
+	WorkerInstallStatePending      WorkerInstallState = "pending"
+	WorkerInstallStateProvisioning WorkerInstallState = "provisioning"
+	WorkerInstallStateInstalled    WorkerInstallState = "installed"
+	WorkerInstallStateError        WorkerInstallState = "error"
+	WorkerInstallStateUninstalling WorkerInstallState = "uninstalling"
+	WorkerInstallStateUninstalled  WorkerInstallState = "uninstalled"
+)
+
+// WorkerSSHCredentials carries the encrypted private key alongside the
+// connection info. Only the orchestrator should ever fetch this; the field is
+// never serialised to admin clients.
+type WorkerSSHCredentials struct {
+	WorkerID                uuid.UUID
+	SSHHost                 string
+	SSHPort                 int
+	SSHUser                 string
+	SSHPublicKey            string
+	SSHPrivateKeyEncrypted  string
+	SSHHostFingerprint      string
 }
 
 type UpdateWorker struct {

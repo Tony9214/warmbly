@@ -8,6 +8,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
     const tabData = {
         "Home": "",
+        "Workers": "/workers",
+        "Credentials": "/credentials",
         "Roles": "/roles",
         "Users": "/users",
         "Plans": "/plans",

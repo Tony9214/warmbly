@@ -27,8 +27,11 @@ import (
 	"github.com/warmbly/warmbly/internal/app/unibox"
 	"github.com/warmbly/warmbly/internal/app/user"
 	"github.com/warmbly/warmbly/internal/app/warmup"
+	"github.com/warmbly/warmbly/internal/app/releases"
 	"github.com/warmbly/warmbly/internal/app/worker"
+	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
 	"github.com/warmbly/warmbly/internal/notify"
+	"github.com/warmbly/warmbly/internal/repository"
 	"github.com/warmbly/warmbly/internal/tasks"
 )
 
@@ -77,6 +80,12 @@ type Handler struct {
 
 	// Admin
 	AdminService admin.AdminService
+
+	// Worker orchestration (SSH-driven lifecycle for admin-managed workers)
+	WorkerOrchestrator *worker_orchestrator.Orchestrator
+	WorkerRepo         repository.WorkerRepository
+	CredentialsRepo    repository.CredentialsRepository
+	ReleasesService    *releases.Service
 
 	// Notifications
 	EmailNotificationService notify.EmailNotificationService

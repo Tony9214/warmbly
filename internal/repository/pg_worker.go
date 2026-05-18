@@ -44,6 +44,23 @@ type WorkerRepository interface {
 	UpdateEmailAccountWorker(ctx context.Context, emailAccountID, workerID uuid.UUID) error
 	ClearEmailAccountWorker(ctx context.Context, emailAccountID uuid.UUID) error
 	UpdateEmailAccountWarmupPoolType(ctx context.Context, emailAccountID uuid.UUID, poolType string) error
+
+	// SSH-managed workers (admin-driven lifecycle)
+	CreateWorker(ctx context.Context, in CreateWorkerInput) error
+	GetWorkerDetail(ctx context.Context, id uuid.UUID) (*models.Worker, error)
+	ListWorkersDetail(ctx context.Context) ([]models.Worker, error)
+	GetWorkerSSHCredentials(ctx context.Context, id uuid.UUID) (*models.WorkerSSHCredentials, error)
+	UpdateInstallState(ctx context.Context, id uuid.UUID, state models.WorkerInstallState, lastError string) error
+	UpdateLastSeen(ctx context.Context, id uuid.UUID, at time.Time) error
+	UpdateHostFingerprint(ctx context.Context, id uuid.UUID, fingerprint string) error
+	RotateSSHKey(ctx context.Context, id uuid.UUID, publicKey, privateKeyEncrypted string) error
+	DeleteWorker(ctx context.Context, id uuid.UUID) error
+	ConsumeEnrollmentToken(ctx context.Context, tokenHash string) (*models.Worker, error)
+	RecordEnrolledIP(ctx context.Context, id uuid.UUID, ip string) error
+	AssignWorkerProfile(ctx context.Context, workerID uuid.UUID, profileID *uuid.UUID) error
+	MarkConfigApplied(ctx context.Context, workerID uuid.UUID, at time.Time) error
+	MarkImageVersion(ctx context.Context, workerID uuid.UUID, version string) error
+	ListWorkersByProfile(ctx context.Context, profileID uuid.UUID) ([]models.Worker, error)
 }
 
 type workerRepository struct {

@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './global.css'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, Outlet, RouterProvider } from 'react-router-dom';
 import RootLayout from './app/layout';
 
 import "@fontsource/inter/400.css";
@@ -54,6 +54,12 @@ import ResetPasswordPage from './app/auth/reset-password/page';
 import ResetPasswordConfirmPage from './app/auth/reset-password/confirm/page';
 import OnboardingLayout from './app/onboarding/layout';
 import OnboardingPage from './app/onboarding/page';
+import AdminLayout from './app/app/admin/layout';
+import AdminPage from './app/app/admin/page';
+import AdminWorkersPage from './app/app/admin/workers/page';
+import AdminAddWorkerPage from './app/app/admin/workers/new/page';
+import AdminWorkerDetailPage from './app/app/admin/workers/[id]/page';
+import AdminCredentialsPage from './app/app/admin/credentials/page';
 
 const queryClient = new QueryClient();
 
@@ -211,12 +217,28 @@ const router = createBrowserRouter([
           {
             path: "team",
             element: <TeamPage />,
-          }
+          },
+          {
+            path: "admin",
+            element: <AdminLayoutWithOutlet />,
+            children: [
+              { index: true, element: <AdminPage /> },
+              { path: "workers", element: <AdminWorkersPage /> },
+              { path: "workers/new", element: <AdminAddWorkerPage /> },
+              { path: "workers/:id", element: <AdminWorkerDetailPage /> },
+              { path: "credentials", element: <AdminCredentialsPage /> },
+            ],
+          },
         ]
       }
     ],
   },
 ]);
+
+// AdminLayout takes a children prop rather than rendering <Outlet/>; bridge it.
+function AdminLayoutWithOutlet() {
+  return <AdminLayout><Outlet /></AdminLayout>;
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

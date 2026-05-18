@@ -41,7 +41,9 @@ import (
 	"github.com/warmbly/warmbly/internal/app/unibox"
 	"github.com/warmbly/warmbly/internal/app/user"
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
+	"github.com/warmbly/warmbly/internal/app/releases"
 	"github.com/warmbly/warmbly/internal/app/worker"
+	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
@@ -107,6 +109,12 @@ func main() {
 
 	// Admin
 	var adminService admin.AdminService
+
+	// Worker orchestrator (SSH-driven admin worker lifecycle)
+	var workerOrchestrator *worker_orchestrator.Orchestrator
+	var workerRepoForHandler repository.WorkerRepository
+	var credentialsRepository repository.CredentialsRepository
+	var releasesService *releases.Service
 
 	// Notifications
 	var emailNotificationService notify.EmailNotificationService
@@ -416,6 +424,50 @@ func main() {
 			userService,
 		)
 		cipherService = cipher.NewService(kms, cache, userEncryptedKeysRepository)
+
+		// Worker orchestrator. The env config below is the FALLBACK that gets
+		// written into /etc/warmbly/worker.env when a worker has no profile
+		// assigned. Production workers should reference a worker_profile row;
+		// dev/sim can rely on the fallback so docker-compose still works.
+		workerRepoForHandler = workerRepository
+		credentialsRepository = repository.NewCredentialsRepository(primaryDB.Pool)
+		workerOrchestrator = worker_orchestrator.New(
+			workerRepository,
+			credentialsRepository,
+			cipherService,
+			worker_orchestrator.WorkerEnvConfig{
+				AppEnv:               os.Getenv("APP_ENV"),
+				WorkerImage:          getenvDefault("WORKER_IMAGE", "ghcr.io/warmbly/worker:latest"),
+				KafkaBootstrap:       os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
+				KafkaSASLUsername:    os.Getenv("KAFKA_SASL_USERNAME"),
+				KafkaSASLPassword:    os.Getenv("KAFKA_SASL_PASSWORD"),
+				SchemaRegistryURL:    os.Getenv("SCHEMA_REGISTRY_URL"),
+				SchemaRegistryKey:    os.Getenv("SCHEMA_REGISTRY_KEY"),
+				SchemaRegistrySecret: os.Getenv("SCHEMA_REGISTRY_SECRET"),
+				RedisURL:             os.Getenv("REDIS"),
+				AWSRegion:            os.Getenv("AWS_REGION"),
+				AWSAccessKeyID:       os.Getenv("WORKER_AWS_ACCESS_KEY_ID"),
+				AWSSecretAccessKey:   os.Getenv("WORKER_AWS_SECRET_ACCESS_KEY"),
+			},
+			getenvDefault("WORKER_INSTALLER_PATH", "/app/scripts/install-worker.sh"),
+		)
+
+		// Releases service. Env-configurable so self-hosters can point at their
+		// own repo/registry, or disable the feature entirely.
+		releasesService = releases.New(
+			releases.Config{
+				Enabled:         getenvDefault("RELEASES_ENABLED", "true") == "true",
+				GithubRepo:      getenvDefault("RELEASES_GITHUB_REPO", "warmbly/warmbly"),
+				WorkerImageRepo: getenvDefault("RELEASES_WORKER_IMAGE_REPO", "ghcr.io/warmbly/warmbly/worker"),
+				WebhookSecret:   os.Getenv("RELEASES_WEBHOOK_SECRET"),
+				GithubToken:     os.Getenv("RELEASES_GITHUB_TOKEN"),
+			},
+			credentialsRepository,
+			workerRepository,
+			workerOrchestrator,
+		)
+		releasesService.RunBootCheck(ctx)
+
 		eventsPublisher := events.NewPublisher(kafkaProducer, s3, avrov2Client, cipherService)
 		emailService = email.NewServiceWithKafka(emailRepostory, cipherService, featureGateService, warmupService, eventsPublisher, kafkaProducer, cache)
 		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, streamingPublisher)
@@ -538,6 +590,12 @@ func main() {
 		// Admin
 		AdminService: adminService,
 
+		// SSH-managed worker lifecycle
+		WorkerOrchestrator: workerOrchestrator,
+		WorkerRepo:         workerRepoForHandler,
+		CredentialsRepo:    credentialsRepository,
+		ReleasesService:    releasesService,
+
 		// Notifications
 		EmailNotificationService: emailNotificationService,
 
@@ -596,4 +654,11 @@ func main() {
 	}
 
 	log.Println("Backend stopped")
+}
+
+func getenvDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

@@ -23,6 +23,9 @@ RUN adduser -D -u 1000 warmbly
 COPY --from=builder /backend /app/backend
 COPY --from=builder /seed /app/seed
 
+# Installer script the worker orchestrator uploads + runs over SSH.
+COPY scripts/install-worker.sh /app/scripts/install-worker.sh
+
 USER warmbly
 EXPOSE 8080
 
