@@ -13,7 +13,7 @@ PROTO_DIR := internal/tasks/proto
 PROTO_GEN_FILES := $(PROTO_DIR)/tasks.pb.go
 
 .PHONY: setup-tools lint proto check-proto \
-        dev sim seed reset logs status stop down tools
+        dev sim seed reset logs status stop down tools test-seed
 
 setup-tools:
 	@echo "Installing required Go tools into $(GO_BIN)"
@@ -76,3 +76,12 @@ logs:
 
 status:
 	docker compose ps
+
+# Run seeder tests against the docker-compose Postgres. Brings up the db
+# if it isn't running. Requires `docker compose up -d postgres` to have
+# happened at least once so the volume exists.
+test-seed:
+	docker compose up -d postgres
+	@until docker compose exec -T postgres pg_isready -U warmbly >/dev/null 2>&1; do echo "waiting for postgres..."; sleep 1; done
+	SEED_TEST_DB="postgres://warmbly:warmbly@localhost:15432/warmbly_dev?sslmode=disable" \
+		go test -count=1 -v ./cmd/seed/
