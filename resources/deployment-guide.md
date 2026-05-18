@@ -1,294 +1,229 @@
-# Warmbly Deployment Guide
+# Deployment Guide
 
-Complete step-by-step guide to deploy Warmbly from scratch.
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Prerequisites](#prerequisites)
-3. [Step 1: Infrastructure Setup](#step-1-infrastructure-setup)
-4. [Step 2: DNS Configuration](#step-2-dns-configuration)
-5. [Step 3: GitHub Repository Setup](#step-3-github-repository-setup)
-6. [Step 4: First Deployment](#step-4-first-deployment)
-7. [Step 5: Verify Everything Works](#step-5-verify-everything-works)
-8. [Ongoing Development](#ongoing-development)
-9. [Production Releases](#production-releases)
-10. [Troubleshooting](#troubleshooting)
-
----
+End-to-end guide for deploying Warmbly. The control plane runs on a container host (Railway in production); workers run on as many VPSes as you want and are managed from the admin dashboard.
 
 ## Overview
 
-### Architecture
+| Plane | What runs | Where |
+|-------|-----------|-------|
+| Control | backend, consumer, tracking, realtime, web | One container host with stable region pinning (Railway, ECS Fargate, Fly, Kubernetes — any of them works). Postgres + Redis + Kafka + Schema Registry + S3 + KMS + DynamoDB are external dependencies. |
+| Execution | worker | One process per VPS, anywhere in the world, supervised by systemd, configured from the admin dashboard over SSH. |
+
+The control plane never needs to scale beyond a few replicas; the worker fleet is what fans out for IP diversity.
+
+## What you need
+
+**For the control plane**:
+
+- A Postgres 16 instance (RDS, Neon, Supabase, self-hosted — anything)
+- A Redis 7 instance
+- A Kafka broker with a Schema Registry (Confluent Cloud, Aiven, Redpanda, self-hosted)
+- An S3-compatible bucket
+- AWS KMS for envelope-encryption root, or a KMS-compatible service via LocalStack for local dev
+- DynamoDB (or compatible) for per-user encrypted DEKs
+- A Stripe account (or stripe-mock for non-prod)
+
+**For the workers**:
+
+- A VPS per worker (Hetzner / OVH / Vultr / DigitalOcean / Linode — anywhere with a public IPv4). Spread providers for IP diversity.
+- Root SSH access on the VPS at install time.
+
+## Step 1: Provision the control-plane dependencies
+
+Whatever your stack, get the seven external services above running and collect the connection details. Local dev can substitute everything with `make sim` from the repo root (see [local-development.md](local-development.md)) — that runs LocalStack for KMS/Dynamo/S3 and includes everything else as containers.
+
+## Step 2: Configure the backend
+
+The backend reads from environment variables. Minimum set:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           GitHub (warmbly repo)                              │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                      │
-│  │   ci.yml    │    │build-push.yml│   │ release.yml │                      │
-│  │  (tests)    │    │ (build imgs) │   │(version tag)│                      │
-│  └─────────────┘    └──────┬──────┘    └──────┬──────┘                      │
-└─────────────────────────────┼─────────────────┼─────────────────────────────┘
-                              │                 │
-                              ▼                 ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    GitHub Container Registry (GHCR)                          │
-│         ghcr.io/warmbly/warmbly/{backend,consumer,worker,tracking,realtime} │
-└─────────────────────────────────────────────────────────────────────────────┘
-                              │
-                              │ ArgoCD detects new images
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Kubernetes Cluster                                   │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    ArgoCD Controller (namespace: gitops)             │    │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐    │    │
-│  │  │   Web UI     │  │  controller  │  │   image-updater        │    │    │
-│  │  └──────────────┘  └──────────────┘  └────────────────────────┘    │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                    │                                         │
-│                    syncs manifests from git                                  │
-│                                    ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │              warmbly-dev / warmbly (namespaces)                      │    │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐       │    │
-│  │  │ backend │ │consumer │ │ worker  │ │tracking │ │realtime │       │    │
-│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘       │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
+APP_ENV=prod
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+
+PRIMARY_DB=postgres://user:pass@host:5432/warmbly?sslmode=require
+REDIS=redis://default:pass@host:6379
+
+KAFKA_BOOTSTRAP_SERVERS=broker1:9092,broker2:9092
+KAFKA_SASL_USERNAME=...
+KAFKA_SASL_PASSWORD=...
+SCHEMA_REGISTRY_URL=https://schema.example.com
+SCHEMA_REGISTRY_KEY=...
+SCHEMA_REGISTRY_SECRET=...
+
+AUTH_SECRET=<32+ char random>
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+TURNSTILE_SECRET=...
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://api.example.com/auth/google/callback
 ```
 
-### What Gets Deployed Where
+Worker-related env (for the dashboard's worker orchestration):
 
-| Component | Location | Managed By |
-|-----------|----------|------------|
-| Kubernetes cluster | Cloud Provider | Terraform |
-| ArgoCD controller | K8s cluster | Terraform/Helm |
-| Warmbly services | K8s (warmbly-dev, warmbly namespaces) | ArgoCD |
-| Docker images | GitHub Container Registry | GitHub Actions |
-| Kubernetes manifests | warmbly repo (deploy/kubernetes/) | Git |
+```
+WORKER_IMAGE=ghcr.io/youruser/yourfork/worker:prod
+WORKER_INSTALLER_PATH=/app/scripts/install-worker.sh
+WORKER_AWS_ACCESS_KEY_ID=...
+WORKER_AWS_SECRET_ACCESS_KEY=...
+```
 
----
+Release auto-update (optional; safe to omit on a fresh install):
 
-## Prerequisites
+```
+RELEASES_ENABLED=true
+RELEASES_GITHUB_REPO=warmbly/warmbly             # or your fork
+RELEASES_WORKER_IMAGE_REPO=ghcr.io/warmbly/warmbly/worker
+RELEASES_WEBHOOK_SECRET=<shared with GitHub>
+RELEASES_GITHUB_TOKEN=<optional PAT for higher API limits>
+```
 
-### Required Tools
+A full env reference is `deploy/config/env.example`.
+
+## Step 3: Build and push images
+
+Tagging a release on GitHub triggers `release.yml`, which builds and pushes:
+
+```
+ghcr.io/<owner>/warmbly/worker:vX.Y.Z
+ghcr.io/<owner>/warmbly/worker:vX.Y
+ghcr.io/<owner>/warmbly/worker:vX
+ghcr.io/<owner>/warmbly/worker:prod
+```
+
+And the same set of tags for `backend`, `consumer`, `tracking`, `realtime`. The `build-push.yml` workflow on `main` publishes `:{sha}` and `:dev`.
+
+For self-hosters: this works out of the box on any fork as long as you have `packages: write` permission enabled in repo settings.
+
+## Step 4: Deploy the control plane
+
+Pick one. The Dockerfiles in `deploy/docker/` are the deployment unit:
+
+- **Railway** (what we use in production): one project per environment, one service per Dockerfile, env vars set in the Railway UI. Pushes to `main` auto-deploy.
+- **ECS Fargate**: a task definition per service, ALB in front, secrets via AWS Secrets Manager. ~200 lines of Terraform.
+- **Fly.io**: `fly launch` per service; nice if you want Elixir distributed clustering for realtime.
+- **Single VPS**: each service as a systemd unit fronted by Caddy. Works for small deployments.
+
+The control plane needs database migration to be run before the backend starts. Backend runs migrations automatically on boot (`internal/infrastructure/db/migrate.go`), so no separate migration step is required.
+
+## Step 5: Set up the GitHub Release webhook
+
+If `RELEASES_ENABLED=true`:
+
+1. In your GitHub repo → Settings → Webhooks → Add webhook
+2. Payload URL: `https://api.example.com/webhooks/github/releases`
+3. Content type: `application/json`
+4. Secret: same value as `RELEASES_WEBHOOK_SECRET` on the backend
+5. Events: select **Releases** only
+6. Save
+
+From now on, publishing a GitHub release fires the webhook and the backend resolves each profile's channel.
+
+## Step 6: Add a worker
+
+Two ways.
+
+### From the dashboard (recommended)
+
+1. Provision a VPS (Hetzner et al). Note its public IPv4 and root user.
+2. In Warmbly admin → Workers → **Add Worker**. Fill in host, port, user, name. Pick a worker profile (or leave blank to use backend env defaults). Click Create.
+3. Copy the generated SSH public key. Paste it into the VPS's `~/.ssh/authorized_keys`:
+   ```bash
+   ssh root@<vps> 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys'
+   # paste the key, then Ctrl-D
+   ```
+4. In the dashboard → worker detail page → **Test connection**. Should succeed and pin the host fingerprint.
+5. Click **Install**. Backend uploads `scripts/install-worker.sh`, runs it, and the worker is live.
+
+### From the VPS itself
 
 ```bash
-# Terraform (>= 1.4.0)
-brew install terraform
-
-# kubectl
-brew install kubectl
-
-# htpasswd (for generating passwords)
-brew install httpd
+curl -fsSL https://get.example.com/worker | sudo bash -s -- \
+  --kafka kafka.example.com:9092 \
+  --schema-registry https://schema.example.com \
+  --redis redis://cache.example.com:6379 \
+  --aws-region us-east-1 --aws-key AKIA... --aws-secret ...
 ```
 
-### Required Accounts
+You can later "adopt" this worker into the dashboard by adding the SSH key to it and pointing a profile at it.
 
-- **Cloud Provider** - For Kubernetes cluster
-- **GitHub** - Repository and Container Registry
-- **AWS** - RDS, DynamoDB, SES, S3
-- **GCP** - Cloud Tasks, Pub/Sub
+## Step 7: Wire up the worker profile
 
----
+In the admin dashboard → Credentials → AWS Credentials → Add. Name it, region, access key, secret. The secret is encrypted via KMS before storage.
 
-## Step 1: Infrastructure Setup
+Then → Worker Profiles → Add. Pick the AWS Credentials row. Fill in Kafka bootstrap, SASL username/password, Schema Registry URL/key/secret, Redis URL. Pick a release channel (`pinned`, `stable`, `dev`) and whether `auto_update` is on.
 
-### 1.1 Clone the Infrastructure Repository
+Assign workers to this profile on each worker's detail page. Click Apply to re-write `worker.env` on the VPS and restart.
+
+## Day-2 operations
+
+Everything happens from the worker detail page:
+
+| Action | Effect |
+|--------|--------|
+| Test connection | Open an SSH session, run `true` |
+| Install | Upload installer + env, run it. Idempotent. |
+| Restart | `systemctl restart warmbly-worker.service` |
+| Pull latest & restart | Pull the new image, regenerate unit, restart |
+| Apply config & restart | Rewrite `/etc/warmbly/worker.env`, restart (no docker pull) |
+| Update OS packages | apt/dnf/pacman/apk upgrade noninteractively |
+| Reboot VPS | `shutdown -r +1` |
+| Rotate SSH keys | Generate new ed25519 keypair, install on target |
+| Uninstall | Stop + remove systemd unit and container |
+| Delete | Uninstall + remove row from `workers` table |
+
+When `auto_update=true` is set on a profile and a new release fires the webhook, every assigned worker gets the new image automatically. Otherwise the dashboard shows an "update available" hint and waits for you to click Apply.
+
+## Releasing a new version
 
 ```bash
-cd ~/projects
-git clone git@github.com:warmbly/warmbly-infrastructure.git
-cd warmbly-infrastructure
+git tag -a v1.2.4 -m "Release v1.2.4"
+git push origin v1.2.4
 ```
 
-### 1.2 Create terraform.tfvars
+`release.yml` builds and pushes images. If a release webhook is configured, the backend picks up the new version, updates any profile on `stable` or `dev` channels, and rolls profiles with `auto_update=true`. Otherwise the dashboard shows the new version and you Apply manually.
 
-```bash
-cp terraform.tfvars.example terraform.tfvars
-```
+## Rolling back
 
-Edit `terraform.tfvars` with your credentials (see infrastructure README for details).
-
-### 1.3 Initialize and Apply Terraform
-
-```bash
-terraform init
-terraform validate
-terraform plan
-terraform apply
-```
-
-### 1.4 Save Important Outputs
-
-```bash
-terraform output
-export KUBECONFIG=$(pwd)/kubeconfig
-kubectl get nodes
-```
-
----
-
-## Step 2: DNS Configuration
-
-### 2.1 ArgoCD Controller DNS
-
-Create a DNS A record pointing to the Kubernetes load balancer:
-
-```
-gitops.warmbly.com → <k8s_load_balancer_ip>
-```
-
-### 2.2 Application DNS
-
-```
-api.warmbly.com      → <k8s_load_balancer_ip>
-t.warmbly.com        → <k8s_load_balancer_ip>
-gateway.warmbly.com  → <k8s_load_balancer_ip>
-```
-
----
-
-## Step 3: GitHub Repository Setup
-
-### 3.1 Verify Workflow Files Exist
-
-```
-warmbly/.github/workflows/
-├── ci.yml           # Tests and linting
-├── build-push.yml   # Build and push Docker images
-└── release.yml      # Release versioned images
-```
-
-### 3.2 Configure Repository Settings
-
-1. Go to GitHub repository → Settings
-2. Actions → General: "Read and write permissions"
-
----
-
-## Step 4: First Deployment
-
-### 4.1 Trigger Initial Build
-
-```bash
-cd warmbly
-git checkout main
-git commit --allow-empty -m "Trigger initial CI/CD build"
-git push origin main
-```
-
-### 4.2 Monitor GitHub Actions
-
-1. Go to GitHub → Actions tab
-2. Watch `Build and Push` workflow
-
-### 4.3 Check ArgoCD Controller
-
-Access the ArgoCD UI and verify applications are synced.
-
----
-
-## Step 5: Verify Everything Works
-
-### 5.1 Check Pods Are Running
-
-```bash
-kubectl -n warmbly-dev get pods
-```
-
-### 5.2 Check Service Endpoints
-
-```bash
-kubectl -n warmbly-dev get ingress
-curl https://api.dev.warmbly.com/health
-```
-
----
-
-## Ongoing Development
-
-### Daily Workflow
-
-```
-1. Create feature branch
-2. Make changes
-3. Create PR → CI runs tests
-4. Merge to main → Build runs → ArgoCD deploys to dev
-5. Verify in dev environment
-```
-
-### Automatic Dev Deployment
-
-When you merge to `main`:
-
-1. `build-push.yml` builds changed services
-2. Images pushed to GHCR with `:dev` tag
-3. ArgoCD detects new image (within 2 minutes)
-4. Automatically deploys to `warmbly-dev` namespace
-
----
-
-## Production Releases
-
-### Release Process
-
-```bash
-# 1. Ensure all changes are tested in dev
-
-# 2. Create a release tag
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin v1.0.0
-
-# 3. ArgoCD deploys to production namespace
-```
-
-### Rollback Production
-
-```bash
-# Via ArgoCD UI or CLI - rollback to previous revision
-```
-
----
+- **Per-profile**: edit the profile, switch channel to `pinned`, set `worker_image` to a specific older tag (e.g. `ghcr.io/.../worker:v1.2.3`), save, then Apply to all workers on that profile.
+- **Per-worker**: same idea, but assign the worker to a different profile (or detach and run the installer manually with the old image).
 
 ## Troubleshooting
 
-### Build Not Triggering
+**Worker shows `install_state: error`**
+Open the worker detail page, click Test. If that fails, the SSH key isn't in `authorized_keys` on the VPS. If Test passes but Install fails, check the `last_error` shown on the detail page and the output captured under Logs.
+
+**Auto-update didn't fire**
+Check GitHub repo → Settings → Webhooks → Recent Deliveries. If the webhook delivery shows 401, the secret is wrong. If it shows 200 but nothing happened, check `Releases panel → Last error` in the dashboard, or `journalctl -u backend` for the boot check.
+
+**Worker stuck on old image**
+"Apply config & restart" only rewrites env, not image. Use "Pull latest & restart" instead, or the release auto-update path.
+
+**Heartbeat shows offline**
+- Worker can reach Kafka? (firewall, SASL creds)
+- Worker container actually running? (worker detail → Live status)
+- VPS's clock skewed? (Kafka SASL auth is time-sensitive)
+
+## Quick reference
 
 ```bash
-gh run list --workflow=build-push.yml
-gh run view <run-id> --log
-```
+# control plane: locally
+make dev
 
-### Pods Not Starting
+# load fixtures
+make seed
 
-```bash
-kubectl -n warmbly-dev describe pod <pod-name>
-kubectl -n warmbly-dev get events --sort-by=.lastTimestamp
-kubectl -n warmbly-dev logs <pod-name>
-```
+# full simulation with extra workers + localstack + stripe-mock
+make sim
 
----
+# tear down everything
+make reset
 
-## Quick Reference
+# manual worker install on a VPS
+curl -fsSL https://your-host/install-worker.sh | sudo bash -s -- --help
 
-### Commands Cheat Sheet
-
-```bash
-# Infrastructure
-cd warmbly-infrastructure
-terraform plan
-terraform apply
-terraform output
-
-# Kubernetes
-export KUBECONFIG=~/projects/warmbly-infrastructure/kubeconfig
-kubectl -n warmbly-dev get pods
-kubectl -n warmbly-dev logs -l app=backend -f
-
-# GitHub
-gh run list
-gh run view <run-id> --log
+# trigger a release manually (build+push happens via GH Actions)
+git tag -a v1.2.4 -m "Release v1.2.4" && git push origin v1.2.4
 ```

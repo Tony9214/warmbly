@@ -1,419 +1,250 @@
-# Local Development Guide
+# Local Development
 
-This guide explains how to set up and run Warmbly locally for development using Docker Compose.
+The whole stack runs locally via a single `docker-compose.yml` at the repo root. Profiles let you opt into heavier setups for simulation testing.
 
 ## Prerequisites
 
-- **Docker** (20.10+) and **Docker Compose** (v2.0+)
-- **Git**
-- Optional for native development:
-  - Go 1.25+
-  - Rust (for tracking service)
-  - Elixir 1.18+ (for realtime service)
-  - Node.js 20+ (for frontend)
-  - pnpm 10+ (for frontend)
+- Docker (20.10+) and Docker Compose v2
+- Git
 
-## Quick Start
+For native development (running services outside Docker against the containerized infra), also install:
 
-### 1. Clone the Repository
+- Go 1.25+
+- Rust (for tracking)
+- Elixir 1.18+ (for realtime)
+- Node 22+ and pnpm (for web)
 
-```bash
-git clone https://github.com/warmbly/warmbly.git
-cd warmbly
-```
-
-### 2. Start Infrastructure Only
-
-If you want to run services natively but need the infrastructure (database, cache, message queue):
+## The five Make targets
 
 ```bash
-cd deploy/docker
-
-# Start only infrastructure services
-docker compose up -d postgres redis zookeeper kafka schema-registry
+make dev        # infra + app + one worker (the everyday default)
+make sim        # adds premium + dedicated workers; full simulation
+make seed       # load rich fixtures (3 orgs, 6 mailboxes, a campaign)
+make tools      # debugging UIs (kafka-ui at :18090)
+make reset      # nuke everything including volumes — start over
 ```
 
-Wait for all services to be healthy:
+All targets shell out to `docker compose`. If you don't have Make, the equivalents are:
 
 ```bash
-docker compose ps
+docker compose up                                            # dev
+docker compose --profile sim up                              # sim
+docker compose --profile seed run --rm seed                  # seed
+docker compose --profile tools up -d kafka-ui                # tools
+docker compose --profile sim --profile seed --profile tools down -v   # reset
 ```
 
-### 3. Start All Services
+## What's running
 
-To run everything in Docker:
+In default profile (`make dev`):
 
-```bash
-cd deploy/docker
-docker compose up
-```
+- **postgres**, **redis**, **zookeeper**, **kafka**, **schema-registry** — infra
+- **localstack** — KMS + DynamoDB + S3 emulation
+- **stripe-mock** — Stripe API surrogate
+- **mailpit** — SMTP catcher with a web UI
+- **cloud-tasks-emulator** — Google Cloud Tasks surrogate
+- **backend**, **consumer**, **tracking**, **realtime**, **web** — app services
+- **worker-shared-1** — one worker bound to the shared profile
 
-This will build and start:
-- **postgres** - PostgreSQL 16 database
-- **redis** - Redis 7 cache
-- **zookeeper** - Kafka coordination
-- **kafka** - Message queue
-- **schema-registry** - Avro schema registry
-- **mailpit** - Local email catcher (SMTP + web UI)
-- **backend** - Go API server
-- **consumer** - Kafka event consumer
-- **worker** - Distributed worker
-- **tracking** - Rust tracking service
-- **realtime** - Elixir WebSocket service
-
-### 4. Run in Background
-
-```bash
-docker compose up -d
-```
-
-View logs:
-
-```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f backend
-```
+The `sim` profile adds two more workers (`worker-premium-1`, `worker-dedicated-1`) so you can exercise tier-based assignment, worker rebalancing, and per-pool routing.
 
 ## Service URLs
 
-Once running, services are available at:
+All ports are offset to avoid colliding with locally-installed daemons:
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| Backend API | http://localhost:8080 | REST API |
-| Tracking | http://localhost:3000 | Pixel/click tracking |
-| Realtime | http://localhost:4000 | WebSocket gateway |
-| Mailpit UI | http://localhost:8025 | Email inbox (catches all outbound emails) |
-| Schema Registry | http://localhost:8081 | Avro schemas |
-| PostgreSQL | localhost:5432 | Database |
-| Redis | localhost:6379 | Cache |
-| Kafka | localhost:9092 | Message queue |
+| Service | URL |
+|---------|-----|
+| Backend API | http://localhost:8080 |
+| Tracking | http://localhost:13000 |
+| Realtime | http://localhost:14000 |
+| Web (Vite dev) | http://localhost:15173 |
+| Mailpit | http://localhost:18025 |
+| Kafka | localhost:19092 |
+| Schema Registry | http://localhost:18081 |
+| Postgres | localhost:15432 |
+| Redis | localhost:16379 |
+| LocalStack | http://localhost:14566 |
+| stripe-mock | http://localhost:12111 |
+| Cloud Tasks emulator | http://localhost:18123 |
+| kafka-ui (with `make tools`) | http://localhost:18090 |
 
-## Database Setup
+## Database setup
 
-### Run Migrations
+The backend runs migrations automatically on boot (`internal/infrastructure/db/migrate.go`), so there's no separate migrate step. Migrations live in `internal/infrastructure/db/migrations/`.
 
-The backend service runs migrations automatically on startup. To run manually:
+## Seeding fixtures
 
-```bash
-# Connect to the backend container
-docker compose exec backend sh
+`make seed` runs the seeder one-shot. It's idempotent — safe to re-run after schema changes.
 
-# Run migrations (inside container)
-go run cmd/migrate/main.go up
-```
-
-### Seed Sample Data
-
-The database starts empty. To create a test user for login:
-
-```bash
-# Running natively (with postgres on localhost)
-go run ./cmd/seed/
-
-# Or via Docker
-docker compose --profile seed run --rm seed
-```
-
-This creates:
+Baseline (always loads):
 
 | Field | Value |
 |-------|-------|
-| Email | dev@warmbly.com |
-| Password | password123 |
-| Organization | Dev's Organization |
+| Email | `dev@warmbly.com` |
+| Password | `password123` |
 
-The seed is idempotent — it skips if the user already exists.
+When `SEED_RICH=true` (default in `docker-compose.yml`), also loads:
 
-To test **registration**, use any email address. Mailpit catches all outbound emails so the verification code will appear at http://localhost:8025.
+- 3 orgs (Acme free, Beta pro, Gamma enterprise) each with their own owner user (password `password123`)
+- 3 workers matching the `docker-compose.yml` hostnames (shared / premium / dedicated)
+- 6 email accounts spread across workers, joined to the right warmup pools
+- A Beta campaign with a 2-step sequence
+- 10 contacts, 2 of them unsubscribed (exercises suppression behaviour)
 
-### Connect to Database
+## LocalStack
+
+The `localstack` service provides KMS, DynamoDB, and S3 locally. A one-shot init container (`localstack-init`) creates everything Warmbly expects:
+
+- KMS alias `alias/master-key-dev` for envelope encryption
+- DynamoDB tables `UserEncryptedKeys` and `EmailMessageData`
+- S3 bucket `main`
+
+Backend, consumer, and workers point at LocalStack via `AWS_ENDPOINT_URL=http://localstack:4566`. Production deployments leave that var unset and hit real AWS.
+
+## Connecting psql / Redis CLI
 
 ```bash
-# Via psql
 docker compose exec postgres psql -U warmbly -d warmbly_dev
-
-# Or use any PostgreSQL client with:
-# Host: localhost
-# Port: 5432
-# User: warmbly
-# Password: warmbly
-# Database: warmbly_dev
+docker compose exec redis redis-cli
 ```
 
-## Development Workflows
+External clients can use:
+
+- Postgres: `localhost:15432` user `warmbly` password `warmbly` db `warmbly_dev`
+- Redis: `localhost:16379`
+
+## Running services natively
+
+If you want hot reload, run a service natively and point it at the docker infra.
 
 ### Backend (Go)
 
-Run natively with hot reload using air:
-
 ```bash
-# Install air
+make dev  # in another terminal, leave running for infra
+
+# Install air for hot reload
 go install github.com/cosmtrek/air@latest
 
-# Start infrastructure
-cd deploy/docker && docker compose up -d postgres redis kafka schema-registry
+# Point at containerized infra
+export PRIMARY_DB="postgres://warmbly:warmbly@localhost:15432/warmbly_dev?sslmode=disable"
+export REDIS="redis://localhost:16379"
+export KAFKA_BOOTSTRAP_SERVERS="localhost:19092"
+export SCHEMA_REGISTRY_URL="http://localhost:18081"
+export AWS_ENDPOINT_URL="http://localhost:14566"
+export AWS_REGION="us-east-1"
+export AWS_ACCESS_KEY_ID="test"
+export AWS_SECRET_ACCESS_KEY="test"
+# ... rest of env, see deploy/config/env.example
 
-# Run backend with hot reload (from repo root)
-cd ../..
 air -c .air.toml
 ```
 
-Or build and run manually:
+### Web (React)
+
+The web service in compose already mounts `./web` and runs `pnpm dev`. To run it locally instead:
 
 ```bash
-# Set environment variables (see deploy/config/env.example)
-export PRIMARY_DB="postgres://warmbly:warmbly@localhost:5432/warmbly_dev?sslmode=disable"
-export REDIS="redis://localhost:6379"
-# ... other vars
-
-go run cmd/backend/main.go
-```
-
-### Frontend (React)
-
-```bash
+docker compose stop web
 cd web
 pnpm install
 pnpm dev
 ```
 
-Frontend runs at http://localhost:5173 by default.
-
-### Tracking Service (Rust)
+### Tracking (Rust)
 
 ```bash
+docker compose stop tracking
 cd tracking
-
-# With cargo watch for hot reload
-cargo install cargo-watch
-cargo watch -x run
-
-# Or build and run
 cargo run
 ```
 
-### Realtime Service (Elixir)
+### Realtime (Elixir)
 
 ```bash
+docker compose stop realtime
 cd realtime
-mix deps.get
-mix phx.server
+mix deps.get && mix phx.server
 ```
 
-## Environment Variables
+## Mailpit
 
-All environment variables are documented in `deploy/config/env.example`.
+All outbound mail is captured by Mailpit. The backend uses plain SMTP (`mailpit:1025`) in dev rather than SES, so no AWS credentials are needed.
 
-For local Docker development, the `docker-compose.yml` includes sensible defaults. Key variables:
+- Web UI: http://localhost:18025
+- SMTP from inside docker: `mailpit:1025`
+- SMTP from host: `localhost:11025`
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APP_ENV` | dev | Environment mode |
-| `PRIMARY_DB` | postgres://warmbly:warmbly@postgres:5432/warmbly_dev | PostgreSQL connection |
-| `REDIS` | redis://redis:6379 | Redis connection |
-| `KAFKA_BOOTSTRAP_SERVERS` | kafka:29092 | Kafka brokers |
-| `AUTH_SECRET` | (auto-generated) | JWT signing secret |
-| `SMTP_HOST` | mailpit | SMTP server for local email delivery |
-| `SMTP_PORT` | 1025 | SMTP port (Mailpit) |
+Note: Mailpit speaks SMTP only, not IMAP. The worker's IMAP sync path is not exercised in `make dev` — for that, add a real IMAP server (e.g. GreenMail) to the stack.
 
-## Email in Local Development
+## Email templates
 
-The local stack includes [Mailpit](https://github.com/axllent/mailpit), a mail catcher that captures all outbound emails sent by the backend (login codes, registration codes, password resets, etc.).
-
-- **Web UI:** http://localhost:8025 — view all captured emails
-- **SMTP:** `mailpit:1025` (inside Docker) / `localhost:1025` (from host)
-
-When `SMTP_HOST` is set, the backend uses a plain SMTP sender instead of AWS SES. This is automatic in docker-compose — no AWS credentials needed for local dev.
-
-If you're running the backend natively (outside Docker), set the env vars to point at Mailpit on the host:
-
-```bash
-export SMTP_HOST=localhost
-export SMTP_PORT=1025
-```
-
-## Email Templates
-
-All email templates live in `internal/notify/templates/`. They share a base layout (`base.go`) with the sky/cloud theme, logo, and legal footer. Each template file defines only its content section.
-
-### Run tests
+Email templates live in `internal/notify/templates/`. Render tests:
 
 ```bash
 go test ./internal/notify/templates/ -v
 ```
 
-This verifies all templates render without errors, contain the expected content, include the required legal details (Companies Act 2006), and don't leak content across templates.
-
-### Preview in browser
-
-Generate the HTML and open it directly:
+To preview templates in a browser, dump them to disk:
 
 ```bash
-# Login code
-go test ./internal/notify/templates/ -run TestGenerateLoginCodeHTML -v
-
-# Or dump all three to files and open them:
 go test ./internal/notify/templates/ -run TestPreview -v
+# Files land in the test temp dir, path printed in output
 ```
 
-To quickly preview a template, create a one-off test or use `go run`:
+Or just trigger the auth flow in the running app and watch the email arrive in Mailpit.
 
-```bash
-go run -exec 'open' <<'EOF'
-//go:build ignore
+## Common tasks
 
-package main
-
-import (
-    "os"
-    "github.com/warmbly/warmbly/internal/notify/templates"
-)
-
-func main() {
-    html, _ := templates.GenerateLoginCodeHTML("123456")
-    os.WriteFile("/tmp/login-code.html", []byte(html), 0644)
-
-    html, _ = templates.GenerateRegistrationCodeHTML("789012")
-    os.WriteFile("/tmp/registration-code.html", []byte(html), 0644)
-
-    html, _ = templates.GenerateResetPasswordHTML("", "https://app.warmbly.com/reset?token=abc123")
-    os.WriteFile("/tmp/reset-password.html", []byte(html), 0644)
-}
-EOF
-
-# Then open in browser:
-open /tmp/login-code.html
-open /tmp/registration-code.html
-open /tmp/reset-password.html
-```
-
-### Preview via Mailpit (full flow)
-
-Start the dev stack and trigger the auth flow — all emails are captured:
-
-1. `docker compose -f deploy/docker/docker-compose.yml up`
-2. Open http://localhost:8025 (Mailpit inbox)
-3. Register, login, or reset password via the app
-4. Emails appear in Mailpit in real time
-
-### Editing templates
-
-| File | Purpose |
-|------|---------|
-| `base.go` | Shared layout (sky theme, logo, card, legal footer), business constants |
-| `login_code.go` | Login verification code email |
-| `registration_code.go` | Registration verification code email |
-| `reset_password.go` | Password reset email with button |
-
-To change branding, legal details, or the footer — edit the constants at the top of `base.go`. To change the sky/card/cloud design — edit the `baseHTML` template in `base.go`. To change a specific email's content — edit that template's content const.
-
-## Common Tasks
-
-### Rebuild a Single Service
+### Rebuild one service
 
 ```bash
 docker compose build backend
 docker compose up -d backend
 ```
 
-### Reset Database
+### Reset Postgres only
 
 ```bash
-# Stop services
-docker compose down
-
-# Remove postgres volume
-docker volume rm docker_postgres_data
-
-# Start fresh
-docker compose up -d
+docker compose stop postgres
+docker volume rm warmbly_postgres_data
+docker compose up -d postgres
 ```
 
-### View Kafka Topics
+### List Kafka topics
 
 ```bash
-# List topics
-docker compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+docker compose exec kafka kafka-topics --bootstrap-server localhost:29092 --list
+```
 
-# Consume messages from a topic
+### Consume a topic
+
+```bash
 docker compose exec kafka kafka-console-consumer \
-  --bootstrap-server localhost:9092 \
-  --topic tracking-events \
-  --from-beginning
+  --bootstrap-server localhost:29092 \
+  --topic tracking-events --from-beginning
 ```
 
-### Check Schema Registry
+Or use kafka-ui at http://localhost:18090 (`make tools`).
+
+### Inspect schema registry
 
 ```bash
-# List schemas
-curl http://localhost:8081/subjects
-
-# Get specific schema
-curl http://localhost:8081/subjects/tracking-events-value/versions/latest
+curl http://localhost:18081/subjects | jq
+curl http://localhost:18081/subjects/tracking-events-value/versions/latest | jq
 ```
 
 ## Troubleshooting
 
-### Services Not Starting
+**Port already in use** — `lsof -i :15432` (or whichever) to find what's holding it. The compose ports are offset on purpose; if you have a local Postgres on 5432 it shouldn't clash.
 
-1. Check if ports are already in use:
-   ```bash
-   lsof -i :5432  # PostgreSQL
-   lsof -i :6379  # Redis
-   lsof -i :9092  # Kafka
-   ```
+**Backend can't reach Kafka** — Kafka needs ~30s to fully start. Healthchecks gate the dependent services, so `docker compose up` should handle this. If you brought services up in a weird order, `docker compose restart backend consumer`.
 
-2. Check Docker logs:
-   ```bash
-   docker compose logs kafka
-   docker compose logs backend
-   ```
+**Schema registry "incompatible schema"** — happens if you tweaked an Avro schema and the registry already has an older version. In dev: `make reset` to nuke volumes.
 
-### Kafka Connection Issues
+**LocalStack init failed** — check `docker compose logs localstack-init`. Usually means LocalStack itself isn't ready yet; the dependency wait should handle it, but re-running `make dev` works.
 
-Kafka needs time to start. If services fail to connect:
+## Next steps
 
-```bash
-# Restart dependent services after Kafka is ready
-docker compose restart backend consumer worker tracking
-```
-
-### Database Connection Refused
-
-Ensure PostgreSQL is healthy before starting dependent services:
-
-```bash
-docker compose up -d postgres
-docker compose exec postgres pg_isready -U warmbly
-# Should output: "localhost:5432 - accepting connections"
-docker compose up -d
-```
-
-### Schema Registry Errors
-
-If you see schema compatibility errors:
-
-```bash
-# Delete and recreate schemas (development only!)
-curl -X DELETE http://localhost:8081/subjects/tracking-events-value
-```
-
-## Stopping Services
-
-```bash
-# Stop all services
-docker compose down
-
-# Stop and remove volumes (full reset)
-docker compose down -v
-```
-
-## Next Steps
-
-- [Architecture Overview](architecture.md) - Understand the system design
-- [Events Documentation](Events.md) - Kafka event system
-- [Deployment Guide](deployment-guide.md) - Production deployment
+- [Architecture](architecture.md) — control vs execution plane, encryption model
+- [Deployment Guide](deployment-guide.md) — running in production
+- [Events](Events.md) — Kafka event reference
