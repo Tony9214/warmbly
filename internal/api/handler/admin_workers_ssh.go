@@ -348,27 +348,36 @@ func (h *Handler) parseID(c *gin.Context) (uuid.UUID, bool) {
 	return id, true
 }
 
-// audit fires an audit log entry for the admin action. Fire-and-forget — the
-// audit service spawns its own goroutine so this never blocks the response.
-// Safe to call with nil entityID and/or nil metadata.
+// audit fires an admin audit log entry. Writes to admin_audit_log (the
+// table the /admin/audit-logs viewer queries) so every action on workers,
+// credentials, and releases is browsable alongside ban/unban/etc.
+//
+// Fire-and-forget — AdminService spawns its own goroutine so the response
+// is never blocked. Safe to call with nil entityID and/or nil metadata.
 func (h *Handler) audit(c *gin.Context, action models.AuditAction, entity models.AuditEntityType, entityID *uuid.UUID, metadata map[string]string) {
-	if h.AuditService == nil {
+	if h.AdminService == nil {
 		return
 	}
 	adminID := middleware.GetAdminUserID(c)
 	if adminID == nil {
 		return
 	}
-	h.AuditService.LogAction(
+	var details map[string]any
+	if len(metadata) > 0 {
+		details = make(map[string]any, len(metadata))
+		for k, v := range metadata {
+			details[k] = v
+		}
+	}
+	h.AdminService.LogAdminAction(
 		c.Request.Context(),
 		*adminID,
-		action,
-		entity,
+		string(action),
+		string(entity),
 		entityID,
+		details,
 		c.ClientIP(),
 		c.GetHeader("User-Agent"),
-		nil,
-		metadata,
 	)
 }
 
