@@ -24,6 +24,12 @@ type WorkerAssignmentService interface {
 	// SelectSharedWorker selects the least loaded shared worker for the given tier
 	SelectSharedWorker(ctx context.Context, freeTier bool) (*models.Worker, error)
 
+	// SelectSharedWorkerForBand selects the least-loaded shared worker whose
+	// risk_pool matches the mailbox's risk band. Falls back to the clean
+	// pool if no worker exists in the target pool, and to any worker of the
+	// tier as a last resort.
+	SelectSharedWorkerForBand(ctx context.Context, freeTier bool, band models.EmailRiskBand) (*models.Worker, error)
+
 	// Dedicated worker management
 	AssignDedicatedWorker(ctx context.Context, orgID, subscriptionID uuid.UUID) error
 	ReleaseDedicatedWorker(ctx context.Context, orgID uuid.UUID) error
@@ -134,6 +140,46 @@ func (s *workerAssignmentService) SelectSharedWorker(ctx context.Context, freeTi
 
 	// Return the least loaded worker (first one since sorted ASC)
 	return &workers[0], nil
+}
+
+// SelectSharedWorkerForBand picks the least-loaded shared worker whose
+// risk_pool matches band.MatchingRiskPool(). Fallback chain:
+//
+//   1. Worker in the matching pool of the right tier
+//   2. Worker in the clean pool of the right tier (better to land risky
+//      mailboxes on clean workers than to refuse, but log + audit this
+//      since it dilutes the clean pool — operator should provision a
+//      risky/quarantine worker)
+//   3. Any worker of the right tier (existing SelectSharedWorker behavior)
+//
+// Step 3 maintains backwards compatibility with installations that don't
+// run risk pools yet — they leave everything in risk_pool='clean' and
+// behavior is unchanged.
+func (s *workerAssignmentService) SelectSharedWorkerForBand(ctx context.Context, freeTier bool, band models.EmailRiskBand) (*models.Worker, error) {
+	target := band.MatchingRiskPool()
+
+	workers, err := s.workerRepo.GetSharedWorkersByTierAndPool(ctx, freeTier, target)
+	if err != nil {
+		return nil, err
+	}
+	if len(workers) > 0 {
+		return &workers[0], nil
+	}
+
+	// Step 2: fall back to the clean pool. Only kicks in for risky/quarantine
+	// bands when no matching-pool worker exists.
+	if target != models.WorkerRiskPoolClean {
+		workers, err = s.workerRepo.GetSharedWorkersByTierAndPool(ctx, freeTier, models.WorkerRiskPoolClean)
+		if err != nil {
+			return nil, err
+		}
+		if len(workers) > 0 {
+			return &workers[0], nil
+		}
+	}
+
+	// Step 3: last-resort, any tier worker. Same as legacy SelectSharedWorker.
+	return s.SelectSharedWorker(ctx, freeTier)
 }
 
 // AssignDedicatedWorker assigns a dedicated worker to an organization
