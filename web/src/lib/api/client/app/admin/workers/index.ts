@@ -121,3 +121,23 @@ export function rebootWorker(id: string): Promise<{ ok: boolean }> {
         authorization: true,
     });
 }
+
+// Reassign emails from one worker to another. The :id in the URL is the
+// TARGET worker; the body lists the email-account IDs to move.
+export function reassignEmailsToWorker(targetWorkerID: string, emailIDs: string[]): Promise<{ message: string }> {
+    return Request({
+        method: "POST",
+        url: `/admin/workers/${targetWorkerID}/reassign`,
+        data: { email_ids: emailIDs },
+        authorization: true,
+    });
+}
+
+// List email account IDs assigned to a worker. Used by the manual rewire flow.
+export function listWorkerEmails(workerID: string, limit = 200): Promise<{ data: Array<{ id: string; email: string }>; pagination: { has_more?: boolean } }> {
+    return Request({
+        method: "GET",
+        url: `/admin/workers/${workerID}/emails?limit=${limit}`,
+        authorization: true,
+    });
+}

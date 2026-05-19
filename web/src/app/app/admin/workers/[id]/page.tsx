@@ -7,7 +7,10 @@ import {
     getWorkerLiveStatus,
     getWorkerLogs,
     installWorker,
+    listManagedWorkers,
+    listWorkerEmails,
     rebootWorker,
+    reassignEmailsToWorker,
     restartWorker,
     rotateWorkerKeys,
     systemUpdateWorker,
@@ -37,6 +40,13 @@ export default function AdminWorkerDetailPage() {
     const [liveStatus, setLiveStatus] = useState<string>("");
     const [sysUpdateOut, setSysUpdateOut] = useState<string>("");
     const [sysRebootNeeded, setSysRebootNeeded] = useState<boolean>(false);
+    const [rewireTarget, setRewireTarget] = useState<string>("");
+    const [rewireMsg, setRewireMsg] = useState<string | null>(null);
+
+    const allWorkers = useQuery({
+        queryKey: ["admin", "workers", "managed"],
+        queryFn: listManagedWorkers,
+    });
 
     function refresh() {
         qc.invalidateQueries({ queryKey: ["admin", "worker", id] });
@@ -94,6 +104,26 @@ export default function AdminWorkerDetailPage() {
             setSysRebootNeeded(r.reboot_required);
         } catch (e: any) {
             setSysUpdateOut("error: " + (e?.message || "failed"));
+        }
+    }
+
+    async function rewireAll() {
+        if (!rewireTarget) return;
+        if (!confirm("Move every email account on this worker to the selected target?")) return;
+        setRewireMsg("fetching accounts…");
+        try {
+            const emails = await listWorkerEmails(id);
+            if (emails.data.length === 0) {
+                setRewireMsg("no accounts to move");
+                return;
+            }
+            setRewireMsg(`moving ${emails.data.length} account${emails.data.length === 1 ? "" : "s"}…`);
+            await reassignEmailsToWorker(rewireTarget, emails.data.map((e) => e.id));
+            setRewireMsg(`✓ ${emails.data.length} moved`);
+            refresh();
+            allWorkers.refetch();
+        } catch (e: any) {
+            setRewireMsg("error: " + (e?.message || "failed"));
         }
     }
 
@@ -251,6 +281,47 @@ export default function AdminWorkerDetailPage() {
             <Section title="Live status">
                 <Btn onClick={fetchLiveStatus}>Refresh</Btn>
                 <pre className="mt-3 bg-slate-100 text-xs p-2 rounded whitespace-pre-wrap min-h-[60px]">{liveStatus || "(click refresh)"}</pre>
+            </Section>
+
+            <Section title="Move accounts to another worker">
+                <p className="text-slate-500 text-sm mb-2">
+                    Useful when this worker is down or overloaded. Eligible targets are workers of
+                    the same tier listed least-loaded first.
+                </p>
+                {(() => {
+                    const candidates = (allWorkers.data?.data ?? [])
+                        .filter((other) => other.id !== id)
+                        .filter((other) => other.worker_type === w.worker_type && other.free_tier === w.free_tier)
+                        .filter((other) => other.install_state === "installed")
+                        .sort((a, b) => a.account_count - b.account_count);
+                    return (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <select
+                                value={rewireTarget}
+                                onChange={(e) => setRewireTarget(e.target.value)}
+                                className="border rounded px-3 py-1.5 text-sm min-w-[18rem]"
+                            >
+                                <option value="">— pick a target worker —</option>
+                                {candidates.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name || c.id.slice(0, 8)} · {c.account_count} accounts · {c.ssh_host || c.ip_addr}
+                                    </option>
+                                ))}
+                            </select>
+                            <Btn onClick={rewireAll} disabled={!rewireTarget} primary>
+                                Move all {w.account_count} account{w.account_count === 1 ? "" : "s"}
+                            </Btn>
+                            {candidates.length === 0 && (
+                                <span className="text-slate-400 text-xs">
+                                    No eligible targets of the same tier are healthy.
+                                </span>
+                            )}
+                        </div>
+                    );
+                })()}
+                {rewireMsg && (
+                    <pre className="mt-3 bg-slate-100 text-xs p-2 rounded whitespace-pre-wrap">{rewireMsg}</pre>
+                )}
             </Section>
 
             <Section title="System updates">
