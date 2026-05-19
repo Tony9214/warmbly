@@ -1,6 +1,7 @@
 import { useUserProfile } from "@/hooks/context/user";
 import React from "react"
 import { useLocation, Link } from "react-router-dom";
+import WorkerHealthAlert from "./_components/WorkerHealthAlert";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
     const user = useUserProfile();
@@ -10,6 +11,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         "Home": "",
         "Workers": "/workers",
         "Credentials": "/credentials",
+        "Audit": "/audit",
         "Roles": "/roles",
         "Users": "/users",
         "Plans": "/plans",
@@ -21,6 +23,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <h1 className="text-slate-600 font-bold font-inter text-2xl mb-4">Administration</h1>
                 <p className="text-slate-400 text-sm font-inter">Logged in as: {user ? user.user.email : "Loading..."}</p>
             </div>
+            <WorkerHealthAlert />
             <div className="flex space-x-4 pb-3 border-b border-gray-200 mb-4 overflow-x-scroll no-scrollbar">
                 {Object.entries(tabData).map((key) => {
                     const fullPath = `/app/admin/${key[1]}`;

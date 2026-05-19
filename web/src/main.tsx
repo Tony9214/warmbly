@@ -60,6 +60,7 @@ import AdminWorkersPage from './app/app/admin/workers/page';
 import AdminAddWorkerPage from './app/app/admin/workers/new/page';
 import AdminWorkerDetailPage from './app/app/admin/workers/[id]/page';
 import AdminCredentialsPage from './app/app/admin/credentials/page';
+import AdminAuditPage from './app/app/admin/audit/page';
 
 const queryClient = new QueryClient();
 
@@ -227,6 +228,7 @@ const router = createBrowserRouter([
               { path: "workers/new", element: <AdminAddWorkerPage /> },
               { path: "workers/:id", element: <AdminWorkerDetailPage /> },
               { path: "credentials", element: <AdminCredentialsPage /> },
+              { path: "audit", element: <AdminAuditPage /> },
             ],
           },
         ]
