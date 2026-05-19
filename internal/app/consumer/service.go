@@ -5,6 +5,7 @@ import (
 
 	"github.com/warmbly/warmbly/internal/app/advanced"
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
+	workerapp "github.com/warmbly/warmbly/internal/app/worker"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
@@ -38,6 +39,10 @@ type JobsService struct {
 	// auto-reassigns email accounts (optional — heartbeat sync also writes
 	// here so admins can see why their fleet moved). Nil disables logging.
 	AdminRepo repository.AdminRepository
+
+	// AssignmentService is used by the risk rebalancer to pick replacement
+	// workers when a mailbox's risk band changes. Nil disables the job.
+	AssignmentService workerapp.WorkerAssignmentService
 
 	eventHandlers map[models.JobEventType]func(ctx context.Context, body any) error
 }

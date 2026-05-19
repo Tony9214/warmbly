@@ -14,6 +14,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	jobs "github.com/warmbly/warmbly/internal/app/consumer"
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
+	workerapp "github.com/warmbly/warmbly/internal/app/worker"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
@@ -165,6 +166,9 @@ func main() {
 	warmupRepo := repository.NewWarmupRepository(primaryDB.Pool)
 	warmupService := warmupapp.NewService(warmupRepo)
 	workerRepo := repository.NewWorkerRepository(primaryDB.Pool)
+	subscriptionRepoConsumer := repository.NewSubscriptionRepository(primaryDB.Pool)
+	planRepoConsumer := repository.NewPlanRepository(primaryDB.Pool)
+	workerAssignmentSvc := workerapp.NewAssignmentService(workerRepo, subscriptionRepoConsumer, planRepoConsumer)
 	campaignRepo := repository.NewCampaignRepostory(primaryDB)
 	taskRepo := repository.NewTaskRepository(primaryDB.Pool)
 	contactRepo := repository.NewContactRepostory(primaryDB)
@@ -203,6 +207,7 @@ func main() {
 		AdvancedService:             advancedService,
 		Cache:                       redisCache,
 		AdminRepo:                   repository.NewAdminRepository(primaryDB.Pool),
+		AssignmentService:           workerAssignmentSvc,
 	}
 
 	jobsService.InitEvents()
@@ -229,6 +234,11 @@ func main() {
 	// Mirror Redis heartbeats into workers.last_seen_at every 60s
 	// so the admin dashboard can render liveness without touching Redis.
 	go jobsService.StartWorkerHeartbeatSync(ctx, 60*time.Second)
+
+	// Re-evaluate per-mailbox risk bands hourly and migrate to a matching
+	// risk_pool worker when the band changes. Skipped if AssignmentService
+	// or WorkerRepo are nil.
+	go jobsService.StartRiskRebalancer(ctx, 1*time.Hour)
 
 	log.Println("Consumer started, listening on", kafka.TopicWorkerEvents)
 	jobsService.Start(ctx)
