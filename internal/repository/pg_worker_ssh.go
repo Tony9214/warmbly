@@ -66,6 +66,7 @@ const workerDetailColumns = `
 	COALESCE(ssh_public_key,''), COALESCE(ssh_host_fingerprint,''),
 	install_state, last_seen_at, COALESCE(last_error,''),
 	profile_id, config_applied_at, COALESCE(image_version,''),
+	risk_pool,
 	created_at, updated_at
 `
 
@@ -78,6 +79,7 @@ func scanWorkerDetail(row pgx.Row) (*models.Worker, error) {
 		&w.SSHPublicKey, &w.SSHHostFingerprint,
 		&w.InstallState, &w.LastSeenAt, &w.LastError,
 		&w.ProfileID, &w.ConfigAppliedAt, &w.ImageVersion,
+		&w.RiskPool,
 		&w.CreatedAt, &w.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

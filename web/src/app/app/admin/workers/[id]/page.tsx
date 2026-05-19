@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
     convertWorkerToDedicated,
     deleteWorker,
+    setWorkerRiskPool,
     getManagedWorker,
     getWorkerLiveStatus,
     getWorkerLogs,
@@ -73,6 +74,10 @@ export default function AdminWorkerDetailPage() {
     const upgrade = useMutation({ mutationFn: () => upgradeWorker(id), ...opts("upgrade") });
     const uninstall = useMutation({ mutationFn: () => uninstallWorker(id), ...opts("uninstall") });
     const apply = useMutation({ mutationFn: () => applyWorkerConfig(id), ...opts("apply") });
+    const setPool = useMutation({
+        mutationFn: (pool: "clean" | "risky" | "quarantine") => setWorkerRiskPool(id, pool),
+        ...opts("set risk pool"),
+    });
 
     const profiles = useQuery({ queryKey: ["admin", "profiles"], queryFn: listWorkerProfiles });
     const assignProfile = useMutation({
@@ -314,6 +319,43 @@ export default function AdminWorkerDetailPage() {
                 <Btn onClick={fetchLiveStatus}>Refresh</Btn>
                 <pre className="mt-3 bg-slate-100 text-xs p-2 rounded whitespace-pre-wrap min-h-[60px]">{liveStatus || "(click refresh)"}</pre>
             </Section>
+
+            {w.worker_type === "shared" && (
+                <Section title="Risk pool">
+                    <p className="text-slate-500 text-sm mb-2">
+                        Buckets shared workers so high-risk mailboxes don't poison the reputation of
+                        clean ones. The background rebalancer migrates mailboxes between pools
+                        hourly based on their warmup health state.
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                        {(["clean", "risky", "quarantine"] as const).map((p) => (
+                            <button
+                                key={p}
+                                onClick={() => {
+                                    if (p === w.risk_pool) return;
+                                    if (!confirm(`Move this worker to the ${p} pool? The rebalancer will redistribute mailboxes on the next tick.`)) return;
+                                    setPool.mutate(p);
+                                }}
+                                disabled={setPool.isPending}
+                                className={`px-3 py-1.5 rounded text-sm border disabled:opacity-50 ${
+                                    p === w.risk_pool
+                                        ? p === "clean"
+                                            ? "bg-green-600 text-white border-green-600"
+                                            : p === "risky"
+                                            ? "bg-amber-600 text-white border-amber-600"
+                                            : "bg-red-600 text-white border-red-600"
+                                        : "bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                            >
+                                {p}
+                            </button>
+                        ))}
+                    </div>
+                    <p className="text-slate-400 text-xs mt-2">
+                        Currently: <span className="font-mono">{w.risk_pool}</span>
+                    </p>
+                </Section>
+            )}
 
             <Section title="Move accounts to another worker">
                 <p className="text-slate-500 text-sm mb-2">

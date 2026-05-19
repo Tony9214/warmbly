@@ -122,6 +122,15 @@ export function rebootWorker(id: string): Promise<{ ok: boolean }> {
     });
 }
 
+export function setWorkerRiskPool(workerID: string, pool: "clean" | "risky" | "quarantine"): Promise<{ ok: boolean }> {
+    return Request({
+        method: "PUT",
+        url: `/admin/workers/${workerID}/risk-pool`,
+        data: { risk_pool: pool },
+        authorization: true,
+    });
+}
+
 export function convertWorkerToDedicated(
     workerID: string,
     body: { user_id: string; subscription_id: string; drain_to_worker_id?: string | null },

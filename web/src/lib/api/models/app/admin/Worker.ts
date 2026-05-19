@@ -8,6 +8,8 @@ export type WorkerInstallState =
 
 export type WorkerType = "shared" | "dedicated";
 
+export type WorkerRiskPool = "clean" | "risky" | "quarantine";
+
 export interface ManagedWorker {
     id: string;
     name: string;
@@ -17,6 +19,7 @@ export interface ManagedWorker {
     free_tier: boolean;
     worker_type: WorkerType;
     account_count: number;
+    risk_pool: WorkerRiskPool;
 
     ssh_host?: string;
     ssh_port?: number;

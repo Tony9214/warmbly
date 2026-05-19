@@ -458,6 +458,33 @@ func boolStr(b bool) string {
 	return "false"
 }
 
+type setRiskPoolBody struct {
+	RiskPool string `json:"risk_pool" binding:"required,oneof=clean risky quarantine"`
+}
+
+// AdminSetWorkerRiskPool moves a shared worker into a different risk pool.
+// The rebalancer will redistribute mailboxes on the next tick — admins
+// don't need to migrate accounts manually after this.
+func (h *Handler) AdminSetWorkerRiskPool(c *gin.Context) {
+	id, ok := h.parseID(c)
+	if !ok {
+		return
+	}
+	var body setRiskPoolBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid request body"))
+		return
+	}
+	if err := h.WorkerRepo.SetWorkerRiskPool(c.Request.Context(), id, models.WorkerRiskPool(body.RiskPool)); err != nil {
+		errx.JSON(c, errx.New(errx.Internal, err.Error()))
+		return
+	}
+	h.audit(c, models.AuditActionUpdate, models.AuditEntityWorker, &id, map[string]string{
+		"risk_pool": body.RiskPool,
+	})
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (h *Handler) AdminDeleteSSHWorker(c *gin.Context) {
 	id, ok := h.parseID(c)
 	if !ok {

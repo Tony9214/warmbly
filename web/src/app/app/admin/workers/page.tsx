@@ -191,6 +191,7 @@ export default function AdminWorkersPage() {
                             <th className="text-left px-3 py-2">Host</th>
                             <th className="text-left px-3 py-2">Tier</th>
                             <th className="text-left px-3 py-2">Install</th>
+                            <th className="text-left px-3 py-2">Pool</th>
                             <th className="text-left px-3 py-2">Version</th>
                             <th className="text-left px-3 py-2">Live</th>
                             <th className="text-left px-3 py-2">Accounts</th>
@@ -222,6 +223,13 @@ export default function AdminWorkersPage() {
                                             {w.install_state}
                                         </span>
                                     </td>
+                                    <td className="px-3 py-2">
+                                        {w.worker_type === "dedicated" ? (
+                                            <span className="text-slate-400 text-xs">n/a</span>
+                                        ) : (
+                                            <RiskPoolBadge pool={w.risk_pool} />
+                                        )}
+                                    </td>
                                     <td className="px-3 py-2 text-xs font-mono">
                                         {w.image_version || <span className="text-slate-400">—</span>}
                                     </td>
@@ -239,7 +247,7 @@ export default function AdminWorkersPage() {
                         })}
                         {filteredWorkers.length === 0 && (
                             <tr>
-                                <td colSpan={8} className="px-3 py-8 text-center text-slate-400 text-sm">
+                                <td colSpan={9} className="px-3 py-8 text-center text-slate-400 text-sm">
                                     {data?.data?.length === 0
                                         ? "No workers yet. Add one to get started."
                                         : "No workers match this filter."}
@@ -285,4 +293,13 @@ function Chip({
 
 function Count({ value }: { value: number }) {
     return <span className="ml-1 font-semibold tabular-nums">{value}</span>;
+}
+
+function RiskPoolBadge({ pool }: { pool: "clean" | "risky" | "quarantine" }) {
+    const cls = {
+        clean:      "bg-green-100 text-green-700",
+        risky:      "bg-amber-100 text-amber-700",
+        quarantine: "bg-red-100 text-red-700",
+    }[pool];
+    return <span className={`px-2 py-0.5 rounded text-xs ${cls}`}>{pool}</span>;
 }
