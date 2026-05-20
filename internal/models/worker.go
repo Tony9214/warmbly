@@ -56,6 +56,11 @@ type Worker struct {
 	// Update. Used for the "v1.2.3 → v1.2.4" badge in the dashboard.
 	ImageVersion string `json:"image_version,omitempty"`
 
+	// Admin-applied free-form tags (eu-west, hetzner, warmup-only, ...).
+	// Auto-derived "smart" labels (tier:free, pool:risky, state:error) are
+	// computed client-side from the worker row and never stored here.
+	Tags []string `json:"tags,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

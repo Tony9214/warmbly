@@ -27,6 +27,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -164,6 +165,12 @@ func (h *Handler) AdminListSSHWorkers(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.Internal, err.Error()))
 		return
 	}
+	// Hydrate tags in one round-trip so the UI gets them in the list response.
+	ptrs := make([]*models.Worker, len(workers))
+	for i := range workers {
+		ptrs[i] = &workers[i]
+	}
+	_ = h.WorkerRepo.HydrateWorkerTags(c.Request.Context(), ptrs)
 	c.JSON(http.StatusOK, gin.H{"data": workers})
 }
 
@@ -174,7 +181,63 @@ func (h *Handler) AdminGetSSHWorker(c *gin.Context) {
 	if xerr != nil {
 		return
 	}
+	tags, err := h.WorkerRepo.GetWorkerTags(c.Request.Context(), w.ID)
+	if err == nil {
+		w.Tags = tags
+	}
 	c.JSON(http.StatusOK, w)
+}
+
+type setTagsBody struct {
+	Tags []string `json:"tags"`
+}
+
+// AdminSetWorkerTags replaces a worker's tag set.
+//   PUT /admin/workers/:id/tags
+func (h *Handler) AdminSetWorkerTags(c *gin.Context) {
+	id, ok := h.parseID(c)
+	if !ok {
+		return
+	}
+	var body setTagsBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid request body"))
+		return
+	}
+	// Normalize: trim, lowercase, dedupe, drop empties. The DB constraint
+	// rejects garbage tags too; this is just to avoid 500s on the happy path.
+	seen := map[string]struct{}{}
+	tags := make([]string, 0, len(body.Tags))
+	for _, t := range body.Tags {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		tags = append(tags, t)
+	}
+	if err := h.WorkerRepo.SetWorkerTags(c.Request.Context(), id, tags); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, err.Error()))
+		return
+	}
+	h.audit(c, models.AuditActionUpdate, models.AuditEntityWorker, &id, map[string]string{
+		"tags": strings.Join(tags, ","),
+	})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "tags": tags})
+}
+
+// AdminListWorkerTags returns every distinct tag in use, for autocomplete.
+//   GET /admin/workers/tags
+func (h *Handler) AdminListWorkerTags(c *gin.Context) {
+	tags, err := h.WorkerRepo.ListAllWorkerTags(c.Request.Context())
+	if err != nil {
+		errx.JSON(c, errx.New(errx.Internal, err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": tags})
 }
 
 // AdminTestWorker runs a no-op SSH command. Pins the host fingerprint on

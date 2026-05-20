@@ -67,6 +67,12 @@ type WorkerRepository interface {
 	SetEmailAccountRiskBand(ctx context.Context, emailAccountID uuid.UUID, band models.EmailRiskBand) error
 	GetSharedWorkersByTierAndPool(ctx context.Context, freeTier bool, pool models.WorkerRiskPool) ([]models.Worker, error)
 	ListRiskCandidates(ctx context.Context, limit int) ([]RiskCandidate, error)
+
+	// Tags
+	GetWorkerTags(ctx context.Context, workerID uuid.UUID) ([]string, error)
+	SetWorkerTags(ctx context.Context, workerID uuid.UUID, tags []string) error
+	ListAllWorkerTags(ctx context.Context) ([]string, error)
+	HydrateWorkerTags(ctx context.Context, workers []*models.Worker) error
 }
 
 type workerRepository struct {
