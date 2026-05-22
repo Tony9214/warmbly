@@ -17,7 +17,7 @@
 #
 # All ports are offset so they don't clash with locally-run services:
 #   postgres 15432, redis 16379, kafka 19092, schema-registry 18081,
-#   backend 8080, tracking 13000, realtime 14000, web 15173,
+#   backend 8080, tracking 13000, realtime 14000, web 5173,
 #   mailpit ui 18025 / smtp 11025, kafka-ui 18090,
 #   localstack 14566, stripe-mock 12111, cloud-tasks 18123.
 
@@ -364,7 +364,7 @@ services:
     volumes:
       - ./web:/app
       - web_node_modules:/app/node_modules
-    ports: ["15173:5173"]
+    ports: ["5173:5173"]
     # Retry corepack only — that one tends to fail transiently while it
     # downloads the pnpm version. pnpm install failures are PERMANENT (bad
     # package.json, unresolvable peer dep, etc.) so we fail fast instead of
@@ -376,7 +376,7 @@ services:
       pnpm dev --host
       '
     environment:
-      VITE_APP_URL: "http://localhost:15173"
+      VITE_APP_URL: "http://localhost:5173"
       VITE_API_URL: "http://localhost:8080"
       VITE_TRACKING_DOMAIN: "localhost:13000"
       VITE_TURNSTILE_KEY: "1x00000000000000000000AA"

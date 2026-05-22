@@ -37,7 +37,7 @@ The frontend (React) talks to three control-plane services: the **Backend API** 
 | Realtime | 14000 | control | WebSocket gateway |
 | Consumer | – | control | Kafka event processor |
 | Worker | – | execution | SSH-managed sender process, one per VPS |
-| Web | 15173 | – | Vite dev server (frontend) |
+| Web | 5173 | – | Vite dev server (frontend) |
 
 ## Quick Start (local dev / simulation)
 
@@ -62,7 +62,7 @@ Service URLs (all ports offset to avoid clashes with locally-installed daemons):
 - Backend API: http://localhost:8080
 - Tracking: http://localhost:13000
 - Realtime: http://localhost:14000
-- Web: http://localhost:15173
+- Web: http://localhost:5173
 - Mailpit: http://localhost:18025
 - Kafka: localhost:19092
 - Schema Registry: http://localhost:18081

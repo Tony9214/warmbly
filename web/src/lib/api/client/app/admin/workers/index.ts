@@ -1,7 +1,7 @@
 // All admin worker-management API calls. Each function is a thin axios wrapper
 // over Request<T>; pages call these directly via react-query.
 
-import Request from "../../../../Request";
+import Request from "../../../Request";
 import type {
     CreateWorkerInput,
     CreateWorkerResponse,

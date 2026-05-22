@@ -82,7 +82,7 @@ All ports are offset to avoid colliding with locally-installed daemons:
 | Backend API | http://localhost:8080 |
 | Tracking | http://localhost:13000 |
 | Realtime | http://localhost:14000 |
-| Web (Vite dev) | http://localhost:15173 |
+| Web (Vite dev) | http://localhost:5173 |
 | Mailpit | http://localhost:18025 |
 | Kafka | localhost:19092 |
 | Schema Registry | http://localhost:18081 |
