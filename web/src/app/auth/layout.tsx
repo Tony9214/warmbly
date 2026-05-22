@@ -288,7 +288,7 @@ export default function AuthLayout() {
                     {/* Top — Logo */}
                     <div className="relative">
                         <div className="flex items-center gap-4">
-                            <Logo className="w-14" />
+                            <Logo className="w-14 text-white" />
                             <span style={{ fontFamily: "var(--font-display)" }} className="font-extrabold text-[26px] tracking-tight text-white">Warmbly</span>
                         </div>
                     </div>
@@ -352,7 +352,7 @@ export default function AuthLayout() {
                 <div className="flex-1 flex items-center justify-center px-5 py-12">
                     <div className="w-full max-w-[440px]">
                         <div className="lg:hidden flex items-center justify-center gap-2.5 mb-8 animate-fade-in">
-                            <Logo className="w-10" />
+                            <Logo className="w-10 text-white" />
                             <span style={{ fontFamily: "var(--font-display)" }} className="font-extrabold text-xl tracking-tight text-white">Warmbly</span>
                         </div>
                         <Outlet />
