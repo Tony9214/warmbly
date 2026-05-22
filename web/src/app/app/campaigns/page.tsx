@@ -70,11 +70,29 @@ export default function CampaignsPage() {
                     </div>
                 </div>
 
-                {!campaignsData.data ? (
+                {campaignsData.isLoading ? (
                     <div className="p-4 space-y-2">
                         {[...Array(4)].map((_, i) => (
                             <div key={i} className="h-16 bg-slate-100 animate-pulse rounded-lg" />
                         ))}
+                    </div>
+                ) : campaignsData.isError ? (
+                    <div className="p-6">
+                        <EmptyState
+                            icon={<MegaphoneIcon className="w-5 h-5" />}
+                            title="Couldn't load campaigns"
+                            description={
+                                campaignsData.error?.message ||
+                                "The request failed. Check that the backend is up and you're signed in to an organisation."
+                            }
+                        >
+                            <button
+                                onClick={() => campaignsData.refetch()}
+                                className="bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-medium rounded-lg px-3 py-1.5 transition-colors"
+                            >
+                                Retry
+                            </button>
+                        </EmptyState>
                     </div>
                 ) : campaignsData.campaigns.length === 0 ? (
                     <div className="p-6">

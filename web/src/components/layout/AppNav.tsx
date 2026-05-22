@@ -85,22 +85,22 @@ function NavRow({ item }: { item: NavItem }) {
         <Link
             to={item.url}
             className={cn(
-                "relative mx-2 flex items-center gap-2.5 px-2.5 h-8 rounded-md text-[12.5px] transition-colors duration-100",
+                "relative mx-2 flex items-center gap-2.5 px-2.5 h-8 rounded-md text-[13px] transition-colors duration-100",
                 active
-                    ? "bg-white/[0.12] text-white font-medium"
-                    : "text-white/65 hover:text-white hover:bg-white/[0.06]",
+                    ? "bg-white text-slate-900 font-medium shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_0_0_1px_rgba(15,23,42,0.06)]"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-white/70",
             )}
         >
             <item.icon
                 className={cn(
                     "w-[15px] h-[15px] shrink-0 transition-colors",
-                    active ? "text-white" : "text-white/55",
+                    active ? "text-sky-600" : "text-slate-400",
                 )}
                 strokeWidth={active ? 2 : 1.75}
             />
             <span className="truncate">{item.title}</span>
             {badge != null && badge > 0 && (
-                <span className="ml-auto text-[10.5px] font-medium bg-white text-sky-700 rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1.5">
+                <span className="ml-auto text-[10.5px] font-medium bg-sky-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1.5">
                     {badge > 99 ? "99+" : badge}
                 </span>
             )}
@@ -111,8 +111,8 @@ function NavRow({ item }: { item: NavItem }) {
 function Section({ section }: { section: NavSection }) {
     return (
         <div className="mt-5">
-            <div className="px-5 mb-1.5">
-                <span className="text-[10.5px] uppercase tracking-[0.18em] text-white/50 font-semibold">
+            <div className="px-5 mb-1">
+                <span className="text-[10.5px] uppercase tracking-[0.16em] text-slate-400 font-semibold">
                     {section.label}
                 </span>
             </div>
@@ -127,15 +127,15 @@ function Section({ section }: { section: NavSection }) {
 
 export function AppNav() {
     return (
-        <aside className="w-64 shrink-0 flex flex-col text-white/90">
-            {/* Primary action — "New Campaign". Sits up top, separate from the
-                navigation list so it reads as a verb, not a destination. */}
-            <div className="px-3 pt-1 pb-2 shrink-0">
+        <aside className="w-64 shrink-0 flex flex-col text-slate-900">
+            {/* Primary action — "New Campaign". A confident sky pill that
+                stands out against the off-white sidebar without shouting. */}
+            <div className="px-3 pt-1 pb-3 shrink-0">
                 <Link
                     to="/app/campaigns"
-                    className="flex items-center justify-center gap-2 h-9 rounded-lg bg-white text-sky-700 hover:bg-white/95 text-[13px] font-semibold transition-colors shadow-[0_1px_2px_rgba(8,47,73,0.25)]"
+                    className="flex items-center justify-center gap-2 h-9 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[13px] font-medium transition-colors shadow-[0_1px_2px_rgba(2,132,199,0.35)]"
                 >
-                    <PlusIcon className="w-4 h-4" />
+                    <PlusIcon className="w-3.5 h-3.5" />
                     <span>New Campaign</span>
                 </Link>
             </div>
@@ -151,14 +151,13 @@ export function AppNav() {
                 ))}
             </nav>
 
-            {/* Settings row pinned just above the user menu, faintly separated. */}
-            <div className="border-t border-white/10 py-2 shrink-0">
+            <div className="border-t border-slate-200/60 py-2 shrink-0">
                 <NavRow
                     item={{ title: "Settings", url: "/app/settings", icon: SettingsIcon }}
                 />
             </div>
 
-            <div className="border-t border-white/10 shrink-0">
+            <div className="border-t border-slate-200/60 shrink-0">
                 <UserNav />
             </div>
         </aside>

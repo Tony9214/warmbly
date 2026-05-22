@@ -35,16 +35,16 @@ export function OrgSwitcher() {
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 px-2 h-7 rounded-md hover:bg-white/[0.08] transition-colors group cursor-pointer max-w-[14rem]">
-                    <span className="w-[18px] h-[18px] rounded bg-white/15 border border-white/10 flex items-center justify-center shrink-0">
+                <button className="flex items-center gap-2 px-2 h-7 rounded-md hover:bg-slate-200/60 transition-colors group cursor-pointer max-w-[14rem]">
+                    <span className="w-[18px] h-[18px] rounded bg-sky-600 flex items-center justify-center shrink-0">
                         <span className="text-[9px] font-bold text-white leading-none">
                             {initials(name)}
                         </span>
                     </span>
-                    <span className="text-[13px] font-medium text-white truncate">
+                    <span className="text-[13px] font-medium text-slate-900 truncate">
                         {name}
                     </span>
-                    <ChevronDownIcon className="w-3 h-3 text-white/55 shrink-0" />
+                    <ChevronDownIcon className="w-3 h-3 text-slate-400 shrink-0" />
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="min-w-56" align="start" sideOffset={6}>

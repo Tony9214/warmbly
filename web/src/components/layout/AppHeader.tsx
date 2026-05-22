@@ -72,28 +72,28 @@ export function AppHeader() {
                 to="/app/emails"
                 className="w-64 px-5 h-full flex items-center gap-2.5 shrink-0 group"
             >
-                <Logo className="w-8 text-white drop-shadow-[0_1px_3px_rgba(8,47,73,0.4)]" />
+                <Logo className="w-7 text-sky-600" />
                 <span
                     style={{ fontFamily: "var(--font-display)" }}
-                    className="font-extrabold text-[16px] tracking-tight text-white"
+                    className="font-extrabold text-[15.5px] tracking-tight text-slate-900"
                 >
                     Warmbly
                 </span>
             </Link>
 
             {/* Breadcrumb: org > section > subpages. */}
-            <div className="flex items-center gap-2 min-w-0 flex-1 pr-4">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-4">
                 <Crumb>
                     <OrgSwitcher />
                 </Crumb>
                 {crumbs.map((seg, i) => (
                     <Crumb key={i}>
-                        <ChevronRight className="w-4 h-4 text-white/45 shrink-0" />
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
                         <span
                             className={
                                 i === crumbs.length - 1
-                                    ? "text-[13.5px] font-medium text-white truncate"
-                                    : "text-[13.5px] text-white/65 truncate"
+                                    ? "text-[13px] font-medium text-slate-900 truncate"
+                                    : "text-[13px] text-slate-500 truncate"
                             }
                         >
                             {pretty(seg)}
@@ -102,15 +102,15 @@ export function AppHeader() {
                 ))}
             </div>
 
-            <div className="flex items-center gap-3 px-4 shrink-0">
+            <div className="flex items-center gap-1 px-4 shrink-0">
                 <ConnectionIndicator />
                 <button
                     onClick={() => setCommandPaletteOpen(true)}
-                    className="flex items-center gap-2 px-2 h-7 rounded-md text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors text-[12.5px]"
+                    className="flex items-center gap-2 px-2 h-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 transition-colors text-[12.5px]"
                 >
                     <Search className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Search</span>
-                    <kbd className="hidden md:inline-flex h-4 items-center px-1 rounded border border-white/15 bg-white/[0.05] font-mono text-[10px] text-white/55 ml-0.5">
+                    <kbd className="hidden md:inline-flex h-4 items-center px-1 rounded border border-slate-300/70 bg-white/60 font-mono text-[10px] text-slate-500 ml-0.5">
                         ⌘K
                     </kbd>
                 </button>
