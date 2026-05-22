@@ -85,27 +85,22 @@ function NavRow({ item }: { item: NavItem }) {
         <Link
             to={item.url}
             className={cn(
-                "group relative mx-2 flex items-center gap-2.5 pl-3 pr-2.5 h-8 rounded-md text-[13px] transition-colors duration-150",
+                "group mx-2 flex items-center gap-2.5 px-2.5 h-8 rounded-md text-[13px] transition-colors duration-100",
                 active
-                    ? "bg-sky-50 text-sky-900 font-medium"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-white/70",
+                    ? "bg-white text-slate-900 font-medium shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_0_0_1px_rgba(15,23,42,0.06)]"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60",
             )}
         >
-            {/* Active rail — 2.5px sky bar at the left edge. Subtler than
-                a full pill, more confident than a coloured underline. */}
-            {active && (
-                <span className="absolute left-0 top-1 bottom-1 w-[2.5px] rounded-full bg-sky-500" />
-            )}
             <item.icon
                 className={cn(
                     "w-[15px] h-[15px] shrink-0 transition-colors",
-                    active ? "text-sky-600" : "text-slate-400 group-hover:text-slate-600",
+                    active ? "text-slate-700" : "text-slate-400 group-hover:text-slate-600",
                 )}
                 strokeWidth={active ? 2 : 1.75}
             />
             <span className="truncate">{item.title}</span>
             {badge != null && badge > 0 && (
-                <span className="ml-auto text-[10.5px] font-medium bg-sky-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1.5">
+                <span className="ml-auto text-[10.5px] font-medium bg-slate-900 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1.5">
                     {badge > 99 ? "99+" : badge}
                 </span>
             )}

@@ -72,7 +72,7 @@ export function AppHeader() {
                 to="/app/emails"
                 className="w-64 px-5 h-full flex items-center gap-2.5 shrink-0 group"
             >
-                <Logo className="w-7 text-sky-600" />
+                <Logo className="w-7 text-slate-400 group-hover:text-slate-700 transition-colors duration-150" />
                 <span
                     style={{ fontFamily: "var(--font-display)" }}
                     className="font-extrabold text-[15.5px] tracking-tight text-slate-900"
