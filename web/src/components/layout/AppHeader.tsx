@@ -66,16 +66,16 @@ export function AppHeader() {
     );
 
     return (
-        <div className="h-12 flex items-center shrink-0">
+        <div className="h-14 flex items-center shrink-0">
             {/* Sidebar-width logo zone — Warmbly wordmark. */}
             <Link
                 to="/app/emails"
-                className="w-64 px-4 h-full flex items-center gap-2.5 shrink-0 group"
+                className="w-64 px-5 h-full flex items-center gap-2.5 shrink-0 group"
             >
-                <Logo className="w-7 text-white" />
+                <Logo className="w-8 text-white drop-shadow-[0_1px_3px_rgba(8,47,73,0.4)]" />
                 <span
                     style={{ fontFamily: "var(--font-display)" }}
-                    className="font-extrabold text-[15px] tracking-tight text-white"
+                    className="font-extrabold text-[16px] tracking-tight text-white"
                 >
                     Warmbly
                 </span>
@@ -88,12 +88,12 @@ export function AppHeader() {
                 </Crumb>
                 {crumbs.map((seg, i) => (
                     <Crumb key={i}>
-                        <ChevronRight className="w-3.5 h-3.5 text-white/30 shrink-0" />
+                        <ChevronRight className="w-4 h-4 text-white/45 shrink-0" />
                         <span
                             className={
                                 i === crumbs.length - 1
-                                    ? "text-[13px] font-medium text-white truncate"
-                                    : "text-[13px] text-white/55 truncate"
+                                    ? "text-[13.5px] font-medium text-white truncate"
+                                    : "text-[13.5px] text-white/65 truncate"
                             }
                         >
                             {pretty(seg)}

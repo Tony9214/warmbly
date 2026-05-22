@@ -36,12 +36,20 @@ export function AppShell() {
                 <div className="flex-1 flex min-h-0">
                     <AppNav />
 
-                    {/* Content panel — white surface tucked into the inner
-                        corner of the L-shape with a generous top-left
-                        radius. The 4px right/bottom inset gives the chrome a
-                        sliver of visible sky at every edge except the corner
-                        seam. */}
-                    <main className="flex-1 min-w-0 mr-1 mb-1 rounded-tl-2xl bg-white overflow-hidden">
+                    {/* Content panel — white work surface "tucked" into the
+                        inner corner of the L-shape. A 14px right/bottom inset
+                        gives the chrome a deliberate window-frame band of
+                        visible sky. The soft shadow + top-edge highlight
+                        make the panel feel suspended rather than glued on.
+                        rounded-tl-3xl (24px) is intentional architecture —
+                        smaller radii read as accidental. */}
+                    <main
+                        className="flex-1 min-w-0 mr-3.5 mb-3.5 rounded-tl-3xl bg-white overflow-hidden relative"
+                        style={{
+                            boxShadow:
+                                "0 -1px 0 0 rgba(255,255,255,0.18) inset, 1px 0 0 0 rgba(255,255,255,0.18) inset, 0 24px 60px -16px rgba(2,32,71,0.55)",
+                        }}
+                    >
                         <div className="h-full overflow-auto">
                             <Outlet />
                         </div>

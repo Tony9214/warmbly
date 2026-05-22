@@ -111,8 +111,8 @@ function NavRow({ item }: { item: NavItem }) {
 function Section({ section }: { section: NavSection }) {
     return (
         <div className="mt-5">
-            <div className="px-5 mb-1">
-                <span className="text-[10px] uppercase tracking-[0.16em] text-white/40 font-medium">
+            <div className="px-5 mb-1.5">
+                <span className="text-[10.5px] uppercase tracking-[0.18em] text-white/50 font-semibold">
                     {section.label}
                 </span>
             </div>
@@ -133,9 +133,9 @@ export function AppNav() {
             <div className="px-3 pt-1 pb-2 shrink-0">
                 <Link
                     to="/app/campaigns"
-                    className="flex items-center justify-center gap-2 h-8 rounded-md bg-white/[0.10] hover:bg-white/[0.15] border border-white/15 text-white text-[12.5px] font-medium transition-colors backdrop-blur"
+                    className="flex items-center justify-center gap-2 h-9 rounded-lg bg-white text-sky-700 hover:bg-white/95 text-[13px] font-semibold transition-colors shadow-[0_1px_2px_rgba(8,47,73,0.25)]"
                 >
-                    <PlusIcon className="w-3.5 h-3.5" />
+                    <PlusIcon className="w-4 h-4" />
                     <span>New Campaign</span>
                 </Link>
             </div>
