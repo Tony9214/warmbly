@@ -216,9 +216,9 @@ export function CheckFilterTime({
         label={label}
     >
         <MiniDate
-            onChange={setValue}
+            onChange={(v) => setValue(v ?? null)}
             placeholder="Null"
-            value={value}
+            value={value ?? undefined}
         />
     </CheckFilter>
 }

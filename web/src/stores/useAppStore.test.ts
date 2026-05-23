@@ -67,7 +67,12 @@ describe('useAppStore', () => {
       const { setUser } = useAppStore.getState()
 
       const mockUser = {
+        id: 'user-1',
+        first_name: 'Test',
+        last_name: 'User',
         email: 'test@example.com',
+        referral_source: '',
+        onboarding_completed_at: null,
         tags: [],
         categories: [],
         folders: [],
@@ -85,7 +90,12 @@ describe('useAppStore', () => {
       const { setUser, logout } = useAppStore.getState()
 
       setUser({
+        id: 'user-2',
+        first_name: 'Test',
+        last_name: 'User',
         email: 'test@example.com',
+        referral_source: '',
+        onboarding_completed_at: null,
         tags: [],
         categories: [],
         folders: [],

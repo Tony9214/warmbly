@@ -52,13 +52,15 @@ export function TurnstileModal({ visible, onToken }: Props) {
 
     if (bypassToken) return null;
 
-    return (
-        <Turnstile
-            ref={turnstileRef as React.RefObject<never>}
-            sitekey={import.meta.env.VITE_TURNSTILE_KEY!}
-            onVerify={handleVerify}
-            onExpire={() => { tokenRef.current = ""; turnstileRef.current?.reset(); }}
-            size="invisible"
-        />
-    );
+    // The Turnstile component's typings don't surface `ref` publicly,
+    // but the underlying widget does support it. Cast the props bag
+    // to allow it without disabling TS for the whole call.
+    const turnstileProps = {
+        ref: turnstileRef,
+        sitekey: import.meta.env.VITE_TURNSTILE_KEY!,
+        onVerify: handleVerify,
+        onExpire: () => { tokenRef.current = ""; turnstileRef.current?.reset(); },
+        size: "invisible" as const,
+    };
+    return <Turnstile {...(turnstileProps as unknown as React.ComponentProps<typeof Turnstile>)} />;
 }

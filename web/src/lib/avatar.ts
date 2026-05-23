@@ -72,7 +72,12 @@ export async function resizeAvatar(file: File): Promise<ResizedAvatar> {
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(bitmap, dx, dy, drawW, drawH);
 
-    bitmap.close?.();
+    // ImageBitmap exposes close(); HTMLImageElement doesn't. Narrow
+    // via the instanceof check rather than optional chaining so TS's
+    // erased-narrow stays valid under strict.
+    if (typeof ImageBitmap !== "undefined" && bitmap instanceof ImageBitmap) {
+        bitmap.close();
+    }
 
     const blob = await new Promise<Blob | null>((resolve) =>
         canvas.toBlob(resolve, "image/jpeg", 0.85),

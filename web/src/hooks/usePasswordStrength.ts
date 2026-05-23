@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 
 interface ZxcvbnResult {
     score: 0 | 1 | 2 | 3 | 4;
-    feedback: { warning: string; suggestions: string[] };
+    feedback: { warning: string | null; suggestions: string[] };
 }
 
 interface StrengthResult {
@@ -13,8 +13,13 @@ interface StrengthResult {
 
 const empty: StrengthResult = { score: 0, warning: "", suggestions: [] };
 
+// zxcvbn's actual signature includes optional userInputs; we widen
+// the ref to `unknown` and narrow at call site so TS doesn't complain
+// about the upstream optional parameter.
+type ZxcvbnFn = (pw: string, userInputs?: (string | number)[]) => ZxcvbnResult;
+
 export function usePasswordStrength() {
-    const zxcvbnRef = useRef<((pw: string) => ZxcvbnResult) | null>(null);
+    const zxcvbnRef = useRef<ZxcvbnFn | null>(null);
     const [loading, setLoading] = useState(false);
 
     const evaluate = useCallback(async (password: string): Promise<StrengthResult> => {
@@ -35,14 +40,16 @@ export function usePasswordStrength() {
                     ...en.dictionary,
                 },
             });
-            zxcvbnRef.current = zxcvbn;
+            zxcvbnRef.current = zxcvbn as ZxcvbnFn;
             setLoading(false);
         }
 
-        const result = zxcvbnRef.current(password);
+        const fn = zxcvbnRef.current;
+        if (!fn) return empty;
+        const result = fn(password);
         return {
             score: result.score,
-            warning: result.feedback.warning,
+            warning: result.feedback.warning ?? "",
             suggestions: result.feedback.suggestions,
         };
     }, []);

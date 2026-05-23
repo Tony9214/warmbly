@@ -4,6 +4,8 @@ export interface Organization {
   id: string
   name: string
   avatar?: string
+  avatar_url?: string | null
+  plan?: string
   role: 'owner' | 'admin' | 'member'
 }
 

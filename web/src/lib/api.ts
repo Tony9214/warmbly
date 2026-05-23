@@ -70,8 +70,12 @@ export const refreshToken = async () => {
 
 export class UnauthorizedError extends Error { }
 export class APIError<T = unknown> extends Error {
-  constructor(message: string, public status: number, public body?: T) {
+  status: number;
+  body?: T;
+  constructor(message: string, status: number, body?: T) {
     super(message);
+    this.status = status;
+    this.body = body;
   }
 }
 

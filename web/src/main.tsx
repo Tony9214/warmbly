@@ -51,8 +51,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import Home from './app/page';
 import AuthLayout from './app/auth/layout';
-import RegisterLayout from './app/auth/register/layout';
-import RegisterPage from './app/auth/register/page';
 import RegisterConfirmPage from './app/auth/register/confirm/page';
 import LoginLayout from './app/auth/login/layout';
 import LoginPage from './app/auth/login/page';

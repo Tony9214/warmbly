@@ -1,3 +1,5 @@
+import type Sequence from "./sequences/Sequence";
+
 export default interface Campaign {
     id: string;
 
