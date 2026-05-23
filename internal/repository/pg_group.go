@@ -21,6 +21,7 @@ type GroupRepository interface {
 	Delete(ctx context.Context, userID, id uuid.UUID) *errx.Error
 	Move(ctx context.Context, userID, id uuid.UUID, position int32) ([]models.Order, *errx.Error)
 	Update(ctx context.Context, userID, id uuid.UUID, data *models.GroupUpdate) (*models.Group, *errx.Error)
+	List(ctx context.Context, userID uuid.UUID) ([]models.Group, *errx.Error)
 }
 
 type groupRepository struct {
@@ -362,4 +363,42 @@ func (r *groupRepository) Update(ctx context.Context, userID, id uuid.UUID, data
 	}
 
 	return &t, nil
+}
+
+// List returns every group of the repository's type belonging to userID,
+// ordered by position. The /auth/me handler calls this once per group
+// type (folders, tags, categories) to populate the User payload so the
+// frontend doesn't have to issue three extra requests on every page
+// load — and so created items still appear after a refresh.
+func (r *groupRepository) List(ctx context.Context, userID uuid.UUID) ([]models.Group, *errx.Error) {
+	query := fmt.Sprintf(
+		`SELECT id, title, color, position, created_at, updated_at
+		   FROM %s
+		  WHERE user_id = $1
+		  ORDER BY position ASC, created_at ASC`,
+		r.Group,
+	)
+
+	rows, err := r.DB.Query(ctx, query, userID)
+	if err != nil {
+		db.CaptureError(err, query, []any{userID}, "query")
+		return nil, errx.InternalError()
+	}
+	defer rows.Close()
+
+	// Non-nil so JSON marshals as [] not null when the user has none.
+	out := make([]models.Group, 0)
+	for rows.Next() {
+		var g models.Group
+		if err := rows.Scan(&g.ID, &g.Title, &g.Color, &g.Position, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			db.CaptureError(err, query, nil, "scan")
+			return nil, errx.InternalError()
+		}
+		out = append(out, g)
+	}
+	if err := rows.Err(); err != nil {
+		db.CaptureError(err, query, nil, "rows")
+		return nil, errx.InternalError()
+	}
+	return out, nil
 }

@@ -139,10 +139,28 @@ func (h *Handler) GetUser(c *gin.Context) {
 		return
 	}
 
-	u, xerr := h.UserService.GetUser(c.Request.Context(), uid)
+	ctx := c.Request.Context()
+
+	u, xerr := h.UserService.GetUser(ctx, uid)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return
+	}
+
+	// Populate the per-user label groups so the frontend can render
+	// folder/tag pickers on initial page load without three extra
+	// round-trips. Without this, anything the user created in a
+	// previous session would disappear after a refresh: the cache
+	// would optimistic-update from a Create response, but on reload
+	// the /auth/me payload had empty folders/tags/categories.
+	if folders, ferr := h.FolderService.List(ctx, uid); ferr == nil {
+		u.Folders = folders
+	}
+	if tags, terr := h.TagService.List(ctx, uid); terr == nil {
+		u.Tags = tags
+	}
+	if cats, cerr := h.CategoryService.List(ctx, uid); cerr == nil {
+		u.Categories = cats
 	}
 
 	c.JSON(http.StatusOK, u)
