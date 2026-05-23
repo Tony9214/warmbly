@@ -1,19 +1,25 @@
-// Org picker — sits in the top breadcrumb, styled for the sky chrome.
-// Reads as a button that says "current org" and opens a dropdown to
-// switch or create. The trigger is intentionally compact (no plan
-// subtitle, no chevron-up-down) because it lives in a one-line
-// breadcrumb, not a sidebar card.
+// Org picker — moved off the shadcn DropdownMenu onto the same
+// PopoverMenu primitive every other dropdown in the dashboard uses
+// (folders, sort, accounts, schedule, sort). One animation, one
+// surface, one set of styles.
+//
+// Sits in the sidebar header above the nav. Trigger is a slim h-7
+// row: 18px slate-900 monogram tile, current org name, chevron.
+// Hover greys the row; the active org in the popover gets a single
+// faint slate-100 background — no big check mark, no avatar inside
+// each row.
 
-import { ChevronDownIcon, PlusIcon } from "lucide-react";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { useNavigate } from "react-router-dom";
+import { ChevronDownIcon, PlusIcon, Settings2Icon } from "lucide-react";
 import { useAppStore } from "@/stores";
+import {
+    PopoverMenu,
+    PopoverMenuContent,
+    PopoverMenuItem,
+    PopoverMenuLabel,
+    PopoverMenuSeparator,
+    PopoverMenuTrigger,
+} from "@/components/ui/popover-menu";
 
 function initials(name: string): string {
     return name
@@ -26,51 +32,63 @@ function initials(name: string): string {
 }
 
 export function OrgSwitcher() {
+    const navigate = useNavigate();
     const organizations = useAppStore((s) => s.organizations);
     const currentOrganization = useAppStore((s) => s.currentOrganization);
     const switchOrganization = useAppStore((s) => s.switchOrganization);
 
-    const name = currentOrganization?.name ?? "Warmbly";
+    const name = currentOrganization?.name ?? "Workspace";
 
     return (
-        <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 px-2 h-7 rounded-md hover:bg-slate-200/60 transition-colors group cursor-pointer max-w-[14rem]">
-                    <span className="w-[18px] h-[18px] rounded bg-sky-600 flex items-center justify-center shrink-0">
-                        <span className="text-[9px] font-bold text-white leading-none">
+        <PopoverMenu align="start">
+            <PopoverMenuTrigger asChild>
+                <button
+                    type="button"
+                    className="group w-full flex items-center gap-2 px-1.5 h-7 rounded-md hover:bg-slate-200/60 transition-colors text-left"
+                >
+                    <span className="size-[18px] rounded bg-slate-900 flex items-center justify-center shrink-0">
+                        <span className="text-[9px] font-bold text-white leading-none tracking-tight">
                             {initials(name)}
                         </span>
                     </span>
-                    <span className="text-[13px] font-medium text-slate-900 truncate">
+                    <span className="text-[12.5px] font-medium text-slate-900 truncate flex-1 min-w-0">
                         {name}
                     </span>
-                    <ChevronDownIcon className="w-3 h-3 text-slate-400 shrink-0" />
+                    <ChevronDownIcon className="w-3 h-3 text-slate-400 shrink-0 group-hover:text-slate-700 transition-colors" />
                 </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="min-w-56" align="start" sideOffset={6}>
-                <DropdownMenuLabel className="text-xs text-zinc-400 font-normal">
-                    Organizations
-                </DropdownMenuLabel>
-                {organizations.map((org) => (
-                    <DropdownMenuItem
-                        key={org.id}
-                        onClick={() => switchOrganization(org.id)}
-                        className={org.id === currentOrganization?.id ? "bg-zinc-50" : ""}
-                    >
-                        <div className="w-4 h-4 rounded bg-zinc-200 flex items-center justify-center shrink-0">
-                            <span className="text-[8px] font-bold text-zinc-600">
-                                {initials(org.name)}
-                            </span>
-                        </div>
-                        <span className="ml-2 text-sm">{org.name}</span>
-                    </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                    <PlusIcon className="w-4 h-4" />
-                    <span className="ml-2 text-sm">Create Organization</span>
-                </DropdownMenuItem>
-            </DropdownMenuContent>
-        </DropdownMenu>
+            </PopoverMenuTrigger>
+
+            <PopoverMenuContent minWidth={232}>
+                <PopoverMenuLabel>Workspaces</PopoverMenuLabel>
+                {organizations.length === 0 ? (
+                    <div className="px-3 py-2 text-[11.5px] text-slate-400">
+                        No workspaces yet.
+                    </div>
+                ) : (
+                    organizations.map((org) => (
+                        <PopoverMenuItem
+                            key={org.id}
+                            onSelect={() => switchOrganization(org.id)}
+                            selected={org.id === currentOrganization?.id}
+                        >
+                            {org.name}
+                        </PopoverMenuItem>
+                    ))
+                )}
+                <PopoverMenuSeparator />
+                <PopoverMenuItem
+                    onSelect={() => navigate("/select-org?new=1")}
+                    icon={<PlusIcon className="w-3 h-3" />}
+                >
+                    New workspace
+                </PopoverMenuItem>
+                <PopoverMenuItem
+                    onSelect={() => navigate("/select-org")}
+                    icon={<Settings2Icon className="w-3 h-3" />}
+                >
+                    Manage workspaces
+                </PopoverMenuItem>
+            </PopoverMenuContent>
+        </PopoverMenu>
     );
 }
