@@ -86,7 +86,7 @@ export default function InboxDetails({
                             {dataLoad ? <Loading className='h-5' color={twColors.blue[500]} /> : "Save Changes"}
                         </button>
                         <button
-                            onClick={() => { }}
+                            onClick={() => setView("")}
                             className='ripple cursor-pointer text-slate-500 transition bg-gray-200 hover:bg-gray-300 px-8 py-2.5 rounded-md'
                         >
                             Cancel

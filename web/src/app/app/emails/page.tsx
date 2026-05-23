@@ -1,17 +1,25 @@
-import { RiFireLine, RiMoreLine, RiPriceTag3Line, RiSoundModuleLine } from "@remixicon/react";
+import { RiFireLine, RiMoreLine } from "@remixicon/react";
 import React, { useMemo } from "react";
 import useEmails from "@/lib/api/hooks/app/emails/useEmails";
 import { useUserProfile } from "@/hooks/context/user";
 import InboxDetails from "@/components/app/emails/InboxDetails";
-import HeadSelectMenu from "@/components/app/head/HeadSelectMenu";
-import SelectOption from "@/components/app/popup/select/SelectOption";
 import type Tag from "@/lib/api/models/app/Tag";
 import {
     FilterIcon,
     MailIcon,
     PlusIcon,
+    Settings2Icon,
 } from "lucide-react";
-import Search from "@/components/app/Search";
+import { SearchInput } from "@/components/ui/field";
+import {
+    PopoverMenu,
+    PopoverMenuContent,
+    PopoverMenuItem,
+    PopoverMenuLabel,
+    PopoverMenuSeparator,
+    PopoverMenuTrigger,
+    SelectButton,
+} from "@/components/ui/popover-menu";
 import {
     EmptyBlock,
     Page,
@@ -39,7 +47,7 @@ export default function AddressesPage() {
 
     const stag = useMemo(() => {
         if (!p) return DefaultFolder;
-        const f = p.user.folders.find((f) => f.id === tag);
+        const f = p.user.tags.find((t) => t.id === tag);
         if (!f) return DefaultFolder;
         return f;
     }, [tag, p]);
@@ -86,24 +94,46 @@ export default function AddressesPage() {
             </StatStrip>
 
             <SectionBar label="Mailboxes" count={emailsData.emails?.length ?? 0}>
-                <Search value={query} onChange={(v) => setQuery(v)} />
-                <HeadSelectMenu icon={<FilterIcon className="w-3.5 h-3.5" />} title={stag.title}>
-                    {p?.user.folders.map((fo) => (
-                        <SelectOption
-                            key={fo.id}
-                            onClick={async () => (tag !== fo.id ? setTag(fo.id) : setTag(""))}
-                            color={fo.color}
-                            selected={tag === fo.id}
+                <SearchInput
+                    value={query}
+                    onChange={setQuery}
+                    placeholder="Search by email…"
+                    className="w-56"
+                />
+                <PopoverMenu align="end">
+                    <PopoverMenuTrigger asChild>
+                        <SelectButton
+                            icon={<FilterIcon className="w-3.5 h-3.5" />}
+                            label={stag.title}
+                        />
+                    </PopoverMenuTrigger>
+                    <PopoverMenuContent minWidth={200}>
+                        <PopoverMenuLabel>Tags</PopoverMenuLabel>
+                        <PopoverMenuItem
+                            onSelect={() => setTag("")}
+                            selected={!tag}
                         >
-                            <RiPriceTag3Line className="w-3.5 h-3.5" />
-                            <span className="truncate">{fo.title}</span>
-                        </SelectOption>
-                    ))}
-                    <SelectOption onClick={() => p?.setTagsEdit(true)}>
-                        <RiSoundModuleLine className="w-3.5 h-3.5" />
-                        <span className="truncate">Manage tags</span>
-                    </SelectOption>
-                </HeadSelectMenu>
+                            All accounts
+                        </PopoverMenuItem>
+                        {(p?.user.tags ?? []).map((t) => (
+                            <PopoverMenuItem
+                                key={t.id}
+                                onSelect={() => setTag(tag === t.id ? "" : t.id)}
+                                icon={<span className="size-2 rounded-full" style={{ backgroundColor: t.color }} />}
+                                selected={tag === t.id}
+                            >
+                                {t.title}
+                            </PopoverMenuItem>
+                        ))}
+                        <PopoverMenuSeparator />
+                        <PopoverMenuItem
+                            onSelect={() => p?.setTagsEdit(true)}
+                            icon={<Settings2Icon className="w-3 h-3" />}
+                        >
+                            Manage tags
+                        </PopoverMenuItem>
+                    </PopoverMenuContent>
+                </PopoverMenu>
             </SectionBar>
 
             <PageBody>
