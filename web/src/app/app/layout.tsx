@@ -8,6 +8,9 @@ import getToken from "@/lib/helper/getToken";
 import { Navigate } from "react-router-dom";
 import { DataSyncProvider } from "@/hooks/DataSyncProvider";
 import { RealtimeManager } from "@/hooks/RealtimeManager";
+import TagsModal from "@/components/app/modals/TagsModal";
+import FoldersModal from "@/components/app/modals/FoldersModal";
+import AddEmailModal from "@/components/app/modals/AddEmailModal";
 
 export default function RootAppLayout() {
     const token = getToken();
@@ -15,6 +18,10 @@ export default function RootAppLayout() {
         return <Navigate to="/auth/login" replace />;
     }
 
+    // Global modals live inside ConfirmProvider so useConfirm() works
+    // inside their action handlers (delete confirmations etc.). They
+    // need UserProvider too (state lives there: tagsEdit, foldersEdit,
+    // addEmail), so they sit between the two providers.
     return <UserProvider>
         <DataSyncProvider>
             <ConfirmProvider>
@@ -25,6 +32,9 @@ export default function RootAppLayout() {
                         </RealtimeManager>
                     </SocketProvider>
                 </LinkProvider>
+                <TagsModal />
+                <FoldersModal />
+                <AddEmailModal />
             </ConfirmProvider>
         </DataSyncProvider>
     </UserProvider>

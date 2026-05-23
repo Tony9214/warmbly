@@ -3,9 +3,6 @@ import { UserContext } from './context/user';
 import useUser from '@/lib/api/hooks/auth/useUser';
 import { AnimatePresence } from 'framer-motion';
 import LoadingScreen from '@/components/LoadingScreen';
-import TagsModal from '@/components/app/modals/TagsModal';
-import FoldersModal from '@/components/app/modals/FoldersModal';
-import AddEmailModal from '@/components/app/modals/AddEmailModal';
 import useRoles from '@/lib/api/hooks/app/admin/roles/useRoles';
 import useTimezones from '@/lib/api/hooks/app/useTimezones';
 import type { AppError } from '@/lib/api/client/normalizeError';
@@ -79,6 +76,12 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
         );
     }
 
+    // NOTE: TagsModal / FoldersModal / AddEmailModal are NOT rendered
+    // here anymore. They depend on ConfirmContext (via useConfirm),
+    // which lives below this provider in the tree. Mounting them here
+    // put them outside the ConfirmProvider and crashed with
+    // "ConfirmProvider not found" on first interaction. They're now
+    // rendered in app/app/layout.tsx after ConfirmProvider is in scope.
     return (
         <UserContext.Provider value={{
             user: safeUser,
@@ -92,9 +95,6 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
             setAddEmail,
         }}>
             {children}
-            <TagsModal />
-            <FoldersModal />
-            <AddEmailModal />
         </UserContext.Provider>
     );
 };
