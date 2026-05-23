@@ -34,10 +34,13 @@ export function RealtimeManager({ children }: { children: React.ReactNode }) {
     }
   }, [isConnected, reconnectAttempt, setConnectionStatus, setConnectionQuality, setReconnectAttempt])
 
-  // Auto-join user channel
+  // Auto-join user channel. Topic uses the user UUID, not the email —
+  // the realtime channel handler is `def join("user:" <> user_id, ...)`
+  // and compares against `socket.assigns.user_id` which is the JWT
+  // `sub` (UUID). Using email here would refuse the join.
   useEffect(() => {
-    if (isConnected && user?.email) {
-      const topic = `user:${user.email}`
+    if (isConnected && user?.id) {
+      const topic = `user:${user.id}`
       joinChannel(topic)
       addJoinedChannel(topic)
       return () => {
@@ -45,7 +48,7 @@ export function RealtimeManager({ children }: { children: React.ReactNode }) {
         removeJoinedChannel(topic)
       }
     }
-  }, [isConnected, user?.email, joinChannel, leaveChannel, addJoinedChannel, removeJoinedChannel])
+  }, [isConnected, user?.id, joinChannel, leaveChannel, addJoinedChannel, removeJoinedChannel])
 
   // Auto-join/leave org channel on org switch
   useEffect(() => {

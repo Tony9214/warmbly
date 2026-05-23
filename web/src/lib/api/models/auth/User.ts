@@ -3,6 +3,8 @@ import type Category from "../app/Category";
 import type Folder from "../app/Folder";
 
 export default interface User {
+    id: string;
+
     first_name: string;
     last_name: string;
     email: string;
