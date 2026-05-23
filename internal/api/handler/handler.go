@@ -30,6 +30,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/releases"
 	"github.com/warmbly/warmbly/internal/app/worker"
 	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
+	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/notify"
 	"github.com/warmbly/warmbly/internal/repository"
 	"github.com/warmbly/warmbly/internal/tasks"
@@ -98,4 +99,13 @@ type Handler struct {
 
 	// Public websocket URL used by frontend clients
 	WebsocketURI string
+
+	// Object storage for user-uploaded artifacts (avatars, etc.).
+	Storage *storage.Client
+
+	// Direct repositories used by handlers that don't yet have a
+	// service layer (avatars, etc.). Keep narrow and add a service
+	// only when business logic accumulates.
+	UserRepo repository.UserRepository
+	OrgRepo  repository.OrganizationRepository
 }

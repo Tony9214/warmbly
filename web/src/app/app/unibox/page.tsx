@@ -1,7 +1,7 @@
-// Unibox page — three-pane mail browser, locked behind a Pro
-// subscription. When the org isn't on a paid tier we render the
-// real layout behind a frosted "Upgrade to Pro" overlay so the
-// user sees what they'd unlock.
+// Unibox page — three-pane mail browser, locked behind any paid
+// plan (Starter and above). When the org isn't on a paid tier we
+// render the real layout behind a frosted "Upgrade to Starter"
+// overlay so the user sees what they'd unlock.
 
 import { ConversationList } from "@/components/app/unibox/ConversationList";
 import { ThreadView } from "@/components/app/unibox/ThreadView";
@@ -16,10 +16,10 @@ export default function UniboxPage() {
 
     return (
         <LockedSurface
-            locked={!access.loading && !access.hasInbox}
+            locked={!access.hasInbox}
             feature="Unified inbox"
             blurb="Read and reply to every inbound message across every connected mailbox from one place — searchable, filterable, with realtime updates."
-            plan="Pro"
+            minPlan="starter"
             bullets={[
                 "Search by sender, subject, account, date range, and tag",
                 "Three-pane reader with keyboard shortcuts",

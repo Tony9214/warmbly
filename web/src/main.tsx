@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './global.css'
-import { createBrowserRouter, Outlet, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import RootLayout from './app/layout';
 
 import "@fontsource/inter/400.css";
@@ -25,9 +25,16 @@ import DealsPage from './app/app/crm/deals/page';
 import TasksPage from './app/app/crm/tasks/page';
 import TemplatesPage from './app/app/templates/page';
 import APIKeysPage from './app/app/api-keys/page';
-import SettingsPage from './app/app/settings/page';
-import BillingPage from './app/app/billing/page';
-import TeamPage from './app/app/team/page';
+import AuditPage from './app/app/audit/page';
+import SettingsLayout from './app/app/settings/layout';
+import ProfileSettingsPage from './app/app/settings/profile/page';
+import NotificationsSettingsPage from './app/app/settings/notifications/page';
+import SecuritySettingsPage from './app/app/settings/security/page';
+import MembersSettingsPage from './app/app/settings/members/page';
+import WorkspaceSettingsPage from './app/app/settings/workspace/page';
+import DangerSettingsPage from './app/app/settings/danger/page';
+import BillingSettingsPage from './app/app/settings/billing/page';
+import RolesSettingsPage from './app/app/settings/roles/page';
 import UniboxPage from './app/app/unibox/page';
 
 import { Toaster } from '@/components/ui/toaster';
@@ -64,7 +71,36 @@ import AdminWorkerDetailPage from './app/app/admin/workers/[id]/page';
 import AdminCredentialsPage from './app/app/admin/credentials/page';
 import AdminAuditPage from './app/app/admin/audit/page';
 
-const queryClient = new QueryClient();
+// React-Query defaults tuned for a dashboard. The library's
+// out-of-the-box behaviour treats every query as immediately stale
+// and refetches on every mount + window focus, so a 3-query page
+// fired 6+ network calls on every navigation. The new defaults:
+//
+//   - staleTime: 30s  — most lists are fine for half a minute. The
+//     few that need to be real-time (subscription, audit) override.
+//   - gcTime: 5min    — keep responses in cache through normal
+//     navigation so the back button is instant.
+//   - refetchOnWindowFocus: false — annoying behaviour in a tool you
+//     actually focus often. Realtime updates flow through the
+//     websocket layer instead.
+//   - refetchOnReconnect: 'always' — when the network drops and
+//     comes back, do refresh once.
+//   - retry: 1 — react-query's default of 3 turns a 500ms backend
+//     hiccup into ~5s of stacked retries on the user.
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            staleTime: 30_000,
+            gcTime: 5 * 60_000,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: "always",
+            retry: 1,
+        },
+        mutations: {
+            retry: 0,
+        },
+    },
+});
 
 const router = createBrowserRouter([
   {
@@ -214,20 +250,36 @@ const router = createBrowserRouter([
             element: <APIKeysPage />,
           },
           {
-            path: "settings",
-            element: <SettingsPage />,
+            path: "audit",
+            element: <AuditPage />,
           },
           {
+            path: "settings",
+            element: <SettingsLayout />,
+            children: [
+              { path: "profile", element: <ProfileSettingsPage /> },
+              { path: "notifications", element: <NotificationsSettingsPage /> },
+              { path: "security", element: <SecuritySettingsPage /> },
+              { path: "members", element: <MembersSettingsPage /> },
+              { path: "workspace", element: <WorkspaceSettingsPage /> },
+              { path: "billing", element: <BillingSettingsPage /> },
+              { path: "roles", element: <RolesSettingsPage /> },
+              { path: "danger", element: <DangerSettingsPage /> },
+            ],
+          },
+          {
+            // Legacy /app/billing entry points → redirect to settings.
             path: "billing",
-            element: <BillingPage />,
+            element: <Navigate to="/app/settings/billing" replace />,
           },
           {
             path: "unibox",
             element: <UniboxPage />,
           },
           {
+            // Legacy /app/team entry points → the Members settings section.
             path: "team",
-            element: <TeamPage />,
+            element: <Navigate to="/app/settings/members" replace />,
           },
           {
             path: "admin",

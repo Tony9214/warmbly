@@ -42,6 +42,73 @@ func NewContactRepostory(db *db.DB) ContactRepository {
 }
 
 func (r *contactRepository) Add(ctx context.Context, userID string, contacts []models.AddContact) ([]models.Contact, *errx.Error) {
+	// Validate userID up front. The handler should have caught a
+	// malformed JWT subject, but a defensive check here keeps any
+	// invalid value from blowing up pgx as "InternalError 500".
+	if _, perr := uuid.Parse(userID); perr != nil {
+		return nil, errx.ErrUuid
+	}
+
+	// Normalize + validate every contact before opening a transaction.
+	// Catching bad input here lets us return 400 instead of letting
+	// pgx fail mid-batch (which used to surface as a generic 500).
+	normalized := make([]models.AddContact, 0, len(contacts))
+	campaignIDs := make([][]uuid.UUID, 0, len(contacts))
+	for _, lead := range contacts {
+		lead.Email = strings.TrimSpace(lead.Email)
+		if !email.IsValid(lead.Email) {
+			return nil, errx.ErrEmail
+		}
+		lead.FirstName = strings.TrimSpace(lead.FirstName)
+		lead.LastName = strings.TrimSpace(lead.LastName)
+		lead.Company = strings.TrimSpace(lead.Company)
+		lead.Phone = strings.TrimSpace(lead.Phone)
+
+		// JSONB column is NOT NULL; encoding a nil map sends NULL.
+		// Replace nil with an empty map so the INSERT can't violate
+		// the constraint.
+		if lead.CustomFields == nil {
+			lead.CustomFields = map[string]string{}
+		}
+		for key := range lead.CustomFields {
+			if !utils.IsValidJSONKey(key) {
+				return nil, errx.ErrJSONKey
+			}
+		}
+
+		// Approximate size check using JSON payload.
+		data, jerr := json.Marshal(lead)
+		if jerr != nil {
+			return nil, errx.ErrContactSerialize
+		}
+		if len(data) > config.MaxContactSize {
+			return nil, errx.ErrContactSize
+		}
+
+		// Parse + dedupe campaign IDs. Skip blanks. Invalid UUIDs are
+		// a user error → 400, not a server crash.
+		cidSet := make(map[uuid.UUID]struct{}, len(lead.Campaigns))
+		cids := make([]uuid.UUID, 0, len(lead.Campaigns))
+		for _, raw := range lead.Campaigns {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
+			cid, cerr := uuid.Parse(raw)
+			if cerr != nil {
+				return nil, errx.ErrUuid
+			}
+			if _, dup := cidSet[cid]; dup {
+				continue
+			}
+			cidSet[cid] = struct{}{}
+			cids = append(cids, cid)
+		}
+
+		normalized = append(normalized, lead)
+		campaignIDs = append(campaignIDs, cids)
+	}
+
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		db.CaptureError(err, "", nil, "begin")
@@ -49,36 +116,16 @@ func (r *contactRepository) Add(ctx context.Context, userID string, contacts []m
 	}
 	defer tx.Rollback(ctx)
 
-	var ncontacts []models.Contact = make([]models.Contact, len(contacts))
-
-	b := pgx.Batch{}
-
-	for _, lead := range contacts {
-		if !email.IsValid(lead.Email) {
-			return nil, errx.ErrEmail
-		}
-
-		data, err := json.Marshal(lead)
-		if err != nil {
-			return nil, errx.ErrContactSerialize
-		}
-		if len(data) > config.MaxContactSize {
-			return nil, errx.ErrContactSize
-		}
-
-		for key := range lead.CustomFields {
-			if !utils.IsValidJSONKey(key) {
-				return nil, errx.ErrJSONKey
-			}
-		}
-
-		b.Queue(
+	// Upsert contacts in a single batch round-trip.
+	insertBatch := pgx.Batch{}
+	for _, lead := range normalized {
+		insertBatch.Queue(
 			`INSERT INTO contacts (
 			 id, user_id, first_name, last_name, email, company, phone, custom_fields
 			 ) VALUES (
 			  gen_random_uuid(), $1, $2, $3, LOWER($4), $5, $6, $7
 			 )
-			 ON CONFLICT (user_id, LOWER(email)) DO UPDATE SET
+			 ON CONFLICT (user_id, (LOWER(email))) DO UPDATE SET
 			  first_name = EXCLUDED.first_name,
 			  last_name = EXCLUDED.last_name,
 			  company = EXCLUDED.company,
@@ -90,81 +137,80 @@ func (r *contactRepository) Add(ctx context.Context, userID string, contacts []m
 		)
 	}
 
-	br := tx.SendBatch(ctx, &b)
-	defer br.Close()
+	br := tx.SendBatch(ctx, &insertBatch)
 
-	bc := pgx.Batch{}
-
-	for _, lead := range contacts {
-		var ncon models.Contact = models.Contact{
-			Campaigns:  make([]models.MiniCampaign, 0),
+	ncontacts := make([]models.Contact, 0, len(normalized))
+	for range normalized {
+		ncon := models.Contact{
+			Campaigns:  []models.MiniCampaign{},
 			Subscribed: true,
 		}
-		err := br.QueryRow().Scan(&ncon.ID, &ncon.FirstName, &ncon.LastName, &ncon.Email, &ncon.Company, &ncon.Phone, &ncon.CustomFields, &ncon.Subscribed, &ncon.UpdatedAt, &ncon.CreatedAt)
-		if err != nil {
+		if err := br.QueryRow().Scan(
+			&ncon.ID, &ncon.FirstName, &ncon.LastName, &ncon.Email, &ncon.Company,
+			&ncon.Phone, &ncon.CustomFields, &ncon.Subscribed, &ncon.UpdatedAt, &ncon.CreatedAt,
+		); err != nil {
 			br.Close()
 			db.CaptureError(err, "", nil, "batch queryrow")
 			return nil, errx.InternalError()
 		}
-
-		if len(lead.Campaigns) > 0 {
-			const stmt = `
-			INSERT INTO campaign_leads (contact_id, campaign_id)
-			SELECT $1, campaigns.id
-			FROM   campaigns
-			WHERE  campaigns.id = ANY($2)
-			AND  campaigns.user_id = $3
-			ON CONFLICT (campaign_id, contact_id) DO NOTHING
-			RETURNING campaigns.id, campaigns.name`
-
-			bc.Queue(
-				stmt,
-				ncon.ID,
-				lead.Campaigns,
-				userID,
-			)
+		// Defensive: backend code occasionally returns nil custom_fields
+		// from older rows. Normalize for the JSON response.
+		if ncon.CustomFields == nil {
+			ncon.CustomFields = map[string]string{}
 		}
 		ncontacts = append(ncontacts, ncon)
 	}
+	if err := br.Close(); err != nil {
+		db.CaptureError(err, "", nil, "batch close")
+		return nil, errx.InternalError()
+	}
 
-	br.Close()
-
-	brc := tx.SendBatch(ctx, &bc)
-
-	for i := range ncontacts {
-		if len(ncontacts[i].Campaigns) == 0 {
+	// Link campaigns. Original code's RETURNING clause referenced a
+	// non-inserted table, which is invalid SQL; resolve by inserting
+	// first, then SELECTing the name back from `campaigns` in a
+	// separate statement. Scoped to the user's own campaigns.
+	for i, cids := range campaignIDs {
+		if len(cids) == 0 {
 			continue
 		}
-		rows, err := brc.Query()
-		if err != nil {
-			brc.Close()
-			db.CaptureError(err, "", nil, "batch query")
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO campaign_leads (contact_id, campaign_id)
+			SELECT $1, c.id
+			FROM   campaigns c
+			WHERE  c.id = ANY($2) AND c.user_id = $3
+			ON CONFLICT (campaign_id, contact_id) DO NOTHING
+		`, ncontacts[i].ID, cids, userID); err != nil {
+			db.CaptureError(err, "", nil, "campaign_leads insert")
 			return nil, errx.InternalError()
 		}
-		var idx int
+
+		rows, err := tx.Query(ctx, `
+			SELECT c.id, c.name
+			FROM   campaigns c
+			JOIN   campaign_leads cl ON cl.campaign_id = c.id
+			WHERE  cl.contact_id = $1 AND c.user_id = $2
+		`, ncontacts[i].ID, userID)
+		if err != nil {
+			db.CaptureError(err, "", nil, "campaign_leads select")
+			return nil, errx.InternalError()
+		}
+		linked := make([]models.MiniCampaign, 0)
 		for rows.Next() {
-			var id, name string
-			err := rows.Scan(&id, &name)
-			if err != nil {
+			var mc models.MiniCampaign
+			if err := rows.Scan(&mc.ID, &mc.Name); err != nil {
 				rows.Close()
-				db.CaptureError(err, "", nil, "batch scan")
+				db.CaptureError(err, "", nil, "campaign scan")
 				return nil, errx.InternalError()
 			}
-			ncontacts[i].Campaigns[idx] = models.MiniCampaign{
-				ID:   id,
-				Name: name,
-			}
-			idx++
+			linked = append(linked, mc)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
-			brc.Close()
-			db.CaptureError(err, "", nil, "rows")
+			db.CaptureError(err, "", nil, "campaign rows")
 			return nil, errx.InternalError()
 		}
+		ncontacts[i].Campaigns = linked
 	}
-
-	brc.Close()
 
 	if err := tx.Commit(ctx); err != nil {
 		db.CaptureError(err, "", nil, "commit")

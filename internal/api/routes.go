@@ -82,6 +82,8 @@ func Run(
 		protectedAuth.POST("/logout-all", h.LogoutAll)
 		protectedAuth.GET("/me", h.GetUser)
 		protectedAuth.PATCH("/me/onboarding", h.CompleteOnboarding)
+		protectedAuth.POST("/me/avatar", h.UploadUserAvatar)
+		protectedAuth.DELETE("/me/avatar", h.DeleteUserAvatar)
 	}
 
 	protected := r.Group("")
@@ -267,6 +269,10 @@ func Run(
 
 			// Ownership transfer
 			org.POST("/transfer-ownership", m.RequireOrganization(), m.RequirePermission(models.PermTransferOwnership), h.TransferOwnership)
+
+			// Workspace avatar (owner-only — checked inside the handler).
+			org.POST("/avatar", m.RequireOrganization(), h.UploadOrganizationAvatar)
+			org.DELETE("/avatar", m.RequireOrganization(), h.DeleteOrganizationAvatar)
 		}
 
 		// User's pending invitations

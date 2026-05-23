@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import listCRMTasks from "@/lib/api/client/app/crm/tasks/listCRMTasks";
+import listCRMTasks, { type ListCRMTasksParams } from "@/lib/api/client/app/crm/tasks/listCRMTasks";
 
-export default function useCRMTasks() {
+export default function useCRMTasks(params: ListCRMTasksParams = {}) {
     return useQuery({
-        queryKey: ["crm", "tasks", "list"],
-        queryFn: () => listCRMTasks(),
-    })
+        queryKey: ["crm", "tasks", "list", params],
+        queryFn: () => listCRMTasks(params),
+        staleTime: 30_000,
+    });
 }

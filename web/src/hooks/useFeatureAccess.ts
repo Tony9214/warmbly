@@ -1,62 +1,83 @@
 // useFeatureAccess — single source of truth for "can this org do X".
 //
-// Reads from the subscription hook and returns boolean gates that
-// the page surfaces consult. Centralizing this means a future plan
-// change only touches this file; pages stay declarative.
+// Plan ladder lifted from warmbly-web/src/pages/pricing.astro:
 //
-//   const access = useFeatureAccess();
-//   if (!access.hasInbox) return <LockedSurface feature="Inbox" ... />;
+//   free       → no active subscription
+//   starter    → $29/mo, 150 sends/day
+//   grow       → $89/mo, 3k sends/day
+//   business   → $329/mo, 15k sends/day + dedicated IPs   (featured)
+//   enterprise → custom, 15k+ sends/day + dedicated IPs
+//
+// Gates here decide which dashboard features show up in the sidebar
+// + which surfaces render the LockedSurface overlay. The minimum
+// unlock plan should always match what we promise on the pricing
+// page.
 
 import useSubscription from "@/lib/api/hooks/app/subscription/useSubscription";
 import { useAppStore } from "@/stores";
+import {
+    getPlan,
+    isAtLeast,
+    type PlanID,
+} from "@/lib/plans";
 
-export type Plan = "free" | "pro" | "premium" | "enterprise" | string;
+export type Plan = PlanID;
 
 export interface FeatureAccess {
     loading: boolean;
-    /** Underlying subscription status — undefined while loading. */
     status?: "active" | "canceled" | "past_due" | "trialing" | "incomplete";
-    plan: Plan;
-    /** True when the user can be expected to have paid features. */
+    plan: PlanID;
+    /** Active subscription on any paid tier. */
     paid: boolean;
-    /** Inbox / unified mailbox — paid-only per product policy. */
+    /** Unified inbox — Starter+. */
     hasInbox: boolean;
-    /** Advanced outreach (AB tests, advanced sequences). */
+    /** Advanced outreach (AB tests, custom rules) — Business+. */
     hasAdvanced: boolean;
-    /** Realtime websocket events. */
+    /** Dedicated IP pool — Business+. */
+    hasDedicatedIps: boolean;
+    /** Realtime websocket events — every tier, baseline. */
     hasRealtime: boolean;
-    /** Bulk operations on contacts, campaigns. */
+    /** Bulk import/edit on contacts — Starter+. */
     hasBulkOps: boolean;
-    /** Team invitations + multiple seats. */
+    /** Team invitations — Starter+. */
     hasTeam: boolean;
-    /** Custom webhooks. */
+    /** Webhook endpoints — Business+. */
     hasWebhooks: boolean;
-    /** Convenience: whether the viewer is the current org's owner. */
+    /** Convenience: viewer is the current org's owner. */
     isOwner: boolean;
+    /** Owner OR admin. */
+    canManage: boolean;
 }
 
 export default function useFeatureAccess(): FeatureAccess {
     const sub = useSubscription();
     const currentOrg = useAppStore((s) => s.currentOrganization);
 
-    const plan: Plan = (sub.data?.plan_name ?? currentOrg?.plan ?? "free").toLowerCase();
+    const planId = ((sub.data?.plan_name ?? currentOrg?.plan ?? "free").toLowerCase()) as PlanID;
+    const plan = getPlan(planId).id;
     const status = sub.data?.status;
-    const isPaid = status === "active" || status === "trialing";
-    const isPro = isPaid && plan !== "free";
-    const isPremium = isPaid && (plan === "premium" || plan === "enterprise");
-    const isEnterprise = isPaid && plan === "enterprise";
+
+    // Real paid status comes from Stripe via /subscription. While
+    // that's in flight, fall back to the org row's plan field so a
+    // paying customer doesn't see "Locked" for a beat on first load.
+    const subSaysPaid = status === "active" || status === "trialing";
+    const orgImpliesPaid =
+        sub.isPending && !!currentOrg?.plan && currentOrg.plan.toLowerCase() !== "free";
+    const isPaid = subSaysPaid || orgImpliesPaid;
 
     return {
         loading: sub.isPending,
         status,
         plan,
         paid: isPaid,
-        hasInbox: isPro,
-        hasAdvanced: isPremium,
-        hasRealtime: true, // baseline feature
-        hasBulkOps: isPro,
-        hasTeam: isPro,
-        hasWebhooks: isEnterprise,
+        hasInbox: isPaid && isAtLeast(plan, "starter"),
+        hasAdvanced: isPaid && isAtLeast(plan, "business"),
+        hasDedicatedIps: isPaid && isAtLeast(plan, "business"),
+        hasRealtime: true,
+        hasBulkOps: isPaid && isAtLeast(plan, "starter"),
+        hasTeam: isPaid && isAtLeast(plan, "starter"),
+        hasWebhooks: isPaid && isAtLeast(plan, "business"),
         isOwner: currentOrg?.role === "owner",
+        canManage: currentOrg?.role === "owner" || currentOrg?.role === "admin",
     };
 }

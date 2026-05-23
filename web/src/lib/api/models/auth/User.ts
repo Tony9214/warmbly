@@ -8,6 +8,7 @@ export default interface User {
     first_name: string;
     last_name: string;
     email: string;
+    avatar_url?: string | null;
 
     referral_source: string;
     onboarding_completed_at: Date | null;

@@ -22,6 +22,7 @@ type UserRepository interface {
 	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
 	SetFreeTrialUsed(ctx context.Context, userID uuid.UUID) error
 	UpdateOnboarding(ctx context.Context, userID uuid.UUID, firstName, lastName, referralSource string) error
+	UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL *string) error
 }
 
 type userRepository struct {
@@ -96,7 +97,7 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 	var u models.User
 
 	q := fmt.Sprintf(
-		`SELECT u.id, u.email, u.first_name, u.last_name, u.referral_source, u.onboarding_completed_at,
+		`SELECT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.referral_source, u.onboarding_completed_at,
 		   u.max_organizations, u.free_trial_used, u.updated_at, u.created_at,
 		   COALESCE(array_agg(ur.role_id) FILTER (WHERE ur.role_id IS NOT NULL), '{}') AS role_ids
 		  FROM users u
@@ -114,7 +115,7 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 		ctx,
 		q,
 		params...,
-	).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.ReferralSource, &u.OnboardingCompletedAt,
+	).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.AvatarURL, &u.ReferralSource, &u.OnboardingCompletedAt,
 		&u.MaxOrganizations, &u.FreeTrialUsed, &u.UpdatedAt, &u.CreatedAt, &u.Roles)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -143,5 +144,11 @@ func (r *userRepository) SetFreeTrialUsed(ctx context.Context, userID uuid.UUID)
 func (r *userRepository) UpdateOnboarding(ctx context.Context, userID uuid.UUID, firstName, lastName, referralSource string) error {
 	const q = `UPDATE users SET first_name=$2, last_name=$3, referral_source=$4, onboarding_completed_at=NOW(), updated_at=NOW() WHERE id=$1`
 	_, err := r.DB.Exec(ctx, q, userID, firstName, lastName, referralSource)
+	return err
+}
+
+func (r *userRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL *string) error {
+	const q = `UPDATE users SET avatar_url=$2, updated_at=NOW() WHERE id=$1`
+	_, err := r.DB.Exec(ctx, q, userID, avatarURL)
 	return err
 }

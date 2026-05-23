@@ -60,7 +60,7 @@ export function CommandPalette() {
     { icon: FileTextIcon, label: 'Templates', shortcut: 'g l', onSelect: () => navigate('/app/templates') },
     { icon: KeyIcon, label: 'API Keys', shortcut: 'g k', onSelect: () => navigate('/app/api-keys') },
     { icon: SettingsIcon, label: 'Settings', shortcut: 'g s', onSelect: () => navigate('/app/settings') },
-    { icon: CreditCardIcon, label: 'Billing', onSelect: () => navigate('/app/billing') },
+    { icon: CreditCardIcon, label: 'Billing', onSelect: () => navigate('/app/settings/billing') },
   ]
 
   const themeCommands: CommandItem[] = [

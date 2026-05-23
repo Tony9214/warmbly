@@ -125,6 +125,13 @@ func main() {
 	// Pub/Sub for realtime streaming
 	var streamingPublisher *pubsub.StreamingPublisher
 
+	// Surfaced into the handler for avatar uploads and other direct
+	// repository / object-storage needs. Declared up here so they
+	// survive the config block where they're initialized.
+	var s3ForHandler *storage.Client
+	var userRepoForHandler repository.UserRepository
+	var organizationRepoForHandler repository.OrganizationRepository
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -202,6 +209,7 @@ func main() {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
+		s3ForHandler = s3
 
 		primaryDBEndpoint, err := cfg.LoadPrimaryDBEndpoint(ctx)
 		if err != nil {
@@ -361,6 +369,7 @@ func main() {
 		})
 
 		userRepostory := repository.NewUserRepostory(primaryDB, kms)
+		userRepoForHandler = userRepostory
 		authRepostory := repository.NewAuthRepostory(primaryDB)
 		tokenRepostory := repository.NewTokenRepostory(primaryDB)
 		emailRepostory := repository.NewEmailRepostory(primaryDB)
@@ -379,6 +388,7 @@ func main() {
 		planRepository := repository.NewPlanRepository(primaryDB.Pool)
 		workerRepository := repository.NewWorkerRepository(primaryDB.Pool)
 		organizationRepository := repository.NewOrganizationRepository(primaryDB.Pool)
+		organizationRepoForHandler = organizationRepository
 		taskRepository := repository.NewTaskRepository(primaryDB.Pool)
 		apiKeyRepository := repository.NewAPIKeyRepository(primaryDB)
 		crmRepository := repository.NewCRMRepository(primaryDB.Pool)
@@ -606,6 +616,12 @@ func main() {
 		WarmupService: warmupService,
 
 		WebsocketURI: websocketURI,
+
+		// Object storage + direct repository handles for handlers
+		// without a dedicated service layer (avatars, etc.).
+		Storage:  s3ForHandler,
+		UserRepo: userRepoForHandler,
+		OrgRepo:  organizationRepoForHandler,
 	}
 
 	m := &middleware.Handler{

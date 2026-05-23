@@ -15,6 +15,7 @@ import {
     GitBranchIcon,
     InboxIcon,
     KeyIcon,
+    ListChecksIcon,
     type LucideIcon,
     MailIcon,
     MegaphoneIcon,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import { useAppStore } from "@/stores";
+import useFeatureAccess from "@/hooks/useFeatureAccess";
 import { UserNav } from "./UserNav";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +33,22 @@ interface NavItem {
     url: string;
     icon: LucideIcon;
     badgeStoreKey?: "unseenCount";
+    /** Feature gate key — when set, sidebar dims the row and shows a plan badge. */
+    requires?: "inbox" | "advanced";
+    /** Role gate — when set, sidebar hides the row entirely for non-matching roles. */
+    rolesAllowed?: "manage";
 }
+
+// Plan badge shown on locked sidebar rows. Plan names + colors come
+// from lib/plans so the marketing site, header pill and sidebar
+// badge all agree on "what does Starter look like".
+//
+//   inbox    → Starter (any paid tier)
+//   advanced → Business (15k/day + dedicated IPs tier)
+const REQUIRES_TO_BADGE: Record<NonNullable<NavItem["requires"]>, { label: string; classes: string }> = {
+    inbox:    { label: "Starter",  classes: "bg-emerald-50 text-emerald-700 border-emerald-100" },
+    advanced: { label: "Business", classes: "bg-indigo-50 text-indigo-700 border-indigo-100" },
+};
 
 interface NavSection {
     label: string;
@@ -39,7 +56,13 @@ interface NavSection {
 }
 
 const topItems: NavItem[] = [
-    { title: "Inbox", url: "/app/unibox", icon: InboxIcon, badgeStoreKey: "unseenCount" },
+    {
+        title: "Inbox",
+        url: "/app/unibox",
+        icon: InboxIcon,
+        badgeStoreKey: "unseenCount",
+        requires: "inbox",
+    },
 ];
 
 const sections: NavSection[] = [
@@ -65,6 +88,7 @@ const sections: NavSection[] = [
         items: [
             { title: "Templates", url: "/app/templates", icon: FileTextIcon },
             { title: "API Keys", url: "/app/api-keys", icon: KeyIcon },
+            { title: "Audit log", url: "/app/audit", icon: ListChecksIcon, rolesAllowed: "manage" },
         ],
     },
 ];
@@ -72,32 +96,64 @@ const sections: NavSection[] = [
 function NavRow({ item }: { item: NavItem }) {
     const { pathname } = useLocation();
     const unseen = useAppStore((s) => s.unseenCount);
+    const access = useFeatureAccess();
     const active =
         pathname === item.url || pathname.startsWith(item.url + "/");
     const badge = item.badgeStoreKey === "unseenCount" ? unseen : undefined;
 
+    // Role-gated items disappear from the sidebar for users that
+    // can't access them, instead of showing a lock — these are
+    // administrative tools, not premium features to tease.
+    if (item.rolesAllowed === "manage" && !access.canManage) return null;
+
+    // Subscription-gated items stay visible but dim with a lock so
+    // the user knows the feature exists.
+    const locked =
+        (item.requires === "inbox" && !access.hasInbox) ||
+        (item.requires === "advanced" && !access.hasAdvanced);
+
+    const planBadge = locked && item.requires ? REQUIRES_TO_BADGE[item.requires] : null;
+
     return (
         <Link
             to={item.url}
+            title={planBadge ? `${item.title} · ${planBadge.label} plan` : undefined}
             className={cn(
                 "group mx-2 flex items-center gap-2.5 px-2.5 h-7 rounded-md text-[12.5px] transition-colors duration-100",
                 active
                     ? "bg-slate-200/70 text-slate-900 font-medium"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/40",
+                    : locked
+                        ? "text-slate-400 hover:text-slate-700 hover:bg-slate-200/40"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/40",
             )}
         >
             <item.icon
                 className={cn(
                     "w-[14px] h-[14px] shrink-0 transition-colors",
-                    active ? "text-slate-700" : "text-slate-400 group-hover:text-slate-600",
+                    active
+                        ? "text-slate-700"
+                        : locked
+                            ? "text-slate-300 group-hover:text-slate-500"
+                            : "text-slate-400 group-hover:text-slate-600",
                 )}
                 strokeWidth={active ? 2 : 1.6}
             />
-            <span className="truncate">{item.title}</span>
-            {badge != null && badge > 0 && (
-                <span className="ml-auto text-[10px] font-medium bg-slate-900 text-white rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 tabular-nums">
-                    {badge > 99 ? "99+" : badge}
+            <span className="truncate flex-1">{item.title}</span>
+            {planBadge ? (
+                <span
+                    className={cn(
+                        "h-4 px-1.5 rounded text-[9.5px] font-semibold uppercase tracking-[0.06em] border inline-flex items-center",
+                        planBadge.classes,
+                    )}
+                >
+                    {planBadge.label}
                 </span>
+            ) : (
+                badge != null && badge > 0 && (
+                    <span className="text-[10px] font-medium bg-slate-900 text-white rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 tabular-nums">
+                        {badge > 99 ? "99+" : badge}
+                    </span>
+                )
             )}
         </Link>
     );

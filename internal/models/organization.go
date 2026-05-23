@@ -8,12 +8,13 @@ import (
 
 // Organization represents a multi-user organization/workspace
 type Organization struct {
-	ID          uuid.UUID  `json:"id"`
-	Name        string     `json:"name"`
-	Slug        *string    `json:"slug,omitempty"`
-	OwnerUserID uuid.UUID  `json:"owner_user_id"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Slug        *string   `json:"slug,omitempty"`
+	AvatarURL   *string   `json:"avatar_url,omitempty"`
+	OwnerUserID uuid.UUID `json:"owner_user_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 
 	// Joined data
 	Owner *User `json:"owner,omitempty"`

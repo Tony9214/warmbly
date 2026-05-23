@@ -9,13 +9,10 @@
 
 import { useNavigate } from "react-router-dom";
 import {
-    CreditCardIcon,
     LogOutIcon,
     SettingsIcon,
-    UsersIcon,
 } from "lucide-react";
 import { useAppStore } from "@/stores";
-import useFeatureAccess from "@/hooks/useFeatureAccess";
 import {
     PopoverMenu,
     PopoverMenuContent,
@@ -28,7 +25,6 @@ export function UserNav() {
     const navigate = useNavigate();
     const user = useAppStore((s) => s.user);
     const logout = useAppStore((s) => s.logout);
-    const access = useFeatureAccess();
 
     if (!user) return null;
 
@@ -48,10 +44,18 @@ export function UserNav() {
         <PopoverMenu side="top" align="start">
             <PopoverMenuTrigger asChild>
                 <button className="flex items-center gap-2.5 mx-3 my-2 px-1.5 py-1 rounded-md hover:bg-slate-200/40 transition-colors w-[calc(100%-1.5rem)] cursor-pointer">
-                    <div className="w-7 h-7 rounded-full bg-slate-900 flex items-center justify-center shrink-0">
-                        <span className="text-[11px] font-medium text-white leading-none">
-                            {initials}
-                        </span>
+                    <div className="w-7 h-7 rounded-full bg-slate-900 flex items-center justify-center shrink-0 overflow-hidden">
+                        {user.avatar_url ? (
+                            <img
+                                src={user.avatar_url}
+                                alt=""
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            <span className="text-[11px] font-medium text-white leading-none">
+                                {initials}
+                            </span>
+                        )}
                     </div>
                     <div className="flex-1 min-w-0 text-left">
                         <div className="text-[13px] text-slate-900 truncate">
@@ -82,20 +86,6 @@ export function UserNav() {
                     icon={<SettingsIcon className="w-3 h-3" />}
                 >
                     Settings
-                </PopoverMenuItem>
-                {access.isOwner && (
-                    <PopoverMenuItem
-                        onSelect={() => navigate("/app/billing")}
-                        icon={<CreditCardIcon className="w-3 h-3" />}
-                    >
-                        Billing
-                    </PopoverMenuItem>
-                )}
-                <PopoverMenuItem
-                    onSelect={() => navigate("/app/team")}
-                    icon={<UsersIcon className="w-3 h-3" />}
-                >
-                    Team
                 </PopoverMenuItem>
                 <PopoverMenuSeparator />
                 <PopoverMenuItem

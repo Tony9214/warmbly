@@ -50,10 +50,18 @@ export function OrgSwitcher() {
                     type="button"
                     className="group w-full flex items-center gap-2 px-1.5 h-7 rounded-md hover:bg-slate-200/60 transition-colors text-left"
                 >
-                    <span className="size-[18px] rounded bg-slate-900 flex items-center justify-center shrink-0">
-                        <span className="text-[9px] font-bold text-white leading-none tracking-tight">
-                            {initials(name)}
-                        </span>
+                    <span className="size-[18px] rounded bg-slate-900 flex items-center justify-center shrink-0 overflow-hidden">
+                        {currentOrganization?.avatar_url || currentOrganization?.avatar ? (
+                            <img
+                                src={currentOrganization.avatar_url ?? currentOrganization.avatar}
+                                alt=""
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            <span className="text-[9px] font-bold text-white leading-none tracking-tight">
+                                {initials(name)}
+                            </span>
+                        )}
                     </span>
                     <span className="text-[12.5px] font-medium text-slate-900 truncate flex-1 min-w-0">
                         {name}
@@ -69,15 +77,33 @@ export function OrgSwitcher() {
                         No workspaces yet.
                     </div>
                 ) : (
-                    organizations.map((org) => (
-                        <PopoverMenuItem
-                            key={org.id}
-                            onSelect={() => switchOrganization(org.id)}
-                            selected={org.id === currentOrganization?.id}
-                        >
-                            {org.name}
-                        </PopoverMenuItem>
-                    ))
+                    organizations.map((org) => {
+                        const avatar = org.avatar_url ?? org.avatar;
+                        return (
+                            <PopoverMenuItem
+                                key={org.id}
+                                onSelect={() => switchOrganization(org.id)}
+                                selected={org.id === currentOrganization?.id}
+                                icon={
+                                    <span className="size-4 rounded bg-slate-900 flex items-center justify-center shrink-0 overflow-hidden">
+                                        {avatar ? (
+                                            <img
+                                                src={avatar}
+                                                alt=""
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            <span className="text-[8px] font-bold text-white leading-none tracking-tight">
+                                                {initials(org.name)}
+                                            </span>
+                                        )}
+                                    </span>
+                                }
+                            >
+                                {org.name}
+                            </PopoverMenuItem>
+                        );
+                    })
                 )}
                 <PopoverMenuSeparator />
                 <PopoverMenuItem

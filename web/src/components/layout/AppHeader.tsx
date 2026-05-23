@@ -17,6 +17,7 @@ import { Logo } from "@/components/svg";
 import { useAppStore } from "@/stores";
 import { ConnectionIndicator } from "@/components/shared/ConnectionIndicator";
 import { OrgSwitcher } from "./OrgSwitcher";
+import { PlanPill } from "./PlanPill";
 
 // Pretty labels for path segments. Anything missing falls back to the
 // raw segment with its first letter capitalised.
@@ -110,7 +111,9 @@ export function AppHeader() {
                 ))}
             </div>
 
-            <div className="flex items-center gap-1 px-4 shrink-0">
+            <div className="flex items-center gap-2 px-4 shrink-0">
+                <PlanPill />
+                <div className="h-4 w-px bg-slate-200/80" />
                 <ConnectionIndicator />
                 <button
                     onClick={() => setCommandPaletteOpen(true)}

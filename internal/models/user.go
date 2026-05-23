@@ -12,6 +12,7 @@ type User struct {
 	FirstName string      `json:"first_name"`
 	LastName  string      `json:"last_name"`
 	Email     string      `json:"email"`
+	AvatarURL *string     `json:"avatar_url,omitempty"`
 	Roles     []uuid.UUID `json:"roles"`
 
 	ReferralSource      *string    `json:"referral_source"`
