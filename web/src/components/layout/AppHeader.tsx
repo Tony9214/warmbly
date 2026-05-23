@@ -75,7 +75,12 @@ export function AppHeader() {
                 {/* Cool blue-leaning gray at rest; deeper blue-gray on hover.
                     Light enough to read as neutral chrome, but with a clear
                     blue lean so the brand sneaks in. */}
-                <Logo className="w-7 text-[#8aa1c1] group-hover:text-[#4e6285] transition-colors duration-150" />
+                {/* Logo color tuned to read as a real brand mark, not
+                    a washed-out accent. Deep slate (#0f172a) at rest +
+                    slight warm shift on hover. The earlier blue-gray
+                    was too pale and competed with the chrome rather
+                    than anchoring it. */}
+                <Logo className="w-7 text-slate-900 group-hover:text-slate-700 transition-colors duration-150" />
                 <span
                     style={{ fontFamily: "var(--font-display)" }}
                     className="font-extrabold text-[15.5px] tracking-tight text-slate-900"

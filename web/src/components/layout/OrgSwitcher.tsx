@@ -9,9 +9,11 @@
 // faint slate-100 background — no big check mark, no avatar inside
 // each row.
 
+import React from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDownIcon, PlusIcon, Settings2Icon } from "lucide-react";
 import { useAppStore } from "@/stores";
+import { NewWorkspaceDialog } from "@/components/app/organizations/NewWorkspaceDialog";
 import {
     PopoverMenu,
     PopoverMenuContent,
@@ -36,10 +38,12 @@ export function OrgSwitcher() {
     const organizations = useAppStore((s) => s.organizations);
     const currentOrganization = useAppStore((s) => s.currentOrganization);
     const switchOrganization = useAppStore((s) => s.switchOrganization);
+    const [newOpen, setNewOpen] = React.useState(false);
 
     const name = currentOrganization?.name ?? "Workspace";
 
     return (
+        <>
         <PopoverMenu align="start">
             <PopoverMenuTrigger asChild>
                 <button
@@ -77,7 +81,7 @@ export function OrgSwitcher() {
                 )}
                 <PopoverMenuSeparator />
                 <PopoverMenuItem
-                    onSelect={() => navigate("/select-org?new=1")}
+                    onSelect={() => setNewOpen(true)}
                     icon={<PlusIcon className="w-3 h-3" />}
                 >
                     New workspace
@@ -90,5 +94,7 @@ export function OrgSwitcher() {
                 </PopoverMenuItem>
             </PopoverMenuContent>
         </PopoverMenu>
+        <NewWorkspaceDialog open={newOpen} onClose={() => setNewOpen(false)} />
+        </>
     );
 }
