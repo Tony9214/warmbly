@@ -114,12 +114,12 @@ export default function TeamPage() {
                             >
                                 <div className="size-6 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
                                     <span className="text-[9.5px] font-semibold text-slate-600">
-                                        {(m.email ?? m.user_id).slice(0, 2).toUpperCase()}
+                                        {((m.email ?? "") || m.user_id).slice(0, 2).toUpperCase()}
                                     </span>
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <div className="text-[12.5px] text-slate-900 font-medium truncate leading-tight">
-                                        {m.email}
+                                        {m.email ?? `(user ${m.user_id.slice(0, 8)})`}
                                     </div>
                                     <div className="text-[11px] text-slate-400 truncate font-mono leading-tight">
                                         joined {new Date(m.joined_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
