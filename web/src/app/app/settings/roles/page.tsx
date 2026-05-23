@@ -179,7 +179,7 @@ function MatrixTable() {
                     </tr>
                 </thead>
                 <tbody>
-                    {(Object.entries(grouped) as Array<[PermissionDef["category"], PermissionDef[]]>).map(
+                    {(Object.entries(grouped) as [PermissionDef["category"], PermissionDef[]][]).map(
                         ([cat, perms]) => (
                             <React.Fragment key={cat}>
                                 <tr className="bg-slate-50/60">

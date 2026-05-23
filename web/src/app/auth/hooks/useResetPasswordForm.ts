@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import type React from "react";
+import { useState } from "react";
 import useResetPassword from "@/lib/api/hooks/auth/useResetPassword";
 import toast from "react-hot-toast";
 import type { AppError } from "@/lib/api/client/normalizeError";

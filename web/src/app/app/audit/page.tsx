@@ -36,6 +36,7 @@ import useFeatureAccess from "@/hooks/useFeatureAccess";
 import useAuditLogs from "@/lib/api/hooks/app/audit/useAuditLogs";
 import useClickOutside from "@/hooks/useClickOutside";
 import { AnimatePresence, motion } from "framer-motion";
+import type AuditLog from "@/lib/api/models/app/audit/AuditLog";
 import type { AuditAction, AuditEntityType } from "@/lib/api/models/app/audit/AuditLog";
 
 const ACTIONS: AuditAction[] = [
@@ -264,7 +265,7 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
     );
 }
 
-function AuditRow({ log }: { log: import("@/lib/api/models/app/audit/AuditLog").default }) {
+function AuditRow({ log }: { log: AuditLog }) {
     const [open, setOpen] = React.useState(false);
     const hasDetails =
         (log.changes && Object.keys(log.changes).length > 0) ||

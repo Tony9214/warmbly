@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import type React from "react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import useLogin from "@/lib/api/hooks/auth/useLogin";
 import toast from "react-hot-toast";

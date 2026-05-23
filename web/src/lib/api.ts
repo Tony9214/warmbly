@@ -81,7 +81,7 @@ export async function Call(
   endpoint: string,
   method: FetchMethod = 'GET',
   body?: object,
-  nocontent: boolean = false,
+  nocontent = false,
 ) {
   if (isTokenExpired()) {
     await refreshToken();

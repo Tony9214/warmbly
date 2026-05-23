@@ -475,7 +475,7 @@ function ContactsTableBody({
     errorMessage: string;
     onRetry: () => void;
     isRefetching: boolean;
-    contacts: Array<{
+    contacts: {
         id: string;
         first_name: string;
         last_name: string;
@@ -483,9 +483,9 @@ function ContactsTableBody({
         company: string;
         phone: string;
         subscribed: boolean;
-        campaigns: Array<{ id: string }>;
+        campaigns: { id: string }[];
         created_at: Date;
-    }>;
+    }[];
     selected: string[];
     onToggle: (id: string, on: boolean) => void;
     isSelectedAll: boolean;

@@ -26,13 +26,13 @@ function liveness(w: ManagedWorker): { label: string; cls: string } {
     return { label: "offline", cls: "text-red-600" };
 }
 
-type Health = {
+interface Health {
     errored: ManagedWorker[];
     offline: ManagedWorker[];
     staleConfig: ManagedWorker[];
     updateAvailable: ManagedWorker[];
     inProgress: ManagedWorker[];
-};
+}
 
 function computeHealth(workers: ManagedWorker[], profilesById: Map<string, WorkerProfile>): Health {
     const h: Health = { errored: [], offline: [], staleConfig: [], updateAvailable: [], inProgress: [] };

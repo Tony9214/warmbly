@@ -311,7 +311,7 @@ function PipelinePicker({
     currentId,
     onChange,
 }: {
-    pipelines: Array<{ id: string; name: string }>;
+    pipelines: { id: string; name: string }[];
     currentId: string | undefined;
     onChange: (id: string) => void;
 }) {

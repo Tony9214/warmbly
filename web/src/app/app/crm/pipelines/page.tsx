@@ -499,7 +499,7 @@ function NewPipelineDialog({ open, onClose }: { open: boolean; onClose: () => vo
     const create = useCreatePipeline();
     const createStage = useCreateStage();
     const [name, setName] = React.useState("");
-    const [stages, setStages] = React.useState<Array<{ name: string; color: string }>>([
+    const [stages, setStages] = React.useState<{ name: string; color: string }[]>([
         { name: "Open",       color: STAGE_COLORS[0].hex },
         { name: "Qualified",  color: STAGE_COLORS[1].hex },
         { name: "Won",        color: STAGE_COLORS[4].hex },

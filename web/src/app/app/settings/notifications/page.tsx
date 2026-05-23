@@ -1,10 +1,10 @@
 import { Section, SectionShell, ToggleRow } from "../_components/SectionShell";
 
-const GROUPS: Array<{
+const GROUPS: {
     title: string;
     description: string;
-    items: Array<{ label: string; hint: string; defaultOn?: boolean }>;
-}> = [
+    items: { label: string; hint: string; defaultOn?: boolean }[];
+}[] = [
     {
         title: "Inbound activity",
         description: "Get notified when something happens on a campaign you're running.",

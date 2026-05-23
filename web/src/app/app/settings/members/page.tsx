@@ -425,7 +425,7 @@ function InviteFlow({
     onSubmit: (emails: string[], role: string) => Promise<void>;
     pending: boolean;
 }) {
-    const [chips, setChips] = React.useState<Array<{ email: string; valid: boolean }>>([]);
+    const [chips, setChips] = React.useState<{ email: string; valid: boolean }[]>([]);
     const [draft, setDraft] = React.useState("");
     const [role, setRole] = React.useState<string>("manager");
     const SEPARATOR_RE = /[\s,;]+/;

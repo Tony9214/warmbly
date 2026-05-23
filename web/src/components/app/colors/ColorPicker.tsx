@@ -11,15 +11,15 @@ type ClassValue =
   | undefined;
 type ClassArray = ClassValue[];
 
-type hsl = {
+interface hsl {
   h: number;
   s: number;
   l: number;
-};
+}
 
-type hex = {
+interface hex {
   hex: string;
-};
+}
 type Color = hsl & hex;
 
 function hslToHex({ h, s, l }: hsl) {

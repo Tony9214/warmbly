@@ -26,7 +26,7 @@ import type { UniboxSearchParams } from "@/lib/api/models/app/unibox/UniboxSearc
 
 type Quick = "all" | "unread" | "today" | "week";
 
-const QUICKS: Array<{ id: Quick; label: string }> = [
+const QUICKS: { id: Quick; label: string }[] = [
     { id: "all", label: "All" },
     { id: "unread", label: "Unread" },
     { id: "today", label: "Today" },

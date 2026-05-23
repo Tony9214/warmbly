@@ -382,7 +382,7 @@ function Toggle3<T extends string | boolean | undefined>({
 }: {
     value: T;
     onChange: (v: T) => void;
-    options: Array<{ id: T; label: string }>;
+    options: { id: T; label: string }[];
 }) {
     return (
         <div className="inline-flex items-center rounded-md border border-slate-200 bg-white p-0.5">

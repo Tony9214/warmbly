@@ -149,7 +149,7 @@ export function preflightWorker(host: string, port: number): Promise<{ ok: boole
 }
 
 interface AdminUserSearchResult {
-    data: Array<{ id: string; email: string; first_name?: string; last_name?: string }>;
+    data: { id: string; email: string; first_name?: string; last_name?: string }[];
     pagination?: { has_more?: boolean };
 }
 
@@ -197,7 +197,7 @@ export function reassignEmailsToWorker(targetWorkerID: string, emailIDs: string[
 }
 
 // List email account IDs assigned to a worker. Used by the manual rewire flow.
-export function listWorkerEmails(workerID: string, limit = 200): Promise<{ data: Array<{ id: string; email: string }>; pagination: { has_more?: boolean } }> {
+export function listWorkerEmails(workerID: string, limit = 200): Promise<{ data: { id: string; email: string }[]; pagination: { has_more?: boolean } }> {
     return Request({
         method: "GET",
         url: `/admin/workers/${workerID}/emails?limit=${limit}`,

@@ -1,15 +1,15 @@
 import { useCallback, useRef, useState } from "react";
 
-type ZxcvbnResult = {
+interface ZxcvbnResult {
     score: 0 | 1 | 2 | 3 | 4;
     feedback: { warning: string; suggestions: string[] };
-};
+}
 
-type StrengthResult = {
+interface StrengthResult {
     score: 0 | 1 | 2 | 3 | 4;
     warning: string;
     suggestions: string[];
-};
+}
 
 const empty: StrengthResult = { score: 0, warning: "", suggestions: [] };
 

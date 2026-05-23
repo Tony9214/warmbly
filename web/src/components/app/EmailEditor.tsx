@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Editor, EditorContent, mergeAttributes, Node as TNode, useEditor } from '@tiptap/react';
+import type { Editor} from '@tiptap/react';
+import { EditorContent, mergeAttributes, Node as TNode, useEditor } from '@tiptap/react';
 import Text from '@tiptap/extension-text';
 import Document from '@tiptap/extension-document';
 import Bold from '@tiptap/extension-bold';

@@ -48,7 +48,7 @@ interface Props {
     loading?: boolean;
 }
 
-const SORT_OPTIONS: Array<{ id: SearchContactsSortBy; label: string }> = [
+const SORT_OPTIONS: { id: SearchContactsSortBy; label: string }[] = [
     { id: "created_at", label: "Date added" },
     { id: "updated_at", label: "Last updated" },
     { id: "first_name", label: "First name" },
@@ -57,7 +57,7 @@ const SORT_OPTIONS: Array<{ id: SearchContactsSortBy; label: string }> = [
     { id: "campaign_count", label: "Campaigns count" },
 ];
 
-const FILTER_TYPES: Array<{ id: SearchContactsFilterType; label: string }> = [
+const FILTER_TYPES: { id: SearchContactsFilterType; label: string }[] = [
     { id: "contains", label: "Contains" },
     { id: "equal", label: "Equals" },
     { id: "starts_with", label: "Starts with" },
@@ -404,7 +404,7 @@ function Toggle3<T extends boolean | undefined>({
 }: {
     value: T;
     onChange: (v: T) => void;
-    options: Array<{ id: T; label: string }>;
+    options: { id: T; label: string }[];
 }) {
     return (
         <div className="inline-flex items-center rounded-md border border-slate-200 bg-white p-0.5">

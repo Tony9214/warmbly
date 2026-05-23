@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import type React from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import useResetPasswordConfirm from "@/lib/api/hooks/auth/useResetPasswordConfirm";
 import { usePasswordStrength } from "@/hooks/usePasswordStrength";

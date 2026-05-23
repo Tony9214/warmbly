@@ -18,7 +18,7 @@ interface AuthRequestConfig extends AxiosRequestConfig {
 let refreshPromise: Promise<Token> | null = null;
 
 async function ensureValidToken(): Promise<Token> {
-    let token = getToken();
+    const token = getToken();
     if (!token) {
         throw NoToken;
     }

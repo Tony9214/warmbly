@@ -3,7 +3,7 @@ import type Timezone from "@/lib/api/models/app/Timezone";
 import type User from "@/lib/api/models/auth/User";
 import { createContext, useContext } from "react";
 
-type UserC = {
+interface UserC {
     user: User;
     access: Access;
     timezones: Timezone[];

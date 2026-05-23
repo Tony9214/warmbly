@@ -76,10 +76,10 @@ export interface WorkerProfileBody {
 }
 
 export interface ApplyResult {
-    results: Array<{
+    results: {
         worker_id: string;
         ok: boolean;
         error?: string;
         skipped?: string;
-    }>;
+    }[];
 }

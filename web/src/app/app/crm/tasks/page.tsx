@@ -53,7 +53,7 @@ const PRIORITIES: { id: CRMTaskPriority; label: string; dot: string; text: strin
 
 type Bucket = "overdue" | "today" | "tomorrow" | "this_week" | "later" | "no_due";
 
-const BUCKETS: Array<{ id: Bucket; label: string; tone: "red" | "sky" | "slate" | "muted" }> = [
+const BUCKETS: { id: Bucket; label: string; tone: "red" | "sky" | "slate" | "muted" }[] = [
     { id: "overdue",   label: "Overdue",     tone: "red" },
     { id: "today",     label: "Today",       tone: "sky" },
     { id: "tomorrow",  label: "Tomorrow",    tone: "slate" },

@@ -24,7 +24,7 @@ function MiniTitle({ children, nom }: { children: React.ReactNode, nom?: boolean
 
 type UploadMethod = 'csv' | 'manual'
 
-export type AddContact = {
+export interface AddContact {
     first_name: string;
     last_name: string;
     email: string;
@@ -105,9 +105,7 @@ const DEFAULT_CONTACT: ManualContact = {
 
 const main_fields = ["first_name", "last_name", "email", "company", "phone"]
 
-interface ColumnMapping {
-    [column: string]: string;
-}
+type ColumnMapping = Record<string, string>;
 
 interface CustomField {
     name: string;

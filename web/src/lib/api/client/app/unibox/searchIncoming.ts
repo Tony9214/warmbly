@@ -7,7 +7,7 @@ import Request from "../../Request";
 import type { UniboxSearchParams } from "@/lib/api/models/app/unibox/UniboxSearch";
 
 interface UniboxListResponse {
-    data: Array<{
+    data: {
         id: string;
         email_id: string;
         thread_id: string;
@@ -15,7 +15,7 @@ interface UniboxListResponse {
         snippet: string;
         internal_date: string;
         seen: boolean;
-    }>;
+    }[];
     pagination: {
         has_more: boolean;
         next_cursor: string | null;
