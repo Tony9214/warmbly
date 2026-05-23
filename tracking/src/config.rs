@@ -134,6 +134,7 @@ impl Config {
     }
 
     /// Load configuration from AWS only (legacy method for backwards compatibility)
+    #[allow(dead_code)]
     pub async fn from_aws(env: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         info!("Loading configuration from AWS for environment: {}", env);
 
