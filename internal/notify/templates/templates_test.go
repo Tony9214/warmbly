@@ -18,22 +18,15 @@ func TestBaseTemplate_Structure(t *testing.T) {
 	checks := []string{
 		"<!DOCTYPE html>",
 		"<html lang=\"en\">",
-		"Bricolage Grotesque",
-		"DM Serif Display",
-		// Inline SVG logo
+		// Inline SVG logo, dashboard slate fill.
 		"<svg",
 		"M222.805 644.772",
-		// Sky gradient background
-		"radial-gradient",
-		"#38bdf8",
-		"#0c4a6e",
-		// Sun glow
-		"rgba(253,224,71",
-		// Horizon haze
-		"rgba(125,211,252",
-		// White card
-		"rgba(255,255,255,0.96)",
-		"border-radius:20px",
+		"fill=\"#0f172a\"",
+		// Brae chrome: cream wrapper + white card + hairline border.
+		"#f5f6f8",
+		"#ffffff",
+		"#e2e8f0",
+		"border-radius:8px",
 	}
 
 	for _, s := range checks {
@@ -53,8 +46,8 @@ func TestBaseTemplate_BusinessDetails(t *testing.T) {
 		// Branding
 		CompanyName,
 		"warmbly.com",
-		"Privacy Policy",
-		"Terms of Use",
+		"Privacy",
+		"Terms",
 		TermsURL,
 		PrivacyURL,
 		// Companies Act 2006 required details
@@ -89,14 +82,12 @@ func TestGenerateLoginCodeHTML(t *testing.T) {
 		substr string
 	}{
 		{"contains the verification code", code},
-		{"code in monospace styled span", "letter-spacing:8px"},
-		{"code on sky-tinted background", "#e0f2fe"},
-		{"shows verify prompt", "verify your login"},
-		{"Hi greeting", "Hi there,"},
-		{"expiry notice", "expires in 15 minutes"},
-		{"safety notice", "safely ignore this email"},
+		{"code monospace tracking", "letter-spacing:6px"},
+		{"heading", "Your login code"},
+		{"sign-in helper", "finish logging in"},
+		{"expiry notice", "Expires in 15 minutes"},
+		{"safety notice", "safely ignore"},
 		{"title tag", "<title>Your Login Code</title>"},
-		{"serif heading font", "DM Serif Display"},
 	}
 
 	for _, c := range checks {
@@ -137,10 +128,9 @@ func TestGenerateRegistrationCodeHTML(t *testing.T) {
 		substr string
 	}{
 		{"contains the verification code", code},
-		{"code on sky-tinted background", "#e0f2fe"},
-		{"welcome heading", "Welcome to Warmbly!"},
-		{"registration prompt", "complete your registration"},
-		{"expiry notice", "expires in 15 minutes"},
+		{"welcome heading", "Welcome to Warmbly"},
+		{"registration prompt", "finish creating your account"},
+		{"expiry notice", "Expires in 15 minutes"},
 		{"title tag", "<title>Your Verification Code</title>"},
 	}
 
@@ -182,9 +172,8 @@ func TestGenerateResetPasswordHTML(t *testing.T) {
 		substr string
 	}{
 		{"reset URL in button href", url},
-		{"button text", "Reset Password</a>"},
-		{"sky gradient button", "#0ea5e9"},
-		{"reset prompt", "reset your password"},
+		{"button text", "Reset password</a>"},
+		{"reset prompt", "Reset your password"},
 		{"ignore notice", "safely ignore this email"},
 		{"expiry notice", "expires in 4 hours"},
 		{"title tag", "<title>Reset Your Password</title>"},

@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import type SocketProviderProps from "@/lib/socket/models/SocketProviderProps";
 import getSocket from '@/lib/api/client/app/socket/getSocket';
 import type { AppError } from '@/lib/api/client/normalizeError';
+import { useAppStore } from '@/stores';
 import {
     SocketContext,
     type ChannelMessage,
@@ -72,13 +73,21 @@ export default function SocketProvider({
         return true;
     }, []);
 
+    // Heartbeat roundtrip tracking. We record send time keyed by ref,
+    // and when phx_reply with that ref lands we compute the delta and
+    // publish it to the store. LivePanel surfaces it.
+    const pendingPingRef = useRef<Map<string, number>>(new Map());
+    const setWsLatencyMs = useAppStore((s) => s.setWsLatencyMs);
+
     // Send heartbeat
     const sendHeartbeat = useCallback(() => {
+        const ref = getRef();
+        pendingPingRef.current.set(ref, performance.now());
         sendRaw({
             topic: 'phoenix',
             event: PHOENIX_EVENTS.HEARTBEAT,
             payload: {},
-            ref: getRef(),
+            ref,
         });
     }, [sendRaw, getRef]);
 
@@ -109,6 +118,17 @@ export default function SocketProvider({
         }
 
         const { topic, event, payload, ref } = msg;
+
+        // Heartbeat reply → compute roundtrip and publish latency.
+        if (event === PHOENIX_EVENTS.REPLY && topic === 'phoenix' && ref) {
+            const sentAt = pendingPingRef.current.get(ref);
+            if (sentAt != null) {
+                const dt = Math.round(performance.now() - sentAt);
+                pendingPingRef.current.delete(ref);
+                setWsLatencyMs(dt);
+            }
+            return;
+        }
 
         // Handle Phoenix system events
         if (event === PHOENIX_EVENTS.REPLY) {
@@ -181,7 +201,7 @@ export default function SocketProvider({
                 }
             });
         }
-    }, []);
+    }, [setWsLatencyMs]);
 
     // Join channel
     const joinChannel = useCallback((topic: string, params: Record<string, unknown> = {}) => {
@@ -395,6 +415,9 @@ export default function SocketProvider({
             wsRef.current.onclose = (ev) => {
                 setIsConnected(false);
                 stopHeartbeat();
+                // Latency only means anything while connected.
+                setWsLatencyMs(null);
+                pendingPingRef.current.clear();
                 onClose?.(ev);
 
                 // Mark all channels as closed
@@ -432,6 +455,7 @@ export default function SocketProvider({
         startHeartbeat,
         stopHeartbeat,
         rejoinChannels,
+        setWsLatencyMs,
     ]);
 
     // Mount effect

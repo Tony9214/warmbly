@@ -146,6 +146,8 @@ function Section({ section, first = false }: { section: NavSection; first?: bool
 function LivePanel() {
     const emails = useAppStore((s) => s.emails);
     const connection = useAppStore((s) => s.connectionStatus);
+    const latencyMs = useAppStore((s) => s.wsLatencyMs);
+    const unseenCount = useAppStore((s) => s.unseenCount);
 
     const { active, mailboxes, capacity } = useMemo(() => {
         const m = emails.length;
@@ -155,14 +157,25 @@ function LivePanel() {
         return { active: a, mailboxes: m, capacity: m * 50 };
     }, [emails]);
 
-    const live = connection === "connected" && active > 0;
-    const label = connection === "disconnected"
-        ? "OFFLINE"
-        : live
-            ? "LIVE"
+    const live = connection === "connected";
+    const label =
+        connection === "disconnected"
+            ? "OFFLINE"
             : connection === "connecting"
-                ? "SYNCING"
-                : "IDLE";
+                ? "CONNECTING"
+                : active > 0
+                    ? "LIVE"
+                    : "IDLE";
+
+    // Latency bucketing: <100ms great, <300ms okay, ≥300ms poor.
+    const latencyTone =
+        latencyMs == null
+            ? "text-slate-400"
+            : latencyMs < 100
+                ? "text-emerald-600"
+                : latencyMs < 300
+                    ? "text-amber-600"
+                    : "text-red-500";
 
     return (
         <Link
@@ -176,24 +189,31 @@ function LivePanel() {
                             "w-1.5 h-1.5 rounded-full",
                             connection === "disconnected"
                                 ? "bg-slate-400"
-                                : live
-                                    ? "bg-emerald-500"
-                                    : connection === "connecting"
-                                        ? "bg-amber-500"
+                                : connection === "connecting"
+                                    ? "bg-amber-500"
+                                    : active > 0
+                                        ? "bg-emerald-500"
                                         : "bg-slate-400",
                         )}
                     />
-                    {live && (
+                    {live && active > 0 && (
                         <span className="absolute inset-0 rounded-full bg-emerald-500/40 animate-ping" />
                     )}
                 </span>
                 <span className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">
                     {label}
                 </span>
-                <span className="ml-auto font-mono text-[10px] text-slate-400 tabular-nums">
-                    0/{capacity || "—"}
+                <span
+                    className={cn(
+                        "ml-auto font-mono text-[10px] tabular-nums",
+                        latencyTone,
+                    )}
+                    title={latencyMs != null ? `Websocket roundtrip` : "Not connected"}
+                >
+                    {latencyMs != null ? `${latencyMs}ms` : "—"}
                 </span>
             </div>
+
             <div className="mt-1.5 flex items-baseline gap-1.5">
                 <span className="text-[15px] text-slate-900 tabular-nums leading-none">
                     {mailboxes}
@@ -207,6 +227,26 @@ function LivePanel() {
                     </span>
                 )}
             </div>
+
+            <div className="mt-1.5 flex items-center justify-between gap-2 text-[10.5px]">
+                <span className="text-slate-400">Inbox</span>
+                <span
+                    className={cn(
+                        "font-mono tabular-nums",
+                        unseenCount > 0 ? "text-sky-600" : "text-slate-400",
+                    )}
+                >
+                    {unseenCount > 99 ? "99+" : unseenCount} unread
+                </span>
+            </div>
+
+            <div className="mt-1 flex items-center justify-between gap-2 text-[10.5px]">
+                <span className="text-slate-400">Today</span>
+                <span className="font-mono text-slate-400 tabular-nums">
+                    0/{capacity || "—"}
+                </span>
+            </div>
+
             <Sparkline />
         </Link>
     );

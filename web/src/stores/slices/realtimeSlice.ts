@@ -7,6 +7,13 @@ export interface RealtimeSlice {
   reconnectAttempt: number
   connectionQuality: ConnectionQuality
   joinedChannels: string[]
+  /**
+   * Roundtrip latency to the realtime server in milliseconds. null
+   * until the first heartbeat reply lands. Updated on every heartbeat
+   * (~30s) so the LivePanel can surface a real "good / degraded /
+   * poor" health signal instead of guessing from connectionStatus.
+   */
+  wsLatencyMs: number | null
 
   setConnectionStatus: (status: 'connected' | 'connecting' | 'disconnected') => void
   setReconnectAttempt: (attempt: number) => void
@@ -14,6 +21,7 @@ export interface RealtimeSlice {
   addJoinedChannel: (channel: string) => void
   removeJoinedChannel: (channel: string) => void
   setJoinedChannels: (channels: string[]) => void
+  setWsLatencyMs: (ms: number | null) => void
 }
 
 export const createRealtimeSlice: StateCreator<RealtimeSlice, [], [], RealtimeSlice> = (set) => ({
@@ -21,6 +29,8 @@ export const createRealtimeSlice: StateCreator<RealtimeSlice, [], [], RealtimeSl
   reconnectAttempt: 0,
   connectionQuality: 'disconnected',
   joinedChannels: [],
+  wsLatencyMs: null,
+  setWsLatencyMs: (ms) => set({ wsLatencyMs: ms }),
 
   setConnectionStatus: (connectionStatus) =>
     set((state) => (state.connectionStatus === connectionStatus ? state : { connectionStatus })),
