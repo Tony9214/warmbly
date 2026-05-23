@@ -78,8 +78,8 @@ const CAMPAIGN_SELECT_FULL = `
 	c.start_time, c.end_time,
 	c.contact_order_by, c.contact_order_dir, c.contact_order_field,
 	c.updated_at, c.created_at,
-	COALESCE(array_agg(cet.tag_id) FILTER (WHERE cet.tag IS NOT NULL), '{}') AS email_tag_ids,
-	COALESCE(array_agg(cec.folder_id) FILTER (WHERE cec.folder IS NOT NULL), '{}') AS email_folder_ids
+	COALESCE(array_agg(cet.tag_id) FILTER (WHERE cet.tag_id IS NOT NULL), '{}') AS email_tag_ids,
+	COALESCE(array_agg(cec.folder_id) FILTER (WHERE cec.folder_id IS NOT NULL), '{}') AS email_folder_ids
 `
 
 func getCampaignFull(rows db.Scannable, campaign *models.Campaign) error {
