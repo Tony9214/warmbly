@@ -28,6 +28,7 @@ import useClickOutside from "@/hooks/useClickOutside";
 import type MiniCampaign from "@/lib/api/models/app/campaigns/MiniCampaign";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
+import CategoryPicker from "./CategoryPicker";
 
 type FieldType = "ADD" | "EDIT" | "DELETE" | "RENAME";
 const FIELD_TYPES: { id: FieldType; label: string; hint: string }[] = [
@@ -54,6 +55,8 @@ export default function ContactsEditBulk({
 }) {
     const [campaignsAdd, setCampaignsAdd] = React.useState<MiniCampaign[]>([]);
     const [campaignsRemove, setCampaignsRemove] = React.useState<MiniCampaign[]>([]);
+    const [categoriesAdd, setCategoriesAdd] = React.useState<string[]>([]);
+    const [categoriesRemove, setCategoriesRemove] = React.useState<string[]>([]);
     const [fields, setFields] = React.useState<Field[]>([]);
     const [subscribeMode, setSubscribeMode] = React.useState<"unchanged" | "subscribe" | "unsubscribe">("unchanged");
 
@@ -62,12 +65,16 @@ export default function ContactsEditBulk({
     const dirty =
         campaignsAdd.length > 0 ||
         campaignsRemove.length > 0 ||
+        categoriesAdd.length > 0 ||
+        categoriesRemove.length > 0 ||
         fields.length > 0 ||
         subscribeMode !== "unchanged";
 
     function reset() {
         setCampaignsAdd([]);
         setCampaignsRemove([]);
+        setCategoriesAdd([]);
+        setCategoriesRemove([]);
         setFields([]);
         setSubscribeMode("unchanged");
     }
@@ -78,6 +85,8 @@ export default function ContactsEditBulk({
             contacts: selected,
             add_campaigns: campaignsAdd.map((c) => c.id),
             remove_campaigns: campaignsRemove.map((c) => c.id),
+            add_categories: categoriesAdd,
+            remove_categories: categoriesRemove,
             fields,
             subscribe:
                 subscribeMode === "subscribe" ? true : subscribeMode === "unsubscribe" ? false : undefined,
@@ -170,6 +179,30 @@ export default function ContactsEditBulk({
                                             Remove from campaigns
                                         </Label>
                                         <CampaignPicker selected={campaignsRemove} setSelected={setCampaignsRemove} />
+                                    </div>
+                                </div>
+                            </Section>
+
+                            <Section title="Categories" subtitle="Apply or strip categories from every selected contact.">
+                                <div className="grid grid-cols-1 gap-3">
+                                    <div>
+                                        <Label className="flex items-center gap-1 text-emerald-700">
+                                            <PlusCircleIcon className="w-3 h-3" />
+                                            Add categories
+                                        </Label>
+                                        <CategoryPicker value={categoriesAdd} onChange={setCategoriesAdd} />
+                                    </div>
+                                    <div>
+                                        <Label className="flex items-center gap-1 text-red-700">
+                                            <MinusCircleIcon className="w-3 h-3" />
+                                            Remove categories
+                                        </Label>
+                                        <CategoryPicker
+                                            value={categoriesRemove}
+                                            onChange={setCategoriesRemove}
+                                            allowCreate={false}
+                                            placeholder="Pick categories to strip…"
+                                        />
                                     </div>
                                 </div>
                             </Section>

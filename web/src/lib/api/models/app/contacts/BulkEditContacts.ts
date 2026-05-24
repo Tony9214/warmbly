@@ -5,6 +5,8 @@ export default interface BulkEditContacts {
 
     add_campaigns: string[];
     remove_campaigns: string[];
+    add_categories?: string[];
+    remove_categories?: string[];
     fields: BulkEditContactsField[];
     subscribe?: boolean;
 }

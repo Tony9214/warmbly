@@ -5,6 +5,7 @@ export default interface AddContact {
     company: string;
     phone: string;
     campaigns: string[];
+    categories?: string[];
 
     custom_fields: Record<string, string>;
 }

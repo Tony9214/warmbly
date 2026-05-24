@@ -40,6 +40,9 @@ import ContactEdit from "./ContactEdit";
 import type MiniCampaign from "@/lib/api/models/app/campaigns/MiniCampaign";
 import ContactsEditBulk from "./ContactsEditBulk";
 import { NewContactDialog } from "./NewContactDialog";
+import ExportDialog from "./ExportDialog";
+import ImportWizard from "./ImportWizard";
+import { CategoryChip } from "./CategoryPicker";
 
 import {
     EmptyBlock,
@@ -77,41 +80,8 @@ export default function ContactsTable({
     const [bulkEdit, setBulkEdit] = React.useState<boolean>(false);
     const [subFilter, setSubFilter] = React.useState<SubFilter>("all");
     const [newOpen, setNewOpen] = React.useState<boolean>(false);
-
-    function exportContacts() {
-        if (!contacts || contacts.length === 0) {
-            toast.error("Nothing to export yet");
-            return;
-        }
-        const cols = ["email", "first_name", "last_name", "company", "phone", "subscribed"];
-        const escape = (v: unknown) => {
-            const s = v == null ? "" : String(v);
-            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-        };
-        const rows = [cols.join(",")];
-        for (const c of contacts) {
-            rows.push(cols.map((k) => escape((c as unknown as Record<string, unknown>)[k])).join(","));
-        }
-        const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `contacts-${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        toast.success(`Exported ${contacts.length} contacts`);
-    }
-
-    function importCSV() {
-        // Import flow is not yet built — surface a clear message instead
-        // of silently doing nothing. Once a real importer lands this
-        // becomes the trigger for the import wizard.
-        toast("CSV import is coming soon — add contacts one by one for now.", {
-            icon: "📄",
-        });
-    }
+    const [exportOpen, setExportOpen] = React.useState<boolean>(false);
+    const [importOpen, setImportOpen] = React.useState<boolean>(false);
 
     const [searchProps, setSearchProps] = React.useState<SearchContacts>({
         query: "",
@@ -305,14 +275,14 @@ export default function ContactsTable({
                 <TopbarAction
                     variant="ghost"
                     icon={<UploadIcon className="w-3 h-3" />}
-                    onClick={importCSV}
+                    onClick={() => setImportOpen(true)}
                 >
-                    Import CSV
+                    Import
                 </TopbarAction>
                 <TopbarAction
                     variant="ghost"
                     icon={<DownloadIcon className="w-3 h-3" />}
-                    onClick={exportContacts}
+                    onClick={() => setExportOpen(true)}
                 >
                     Export
                 </TopbarAction>
@@ -446,6 +416,17 @@ export default function ContactsTable({
             <ContactEdit contacts={contacts ?? []} active={edit} setActive={setEdit} />
             <ContactsEditBulk active={bulkEdit} setActive={setBulkEdit} selected={selected} />
             <NewContactDialog open={newOpen} onClose={() => setNewOpen(false)} />
+            <ExportDialog
+                open={exportOpen}
+                onClose={() => setExportOpen(false)}
+                filters={searchProps}
+                selectedIds={selected}
+                totalKnown={total}
+            />
+            <ImportWizard
+                open={importOpen}
+                onClose={() => setImportOpen(false)}
+            />
         </Page>
     );
 }
@@ -484,6 +465,7 @@ function ContactsTableBody({
         phone: string;
         subscribed: boolean;
         campaigns: { id: string }[];
+        categories?: { id: string; title: string; color: string }[];
         created_at: Date;
     }[];
     selected: string[];
@@ -608,8 +590,23 @@ function ContactsTableBody({
                                             </span>
                                         </div>
                                         <div className="min-w-0">
-                                            <div className="text-[12.5px] text-slate-900 font-medium truncate leading-tight">
-                                                {name}
+                                            <div className="text-[12.5px] text-slate-900 font-medium truncate leading-tight flex items-center gap-1.5">
+                                                <span className="truncate">{name}</span>
+                                                {c.categories && c.categories.length > 0 && (
+                                                    <span className="inline-flex items-center gap-0.5 shrink-0">
+                                                        {c.categories.slice(0, 2).map((cat) => (
+                                                            <CategoryChip key={cat.id} category={cat} compact />
+                                                        ))}
+                                                        {c.categories.length > 2 && (
+                                                            <span
+                                                                className="inline-flex items-center h-4 px-1 rounded text-[10px] font-medium bg-slate-100 text-slate-500"
+                                                                title={c.categories.slice(2).map((x) => x.title).join(", ")}
+                                                            >
+                                                                +{c.categories.length - 2}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="text-[10.5px] text-slate-400 truncate font-mono leading-tight flex items-center gap-1">
                                                 <MailIcon className="w-2.5 h-2.5" />
