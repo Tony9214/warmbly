@@ -54,3 +54,21 @@ web/.pnpm-store/
 .tmp-tests/
 test-results/
 web/.tmp/
+
+# AI assistant local state
+.claude/
+.claude.json
+.aider*
+.cursor/
+.cursorrules
+.cursorignore
+.windsurfrules
+.windsurf/
+.continue/
+.codeium/
+.copilot/
+.gemini/
+.codex/
+.zed/
+.roo/
+.cline/
