@@ -298,4 +298,3 @@ func fetchOutlookOwner(ctx context.Context, token string) (*inboxOwner, *errx.Er
 	}
 	return &inboxOwner{Email: addr, Name: out.DisplayName}, nil
 }
-
