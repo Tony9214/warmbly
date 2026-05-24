@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/warmbly/warmbly/internal/app/tz"
 	"github.com/warmbly/warmbly/internal/bitmask"
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/models"
@@ -17,7 +19,7 @@ import (
 )
 
 type CampaignRepository interface {
-	Create(ctx context.Context, userID string, data *models.CreateCampaign) (*models.Campaign, error)
+	Create(ctx context.Context, userID string, orgID *uuid.UUID, data *models.CreateCampaign) (*models.Campaign, *errx.Error)
 	Get(ctx context.Context, userID, id string) (*models.Campaign, error)
 	GetByID(ctx context.Context, campaignID uuid.UUID) (*models.Campaign, error)
 	GetSequenceByID(ctx context.Context, sequenceID uuid.UUID) (*models.Sequence, error)
@@ -86,13 +88,130 @@ func getCampaignFull(rows db.Scannable, campaign *models.Campaign) error {
 	return getCampaign(rows, campaign, &campaign.EmailTags, &campaign.Folders)
 }
 
-func (r *campaignRepository) Create(ctx context.Context, userID string, data *models.CreateCampaign) (*models.Campaign, error) {
+// Create inserts a new campaign and, in the same transaction, applies every
+// optional bit of initial config the caller sent (schedule, tracking flags,
+// sender pool, initial sequences, A/B variants, advanced overrides). The
+// previous version omitted updated_at/created_at which are NOT NULL and have
+// no DEFAULT, so any call returned a 500.
+func (r *campaignRepository) Create(ctx context.Context, userID string, orgID *uuid.UUID, data *models.CreateCampaign) (*models.Campaign, *errx.Error) {
+	// Validate all optional inputs up front so we don't open a tx for a
+	// payload we'll reject. Required fields are validated by the service.
+	days := bitmask.DefaultDays()
+	if data.Days != nil {
+		if err := validate.CampaignDays(*data.Days); err != nil {
+			return nil, err
+		}
+		days = *data.Days
+	}
+	timezone := "Europe/London"
+	if data.Timezone != nil {
+		if !tz.Valid(*data.Timezone) {
+			return nil, errx.ErrTimezone
+		}
+		timezone = *data.Timezone
+	}
+	startTime := "08:00"
+	if data.StartTime != nil {
+		if err := validate.CampaignTime(*data.StartTime); err != nil {
+			return nil, err
+		}
+		startTime = *data.StartTime
+	}
+	endTime := "18:00"
+	if data.EndTime != nil {
+		if err := validate.CampaignTime(*data.EndTime); err != nil {
+			return nil, err
+		}
+		endTime = *data.EndTime
+	}
+	if data.StartDate != nil {
+		if err := validate.CampaignStartDate(*data.StartDate); err != nil {
+			return nil, err
+		}
+	}
+	if data.EndDate != nil {
+		if err := validate.CampaignEndDate(*data.EndDate); err != nil {
+			return nil, err
+		}
+	}
+	dailyLimit := config.CampaignLimitDefault
+	if data.DailyLimit != nil {
+		if err := validate.CampaignDailyLimit(*data.DailyLimit); err != nil {
+			return nil, err
+		}
+		dailyLimit = *data.DailyLimit
+	}
+	if data.CC != nil && !validate.EmailBulk(data.CC) {
+		return nil, errx.ErrEmail
+	}
+	if data.BCC != nil && !validate.EmailBulk(data.BCC) {
+		return nil, errx.ErrEmail
+	}
+	for i, seq := range data.Sequences {
+		if len(seq.Name) > 50 {
+			return nil, errx.ErrSequenceName
+		}
+		if len(seq.Subject) > config.SequenceSubjectLimit {
+			return nil, errx.ErrSequenceSubject
+		}
+		if len(seq.BodyPlain) > config.SequenceBodyLimit || len(seq.BodyHTML) > config.SequenceBodyLimit {
+			return nil, errx.ErrSequenceBody
+		}
+		if seq.Name == "" {
+			data.Sequences[i].Name = fmt.Sprintf("Step %d", i+1)
+		}
+	}
+	for _, v := range data.Variants {
+		if v.Name == "" {
+			return nil, errx.New(errx.BadRequest, "A/B variant name is required")
+		}
+		if len(v.Subject) > config.SequenceSubjectLimit {
+			return nil, errx.ErrSequenceSubject
+		}
+		if len(v.BodyPlain) > config.SequenceBodyLimit || len(v.BodyHTML) > config.SequenceBodyLimit {
+			return nil, errx.ErrSequenceBody
+		}
+	}
+
+	cc := data.CC
+	if cc == nil {
+		cc = []string{}
+	}
+	bcc := data.BCC
+	if bcc == nil {
+		bcc = []string{}
+	}
+
+	stopOnReply := false
+	if data.StopOnReply != nil {
+		stopOnReply = *data.StopOnReply
+	}
+	openTracking := false
+	if data.OpenTracking != nil {
+		openTracking = *data.OpenTracking
+	}
+	linkTracking := false
+	if data.LinkTracking != nil {
+		linkTracking = *data.LinkTracking
+	}
+	textOnly := false
+	if data.TextOnly != nil {
+		textOnly = *data.TextOnly
+	}
+	unsubHeader := true
+	if data.UnsubscribeHeader != nil {
+		unsubHeader = *data.UnsubscribeHeader
+	}
+	riskyEmails := true
+	if data.RiskyEmails != nil {
+		riskyEmails = *data.RiskyEmails
+	}
+
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		db.CaptureError(err, "", nil, "begin")
-		return nil, err
+		return nil, errx.InternalError()
 	}
-
 	var committed bool
 	defer func() {
 		if !committed {
@@ -101,38 +220,171 @@ func (r *campaignRepository) Create(ctx context.Context, userID string, data *mo
 	}()
 
 	var campaign models.Campaign
-	campaign.EmailTags = make([]string, 0)
 
-	query := fmt.Sprintf(
-		`INSERT INTO campaigns
-		  (id, name, description, user_id, days)
-		 VALUES
-		  (gen_random_uuid(), $1, $2, $3, $4)
-		 RETURNING %s`,
-		CAMPAIGN_SELECT,
-	)
+	insertSQL := fmt.Sprintf(`
+		INSERT INTO campaigns (
+			id, name, description, user_id, organization_id,
+			stop_on_reply, open_tracking, link_tracking, text_only,
+			daily_limit, unsubscribe_header, risky_emails,
+			cc_addr, bcc_addr,
+			start_date, end_date, timezone, days, start_time, end_time,
+			created_at, updated_at
+		) VALUES (
+			gen_random_uuid(), $1, $2, $3, $4,
+			$5, $6, $7, $8,
+			$9, $10, $11,
+			$12, $13,
+			$14, $15, $16, $17, $18, $19,
+			NOW(), NOW()
+		)
+		RETURNING %s
+	`, CAMPAIGN_SELECT)
 
 	params := []any{
-		data.Name,
-		data.Description,
-		userID,
-		bitmask.DefaultDays(),
+		data.Name,        // $1
+		data.Description, // $2
+		userID,           // $3
+		orgID,            // $4 (nullable)
+		stopOnReply,      // $5
+		openTracking,     // $6
+		linkTracking,     // $7
+		textOnly,         // $8
+		dailyLimit,       // $9
+		unsubHeader,      // $10
+		riskyEmails,      // $11
+		cc,               // $12
+		bcc,              // $13
+		data.StartDate,   // $14
+		data.EndDate,     // $15
+		timezone,         // $16
+		days,             // $17
+		startTime,        // $18
+		endTime,          // $19
 	}
 
-	row := tx.QueryRow(
-		ctx,
-		query,
-		params...,
-	)
-	err = getCampaign(row, &campaign)
-	if err != nil {
-		db.CaptureError(err, query, params, "queryrow")
-		return nil, err
+	row := tx.QueryRow(ctx, insertSQL, params...)
+	if err := getCampaign(row, &campaign); err != nil {
+		db.CaptureError(err, insertSQL, params, "queryrow")
+		return nil, errx.InternalError()
+	}
+	if orgID != nil {
+		campaign.OrganizationID = orgID
+	}
+
+	// Sender pool — email tag links.
+	campaign.EmailTags = make([]string, 0)
+	if len(data.EmailTagIDs) > 0 {
+		tags, xerr := SyncCampaignEmailTags(ctx, tx, campaign.ID.String(), data.EmailTagIDs)
+		if xerr != nil {
+			return nil, xerr
+		}
+		campaign.EmailTags = tags
+	}
+
+	// Folder links.
+	campaign.Folders = make([]string, 0)
+	if len(data.FolderIDs) > 0 {
+		folders, xerr := SyncCampaignFolders(ctx, tx, campaign.ID.String(), data.FolderIDs)
+		if xerr != nil {
+			return nil, xerr
+		}
+		campaign.Folders = folders
+	}
+
+	// Initial sequences. Position is the array index; wait_after defaults
+	// to 0 for the first step and 3 days for any follow-ups so a default
+	// wizard run still produces something usable.
+	if len(data.Sequences) > 0 {
+		for i, seq := range data.Sequences {
+			waitAfter := 0
+			if i > 0 {
+				waitAfter = 3
+			}
+			if seq.WaitAfter != nil {
+				waitAfter = *seq.WaitAfter
+			}
+			bodySync := true
+			if seq.BodySync != nil {
+				bodySync = *seq.BodySync
+			}
+			bodyCode := false
+			if seq.BodyCode != nil {
+				bodyCode = *seq.BodyCode
+			}
+			bodyHTML := seq.BodyHTML
+			if bodyHTML == "" {
+				bodyHTML = "<div></div>"
+			}
+			seqInsert := `
+				INSERT INTO sequences (
+					campaign_id, organization_id, name, subject,
+					body_plain, body_html, body_sync, body_code,
+					wait_after, position
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			`
+			seqParams := []any{
+				campaign.ID, orgID, seq.Name, seq.Subject,
+				seq.BodyPlain, bodyHTML, bodySync, bodyCode,
+				waitAfter, i + 1,
+			}
+			if _, err := tx.Exec(ctx, seqInsert, seqParams...); err != nil {
+				db.CaptureError(err, seqInsert, seqParams, "exec")
+				return nil, errx.InternalError()
+			}
+		}
+	}
+
+	// A/B variants.
+	for _, v := range data.Variants {
+		weight := v.Weight
+		if weight <= 0 {
+			weight = 100
+		}
+		isActive := true
+		if v.IsActive != nil {
+			isActive = *v.IsActive
+		}
+		metaBytes, mErr := json.Marshal(v.Metadata)
+		if mErr != nil {
+			metaBytes = []byte(`{}`)
+		}
+		variantInsert := `
+			INSERT INTO campaign_ab_variants (
+				campaign_id, name, weight, subject, body_html, body_plain,
+				is_control, is_active, metadata, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+		`
+		variantParams := []any{
+			campaign.ID, v.Name, weight, v.Subject, v.BodyHTML, v.BodyPlain,
+			v.IsControl, isActive, metaBytes,
+		}
+		if _, err := tx.Exec(ctx, variantInsert, variantParams...); err != nil {
+			db.CaptureError(err, variantInsert, variantParams, "exec")
+			return nil, errx.InternalError()
+		}
+	}
+
+	// Advanced overrides (bounce policy, intent rules, dashboard toggles).
+	if data.AdvancedOverrides != nil {
+		settingsJSON, mErr := json.Marshal(data.AdvancedOverrides)
+		if mErr != nil {
+			settingsJSON = []byte(`{}`)
+		}
+		settingsSQL := `
+			INSERT INTO campaign_advanced_settings (campaign_id, settings, updated_at)
+			VALUES ($1, $2, NOW())
+			ON CONFLICT (campaign_id) DO UPDATE
+			  SET settings = EXCLUDED.settings, updated_at = NOW()
+		`
+		if _, err := tx.Exec(ctx, settingsSQL, campaign.ID, settingsJSON); err != nil {
+			db.CaptureError(err, settingsSQL, []any{campaign.ID}, "exec")
+			return nil, errx.InternalError()
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		db.CaptureError(err, "", nil, "commit")
-		return nil, err
+		return nil, errx.InternalError()
 	}
 	committed = true
 
@@ -145,8 +397,8 @@ func (r *campaignRepository) Get(ctx context.Context, userID, id string) (*model
 	query := fmt.Sprintf(
 		`SELECT %s
 		 FROM campaigns c
-		 LEFT JOIN campaign_email_tags cet ON cet.campaign = c.id
-		 LEFT JOIN campaign_folders cec ON cec.campaign = c.id
+		 LEFT JOIN campaign_email_tags cet ON cet.campaign_id = c.id
+		 LEFT JOIN campaign_folders cec ON cec.campaign_id = c.id
 		 WHERE c.user_id = $1 AND c.id = $2
 		 GROUP BY c.id`,
 		CAMPAIGN_SELECT_FULL,
@@ -556,8 +808,8 @@ func (r *campaignRepository) GetByID(ctx context.Context, campaignID uuid.UUID) 
 	query := fmt.Sprintf(
 		`SELECT c.user_id, %s
 		 FROM campaigns c
-		 LEFT JOIN campaign_email_tags cet ON cet.campaign = c.id
-		 LEFT JOIN campaign_folders cec ON cec.campaign = c.id
+		 LEFT JOIN campaign_email_tags cet ON cet.campaign_id = c.id
+		 LEFT JOIN campaign_folders cec ON cec.campaign_id = c.id
 		 WHERE c.id = $1
 		 GROUP BY c.id`,
 		CAMPAIGN_SELECT_FULL,

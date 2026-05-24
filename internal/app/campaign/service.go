@@ -14,7 +14,7 @@ import (
 const campaignCooldownSeconds = 60
 
 type CampaignService interface {
-	Create(ctx context.Context, userID string, data *models.CreateCampaign) (*models.Campaign, *errx.Error)
+	Create(ctx context.Context, userID string, orgID *uuid.UUID, data *models.CreateCampaign) (*models.Campaign, *errx.Error)
 	Get(ctx context.Context, userID, id string) (*models.Campaign, *errx.Error)
 	Search(ctx context.Context, userID, query, cursor, folder, limit string) (*models.CampaignsResult, *errx.Error)
 	Update(ctx context.Context, userID, id string, data *models.UpdateCampaign) (*models.Campaign, *errx.Error)

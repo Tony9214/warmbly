@@ -14,6 +14,7 @@ import (
 
 func (h *Handler) CreateCampaign(c *gin.Context) {
 	userIDStr := middleware.GetUserID(c)
+	orgID := middleware.GetOrganizationID(c)
 
 	var data models.CreateCampaign
 
@@ -22,7 +23,7 @@ func (h *Handler) CreateCampaign(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.CampaignService.Create(c.Request.Context(), userIDStr, &data)
+	resp, err := h.CampaignService.Create(c.Request.Context(), userIDStr, orgID, &data)
 	if err != nil {
 		errx.JSON(c, err)
 		return
