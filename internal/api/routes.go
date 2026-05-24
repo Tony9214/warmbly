@@ -59,6 +59,14 @@ func Run(
 			emails.PATCH("/:id/track", h.UpdateEmailTrackingDomain)
 			emails.DELETE("/:id", h.DeleteEmail)
 			emails.POST("/:id/send", m.RequireOrganization(), h.SendEmailFromAccount)
+
+			// Onboarding: two-step OAuth (Gmail/Outlook) + single-shot SMTP/IMAP.
+			onboarding := emails.Group("/onboarding")
+			{
+				onboarding.POST("/oauth/start", h.StartEmailOAuth)
+				onboarding.POST("/oauth/finish", h.FinishEmailOAuth)
+				onboarding.POST("/smtp-imap", h.ConnectEmailSMTPIMAP)
+			}
 		}
 
 		campaigns := protected.Group("/campaigns")
