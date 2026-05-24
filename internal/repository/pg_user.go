@@ -98,7 +98,9 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 
 	q := fmt.Sprintf(
 		`SELECT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.referral_source, u.onboarding_completed_at,
-		   u.max_organizations, u.free_trial_used, u.updated_at, u.created_at,
+		   u.max_organizations, u.free_trial_used,
+		   u.deletion_scheduled_at, u.deletion_scheduled_for,
+		   u.updated_at, u.created_at,
 		   COALESCE(array_agg(ur.role_id) FILTER (WHERE ur.role_id IS NOT NULL), '{}') AS role_ids
 		  FROM users u
 		  LEFT JOIN user_roles ur ON ur.user_id = u.id
@@ -116,7 +118,9 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 		q,
 		params...,
 	).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.AvatarURL, &u.ReferralSource, &u.OnboardingCompletedAt,
-		&u.MaxOrganizations, &u.FreeTrialUsed, &u.UpdatedAt, &u.CreatedAt, &u.Roles)
+		&u.MaxOrganizations, &u.FreeTrialUsed,
+		&u.DeletionScheduledAt, &u.DeletionScheduledFor,
+		&u.UpdatedAt, &u.CreatedAt, &u.Roles)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errx.ErrUser

@@ -44,6 +44,7 @@ const (
 	AuditEntitySequence       AuditEntityType = "sequence"
 	AuditEntityUser           AuditEntityType = "user"
 	AuditEntitySession        AuditEntityType = "session"
+	AuditEntityOrganization   AuditEntityType = "organization"
 	AuditEntityWorker         AuditEntityType = "worker"
 	AuditEntityAWSCredentials AuditEntityType = "aws_credentials"
 	AuditEntityWorkerProfile  AuditEntityType = "worker_profile"

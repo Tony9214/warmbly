@@ -21,6 +21,12 @@ type User struct {
 	MaxOrganizations int  `json:"max_organizations"`
 	FreeTrialUsed    bool `json:"free_trial_used"`
 
+	// Set when the user has scheduled their own account for deletion.
+	// While these are populated the account is "pending deletion" and
+	// gets hard-deleted at DeletionScheduledFor unless cancelled.
+	DeletionScheduledAt  *time.Time `json:"deletion_scheduled_at,omitempty"`
+	DeletionScheduledFor *time.Time `json:"deletion_scheduled_for,omitempty"`
+
 	// Per-user label groups. Always serialized as arrays (never null)
 	// so the frontend can iterate without optional-chaining every
 	// access. Populated by the /auth/me handler after the base user
@@ -31,4 +37,9 @@ type User struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IsPendingDeletion reports whether the user has a pending account deletion.
+func (u *User) IsPendingDeletion() bool {
+	return u.DeletionScheduledFor != nil
 }

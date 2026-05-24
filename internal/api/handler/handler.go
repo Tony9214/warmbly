@@ -10,6 +10,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/campaign"
 	"github.com/warmbly/warmbly/internal/app/contact"
 	"github.com/warmbly/warmbly/internal/app/crm"
+	"github.com/warmbly/warmbly/internal/app/dangerzone"
 	"github.com/warmbly/warmbly/internal/app/email"
 	"github.com/warmbly/warmbly/internal/app/emailsend"
 	"github.com/warmbly/warmbly/internal/app/feature"
@@ -108,4 +109,7 @@ type Handler struct {
 	// only when business logic accumulates.
 	UserRepo repository.UserRepository
 	OrgRepo  repository.OrganizationRepository
+
+	// Danger zone (delayed deletions for orgs & user accounts)
+	DangerZoneService dangerzone.Service
 }

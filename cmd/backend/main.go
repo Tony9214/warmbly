@@ -25,6 +25,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/contact"
 	"github.com/warmbly/warmbly/internal/app/crm"
+	"github.com/warmbly/warmbly/internal/app/dangerzone"
 	"github.com/warmbly/warmbly/internal/app/email"
 	"github.com/warmbly/warmbly/internal/app/emailsend"
 	"github.com/warmbly/warmbly/internal/app/feature"
@@ -121,6 +122,9 @@ func main() {
 
 	// Warmup
 	var warmupService warmupapp.Service
+
+	// Danger zone (delayed deletions)
+	var dangerZoneService dangerzone.Service
 
 	// Pub/Sub for realtime streaming
 	var streamingPublisher *pubsub.StreamingPublisher
@@ -551,6 +555,19 @@ func main() {
 		trialScheduler := jobs.NewTrialExpirationScheduler(trialExpirationJob, 1*time.Hour)
 		go trialScheduler.Start(ctx)
 
+		// Danger zone: schedule + execute delayed deletions (orgs, accounts).
+		dangerZoneRepository := repository.NewDangerZoneRepository(primaryDB.Pool)
+		dangerZoneService = dangerzone.NewService(
+			dangerZoneRepository,
+			organizationRepository,
+			userRepostory,
+			emailNotificationService,
+			os.Getenv("FRONTEND_BASE_URL"),
+		)
+		dangerZoneJob := jobs.NewDangerZoneJob(dangerZoneService)
+		dangerZoneScheduler := jobs.NewDangerZoneScheduler(dangerZoneJob, 1*time.Hour)
+		go dangerZoneScheduler.Start(ctx)
+
 		addr = apiCfg.Hostname
 		ginMode = apiCfg.GinMode
 		websocketURI = apiCfg.WebsocketURI
@@ -622,6 +639,9 @@ func main() {
 		Storage:  s3ForHandler,
 		UserRepo: userRepoForHandler,
 		OrgRepo:  organizationRepoForHandler,
+
+		// Danger zone
+		DangerZoneService: dangerZoneService,
 	}
 
 	m := &middleware.Handler{
