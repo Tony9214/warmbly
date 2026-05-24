@@ -96,7 +96,9 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 	var u models.User
 
 	q := fmt.Sprintf(
-		`SELECT u.email, u.max_organizations, u.free_trial_used, u.updated_at, u.created_at,
+		`SELECT u.email, u.max_organizations, u.free_trial_used,
+		        u.deletion_scheduled_at, u.deletion_scheduled_for,
+		        u.updated_at, u.created_at,
 		   COALESCE(array_agg(ur.role_id) FILTER (WHERE ur.role_id IS NOT NULL), '{}') AS role_ids
 		  FROM users u
 		  LEFT JOIN user_roles ur ON ur.user_id = u.id
@@ -113,7 +115,9 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 		ctx,
 		q,
 		params...,
-	).Scan(&u.Email, &u.MaxOrganizations, &u.FreeTrialUsed, &u.UpdatedAt, &u.CreatedAt, &u.Roles)
+	).Scan(&u.Email, &u.MaxOrganizations, &u.FreeTrialUsed,
+		&u.DeletionScheduledAt, &u.DeletionScheduledFor,
+		&u.UpdatedAt, &u.CreatedAt, &u.Roles)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errx.ErrUser

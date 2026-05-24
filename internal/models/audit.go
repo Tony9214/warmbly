@@ -31,6 +31,7 @@ const (
 	AuditEntitySequence     AuditEntityType = "sequence"
 	AuditEntityUser         AuditEntityType = "user"
 	AuditEntitySession      AuditEntityType = "session"
+	AuditEntityOrganization AuditEntityType = "organization"
 )
 
 type AuditLog struct {

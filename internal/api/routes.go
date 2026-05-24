@@ -190,6 +190,20 @@ func Run(
 
 			// Ownership transfer
 			org.POST("/transfer-ownership", m.RequireOrganization(), m.RequirePermission(models.PermTransferOwnership), h.TransferOwnership)
+
+			// Danger zone (delayed organization deletion with 30-day grace)
+			// Owner-only; the service double-checks ownership too.
+			org.GET("/current/danger-zone", m.RequireOrganization(), h.GetOrganizationDangerZone)
+			org.POST("/current/danger-zone/delete", m.RequireOrganization(), h.ScheduleOrganizationDeletion)
+			org.DELETE("/current/danger-zone/delete", m.RequireOrganization(), h.CancelOrganizationDeletion)
+		}
+
+		// Account-level danger zone (delayed account deletion)
+		account := protected.Group("/me")
+		{
+			account.GET("/danger-zone", h.GetAccountDangerZone)
+			account.POST("/danger-zone/delete", h.ScheduleAccountDeletion)
+			account.DELETE("/danger-zone/delete", h.CancelAccountDeletion)
 		}
 
 		// User's pending invitations

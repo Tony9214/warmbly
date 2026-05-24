@@ -88,7 +88,8 @@ func (r *organizationRepository) Create(ctx context.Context, org *models.Organiz
 // GetByID retrieves an organization by ID
 func (r *organizationRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Organization, error) {
 	query := `
-		SELECT id, name, slug, owner_user_id, created_at, updated_at
+		SELECT id, name, slug, owner_user_id, created_at, updated_at,
+		       deletion_scheduled_at, deletion_scheduled_for
 		FROM organizations WHERE id = $1
 	`
 	return r.scanOrganization(ctx, query, id)
@@ -97,7 +98,8 @@ func (r *organizationRepository) GetByID(ctx context.Context, id uuid.UUID) (*mo
 // GetBySlug retrieves an organization by slug
 func (r *organizationRepository) GetBySlug(ctx context.Context, slug string) (*models.Organization, error) {
 	query := `
-		SELECT id, name, slug, owner_user_id, created_at, updated_at
+		SELECT id, name, slug, owner_user_id, created_at, updated_at,
+		       deletion_scheduled_at, deletion_scheduled_for
 		FROM organizations WHERE slug = $1
 	`
 	return r.scanOrganization(ctx, query, slug)
@@ -106,7 +108,7 @@ func (r *organizationRepository) GetBySlug(ctx context.Context, slug string) (*m
 func (r *organizationRepository) scanOrganization(ctx context.Context, query string, args ...interface{}) (*models.Organization, error) {
 	row := r.db.QueryRow(ctx, query, args...)
 	var org models.Organization
-	err := row.Scan(&org.ID, &org.Name, &org.Slug, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt)
+	err := row.Scan(&org.ID, &org.Name, &org.Slug, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt, &org.DeletionScheduledAt, &org.DeletionScheduledFor)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -138,7 +140,8 @@ func (r *organizationRepository) GetUserOrganizations(ctx context.Context, userI
 		SELECT
 			om.id, om.organization_id, om.user_id, om.role, om.permissions,
 			om.invited_by, om.invited_at, om.accepted_at,
-			o.id, o.name, o.slug, o.owner_user_id, o.created_at, o.updated_at
+			o.id, o.name, o.slug, o.owner_user_id, o.created_at, o.updated_at,
+			o.deletion_scheduled_at, o.deletion_scheduled_for
 		FROM organization_members om
 		JOIN organizations o ON o.id = om.organization_id
 		WHERE om.user_id = $1
@@ -158,6 +161,7 @@ func (r *organizationRepository) GetUserOrganizations(ctx context.Context, userI
 			&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.Permissions,
 			&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt,
 			&org.ID, &org.Name, &org.Slug, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt,
+			&org.DeletionScheduledAt, &org.DeletionScheduledFor,
 		)
 		if err != nil {
 			return nil, err
@@ -171,7 +175,8 @@ func (r *organizationRepository) GetUserOrganizations(ctx context.Context, userI
 // GetUserDefaultOrganization retrieves the first organization a user owns
 func (r *organizationRepository) GetUserDefaultOrganization(ctx context.Context, userID uuid.UUID) (*models.Organization, error) {
 	query := `
-		SELECT id, name, slug, owner_user_id, created_at, updated_at
+		SELECT id, name, slug, owner_user_id, created_at, updated_at,
+		       deletion_scheduled_at, deletion_scheduled_for
 		FROM organizations WHERE owner_user_id = $1
 		ORDER BY created_at ASC LIMIT 1
 	`
@@ -311,7 +316,8 @@ func (r *organizationRepository) GetInvitationByToken(ctx context.Context, token
 	query := `
 		SELECT
 			i.id, i.organization_id, i.email, i.role, i.permissions, i.invited_by, i.token, i.expires_at, i.created_at,
-			o.id, o.name, o.slug, o.owner_user_id, o.created_at, o.updated_at
+			o.id, o.name, o.slug, o.owner_user_id, o.created_at, o.updated_at,
+			o.deletion_scheduled_at, o.deletion_scheduled_for
 		FROM organization_invitations i
 		JOIN organizations o ON o.id = i.organization_id
 		WHERE i.token = $1
@@ -323,6 +329,7 @@ func (r *organizationRepository) GetInvitationByToken(ctx context.Context, token
 		&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.Permissions,
 		&inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt,
 		&org.ID, &org.Name, &org.Slug, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt,
+		&org.DeletionScheduledAt, &org.DeletionScheduledFor,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -384,7 +391,8 @@ func (r *organizationRepository) GetUserPendingInvitations(ctx context.Context, 
 	query := `
 		SELECT
 			i.id, i.organization_id, i.email, i.role, i.permissions, i.invited_by, i.token, i.expires_at, i.created_at,
-			o.id, o.name, o.slug, o.owner_user_id, o.created_at, o.updated_at
+			o.id, o.name, o.slug, o.owner_user_id, o.created_at, o.updated_at,
+			o.deletion_scheduled_at, o.deletion_scheduled_for
 		FROM organization_invitations i
 		JOIN organizations o ON o.id = i.organization_id
 		WHERE i.email = $1 AND i.expires_at > NOW()
@@ -404,6 +412,7 @@ func (r *organizationRepository) GetUserPendingInvitations(ctx context.Context, 
 			&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.Permissions,
 			&inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt,
 			&org.ID, &org.Name, &org.Slug, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt,
+			&org.DeletionScheduledAt, &org.DeletionScheduledFor,
 		)
 		if err != nil {
 			return nil, err

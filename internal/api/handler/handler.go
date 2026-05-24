@@ -9,6 +9,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/campaign"
 	"github.com/warmbly/warmbly/internal/app/contact"
 	"github.com/warmbly/warmbly/internal/app/crm"
+	"github.com/warmbly/warmbly/internal/app/dangerzone"
 	"github.com/warmbly/warmbly/internal/app/email"
 	"github.com/warmbly/warmbly/internal/app/emailsend"
 	"github.com/warmbly/warmbly/internal/app/feature"
@@ -78,4 +79,7 @@ type Handler struct {
 
 	// Notifications
 	EmailNotificationService notify.EmailNotificationService
+
+	// Danger zone (delayed deletions for orgs & user accounts)
+	DangerZoneService dangerzone.Service
 }
