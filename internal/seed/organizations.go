@@ -16,9 +16,11 @@ func seedOrganizations(ctx context.Context, pool *pgxpool.Pool, r *Result) error
 		owner uuid.UUID
 		plan  string
 	}
+	// Slugs are namespaced "warmbly-..." to avoid colliding with main's
+	// seedRich, which uses bare "acme"/"beta"/"gamma".
 	orgs := []org{
-		{OrgAcmeID, "Acme Inc", "acme", UserOwnerID, "pro"},
-		{OrgGlobexID, "Globex Corp", "globex", UserFounderID, "free-trial"},
+		{OrgAcmeID, "Warmbly Pro Demo", "warmbly-pro-demo", UserOwnerID, "pro"},
+		{OrgGlobexID, "Warmbly Trial Demo", "warmbly-trial-demo", UserFounderID, "free-trial"},
 	}
 
 	for _, o := range orgs {
@@ -55,7 +57,11 @@ func seedOrganizations(ctx context.Context, pool *pgxpool.Pool, r *Result) error
 		{uuid.MustParse("00000000-0000-0000-0000-000000000415"), OrgGlobexID, UserFounderID, models.RoleOwner},
 	}
 	for _, m := range members {
-		perms := models.RolePermissions[m.role]
+		// organization_members.permissions is SMALLINT in Postgres (signed
+		// int16); the in-memory bitmask is uint16. RoleOwner == 0xFFFF
+		// overflows SMALLINT on the wire, so cast through int16 to land on
+		// the same 16 bits the model stores in memory.
+		perms := int16(models.RolePermissions[m.role])
 		_, err := pool.Exec(ctx, `
 			INSERT INTO organization_members (id, organization_id, user_id, role, permissions, invited_at, accepted_at)
 			VALUES ($1,$2,$3,$4,$5,NOW(),NOW())
@@ -63,7 +69,7 @@ func seedOrganizations(ctx context.Context, pool *pgxpool.Pool, r *Result) error
 				role = EXCLUDED.role,
 				permissions = EXCLUDED.permissions,
 				accepted_at = COALESCE(organization_members.accepted_at, NOW())
-		`, m.mid, m.orgID, m.userID, string(m.role), uint16(perms))
+		`, m.mid, m.orgID, m.userID, string(m.role), perms)
 		if err != nil {
 			return err
 		}
@@ -78,7 +84,7 @@ func seedOrganizations(ctx context.Context, pool *pgxpool.Pool, r *Result) error
 			token = EXCLUDED.token,
 			expires_at = EXCLUDED.expires_at
 	`, inviteID, OrgAcmeID, "pending-invite@warmbly.local",
-		uint16(models.RolePermissions[models.RoleManager]),
+		int16(models.RolePermissions[models.RoleManager]),
 		UserOwnerID, "seed-invite-token-acme-pending-0001")
 	return err
 }

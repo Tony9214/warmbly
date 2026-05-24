@@ -27,6 +27,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool) (*Result, error) {
 		name string
 		fn   func(context.Context, *pgxpool.Pool, *Result) error
 	}{
+		{"durations", seedDurations},
 		{"plans", seedPlans},
 		{"workers", seedWorkers},
 		{"users", seedUsers},

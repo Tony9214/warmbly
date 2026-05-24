@@ -24,11 +24,11 @@ var (
 	ErrLimit     = New(BadRequest, "Limit must be between 10 and 200.")
 
 	// Authorization
-	ErrToken = New(BadRequest, "Invalid or expired token.")
-	ErrAuth  = New(BadRequest, "Missing or invalid Authorization header.")
+	ErrToken = New(Unauthorized, "Invalid or expired token.")
+	ErrAuth  = New(Unauthorized, "Missing or invalid Authorization header.")
 
 	ErrUser        = New(BadRequest, "User doesn't exists.")
-	ErrPassword    = New(BadRequest, "The password must be between 8 and 50 characters long and contain both uppercase and lowercase letters, as well as a number.")
+	ErrPassword    = New(BadRequest, "Password must be at least 8 characters long.")
 	ErrEmail       = New(BadRequest, "Invalid email address.")
 	ErrCredentials = New(BadRequest, "Invalid email or password.")
 	ErrSession     = New(BadRequest, "Invalid or expired session.")
@@ -46,12 +46,24 @@ var (
 	ErrCaptcha = New(BadRequest, "We couldn’t verify you’re human. Please try the security check again or reload the page.")
 
 	// Group
-	ErrGroupTitle = New(BadRequest, "The title lenght must be between 3 and 50 characters.")
+	ErrGroupTitle = New(BadRequest, "The title length must be between 1 and 50 characters.")
 	ErrGroupMax   = New(BadRequest, "You reached the maximum amount.")
 
 	// Email
 	ErrEmailCredentials          = New(BadRequest, "Invalid email credentials.")
 	ErrEmailValidation           = New(BadRequest, "Deadline exceed, try again later.")
+	ErrEmailOnboardProvider      = New(BadRequest, "Unsupported email provider. Use 'gmail', 'outlook', or 'smtp_imap'.")
+	ErrEmailOnboardState         = New(BadRequest, "Invalid or expired onboarding state.")
+	ErrEmailOnboardCode          = New(BadRequest, "Authorization code is missing or invalid.")
+	ErrEmailOnboardExchange      = New(BadRequest, "Could not exchange the authorization code with the provider.")
+	ErrEmailOnboardUserInfo      = New(BadRequest, "Could not read account details from the provider.")
+	ErrEmailOnboardAlreadyExists = New(Conflict, "This email account is already connected.")
+	ErrEmailOnboardNoWorker      = New(ServiceUnavailable, "No mailbox workers are available right now. Please try again shortly.")
+	ErrEmailSMTPHost             = New(BadRequest, "SMTP host is required.")
+	ErrEmailSMTPPort             = New(BadRequest, "SMTP port must be 465 or 587.")
+	ErrEmailIMAPHost             = New(BadRequest, "IMAP host is required.")
+	ErrEmailIMAPPort             = New(BadRequest, "IMAP port must be a positive integer.")
+	ErrEmailCredentialsRequired  = New(BadRequest, "SMTP and IMAP credentials are required.")
 	ErrEmailTrackingDomain       = New(BadRequest, "Invalid tracking domain.")
 	ErrEmailTrackingDomainLength = New(BadRequest, "Tracking domain is too long (max 253 characters).")
 	ErrEmailName                 = New(BadRequest, "Invalid name. Must be 2–100 characters and contain only letters, numbers, spaces, '-', '.', or '’'.")

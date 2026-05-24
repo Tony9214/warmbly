@@ -46,6 +46,7 @@ type Email struct {
 	WarmupIncrease  int        `json:"warmup_increase"`
 	WarmupReplyRate int        `json:"warmup_reply_rate"`
 	WarmupTag       string     `json:"warmup_tag"`
+	WarmupPoolType  string     `json:"warmup_pool_type"`
 	WarmupStartTime string     `json:"warmup_start_time"`
 	WarmupEndTime   string     `json:"warmup_end_time"`
 	WarmupDays      int        `json:"warmup_days"`
@@ -82,19 +83,35 @@ type Oauth2SmtpImap struct {
 }
 
 type NewOauthAccount struct {
-	Provider     InboxProvider
-	Name         string
-	Email        string
-	AccessToken  string
-	RefreshToken string
-	ExpiresAt    time.Time
+	OrganizationID *uuid.UUID
+	Provider       InboxProvider
+	Name           string
+	Email          string
+	AccessToken    string
+	RefreshToken   string
+	ExpiresAt      time.Time
 }
 
 type NewSMTPIMAPAccount struct {
-	Name  string
-	Email string
-	SMTP  *Service
-	IMAP  *Service
+	OrganizationID *uuid.UUID
+	Name           string
+	Email          string
+	SMTP           *Service
+	IMAP           *Service
+}
+
+// EmailOnboardingState is stored in Redis for the lifetime of an OAuth round trip.
+type EmailOnboardingState struct {
+	UserID         string     `json:"user_id"`
+	OrganizationID *uuid.UUID `json:"organization_id,omitempty"`
+	Provider       string     `json:"provider"`
+	Nonce          string     `json:"nonce"`
+}
+
+// EmailOnboardingStartResponse is returned from POST /emails/onboarding/oauth/start.
+type EmailOnboardingStartResponse struct {
+	URL   string `json:"url"`
+	State string `json:"state"`
 }
 
 type EmailsResult struct {
@@ -116,10 +133,10 @@ type UpdateEmail struct {
 	MinWaitTime   *int    `json:"min_wait_time"`
 	ReplyTo       *string `json:"reply_to"`
 
-	Warmup          *bool `json:"warmup"`
-	WarmupBase      *int  `json:"warmup_base"`
-	WarmupMax       *int  `json:"warmup_max"`
-	WarmupIncrease  *int  `json:"warmup_increase"`
+	Warmup          *bool   `json:"warmup"`
+	WarmupBase      *int    `json:"warmup_base"`
+	WarmupMax       *int    `json:"warmup_max"`
+	WarmupIncrease  *int    `json:"warmup_increase"`
 	WarmupReplyRate *int    `json:"warmup_reply_rate"`
 	WarmupStartTime *string `json:"warmup_start_time"`
 	WarmupEndTime   *string `json:"warmup_end_time"`

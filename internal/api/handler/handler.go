@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/warmbly/warmbly/internal/app/admin"
+	"github.com/warmbly/warmbly/internal/app/advanced"
 	"github.com/warmbly/warmbly/internal/app/analytics"
 	"github.com/warmbly/warmbly/internal/app/apikey"
 	"github.com/warmbly/warmbly/internal/app/audit"
@@ -9,12 +10,14 @@ import (
 	"github.com/warmbly/warmbly/internal/app/campaign"
 	"github.com/warmbly/warmbly/internal/app/contact"
 	"github.com/warmbly/warmbly/internal/app/crm"
+	"github.com/warmbly/warmbly/internal/app/dangerzone"
 	"github.com/warmbly/warmbly/internal/app/email"
 	"github.com/warmbly/warmbly/internal/app/emailsend"
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/app/group"
 	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/ratelimit"
+	"github.com/warmbly/warmbly/internal/app/releases"
 	"github.com/warmbly/warmbly/internal/app/sequence"
 	"github.com/warmbly/warmbly/internal/app/socket"
 	"github.com/warmbly/warmbly/internal/app/stripe"
@@ -25,8 +28,12 @@ import (
 	"github.com/warmbly/warmbly/internal/app/tz"
 	"github.com/warmbly/warmbly/internal/app/unibox"
 	"github.com/warmbly/warmbly/internal/app/user"
+	"github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/app/worker"
+	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
+	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/notify"
+	"github.com/warmbly/warmbly/internal/repository"
 	"github.com/warmbly/warmbly/internal/tasks"
 )
 
@@ -76,6 +83,33 @@ type Handler struct {
 	// Admin
 	AdminService admin.AdminService
 
+	// Worker orchestration (SSH-driven lifecycle for admin-managed workers)
+	WorkerOrchestrator *worker_orchestrator.Orchestrator
+	WorkerRepo         repository.WorkerRepository
+	CredentialsRepo    repository.CredentialsRepository
+	ReleasesService    *releases.Service
+
 	// Notifications
 	EmailNotificationService notify.EmailNotificationService
+
+	// Advanced outreach controls
+	AdvancedService advanced.Service
+
+	// Warmup health
+	WarmupService warmup.Service
+
+	// Public websocket URL used by frontend clients
+	WebsocketURI string
+
+	// Object storage for user-uploaded artifacts (avatars, etc.).
+	Storage *storage.Client
+
+	// Direct repositories used by handlers that don't yet have a
+	// service layer (avatars, etc.). Keep narrow and add a service
+	// only when business logic accumulates.
+	UserRepo repository.UserRepository
+	OrgRepo  repository.OrganizationRepository
+
+	// Danger zone (delayed deletions for orgs & user accounts)
+	DangerZoneService dangerzone.Service
 }
