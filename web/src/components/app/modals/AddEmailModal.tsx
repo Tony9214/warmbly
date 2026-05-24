@@ -169,30 +169,40 @@ export default function AddEmailModal() {
                         className="w-full max-w-[560px] rounded-lg bg-white border border-slate-200 shadow-[0_24px_48px_-12px_rgba(15,23,42,0.18),0_8px_16px_-8px_rgba(15,23,42,0.1)] overflow-hidden flex flex-col max-h-[88vh]"
                     >
                         <Header view={view} onBack={() => setView("pick")} onClose={() => user.setAddEmail(false)} />
-                        <div className="flex-1 min-h-0 overflow-y-auto">
-                            {view === "pick" && <PickProvider onPick={setView} />}
-                            {view === "gmail" && (
-                                <OAuthPanel
-                                    provider="gmail"
-                                    busy={oauthBusy === "gmail"}
-                                    onConnect={() => startOAuth("gmail")}
-                                />
-                            )}
-                            {view === "outlook" && (
-                                <OAuthPanel
-                                    provider="outlook"
-                                    busy={oauthBusy === "outlook"}
-                                    onConnect={() => startOAuth("outlook")}
-                                />
-                            )}
-                            {view === "smtp_imap" && (
-                                <SmtpImapPanel
-                                    onDone={() => {
-                                        qc.invalidateQueries({ queryKey: ["emails", "list"] });
-                                        user.setAddEmail(false);
-                                    }}
-                                />
-                            )}
+                        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative">
+                            <AnimatePresence mode="wait" initial={false}>
+                                <motion.div
+                                    key={view}
+                                    initial={{ opacity: 0, x: view === "pick" ? -12 : 12 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: view === "pick" ? 12 : -12 }}
+                                    transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+                                >
+                                    {view === "pick" && <PickProvider onPick={setView} />}
+                                    {view === "gmail" && (
+                                        <OAuthPanel
+                                            provider="gmail"
+                                            busy={oauthBusy === "gmail"}
+                                            onConnect={() => startOAuth("gmail")}
+                                        />
+                                    )}
+                                    {view === "outlook" && (
+                                        <OAuthPanel
+                                            provider="outlook"
+                                            busy={oauthBusy === "outlook"}
+                                            onConnect={() => startOAuth("outlook")}
+                                        />
+                                    )}
+                                    {view === "smtp_imap" && (
+                                        <SmtpImapPanel
+                                            onDone={() => {
+                                                qc.invalidateQueries({ queryKey: ["emails", "list"] });
+                                                user.setAddEmail(false);
+                                            }}
+                                        />
+                                    )}
+                                </motion.div>
+                            </AnimatePresence>
                         </div>
                     </motion.div>
                 </motion.div>
@@ -277,22 +287,33 @@ function PickProvider({ onPick }: { onPick: (v: View) => void }) {
     ];
     return (
         <div className="divide-y divide-slate-200/60">
-            {rows.map((r) => (
-                <button
+            {rows.map((r, i) => (
+                <motion.button
                     key={r.key}
                     type="button"
                     onClick={() => onPick(r.key)}
-                    className="w-full px-4 py-3.5 flex items-center gap-3 text-left hover:bg-slate-50 transition-colors group"
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.04 + i * 0.04, duration: 0.18, ease: "easeOut" }}
+                    whileHover={{ backgroundColor: "rgb(248 250 252)" }}
+                    whileTap={{ scale: 0.995 }}
+                    className="w-full px-4 py-3.5 flex items-center gap-3 text-left group"
                 >
-                    <div className="size-9 rounded-md border border-slate-200 bg-white flex items-center justify-center shrink-0">
+                    <div className="size-9 rounded-md border border-slate-200 bg-white flex items-center justify-center shrink-0 transition-colors group-hover:border-slate-300">
                         {r.icon}
                     </div>
                     <div className="min-w-0 flex-1">
-                        <div className="text-[13px] font-medium text-slate-900">{r.title}</div>
+                        <div className="text-[13px] font-medium text-slate-900 truncate">{r.title}</div>
                         <div className="text-[11.5px] text-slate-500 truncate">{r.sub}</div>
                     </div>
-                    <ChevronRightIcon className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
-                </button>
+                    <motion.div
+                        className="shrink-0"
+                        whileHover={{ x: 2 }}
+                        transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                    >
+                        <ChevronRightIcon className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                    </motion.div>
+                </motion.button>
             ))}
         </div>
     );
@@ -331,10 +352,11 @@ function OAuthPanel({
                 <Scope>Refresh tokens are stored encrypted; revoke any time</Scope>
             </ul>
 
-            <button
+            <motion.button
                 type="button"
                 onClick={onConnect}
                 disabled={busy}
+                whileTap={busy ? undefined : { scale: 0.985 }}
                 className="w-full h-9 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[12.5px] font-medium inline-flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
             >
                 {busy ? (
@@ -343,7 +365,7 @@ function OAuthPanel({
                     <ShieldCheckIcon className="w-3.5 h-3.5" />
                 )}
                 {busy ? "Waiting for authorization…" : `Continue with ${label}`}
-            </button>
+            </motion.button>
         </div>
     );
 }
@@ -440,7 +462,7 @@ function SmtpImapPanel({ onDone }: { onDone: () => void }) {
 
     return (
         <div>
-            <Section title="Account" sub="Display name and the address you'll send from" icon={<MailIcon className="w-3.5 h-3.5" />}>
+            <Section title="Account" sub="Name and address you send from" icon={<MailIcon className="w-3.5 h-3.5" />}>
                 <Field label="Name">
                     <TextInput value={name} onChange={setName} placeholder="Alex Rivera" />
                 </Field>
@@ -449,7 +471,7 @@ function SmtpImapPanel({ onDone }: { onDone: () => void }) {
                 </Field>
             </Section>
 
-            <Section title="IMAP" sub="Incoming mail — usually port 993" icon={<InboxIcon className="w-3.5 h-3.5" />}>
+            <Section title="IMAP" sub="Incoming (usually port 993)" icon={<InboxIcon className="w-3.5 h-3.5" />}>
                 <div className="grid grid-cols-[1fr_88px] gap-2">
                     <Field label="Host">
                         <TextInput value={imapHost} onChange={setImapHost} placeholder="imap.example.com" />
@@ -473,7 +495,7 @@ function SmtpImapPanel({ onDone }: { onDone: () => void }) {
                 </Field>
             </Section>
 
-            <Section title="SMTP" sub="Outgoing mail — port 465 (SSL) or 587 (STARTTLS)" icon={<SendIcon className="w-3.5 h-3.5" />}>
+            <Section title="SMTP" sub="Outgoing (port 465 or 587)" icon={<SendIcon className="w-3.5 h-3.5" />}>
                 <div className="grid grid-cols-[1fr_88px] gap-2">
                     <Field label="Host">
                         <TextInput value={smtpHost} onChange={setSmtpHost} placeholder="smtp.example.com" />
@@ -493,42 +515,52 @@ function SmtpImapPanel({ onDone }: { onDone: () => void }) {
                         Use the same login as IMAP
                     </span>
                 </label>
-                {!sameCreds && (
-                    <>
-                        <Field label="Username">
-                            <TextInput
-                                value={smtpUser}
-                                onChange={(v) => {
-                                    smtpUserTouched.current = true;
-                                    setSmtpUser(v);
-                                }}
-                                placeholder={email || "alex@company.com"}
-                            />
-                        </Field>
-                        <Field label="Password">
-                            <TextInput value={smtpPass} onChange={setSmtpPass} placeholder="App password" type="password" />
-                        </Field>
-                    </>
-                )}
+                <AnimatePresence initial={false}>
+                    {!sameCreds && (
+                        <motion.div
+                            key="smtp-creds"
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
+                            className="overflow-hidden space-y-2"
+                        >
+                            <Field label="Username">
+                                <TextInput
+                                    value={smtpUser}
+                                    onChange={(v) => {
+                                        smtpUserTouched.current = true;
+                                        setSmtpUser(v);
+                                    }}
+                                    placeholder={email || "alex@company.com"}
+                                />
+                            </Field>
+                            <Field label="Password">
+                                <TextInput value={smtpPass} onChange={setSmtpPass} placeholder="App password" type="password" />
+                            </Field>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </Section>
 
-            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50/60 flex items-center gap-2">
-                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                    <KeyRoundIcon className="w-3 h-3" />
-                    Credentials are validated against your mail server before saving.
+            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50/60 flex items-center gap-2 min-w-0 sticky bottom-0">
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500 min-w-0 flex-1">
+                    <KeyRoundIcon className="w-3 h-3 shrink-0" />
+                    <span className="truncate">Verified against your mail server before saving.</span>
                 </div>
-                <button
+                <motion.button
                     type="button"
                     onClick={submit}
                     disabled={!valid() || submitting}
+                    whileTap={valid() && !submitting ? { scale: 0.97 } : undefined}
                     className={cn(
-                        "ml-auto h-7 px-3 rounded-md text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors",
+                        "shrink-0 h-7 px-3 rounded-md text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors",
                         "bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50 disabled:cursor-not-allowed",
                     )}
                 >
                     {submitting ? <Loader2Icon className="w-3 h-3 animate-spin" /> : <CheckIcon className="w-3 h-3" />}
-                    Connect mailbox
-                </button>
+                    Connect
+                </motion.button>
             </div>
         </div>
     );
@@ -546,16 +578,16 @@ function Section({
     children: React.ReactNode;
 }) {
     return (
-        <div className="px-4 py-3.5 border-b border-slate-200/60 last:border-b-0">
-            <div className="flex items-center gap-1.5 mb-2.5">
-                <span className="text-slate-500">{icon}</span>
-                <span className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
+        <div className="px-4 py-3.5 border-b border-slate-200/60 last:border-b-0 min-w-0">
+            <div className="flex items-center gap-1.5 mb-2.5 min-w-0">
+                <span className="text-slate-500 shrink-0">{icon}</span>
+                <span className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium shrink-0">
                     {title}
                 </span>
-                <div className="h-3 w-px bg-slate-200" />
-                <span className="text-[11.5px] text-slate-500 truncate">{sub}</span>
+                <div className="h-3 w-px bg-slate-200 shrink-0" />
+                <span className="text-[11.5px] text-slate-500 truncate min-w-0">{sub}</span>
             </div>
-            <div className="space-y-2">{children}</div>
+            <div className="space-y-2 min-w-0">{children}</div>
         </div>
     );
 }
