@@ -42,6 +42,7 @@ import { useConfirm } from "@/hooks/context/confirm";
 import type Template from "@/lib/api/models/app/templates/Template";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
+import { TEMPLATE_PRESETS, type TemplatePreset } from "./presets";
 
 const VARIABLE_HINTS = [
     "{{.FirstName}}",
@@ -463,6 +464,7 @@ function TemplateEditor({
     const [bodyPlain, setBodyPlain] = React.useState("");
     const [bodyHTML, setBodyHTML] = React.useState("");
     const [showHTML, setShowHTML] = React.useState(false);
+    const [activePresetId, setActivePresetId] = React.useState<string | null>(null);
 
     React.useEffect(() => {
         if (!state) return;
@@ -472,14 +474,41 @@ function TemplateEditor({
             setBodyPlain(state.template.body_plain);
             setBodyHTML(state.template.body_html);
             setShowHTML(Boolean(state.template.body_html));
+            setActivePresetId(null);
         } else {
             setName("");
             setSubject("");
             setBodyPlain("");
             setBodyHTML("");
             setShowHTML(false);
+            setActivePresetId(null);
         }
     }, [state]);
+
+    function applyPreset(p: TemplatePreset) {
+        // Only fill empty fields if the user has already started typing,
+        // so picking a preset by accident doesn't trash their work.
+        const dirty = name.trim() !== "" || subject.trim() !== "" || bodyPlain.trim() !== "" || bodyHTML.trim() !== "";
+        if (dirty && activePresetId !== p.id) {
+            const ok = window.confirm("Replace what you have so far with this template?");
+            if (!ok) return;
+        }
+        setName(p.name);
+        setSubject(p.subject);
+        setBodyPlain(p.body_plain);
+        setBodyHTML("");
+        setShowHTML(false);
+        setActivePresetId(p.id);
+    }
+
+    function clearPreset() {
+        setName("");
+        setSubject("");
+        setBodyPlain("");
+        setBodyHTML("");
+        setShowHTML(false);
+        setActivePresetId(null);
+    }
 
     async function submit() {
         const trimmedName = name.trim();
@@ -570,6 +599,14 @@ function TemplateEditor({
                         </div>
 
                         <div className="px-4 py-4 space-y-3 max-h-[68vh] overflow-y-auto">
+                            {!isEdit && (
+                                <PresetStrip
+                                    activeId={activePresetId}
+                                    onPick={applyPreset}
+                                    onClear={clearPreset}
+                                />
+                            )}
+
                             <div>
                                 <Label>Name</Label>
                                 <TextInput
@@ -722,6 +759,72 @@ function VariableMenu({ onPick }: { onPick: (token: string) => void }) {
                     </motion.div>
                 )}
             </AnimatePresence>
+        </div>
+    );
+}
+
+function PresetStrip({
+    activeId,
+    onPick,
+    onClear,
+}: {
+    activeId: string | null;
+    onPick: (p: TemplatePreset) => void;
+    onClear: () => void;
+}) {
+    return (
+        <div className="rounded-md border border-slate-200 bg-slate-50/60 px-2.5 py-2">
+            <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-[10.5px] uppercase tracking-[0.1em] font-medium text-slate-500">
+                    Start from a template
+                </span>
+                <span className="text-[10.5px] text-slate-400">
+                    or skip this and start blank
+                </span>
+                {activeId && (
+                    <button
+                        type="button"
+                        onClick={onClear}
+                        className="ml-auto text-[10.5px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-1 h-5 px-1.5 rounded hover:bg-slate-100 transition-colors"
+                    >
+                        Reset to blank
+                    </button>
+                )}
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
+                {TEMPLATE_PRESETS.map((p) => {
+                    const active = activeId === p.id;
+                    return (
+                        <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => onPick(p)}
+                            title={p.description}
+                            className={
+                                "shrink-0 text-left rounded-md border px-2 py-1.5 transition-colors min-w-[140px] " +
+                                (active
+                                    ? "border-slate-900 bg-white"
+                                    : "border-slate-200 bg-white hover:border-slate-300")
+                            }
+                        >
+                            <div className="flex items-center gap-1 mb-0.5">
+                                <span className="text-[9.5px] uppercase tracking-[0.1em] text-slate-400 font-medium">
+                                    {p.tag}
+                                </span>
+                                {active && (
+                                    <span className="size-1 rounded-full bg-slate-900" />
+                                )}
+                            </div>
+                            <div className="text-[11.5px] font-medium text-slate-900 truncate">
+                                {p.label}
+                            </div>
+                            <div className="text-[10.5px] text-slate-500 truncate">
+                                {p.description}
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
         </div>
     );
 }
