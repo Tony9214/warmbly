@@ -295,9 +295,7 @@ function PickProvider({ onPick }: { onPick: (v: View) => void }) {
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.04 + i * 0.04, duration: 0.18, ease: "easeOut" }}
-                    whileHover={{ backgroundColor: "rgb(248 250 252)" }}
-                    whileTap={{ scale: 0.995 }}
-                    className="w-full px-4 py-3.5 flex items-center gap-3 text-left group"
+                    className="w-full px-4 py-3.5 flex items-center gap-3 text-left group hover:bg-slate-50 transition-colors"
                 >
                     <div className="size-9 rounded-md border border-slate-200 bg-white flex items-center justify-center shrink-0 transition-colors group-hover:border-slate-300">
                         {r.icon}
@@ -306,13 +304,7 @@ function PickProvider({ onPick }: { onPick: (v: View) => void }) {
                         <div className="text-[13px] font-medium text-slate-900 truncate">{r.title}</div>
                         <div className="text-[11.5px] text-slate-500 truncate">{r.sub}</div>
                     </div>
-                    <motion.div
-                        className="shrink-0"
-                        whileHover={{ x: 2 }}
-                        transition={{ type: "spring", stiffness: 400, damping: 28 }}
-                    >
-                        <ChevronRightIcon className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
-                    </motion.div>
+                    <ChevronRightIcon className="w-4 h-4 text-slate-300 shrink-0 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" />
                 </motion.button>
             ))}
         </div>
@@ -472,14 +464,15 @@ function SmtpImapPanel({ onDone }: { onDone: () => void }) {
             </Section>
 
             <Section title="IMAP" sub="Incoming (usually port 993)" icon={<InboxIcon className="w-3.5 h-3.5" />}>
-                <div className="grid grid-cols-[1fr_88px] gap-2">
-                    <Field label="Host">
-                        <TextInput value={imapHost} onChange={setImapHost} placeholder="imap.example.com" />
-                    </Field>
-                    <Field label="Port">
-                        <TextInput value={imapPort} onChange={setImapPort} placeholder="993" />
-                    </Field>
-                </div>
+                <HostPortField
+                    hostLabel="Host"
+                    host={imapHost}
+                    onHost={setImapHost}
+                    hostPlaceholder="imap.example.com"
+                    port={imapPort}
+                    onPort={setImapPort}
+                    portPlaceholder="993"
+                />
                 <Field label="Username">
                     <TextInput
                         value={imapUser}
@@ -496,14 +489,15 @@ function SmtpImapPanel({ onDone }: { onDone: () => void }) {
             </Section>
 
             <Section title="SMTP" sub="Outgoing (port 465 or 587)" icon={<SendIcon className="w-3.5 h-3.5" />}>
-                <div className="grid grid-cols-[1fr_88px] gap-2">
-                    <Field label="Host">
-                        <TextInput value={smtpHost} onChange={setSmtpHost} placeholder="smtp.example.com" />
-                    </Field>
-                    <Field label="Port">
-                        <TextInput value={smtpPort} onChange={setSmtpPort} placeholder="587" />
-                    </Field>
-                </div>
+                <HostPortField
+                    hostLabel="Host"
+                    host={smtpHost}
+                    onHost={setSmtpHost}
+                    hostPlaceholder="smtp.example.com"
+                    port={smtpPort}
+                    onPort={setSmtpPort}
+                    portPlaceholder="587"
+                />
                 <label className="flex items-center gap-2 px-1 pt-1">
                     <input
                         type="checkbox"
@@ -599,6 +593,44 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
                 {label}
             </span>
             <div className="flex-1 min-w-0">{children}</div>
+        </div>
+    );
+}
+
+// HostPortField — Host (flex) + Port (fixed) on a single row. Avoids the
+// nested-grid pinch where the Port column was too narrow to hold the
+// label + 3-digit input without overflowing.
+function HostPortField({
+    hostLabel,
+    host,
+    onHost,
+    hostPlaceholder,
+    port,
+    onPort,
+    portPlaceholder,
+}: {
+    hostLabel: string;
+    host: string;
+    onHost: (v: string) => void;
+    hostPlaceholder: string;
+    port: string;
+    onPort: (v: string) => void;
+    portPlaceholder: string;
+}) {
+    return (
+        <div className="flex items-center gap-3 min-w-0">
+            <span className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium w-16 shrink-0">
+                {hostLabel}
+            </span>
+            <div className="flex-1 min-w-0">
+                <TextInput value={host} onChange={onHost} placeholder={hostPlaceholder} />
+            </div>
+            <span className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium shrink-0">
+                Port
+            </span>
+            <div className="w-16 shrink-0">
+                <TextInput value={port} onChange={onPort} placeholder={portPlaceholder} />
+            </div>
         </div>
     );
 }
