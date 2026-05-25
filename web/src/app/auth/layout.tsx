@@ -1,6 +1,7 @@
 import React from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useNavigate } from "react-router-dom";
 import { APP_URL, WEBSITE_URL } from "@/lib/information";
+import getToken from "@/lib/helper/getToken";
 import { Logo } from "@/components/svg";
 import { Mail, BarChart3, Zap, Shield, Github, ArrowRight } from "lucide-react";
 
@@ -109,6 +110,14 @@ export default function AuthLayout() {
         window.addEventListener("message", receiveMessage);
         return () => window.removeEventListener("message", receiveMessage);
     }, [navigate]);
+
+    // Already signed in? Skip the auth UI entirely and send the user
+    // into the app. /app's own guard will redirect onward to
+    // /select-org or /onboarding if needed. Sits after hooks so the
+    // Rules of Hooks aren't violated when the token state changes.
+    if (getToken()) {
+        return <Navigate to="/app/emails" replace />;
+    }
 
     return (
         <div

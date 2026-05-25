@@ -32,11 +32,22 @@ services:
       - .:/app
       - warmbly_gomodcache:/go/pkg/mod
       - warmbly_gocache:/root/.cache/go-build
-    # air's restart loop causes brief health flaps; depends_on can't
-    # tolerate that, so disable. Consumer / worker fall back to
-    # `service_started` below for the same reason.
+    # Relax the prod healthcheck instead of disabling it: dev needs to
+    # keep one because web, seed and the base consumer all depend on
+    # backend with `condition: service_healthy`, and compose refuses to
+    # bring up a service whose service_healthy target has no
+    # healthcheck.
+    #
+    # The bigger start_period gives air time to do a cold first compile
+    # (Go build cache empty in a fresh worktree → 60-90s isn't unusual).
+    # depends_on only gates initial startup, so the brief unhealthy
+    # blips on each subsequent rebuild don't bounce dependents.
     healthcheck:
-      disable: true
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 180s
 
   consumer:
     image: warmbly-go-dev
@@ -85,18 +96,6 @@ services:
       - warmbly_cargo_target:/app/target
     healthcheck:
       disable: true
-
-  # ─── web ──────────────────────────────────────────────────────────────
-  # web still runs the same image as `make up`; we only re-declare it to
-  # weaken the `depends_on: backend` from service_healthy → service_started.
-  # In dev mode backend's healthcheck is disabled (air flaps would defeat
-  # the gate), and compose refuses to bring up any service whose
-  # `service_healthy` target has no healthcheck. web is a Vite dev server,
-  # it doesn't reach out to backend at boot, so service_started is enough.
-  web:
-    depends_on:
-      backend:
-        condition: service_started
 
   # ─── Elixir (realtime) ────────────────────────────────────────────────
   realtime:

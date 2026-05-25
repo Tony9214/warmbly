@@ -16,9 +16,10 @@
 // landing, no orgs" and "ongoing management" cases.
 
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { LogOutIcon, Loader2Icon, MailIcon, PlusIcon, UsersIcon } from "lucide-react";
 import toast from "react-hot-toast";
+import getToken from "@/lib/helper/getToken";
 import useOrganizations from "@/lib/api/hooks/app/organizations/useOrganizations";
 import useMyInvitations from "@/lib/api/hooks/app/organizations/useMyInvitations";
 import useAcceptInvitation from "@/lib/api/hooks/app/organizations/useAcceptInvitation";
@@ -53,6 +54,17 @@ function initials(name: string): string {
 }
 
 export default function SelectOrgPage() {
+    // Guard: this page is the post-login workspace picker. Hitting it
+    // without a token (direct URL, expired session) bounces to login,
+    // matching the protection on /app/* and /onboarding.
+    if (!getToken()) {
+        return <Navigate to="/auth/login" replace />;
+    }
+
+    return <SelectOrgPageInner />;
+}
+
+function SelectOrgPageInner() {
     const navigate = useNavigate();
     const [createOpen, setCreateOpen] = React.useState(false);
 
