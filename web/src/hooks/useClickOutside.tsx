@@ -11,18 +11,21 @@ export default function useClickOutside(
 ) {
   useEffect(() => {
     const listener = (event: MouseEvent | TouchEvent) => {
-      // Clicked inside the main element → ignore
       if (!ref.current || ref.current.contains(event.target as Node)) return;
 
       handler();
     };
 
-    document.addEventListener('mousedown', listener);
-    document.addEventListener('touchstart', listener);
+    // Capture phase so we still fire inside containers that call
+    // stopPropagation() on mousedown (e.g. the contact edit slide-over,
+    // which stops bubbling so clicks inside the panel don't dismiss the
+    // overlay). Bubble-phase listeners never reach document in that case.
+    document.addEventListener('mousedown', listener, true);
+    document.addEventListener('touchstart', listener, true);
 
     return () => {
-      document.removeEventListener('mousedown', listener);
-      document.removeEventListener('touchstart', listener);
+      document.removeEventListener('mousedown', listener, true);
+      document.removeEventListener('touchstart', listener, true);
     };
   }, [ref, handler]);
 }

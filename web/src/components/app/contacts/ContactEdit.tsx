@@ -35,6 +35,7 @@ import type MiniCampaign from "@/lib/api/models/app/campaigns/MiniCampaign";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import useClickOutside from "@/hooks/useClickOutside";
+import CategoryPicker from "./CategoryPicker";
 
 interface CustomField {
     name: string;
@@ -84,6 +85,9 @@ function ContactEditPanel({
     const [phone, setPhone] = React.useState(contact.phone);
     const [subscribed, setSubscribed] = React.useState(contact.subscribed);
     const [campaigns, setCampaigns] = React.useState<MiniCampaign[]>(contact.campaigns ?? []);
+    const [categoryIds, setCategoryIds] = React.useState<string[]>(
+        () => (contact.categories ?? []).map((c) => c.id),
+    );
     const [customFields, setCustomFields] = React.useState<CustomField[]>(() =>
         Object.entries(contact.custom_fields ?? {}).map(([n, v]) => ({ name: n, value: v })),
     );
@@ -96,6 +100,7 @@ function ContactEditPanel({
         setPhone(contact.phone);
         setSubscribed(contact.subscribed);
         setCampaigns(contact.campaigns ?? []);
+        setCategoryIds((contact.categories ?? []).map((c) => c.id));
         setCustomFields(Object.entries(contact.custom_fields ?? {}).map(([n, v]) => ({ name: n, value: v })));
     }
 
@@ -116,12 +121,16 @@ function ContactEditPanel({
         if (phone !== contact.phone) return true;
         if (subscribed !== contact.subscribed) return true;
         if (JSON.stringify(recordFromCF(customFields)) !== JSON.stringify(contact.custom_fields ?? {})) return true;
-        const cur = new Set(contact.campaigns.map((c) => c.id));
-        const next = new Set(campaigns.map((c) => c.id));
-        if (cur.size !== next.size) return true;
-        for (const id of cur) if (!next.has(id)) return true;
+        const curC = new Set(contact.campaigns.map((c) => c.id));
+        const nextC = new Set(campaigns.map((c) => c.id));
+        if (curC.size !== nextC.size) return true;
+        for (const id of curC) if (!nextC.has(id)) return true;
+        const curCat = new Set((contact.categories ?? []).map((c) => c.id));
+        const nextCat = new Set(categoryIds);
+        if (curCat.size !== nextCat.size) return true;
+        for (const id of curCat) if (!nextCat.has(id)) return true;
         return false;
-    }, [contact, firstName, lastName, email, company, phone, subscribed, customFields, campaigns, recordFromCF]);
+    }, [contact, firstName, lastName, email, company, phone, subscribed, customFields, campaigns, categoryIds, recordFromCF]);
 
     async function save() {
         if (!dirty) return;
@@ -139,6 +148,12 @@ function ContactEditPanel({
         let campaignsChanged = cur.size !== next.size;
         if (!campaignsChanged) for (const id of cur) if (!next.has(id)) { campaignsChanged = true; break; }
         if (campaignsChanged) data.campaigns = campaigns.map((c) => c.id);
+
+        const curCat = new Set((contact.categories ?? []).map((c) => c.id));
+        const nextCat = new Set(categoryIds);
+        let categoriesChanged = curCat.size !== nextCat.size;
+        if (!categoriesChanged) for (const id of curCat) if (!nextCat.has(id)) { categoriesChanged = true; break; }
+        if (categoriesChanged) data.categories = categoryIds;
 
         try {
             await toast.promise(update.mutateAsync(data), {
@@ -244,6 +259,17 @@ function ContactEditPanel({
                             on={subscribed}
                             onChange={setSubscribed}
                         />
+                    </Section>
+
+                    <Section
+                        title="Categories"
+                        accessory={
+                            <span className="text-[10.5px] text-slate-400 tabular-nums">
+                                {categoryIds.length}
+                            </span>
+                        }
+                    >
+                        <CategoryPicker value={categoryIds} onChange={setCategoryIds} />
                     </Section>
 
                     <Section
