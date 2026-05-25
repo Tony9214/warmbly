@@ -97,11 +97,12 @@ func (s *JobsService) performWarmupActions(ctx context.Context, e *models.JobEve
 	}
 
 	action := &models.WarmupEmailAction{
-		UserID:  e.UserID,
-		EmailID: e.Message.EmailID,
-		GmailID: e.Message.GmailID,
-		UID:     e.Message.UID,
-		Actions: []string{"move_to_warmbly", "mark_read", "remove_from_spam", "mark_important"},
+		UserID:             e.UserID,
+		EmailID:            e.Message.EmailID,
+		GmailID:            e.Message.GmailID,
+		UID:                e.Message.UID,
+		MailboxUIDValidity: e.Message.Mailbox,
+		Actions:            []string{"move_to_warmbly", "mark_read", "remove_from_spam", "mark_important"},
 	}
 
 	// Look up the worker ID from the email account

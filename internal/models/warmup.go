@@ -16,13 +16,19 @@ type WarmupToken struct {
 	ExpiresAt          time.Time  `json:"expires_at"`
 }
 
-// WarmupEmailAction represents actions to perform on a detected warmup email
+// WarmupEmailAction represents actions to perform on a detected warmup email.
+//
+// For Gmail accounts the worker uses GmailID to issue Users.Messages.Modify
+// requests. For IMAP-backed accounts (Outlook + custom SMTP/IMAP) the worker
+// needs UID + the source mailbox's UIDValidity to locate the message; the
+// mailbox name is then resolved against the worker's cached folder list.
 type WarmupEmailAction struct {
-	UserID  uuid.UUID `json:"user_id"`
-	EmailID uuid.UUID `json:"email_id"`
-	GmailID string    `json:"gmail_id"`
-	UID     uint32    `json:"uid"`
-	Actions []string  `json:"actions"` // "move_to_warmbly", "mark_read", "remove_from_spam", "mark_important"
+	UserID             uuid.UUID `json:"user_id"`
+	EmailID            uuid.UUID `json:"email_id"`
+	GmailID            string    `json:"gmail_id"`
+	UID                uint32    `json:"uid"`
+	MailboxUIDValidity uint32    `json:"mailbox_uid_validity"`
+	Actions            []string  `json:"actions"` // "move_to_warmbly", "mark_read", "remove_from_spam", "mark_important"
 }
 
 type WarmupHealthState string
