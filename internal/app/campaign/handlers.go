@@ -13,7 +13,7 @@ import (
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
-func (s *campaignService) Create(ctx context.Context, userID string, data *models.CreateCampaign) (*models.Campaign, *errx.Error) {
+func (s *campaignService) Create(ctx context.Context, userID string, orgID *uuid.UUID, data *models.CreateCampaign) (*models.Campaign, *errx.Error) {
 	if err := validate.CampaignName(data.Name); err != nil {
 		return nil, err
 	}
@@ -21,9 +21,21 @@ func (s *campaignService) Create(ctx context.Context, userID string, data *model
 		return nil, err
 	}
 
-	resp, err := s.campaignRepository.Create(ctx, userID, data)
-	if err != nil {
-		return nil, errx.InternalError()
+	resp, xerr := s.campaignRepository.Create(ctx, userID, orgID, data)
+	if xerr != nil {
+		return nil, xerr
+	}
+
+	if s.streamingPublisher != nil {
+		s.streamingPublisher.PublishCampaignEvent(ctx, &pubsub.CampaignEvent{
+			BaseEvent: pubsub.BaseEvent{
+				EventType: pubsub.EventCampaignCreated,
+				UserID:    userID,
+			},
+			CampaignID: resp.ID.String(),
+			Name:       resp.Name,
+			Status:     resp.Status,
+		})
 	}
 
 	return resp, nil
