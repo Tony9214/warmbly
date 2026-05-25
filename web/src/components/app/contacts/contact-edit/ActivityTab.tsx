@@ -1,16 +1,12 @@
 // Activity tab — the contact 360 timeline.
 //
-// One vertical feed, newest first. Each row carries an icon for the
-// event type, a single-line summary ("Sent / Opened / Replied"), and
-// secondary context: mailbox sender, campaign + sequence step,
-// subject. Filter chips up top let the user narrow to a single
-// event class.
-//
-// The backend already merges sources (campaign_contact_progress,
-// reply_intents, deliverability_events, suppressed_recipients, notes)
-// so this view just renders.
+// Flat monochrome list, newest first. Each row shows an icon for the
+// event type, a one-line summary, structured meta below, and an
+// optional body (note text, reply snippet, bounce reason). A
+// segmented filter strip up top narrows by event class.
 
 import React from "react";
+import { motion } from "framer-motion";
 import {
     AlertOctagonIcon,
     BanIcon,
@@ -69,22 +65,40 @@ export default function ActivityTab({ contactId }: { contactId: string }) {
     }, [data, filter]);
 
     return (
-        <div className="space-y-4">
-            <div className="flex gap-1 overflow-x-auto -mx-1 px-1">
-                {FILTERS.map((f) => (
-                    <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => setFilter(f.id)}
-                        className={`h-6 px-2 rounded text-[11px] font-medium whitespace-nowrap transition-colors ${
-                            filter === f.id
-                                ? "bg-slate-900 text-white"
-                                : "bg-slate-100 text-slate-600 hover:text-slate-900"
-                        }`}
-                    >
-                        {f.label}
-                    </button>
-                ))}
+        <div className="space-y-3">
+            <div className="inline-flex bg-slate-100 rounded-md p-0.5">
+                {FILTERS.map((f) => {
+                    const isActive = filter === f.id;
+                    return (
+                        <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => setFilter(f.id)}
+                            className="relative h-6 px-2.5 rounded text-[11px] font-medium outline-none whitespace-nowrap"
+                        >
+                            {isActive && (
+                                <motion.div
+                                    layoutId="contact-activity-filter"
+                                    className="absolute inset-0 rounded bg-white shadow-sm"
+                                    transition={{
+                                        type: "spring",
+                                        duration: 0.3,
+                                        bounce: 0.15,
+                                    }}
+                                />
+                            )}
+                            <span
+                                className={`relative z-10 transition-colors ${
+                                    isActive
+                                        ? "text-slate-900"
+                                        : "text-slate-500 hover:text-slate-800"
+                                }`}
+                            >
+                                {f.label}
+                            </span>
+                        </button>
+                    );
+                })}
             </div>
 
             {isLoading ? (
@@ -92,53 +106,38 @@ export default function ActivityTab({ contactId }: { contactId: string }) {
                     <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
                 </div>
             ) : error ? (
-                <div className="rounded-md border border-red-200 bg-red-50/50 px-3 py-2.5 text-[11.5px] text-red-700">
+                <div className="rounded-md border border-red-200 bg-red-50/60 px-3 py-2.5 text-[11.5px] text-red-700">
                     Failed to load activity.
                 </div>
             ) : events.length === 0 ? (
-                <div className="rounded-md border border-dashed border-slate-200 px-3 py-8 text-[11.5px] text-slate-400 text-center">
+                <div className="rounded-md border border-dashed border-slate-200 px-3 py-10 text-[11.5px] text-slate-400 text-center">
                     No activity yet for this filter.
                 </div>
             ) : (
-                <ol className="relative pl-5">
-                    {/* Vertical rail */}
-                    <span className="absolute left-2 top-1 bottom-1 w-px bg-slate-200" />
+                <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
                     {events.map((e, i) => (
-                        <li key={`${e.type}-${e.at}-${i}`} className="relative pb-3 last:pb-0">
-                            <EventDot type={e.type} />
-                            <EventRow event={e} />
-                        </li>
+                        <EventRow key={`${e.type}-${e.at}-${i}`} event={e} />
                     ))}
-                </ol>
+                </div>
             )}
             {data?.has_more && (
-                <div className="text-[10.5px] text-slate-400 text-center">
-                    Showing latest {events.length} events. Older history is
-                    paginated; ask the team if you need the full export.
+                <div className="text-[10.5px] text-slate-400 text-center pt-1">
+                    Showing latest {events.length} events.
                 </div>
             )}
         </div>
     );
 }
 
-function EventDot({ type }: { type: ContactTimelineEventType }) {
-    const { color } = visualFor(type);
-    return (
-        <span
-            className={`absolute -left-3 top-1 size-2 rounded-full border-2 border-white ${color}`}
-        />
-    );
-}
-
 function EventRow({ event }: { event: ContactTimelineEvent }) {
     const { Icon, label } = visualFor(event.type);
     return (
-        <div className="rounded-md border border-slate-200 bg-white px-2.5 py-2">
-            <div className="flex items-start gap-2">
-                <Icon className="w-3.5 h-3.5 text-slate-500 mt-px shrink-0" />
+        <div className="px-3 py-2 border-b last:border-b-0 border-slate-100">
+            <div className="flex items-start gap-2.5">
+                <Icon className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-1.5 flex-wrap">
-                        <span className="text-[12px] font-medium text-slate-900">
+                    <div className="flex items-baseline gap-1.5 min-w-0">
+                        <span className="text-[12px] font-medium text-slate-900 shrink-0">
                             {label}
                         </span>
                         {event.subject && (
@@ -150,14 +149,14 @@ function EventRow({ event }: { event: ContactTimelineEvent }) {
                     <EventMeta event={event} />
                 </div>
                 <span
-                    className="text-[10.5px] text-slate-400 tabular-nums shrink-0"
+                    className="text-[10.5px] text-slate-400 tabular-nums shrink-0 mt-0.5"
                     title={fmtAbsolute(event.at)}
                 >
                     {fmtRelative(event.at)}
                 </span>
             </div>
             {event.content && (
-                <div className="text-[11.5px] text-slate-700 mt-1.5 whitespace-pre-wrap break-words">
+                <div className="text-[11.5px] text-slate-700 mt-1.5 ml-6 whitespace-pre-wrap break-words border-l-2 border-slate-100 pl-2">
                     {event.content}
                 </div>
             )}
@@ -205,7 +204,9 @@ function EventMeta({ event }: { event: ContactTimelineEvent }) {
             {parts.map((p, i) => (
                 <React.Fragment key={i}>
                     {p}
-                    {i < parts.length - 1 && <span className="text-slate-300">·</span>}
+                    {i < parts.length - 1 && (
+                        <span className="text-slate-300">·</span>
+                    )}
                 </React.Fragment>
             ))}
         </div>
@@ -215,36 +216,27 @@ function EventMeta({ event }: { event: ContactTimelineEvent }) {
 function visualFor(type: ContactTimelineEventType): {
     Icon: typeof MailIcon;
     label: string;
-    color: string;
 } {
     switch (type) {
         case "email_sent":
-            return { Icon: MailIcon, label: "Email sent", color: "bg-slate-400" };
+            return { Icon: MailIcon, label: "Email sent" };
         case "email_opened":
-            return { Icon: MailOpenIcon, label: "Opened", color: "bg-sky-500" };
+            return { Icon: MailOpenIcon, label: "Opened" };
         case "email_clicked":
-            return {
-                Icon: MousePointerClickIcon,
-                label: "Clicked link",
-                color: "bg-indigo-500",
-            };
+            return { Icon: MousePointerClickIcon, label: "Clicked link" };
         case "email_replied":
-            return { Icon: ReplyIcon, label: "Replied (auto-detected)", color: "bg-emerald-500" };
+            return { Icon: ReplyIcon, label: "Replied" };
         case "reply_received":
-            return { Icon: MessageSquareIcon, label: "Reply received", color: "bg-emerald-500" };
+            return { Icon: MessageSquareIcon, label: "Reply received" };
         case "email_bounced":
-            return { Icon: MailWarningIcon, label: "Bounced", color: "bg-amber-500" };
+            return { Icon: MailWarningIcon, label: "Bounced" };
         case "deliverability":
-            return {
-                Icon: AlertOctagonIcon,
-                label: "Deliverability event",
-                color: "bg-red-500",
-            };
+            return { Icon: AlertOctagonIcon, label: "Deliverability event" };
         case "suppressed":
-            return { Icon: BanIcon, label: "Suppressed", color: "bg-red-600" };
+            return { Icon: BanIcon, label: "Suppressed" };
         case "note":
-            return { Icon: StickyNoteIcon, label: "Note added", color: "bg-yellow-500" };
+            return { Icon: StickyNoteIcon, label: "Note added" };
         default:
-            return { Icon: MailIcon, label: type, color: "bg-slate-400" };
+            return { Icon: MailIcon, label: type };
     }
 }
