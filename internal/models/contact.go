@@ -39,6 +39,133 @@ type ContactsResult struct {
 	Pagination Pagination `json:"pagination"`
 }
 
+// ContactEngagement summarises every email touchpoint we have for a
+// single contact. It's denormalised on read so the contact 360 view
+// can render counts and "last X" timestamps in a single round-trip.
+type ContactEngagement struct {
+	TotalSent     int `json:"total_sent"`
+	TotalOpened   int `json:"total_opened"`
+	TotalClicked  int `json:"total_clicked"`
+	TotalReplied  int `json:"total_replied"`
+	TotalBounced  int `json:"total_bounced"`
+	TotalComplained int `json:"total_complained"`
+
+	LastSentAt    *time.Time `json:"last_sent_at,omitempty"`
+	LastOpenedAt  *time.Time `json:"last_opened_at,omitempty"`
+	LastClickedAt *time.Time `json:"last_clicked_at,omitempty"`
+	LastRepliedAt *time.Time `json:"last_replied_at,omitempty"`
+	LastBouncedAt *time.Time `json:"last_bounced_at,omitempty"`
+}
+
+// ContactSuppression mirrors a row from suppressed_recipients for the
+// contact's email. Null on the wire when the contact is not suppressed.
+type ContactSuppression struct {
+	Reason    string     `json:"reason"`
+	Source    string     `json:"source"` // bounce | complaint | unsubscribe
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+// ContactDetail is the hydrated read model returned by GET /contacts/:id.
+// It bundles everything the slide-over needs in one payload so the UI
+// doesn't have to fan out a half-dozen requests on open.
+type ContactDetail struct {
+	Contact
+	Engagement  ContactEngagement   `json:"engagement"`
+	Suppression *ContactSuppression `json:"suppression,omitempty"`
+}
+
+// ContactSentEmail is one row in the "Emails sent to this contact"
+// list. Each row corresponds to a single delivered (or attempted)
+// task. Engagement timestamps come from campaign_contact_progress
+// when present; some legacy rows may have nil progress.
+type ContactSentEmail struct {
+	TaskID       uuid.UUID `json:"task_id"`
+	Status       string    `json:"status"`
+	MessageID    string    `json:"message_id"`
+	Subject      string    `json:"subject"`
+	SentAt       time.Time `json:"sent_at"`
+
+	// Sender mailbox
+	EmailAccountID    *uuid.UUID `json:"email_account_id,omitempty"`
+	EmailAccountEmail *string    `json:"email_account_email,omitempty"`
+	EmailAccountName  *string    `json:"email_account_name,omitempty"`
+
+	// Campaign + sequence context
+	CampaignID   *uuid.UUID `json:"campaign_id,omitempty"`
+	CampaignName *string    `json:"campaign_name,omitempty"`
+	SequenceID   *uuid.UUID `json:"sequence_id,omitempty"`
+	SequenceName *string    `json:"sequence_name,omitempty"`
+
+	// Engagement (from campaign_contact_progress, may be nil).
+	OpenedAt  *time.Time `json:"opened_at,omitempty"`
+	ClickedAt *time.Time `json:"clicked_at,omitempty"`
+	RepliedAt *time.Time `json:"replied_at,omitempty"`
+	BouncedAt *time.Time `json:"bounced_at,omitempty"`
+}
+
+type ContactSentEmailsResult struct {
+	Data       []ContactSentEmail `json:"data"`
+	Pagination Pagination         `json:"pagination"`
+}
+
+// ContactTimelineEventType is a closed enum so the frontend can pick
+// the right icon / colour without parsing free text.
+type ContactTimelineEventType string
+
+const (
+	TimelineEmailSent      ContactTimelineEventType = "email_sent"
+	TimelineEmailOpened    ContactTimelineEventType = "email_opened"
+	TimelineEmailClicked   ContactTimelineEventType = "email_clicked"
+	TimelineEmailReplied   ContactTimelineEventType = "email_replied"
+	TimelineEmailBounced   ContactTimelineEventType = "email_bounced"
+	TimelineReplyReceived  ContactTimelineEventType = "reply_received"
+	TimelineDeliverability ContactTimelineEventType = "deliverability"
+	TimelineSuppressed     ContactTimelineEventType = "suppressed"
+	TimelineNote           ContactTimelineEventType = "note"
+)
+
+// ContactTimelineEvent is one entry in the merged activity feed. The
+// optional fields are tagged with omitempty so the JSON stays compact
+// for event types that don't carry that data.
+type ContactTimelineEvent struct {
+	Type ContactTimelineEventType `json:"type"`
+	At   time.Time                `json:"at"`
+
+	// Mailbox sender (email_sent / opened / clicked / replied / bounced).
+	EmailAccountID    *uuid.UUID `json:"email_account_id,omitempty"`
+	EmailAccountEmail *string    `json:"email_account_email,omitempty"`
+	EmailAccountName  *string    `json:"email_account_name,omitempty"`
+
+	// Campaign / sequence linkage. Optional because notes, suppression,
+	// and out-of-campaign reply intents don't always have one.
+	CampaignID   *uuid.UUID `json:"campaign_id,omitempty"`
+	CampaignName *string    `json:"campaign_name,omitempty"`
+	SequenceID   *uuid.UUID `json:"sequence_id,omitempty"`
+	SequenceName *string    `json:"sequence_name,omitempty"`
+
+	// Task linkage for engagement events.
+	TaskID  *uuid.UUID `json:"task_id,omitempty"`
+	Subject *string    `json:"subject,omitempty"`
+
+	// Type-specific.
+	Reason   *string `json:"reason,omitempty"`   // deliverability / suppression
+	Source   *string `json:"source,omitempty"`   // suppression: bounce/complaint/unsubscribe
+	Provider *string `json:"provider,omitempty"` // deliverability provider
+	Intent   *string `json:"intent,omitempty"`   // reply_intent classification
+	Content  *string `json:"content,omitempty"`  // note body
+
+	// Author (notes).
+	UserID *uuid.UUID `json:"user_id,omitempty"`
+}
+
+type ContactTimelineResult struct {
+	Data []ContactTimelineEvent `json:"data"`
+	// True if we hit the per-call cap and the caller should paginate
+	// via the `before` query param.
+	HasMore bool `json:"has_more"`
+}
+
 type UpdateContact struct {
 	FirstName        *string            `json:"first_name"`
 	LastName         *string            `json:"last_name"`

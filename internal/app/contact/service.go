@@ -3,7 +3,9 @@ package contact
 import (
 	"context"
 	"io"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -30,6 +32,18 @@ type ContactService interface {
 	// and performs the upsert / skip / dedup work. Returns per-row
 	// result counts plus a list of rows that failed (with reasons).
 	ImportCommit(ctx context.Context, userID string, file io.Reader, filename string, opts *models.ContactImportCommit) (*models.ContactImportResult, *errx.Error)
+
+	// GetDetail returns the 360 read model used by the contact
+	// slide-over: hydrated contact + engagement summary + suppression.
+	GetDetail(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, contactID uuid.UUID) (*models.ContactDetail, *errx.Error)
+
+	// ListSentEmails enumerates every send (or attempted send) we made
+	// to the contact, newest first.
+	ListSentEmails(ctx context.Context, userID, contactID uuid.UUID, limit int, beforeSentAt *time.Time, beforeTaskID *uuid.UUID) (*models.ContactSentEmailsResult, *errx.Error)
+
+	// ListTimeline returns a merged, reverse-chronological feed of all
+	// engagement + CRM events for the contact.
+	ListTimeline(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, contactID uuid.UUID, limit int, before *time.Time) (*models.ContactTimelineResult, *errx.Error)
 }
 
 type contactService struct {

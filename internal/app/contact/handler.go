@@ -2,6 +2,7 @@ package contact
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
@@ -65,4 +66,16 @@ func (s *contactService) BulkDelete(ctx context.Context, userID string, contactI
 
 func (s *contactService) Delete(ctx context.Context, userID string, contactID string) *errx.Error {
 	return s.contactRepository.Delete(ctx, userID, contactID)
+}
+
+func (s *contactService) GetDetail(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, contactID uuid.UUID) (*models.ContactDetail, *errx.Error) {
+	return s.contactRepository.GetDetail(ctx, userID, orgID, contactID)
+}
+
+func (s *contactService) ListSentEmails(ctx context.Context, userID, contactID uuid.UUID, limit int, beforeSentAt *time.Time, beforeTaskID *uuid.UUID) (*models.ContactSentEmailsResult, *errx.Error) {
+	return s.contactRepository.ListSentEmails(ctx, userID, contactID, limit, beforeSentAt, beforeTaskID)
+}
+
+func (s *contactService) ListTimeline(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, contactID uuid.UUID, limit int, before *time.Time) (*models.ContactTimelineResult, *errx.Error) {
+	return s.contactRepository.ListTimeline(ctx, userID, orgID, contactID, limit, before)
 }
