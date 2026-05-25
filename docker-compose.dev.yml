@@ -1,0 +1,132 @@
+# Dev mode override. Brings all stateful build steps inside long-
+# running containers with bind-mounted source so a save in the host
+# triggers an in-container recompile/restart — no docker image
+# rebuild, no container recreate.
+#
+# Activated via `make dev` (or `docker compose -f docker-compose.yml
+# -f docker-compose.dev.yml up`).
+#
+# Covers:
+#   - backend / consumer / worker-shared-1  (Go via air)
+#   - tracking                              (Rust via cargo-watch)
+#   - realtime                              (Elixir via mix phx.server)
+#
+# The default `docker-compose.yml` keeps the production-style images
+# untouched; `make up` still uses those.
+#
+# Caching strategy: each language's build cache lives on a named
+# volume whose `name:` skips the per-project prefix, so worktrees
+# point at the same physical volumes on the host and starts after the
+# first are seconds, not minutes.
+
+services:
+  # ─── Go services (backend / consumer / worker) ────────────────────────
+  backend:
+    image: warmbly-go-dev
+    build:
+      context: .
+      dockerfile: deploy/docker/go-dev.Dockerfile
+    environment:
+      WARMBLY_CMD: backend
+    volumes:
+      - .:/app
+      - warmbly_gomodcache:/go/pkg/mod
+      - warmbly_gocache:/root/.cache/go-build
+    # Relax the prod healthcheck instead of disabling it: dev needs to
+    # keep one because web, seed and the base consumer all depend on
+    # backend with `condition: service_healthy`, and compose refuses to
+    # bring up a service whose service_healthy target has no
+    # healthcheck.
+    #
+    # The bigger start_period gives air time to do a cold first compile
+    # (Go build cache empty in a fresh worktree → 60-90s isn't unusual).
+    # depends_on only gates initial startup, so the brief unhealthy
+    # blips on each subsequent rebuild don't bounce dependents.
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 180s
+
+  consumer:
+    image: warmbly-go-dev
+    build:
+      context: .
+      dockerfile: deploy/docker/go-dev.Dockerfile
+    environment:
+      WARMBLY_CMD: consumer
+    volumes:
+      - .:/app
+      - warmbly_gomodcache:/go/pkg/mod
+      - warmbly_gocache:/root/.cache/go-build
+    depends_on:
+      backend:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_started
+
+  worker-shared-1:
+    image: warmbly-go-dev
+    build:
+      context: .
+      dockerfile: deploy/docker/go-dev.Dockerfile
+    environment:
+      WARMBLY_CMD: worker
+      WORKER_TIER: shared
+    volumes:
+      - .:/app
+      - warmbly_gomodcache:/go/pkg/mod
+      - warmbly_gocache:/root/.cache/go-build
+
+  # ─── Rust (tracking) ──────────────────────────────────────────────────
+  tracking:
+    image: warmbly-rust-dev
+    build:
+      context: .
+      dockerfile: deploy/docker/rust-dev.Dockerfile
+    volumes:
+      - ./tracking:/app
+      - warmbly_cargo_home:/usr/local/cargo
+      # Build artifacts default to ./tracking/target inside the bind
+      # mount. Redirecting to a named volume keeps the host tree clean
+      # and lets the artifact cache survive container recreates.
+      - warmbly_cargo_target:/app/target
+    healthcheck:
+      disable: true
+
+  # ─── Elixir (realtime) ────────────────────────────────────────────────
+  realtime:
+    image: warmbly-elixir-dev
+    build:
+      context: .
+      dockerfile: deploy/docker/elixir-dev.Dockerfile
+    environment:
+      # Phoenix uses MIX_ENV=dev for code reload; PHX_HOST/PORT/etc
+      # from the base file still apply.
+      MIX_ENV: dev
+    volumes:
+      - ./realtime:/app
+      - warmbly_mix_deps:/app/deps
+      - warmbly_mix_build:/app/_build
+    healthcheck:
+      disable: true
+
+volumes:
+  # `name:` overrides the default `<project>_<volume>` prefixing. Every
+  # worktree that brings up this override mounts the same physical
+  # volume, so cache populated in one worktree is warm in every other.
+  warmbly_gomodcache:
+    name: warmbly_gomodcache
+  warmbly_gocache:
+    name: warmbly_gocache
+  warmbly_cargo_home:
+    name: warmbly_cargo_home
+  warmbly_cargo_target:
+    name: warmbly_cargo_target
+  warmbly_mix_deps:
+    name: warmbly_mix_deps
+  warmbly_mix_build:
+    name: warmbly_mix_build

@@ -16,13 +16,16 @@
 // landing, no orgs" and "ongoing management" cases.
 
 import React from "react";
-import { useNavigate } from "react-router-dom";
-import { Loader2Icon, MailIcon, PlusIcon, UsersIcon } from "lucide-react";
+import { Navigate, useNavigate } from "react-router-dom";
+import { LogOutIcon, Loader2Icon, MailIcon, PlusIcon, UsersIcon } from "lucide-react";
 import toast from "react-hot-toast";
+import getToken from "@/lib/helper/getToken";
 import useOrganizations from "@/lib/api/hooks/app/organizations/useOrganizations";
 import useMyInvitations from "@/lib/api/hooks/app/organizations/useMyInvitations";
 import useAcceptInvitation from "@/lib/api/hooks/app/organizations/useAcceptInvitation";
 import useSwitchOrganization from "@/lib/api/hooks/app/organizations/useSwitchOrganization";
+import useLogout from "@/lib/api/hooks/auth/useLogout";
+import useUser from "@/lib/api/hooks/auth/useUser";
 import { useAppStore } from "@/stores";
 import { Logo } from "@/components/svg";
 import { NewWorkspaceDialog } from "@/components/app/organizations/NewWorkspaceDialog";
@@ -51,6 +54,17 @@ function initials(name: string): string {
 }
 
 export default function SelectOrgPage() {
+    // Guard: this page is the post-login workspace picker. Hitting it
+    // without a token (direct URL, expired session) bounces to login,
+    // matching the protection on /app/* and /onboarding.
+    if (!getToken()) {
+        return <Navigate to="/auth/login" replace />;
+    }
+
+    return <SelectOrgPageInner />;
+}
+
+function SelectOrgPageInner() {
     const navigate = useNavigate();
     const [createOpen, setCreateOpen] = React.useState(false);
 
@@ -59,9 +73,22 @@ export default function SelectOrgPage() {
     const setOrganizations = useAppStore((s) => s.setOrganizations);
     const setCurrentOrganization = useAppStore((s) => s.setCurrentOrganization);
     const currentOrg = useAppStore((s) => s.currentOrganization);
+    // Read identity directly from the /auth/me query. The zustand
+    // user slice is only populated inside RootAppLayout (via
+    // DataSyncProvider), and this page sits *above* that layout in
+    // the route tree, so useAppStore(s => s.user) is always null here
+    // and the footer would never render.
+    const userQuery = useUser();
+    const user = userQuery.data ?? null;
 
     const accept = useAcceptInvitation();
     const switchOrg = useSwitchOrganization();
+    const logout = useLogout();
+
+    async function onLogout() {
+        await logout.mutateAsync();
+        navigate("/auth/login", { replace: true });
+    }
 
     const orgList = orgs.data ?? [];
     const inviteList = invites.data ?? [];
@@ -264,6 +291,29 @@ export default function SelectOrgPage() {
                         </>
                     )}
                 </div>
+
+                {/* Identity + escape hatch. Sits inside the card on a
+                    muted slate strip so the user always has a visible
+                    way out of this screen — important because before
+                    a workspace is picked there's no sidebar, no nav,
+                    no other surface that exposes "log out". */}
+                {user && (
+                    <div className="px-4 h-10 border-t border-slate-200 bg-slate-50/60 flex items-center gap-2">
+                        <span className="text-[11px] text-slate-500 truncate flex-1 min-w-0">
+                            Signed in as{" "}
+                            <span className="text-slate-700 font-medium">{user.email}</span>
+                        </span>
+                        <button
+                            type="button"
+                            onClick={onLogout}
+                            disabled={logout.isPending}
+                            className="h-6 px-2 rounded text-[11px] text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 inline-flex items-center gap-1 transition-colors disabled:opacity-50 shrink-0"
+                        >
+                            <LogOutIcon className="w-3 h-3" />
+                            {logout.isPending ? "Signing out…" : "Log out"}
+                        </button>
+                    </div>
+                )}
             </div>
 
             <NewWorkspaceDialog open={createOpen} onClose={() => setCreateOpen(false)} />

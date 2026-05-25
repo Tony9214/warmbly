@@ -1,6 +1,7 @@
 import React from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useNavigate } from "react-router-dom";
 import { APP_URL, WEBSITE_URL } from "@/lib/information";
+import getToken from "@/lib/helper/getToken";
 import { Logo } from "@/components/svg";
 import { Mail, BarChart3, Zap, Shield, Github, ArrowRight } from "lucide-react";
 
@@ -98,7 +99,16 @@ const features = [
    Auth Layout — Living sky with layered clouds
    ═══════════════════════════════════════════ */
 
-export default function AuthLayout() {
+// `redirectIfAuthenticated` defaults to true so the bare /auth/* mount
+// kicks already-signed-in users back into the app. OnboardingLayout
+// reuses this component for its visual chrome but passes false — the
+// onboarding page is *meant* to be reached while authenticated, and
+// without this opt-out the AuthLayout guard bounces to /app/emails
+// while UserProvider bounces back to /onboarding, producing an
+// infinite history.replaceState loop.
+export default function AuthLayout({
+    redirectIfAuthenticated = true,
+}: { redirectIfAuthenticated?: boolean } = {}) {
     const navigate = useNavigate();
 
     React.useEffect(() => {
@@ -109,6 +119,14 @@ export default function AuthLayout() {
         window.addEventListener("message", receiveMessage);
         return () => window.removeEventListener("message", receiveMessage);
     }, [navigate]);
+
+    // Already signed in? Skip the auth UI entirely and send the user
+    // into the app. /app's own guard will redirect onward to
+    // /select-org or /onboarding if needed. Sits after hooks so the
+    // Rules of Hooks aren't violated when the token state changes.
+    if (redirectIfAuthenticated && getToken()) {
+        return <Navigate to="/app/emails" replace />;
+    }
 
     return (
         <div

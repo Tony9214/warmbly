@@ -5,6 +5,7 @@ export default interface SearchContacts {
     query: string;
     filters: SearchContactsFilter[];
     campaign_ids: string[];
+    category_ids?: string[];
     min_campaigns?: number;
     max_campaigns?: number;
     subscribed?: boolean;

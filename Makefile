@@ -13,7 +13,7 @@ PROTO_DIR := internal/tasks/proto
 PROTO_GEN_FILES := $(PROTO_DIR)/tasks.pb.go
 
 .PHONY: setup-tools lint proto check-proto \
-        dev sim seed reset logs status stop down tools test-seed \
+        up dev dev-down dev-logs sim seed reset logs status stop down tools test-seed \
         restart restart-go restart-all
 
 setup-tools:
@@ -43,17 +43,23 @@ check-proto:
 
 # ─── dev / simulation stack ─────────────────────────────────────────────
 
-# Start infra + app services (one worker). Foreground.
-dev:
+# Bring up the production-style stack (one worker, foreground).
+# Uses the unchanged docker-compose.yml — every service runs the same
+# image it would run in prod, just wired against local infra. Good
+# for "does the release binary boot?" smoke tests.
+up:
 	docker compose up
 
 # Full simulation: infra + app + premium and dedicated workers.
 sim:
 	docker compose --profile sim up
 
-# Load rich fixture data. Backend must already be healthy.
+# Load rich fixture data. Requires backend up (via `make dev` or
+# `make up`) so migrations have run. `-T` disables TTY allocation
+# (Make's shell isn't a tty; without -T compose can silently swallow
+# the seed's stdout).
 seed:
-	docker compose --profile seed run --rm seed
+	docker compose --profile seed run --rm -T seed
 
 # Spin up debugging UIs (kafka-ui).
 tools:
@@ -100,16 +106,73 @@ restart:
 
 # Rebuild + restart every Go service in one shot. Use when you've touched
 # something in internal/ and don't want to think about which service uses
-# it.
+# it. `--parallel` runs the three Go builds concurrently.
 restart-go:
-	docker compose build backend consumer worker-shared-1
+	docker compose build --parallel backend consumer worker-shared-1
 	docker compose up -d backend consumer worker-shared-1
 
 # Same but including Rust (tracking) and Elixir (realtime). Slower; the
 # safe choice when you've touched things across stacks.
 restart-all:
-	docker compose build backend consumer worker-shared-1 tracking realtime
+	docker compose build --parallel backend consumer worker-shared-1 tracking realtime
 	docker compose up -d backend consumer worker-shared-1 tracking realtime
+
+# ─── hot-reload dev mode ────────────────────────────────────────────────
+#
+# Bind-mounts source into long-running containers so saves are picked
+# up without a docker image rebuild:
+#
+#   - backend / consumer / worker-shared-1   → air watches .go and
+#     rebuilds the binary into ./tmp/main, then restarts in place.
+#   - tracking                                → cargo-watch reruns
+#     `cargo run` on changes under tracking/src.
+#   - realtime                                → mix phx.server — Phoenix
+#     reloads modules in-process; no external watcher.
+#
+# Caches (Go mod + build, Cargo registry + target, Mix deps + _build)
+# live on named volumes whose `name:` skips the per-project prefix, so
+# the second worktree to bring up `make dev` starts in seconds.
+#
+# `make up` still gives you the production-style images. Dev is opt-in.
+
+DEV_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
+# Services with a hot-reload override in docker-compose.dev.yml. Used
+# by dev-down / dev-logs to scope to "the things dev mode replaced".
+DEV_SVCS    := backend consumer worker-shared-1 tracking realtime
+
+# Bring up the full stack with dev-mode overrides for the language
+# services. Same set of services you'd get from `make up` (infra,
+# mailpit, web, app, one worker), but the 5 language services in
+# DEV_SVCS run from the *-dev Dockerfiles with bind-mounted source.
+#
+# We pass no service list on purpose: depends_on doesn't pull in
+# mailpit (only used via SMTP env vars, no edge in the graph) or web,
+# so naming the 5 dev services directly would silently drop them. The
+# user expectation is "dev = up + hot reload", so default to the full
+# default profile.
+#
+# Escape hatch: SVCS="backend consumer worker-shared-1" narrows the
+# `up` to just those services (plus their depends_on chain) if you
+# don't want to spin up Rust/Elixir.
+SVCS ?=
+dev:
+	$(DEV_COMPOSE) up -d --build $(SVCS)
+	@echo ""
+	@echo "Dev mode running. Hot reload enabled for: $(DEV_SVCS)"
+	@echo "  Go saves           → ~2-5s rebuild (air)"
+	@echo "  Rust saves         → ~2-10s rebuild (cargo-watch, debug build)"
+	@echo "  Elixir saves       → in-process reload (Phoenix)"
+	@echo ""
+	@echo "Stream logs:   make dev-logs"
+	@echo "Stop dev:      make dev-down    (stops language services only)"
+	@echo "Stop all:      make stop        (everything, incl. infra)"
+
+dev-down:
+	$(DEV_COMPOSE) stop $(DEV_SVCS)
+	@echo "dev language services stopped (infra still up). Run 'make stop' to tear down everything."
+
+dev-logs:
+	$(DEV_COMPOSE) logs -f --tail=200 $(DEV_SVCS)
 
 # Positional-args plumbing. When the first goal is `restart` or `logs`,
 # capture every following word as RUN_ARGS and declare those words as

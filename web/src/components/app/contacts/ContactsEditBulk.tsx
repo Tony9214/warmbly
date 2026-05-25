@@ -25,9 +25,11 @@ import { Label, TextInput } from "@/components/ui/field";
 import useUpdateContactsBulk from "@/lib/api/hooks/app/contacts/useUpdateContactsBulk";
 import useCampaigns from "@/lib/api/hooks/app/campaigns/useCampaigns";
 import useClickOutside from "@/hooks/useClickOutside";
+import useFlipPlacement from "@/hooks/useFlipPlacement";
 import type MiniCampaign from "@/lib/api/models/app/campaigns/MiniCampaign";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
+import CategoryPicker from "./CategoryPicker";
 
 type FieldType = "ADD" | "EDIT" | "DELETE" | "RENAME";
 const FIELD_TYPES: { id: FieldType; label: string; hint: string }[] = [
@@ -54,6 +56,8 @@ export default function ContactsEditBulk({
 }) {
     const [campaignsAdd, setCampaignsAdd] = React.useState<MiniCampaign[]>([]);
     const [campaignsRemove, setCampaignsRemove] = React.useState<MiniCampaign[]>([]);
+    const [categoriesAdd, setCategoriesAdd] = React.useState<string[]>([]);
+    const [categoriesRemove, setCategoriesRemove] = React.useState<string[]>([]);
     const [fields, setFields] = React.useState<Field[]>([]);
     const [subscribeMode, setSubscribeMode] = React.useState<"unchanged" | "subscribe" | "unsubscribe">("unchanged");
 
@@ -62,12 +66,16 @@ export default function ContactsEditBulk({
     const dirty =
         campaignsAdd.length > 0 ||
         campaignsRemove.length > 0 ||
+        categoriesAdd.length > 0 ||
+        categoriesRemove.length > 0 ||
         fields.length > 0 ||
         subscribeMode !== "unchanged";
 
     function reset() {
         setCampaignsAdd([]);
         setCampaignsRemove([]);
+        setCategoriesAdd([]);
+        setCategoriesRemove([]);
         setFields([]);
         setSubscribeMode("unchanged");
     }
@@ -78,6 +86,8 @@ export default function ContactsEditBulk({
             contacts: selected,
             add_campaigns: campaignsAdd.map((c) => c.id),
             remove_campaigns: campaignsRemove.map((c) => c.id),
+            add_categories: categoriesAdd,
+            remove_categories: categoriesRemove,
             fields,
             subscribe:
                 subscribeMode === "subscribe" ? true : subscribeMode === "unsubscribe" ? false : undefined,
@@ -170,6 +180,30 @@ export default function ContactsEditBulk({
                                             Remove from campaigns
                                         </Label>
                                         <CampaignPicker selected={campaignsRemove} setSelected={setCampaignsRemove} />
+                                    </div>
+                                </div>
+                            </Section>
+
+                            <Section title="Categories" subtitle="Apply or strip categories from every selected contact.">
+                                <div className="grid grid-cols-1 gap-3">
+                                    <div>
+                                        <Label className="flex items-center gap-1 text-emerald-700">
+                                            <PlusCircleIcon className="w-3 h-3" />
+                                            Add categories
+                                        </Label>
+                                        <CategoryPicker value={categoriesAdd} onChange={setCategoriesAdd} />
+                                    </div>
+                                    <div>
+                                        <Label className="flex items-center gap-1 text-red-700">
+                                            <MinusCircleIcon className="w-3 h-3" />
+                                            Remove categories
+                                        </Label>
+                                        <CategoryPicker
+                                            value={categoriesRemove}
+                                            onChange={setCategoriesRemove}
+                                            allowCreate={false}
+                                            placeholder="Pick categories to strip…"
+                                        />
                                     </div>
                                 </div>
                             </Section>
@@ -315,7 +349,9 @@ function FieldRow({
 }) {
     const [showType, setShowType] = React.useState(false);
     const dropRef = React.useRef<HTMLDivElement>(null);
+    const triggerRef = React.useRef<HTMLButtonElement>(null);
     useClickOutside(dropRef, () => setShowType(false));
+    const typePlacement = useFlipPlacement(triggerRef, showType, 180);
     const typeDef = FIELD_TYPES.find((t) => t.id === field.type)!;
 
     return (
@@ -324,6 +360,7 @@ function FieldRow({
                 {/* Type selector */}
                 <div ref={dropRef} className="relative shrink-0">
                     <button
+                        ref={triggerRef}
                         type="button"
                         onClick={() => setShowType((s) => !s)}
                         className="h-7 px-2 rounded-md border border-slate-200 hover:border-slate-300 text-[11.5px] font-medium text-slate-700 inline-flex items-center gap-1 transition-colors"
@@ -334,11 +371,13 @@ function FieldRow({
                     <AnimatePresence>
                         {showType && (
                             <motion.div
-                                initial={{ opacity: 0, y: -4 }}
+                                initial={{ opacity: 0, y: typePlacement === "top" ? 4 : -4 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -4 }}
+                                exit={{ opacity: 0, y: typePlacement === "top" ? 4 : -4 }}
                                 transition={{ duration: 0.12 }}
-                                className="absolute top-full left-0 mt-1 z-20 w-56 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] py-1"
+                                className={`absolute left-0 z-20 w-56 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] py-1 ${
+                                    typePlacement === "top" ? "bottom-full mb-1" : "top-full mt-1"
+                                }`}
                             >
                                 {FIELD_TYPES.map((t) => (
                                     <button
@@ -406,7 +445,9 @@ function CampaignPicker({
     const [search, setSearch] = React.useState("");
     const [enabled, setEnabled] = React.useState(false);
     const ref = React.useRef<HTMLDivElement>(null);
+    const triggerRef = React.useRef<HTMLDivElement>(null);
     useClickOutside(ref, () => setOpen(false));
+    const placement = useFlipPlacement(triggerRef, open, 290);
 
     React.useEffect(() => {
         if (open) setEnabled(true);
@@ -424,7 +465,7 @@ function CampaignPicker({
 
     return (
         <div ref={ref} className="relative">
-            <div className="rounded-md border border-slate-200 bg-white">
+            <div ref={triggerRef} className="rounded-md border border-slate-200 bg-white">
                 {selected.length === 0 ? (
                     <div
                         onClick={() => setOpen((o) => !o)}
@@ -468,11 +509,13 @@ function CampaignPicker({
             <AnimatePresence>
                 {open && (
                     <motion.div
-                        initial={{ opacity: 0, y: -4 }}
+                        initial={{ opacity: 0, y: placement === "top" ? 4 : -4 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
+                        exit={{ opacity: 0, y: placement === "top" ? 4 : -4 }}
                         transition={{ duration: 0.12 }}
-                        className="absolute top-full left-0 right-0 mt-1 z-20 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] overflow-hidden"
+                        className={`absolute left-0 right-0 z-20 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] overflow-hidden ${
+                            placement === "top" ? "bottom-full mb-1" : "top-full mt-1"
+                        }`}
                     >
                         <div className="px-2 py-1.5 border-b border-slate-200">
                             <input

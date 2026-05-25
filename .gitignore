@@ -55,6 +55,12 @@ web/.pnpm-store/
 test-results/
 web/.tmp/
 
+# air (dev hot-reload) build artifacts. The dev container writes its
+# rebuilt Go binaries to /app/tmp/main, which is the bind-mounted
+# worktree — so they show up here on the host.
+tmp/
+build-errors.log
+
 # AI assistant local state
 .claude/
 .claude.json

@@ -1,4 +1,5 @@
 import type MiniCampaign from "../campaigns/MiniCampaign";
+import type MiniCategory from "./MiniCategory";
 
 export default interface Contact {
     id: string;
@@ -13,6 +14,7 @@ export default interface Contact {
 
     subscribed: boolean;
     campaigns: MiniCampaign[];
+    categories: MiniCategory[];
 
     updated_at: Date;
     created_at: Date;

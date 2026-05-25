@@ -13,6 +13,7 @@ import type { AddContact } from "@/components/app/AddContacts";
 import { Label, TextInput } from "@/components/ui/field";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
+import CategoryPicker from "./CategoryPicker";
 
 interface Props {
     open: boolean;
@@ -25,6 +26,7 @@ export function NewContactDialog({ open, onClose }: Props) {
     const [lastName, setLastName] = React.useState("");
     const [company, setCompany] = React.useState("");
     const [phone, setPhone] = React.useState("");
+    const [categories, setCategories] = React.useState<string[]>([]);
     const add = useAddContacts();
 
     React.useEffect(() => {
@@ -34,6 +36,7 @@ export function NewContactDialog({ open, onClose }: Props) {
             setLastName("");
             setCompany("");
             setPhone("");
+            setCategories([]);
         }
     }, [open]);
 
@@ -54,6 +57,7 @@ export function NewContactDialog({ open, onClose }: Props) {
             company: company.trim(),
             phone: phone.trim(),
             campaigns: [],
+            categories,
             custom_fields: {},
         };
         try {
@@ -145,6 +149,10 @@ export function NewContactDialog({ open, onClose }: Props) {
                             <div>
                                 <Label>Phone</Label>
                                 <TextInput value={phone} onChange={setPhone} className="w-full" />
+                            </div>
+                            <div>
+                                <Label>Categories</Label>
+                                <CategoryPicker value={categories} onChange={setCategories} />
                             </div>
                         </form>
 
