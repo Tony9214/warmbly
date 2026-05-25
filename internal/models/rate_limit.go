@@ -89,21 +89,25 @@ type RateLimitStatus struct {
 	RetryAfterMs *int64            `json:"retry_after_ms,omitempty"`
 }
 
-// DefaultRateLimits returns the default rate limits
+// DefaultRateLimits returns the default rate limits. Sized to allow paid
+// customers to sustain ~100 req/s on read and write categories, matching
+// the API throughput competitors (Instantly) advertise as of mid-2026.
+// 100 req/s = 6000 req/min. BurstMultiplier=2.0 lets brief spikes hit
+// 200 req/s before throttling kicks in.
 func DefaultRateLimits() *UserRateLimits {
 	return &UserRateLimits{
-		LimitReadPM:        300,
-		LimitWritePM:       60,
-		LimitBulkPM:        10,
-		LimitUniboxPM:      120,
-		LimitAnalyticsPM:   60,
-		LimitAPICallsDaily: 50000,
-		LimitBulkOpsDaily:  100,
+		LimitReadPM:        6000,
+		LimitWritePM:       6000,
+		LimitBulkPM:        600,
+		LimitUniboxPM:      1200,
+		LimitAnalyticsPM:   600,
+		LimitAPICallsDaily: 500000,
+		LimitBulkOpsDaily:  1000,
 		LimitWSMessagePM:   120,
 		LimitWSJoinPM:      30,
 		LimitWSEventPM:     60,
 		MaxConnections:     10,
-		BurstMultiplier:    1.5,
+		BurstMultiplier:    2.0,
 	}
 }
 
