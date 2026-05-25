@@ -1,0 +1,184 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PageHero from '../components/PageHero.astro';
+import Section from '../components/Section.astro';
+import SectionHead from '../components/SectionHead.astro';
+import Card from '../components/Card.astro';
+import Icon from '../components/Icon.astro';
+import CTA from '../components/CTA.astro';
+
+const pillars = [
+  {
+    icon: 'flame',
+    title: 'Warmup',
+    href: '/warmup/',
+    body: 'Reputation-safe pools, gradual ramps, automatic quarantine. Free and premium pools never mix.',
+    bullets: [
+      'Start at 10/day, ramp +1/day, ceiling 40/day',
+      'Spam-score tracking & invalid token detection',
+      'Auto-block at 3 invalid tokens / 24h or score > 50',
+      'Recovery pool for cooldown senders',
+    ],
+  },
+  {
+    icon: 'send',
+    title: 'Sending engine',
+    href: '/sending/',
+    body: 'Workers distribute campaign mail across machines. Per-mailbox caps, per-worker concentration limits.',
+    bullets: [
+      'Default 50/day cold cap per mailbox',
+      'Minimum 10-minute gap between sends',
+      'Worker volume = sum of mailbox budgets',
+      'Native Gmail, Outlook, SMTP/IMAP',
+    ],
+  },
+  {
+    icon: 'inbox',
+    title: 'Unified inbox',
+    href: '/inbox/',
+    body: 'Every reply, OOO, bounce and click across every mailbox in one console. Assign, snooze, label, search.',
+    bullets: [
+      'Reply detection that survives quoted text',
+      'OOO classification with auto-suppress',
+      'Thread-level assignment to teammates',
+      'Search across all connected mailboxes',
+    ],
+  },
+  {
+    icon: 'workflow',
+    title: 'Sequences',
+    href: '/campaigns/',
+    body: 'Multi-step sequences with conditions, A/B variants and time-zone aware sending.',
+    bullets: [
+      'Step delays in business hours by recipient TZ',
+      'A/B variants on subject and body',
+      'If-replied / if-opened / if-clicked branching',
+      'Plain-text first; opt-in to HTML',
+    ],
+  },
+  {
+    icon: 'chart',
+    title: 'Analytics',
+    href: '/analytics/',
+    body: 'Placement, complaint rate, bounce rate, warmup health by mailbox, pool and worker — not just opens.',
+    bullets: [
+      'Inbox vs spam placement per mailbox',
+      'Complaint rate vs Google’s 0.1% / 0.3% bands',
+      'Bounce rate vs SES’s 5% / 10% bands',
+      'Health state machine: healthy → watch → quarantined',
+    ],
+  },
+  {
+    icon: 'contact',
+    title: 'Contacts & CRM',
+    href: '/crm/',
+    body: 'Light CRM with pipelines, deals and tasks. Imports, dedup, categories, suppression-aware.',
+    bullets: [
+      'CSV/XLSX/JSON import with column mapping',
+      'Dedup by email, domain or custom key',
+      'Categories instead of tag soup',
+      'Suppression list shared across campaigns',
+    ],
+  },
+  {
+    icon: 'cpu',
+    title: 'Workers',
+    href: '/workers/',
+    body: 'Distributed execution plane. Shared free, shared premium, or dedicated to your org.',
+    bullets: [
+      'Kafka-driven command/result topics',
+      'Per-worker IP identity, no shared NAT',
+      'Live rebalance and migration',
+      'Lightweight: no Postgres on workers',
+    ],
+  },
+  {
+    icon: 'shield',
+    title: 'Security',
+    href: '/security/',
+    body: 'Envelope encryption with AWS KMS, per-user data keys, cached decryption, audit log.',
+    bullets: [
+      'AES-256-GCM via KMS-generated DEKs',
+      'Encrypted DEK stored, plaintext cached briefly',
+      'Workers never touch Postgres',
+      'Admin actions audited',
+    ],
+  },
+  {
+    icon: 'webhook',
+    title: 'API & webhooks',
+    href: '/developers/',
+    body: 'Programmatic control over mailboxes, campaigns, contacts. Signed webhooks for every event.',
+    bullets: [
+      'REST with idempotency keys',
+      'HMAC-signed webhooks',
+      'Per-key scopes & rotation',
+      'Rate limits surfaced in headers',
+    ],
+  },
+];
+---
+<Layout
+  title="Product — Warmbly"
+  description="Warmbly is warmup, sending, inbox and analytics in one platform — built for cold email teams who care about deliverability."
+>
+  <PageHero
+    eyebrow="Product"
+    title="One platform for warmup, sending and inbox."
+    description="Warmbly replaces three or four tools and the spreadsheet that ties them together. Connect mailboxes, warm them, send sequences, watch placement, and reply from a single console."
+  />
+
+  <Section>
+    <SectionHead
+      eyebrow="Nine systems, one product"
+      title="Each pillar engineered to make the next one safer."
+      description="The signal warmup gathers is the signal sending throttles on. The signal inbox classifies is the signal analytics scores. Nothing exists in a vacuum."
+    />
+    <div class="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {pillars.map((p) => (
+        <Card class="flex flex-col">
+          <div class="w-9 h-9 rounded-lg bg-brand-soft text-brand inline-flex items-center justify-center mb-4">
+            <Icon name={p.icon} size={18} />
+          </div>
+          <h3 class="text-[15.5px] font-semibold">{p.title}</h3>
+          <p class="mt-1.5 text-[13.5px] text-muted-foreground leading-relaxed">{p.body}</p>
+          <ul class="mt-4 space-y-1.5">
+            {p.bullets.map((b) => (
+              <li class="flex items-start gap-2 text-[13px] text-foreground/85">
+                <Icon name="check" size={13} class="text-success mt-1 shrink-0" />
+                <span>{b}</span>
+              </li>
+            ))}
+          </ul>
+          <a href={p.href} class="mt-5 inline-flex items-center gap-1.5 text-[13px] font-medium text-brand hover:text-brand-strong">
+            Learn more <Icon name="arrowRight" size={13} />
+          </a>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <Section variant="muted">
+    <SectionHead
+      eyebrow="Design principles"
+      title="Opinionated where it matters. Quiet everywhere else."
+    />
+    <div class="mt-10 grid md:grid-cols-2 gap-4">
+      {[
+        ['Mailbox first, not worker first', 'A worker’s safe send volume is the sum of its mailbox budgets. We don’t reward you for forcing one inbox to do the work of ten.'],
+        ['Quarantine before providers do', 'Shared pool thresholds are stricter than Google/Microsoft enforcement, so reputation never gets the chance to slip publicly.'],
+        ['Plain-text by default', 'Cold mail is a person talking to a person. HTML is opt-in; we won’t add tracking pixels or branded footers without permission.'],
+        ['No black boxes', 'Every action, score, suppression and quarantine has a reason you can read. No “the algorithm decided.”'],
+        ['Reputation is shared infrastructure', 'A bad sender in a shared pool taxes everyone. We act on warning bands, not catastrophic bands.'],
+        ['Workers are replaceable', 'Worker state is disposable. We can migrate a mailbox between workers without you noticing.'],
+      ].map(([title, body]) => (
+        <Card>
+          <h3 class="text-[15px] font-semibold">{title}</h3>
+          <p class="mt-1.5 text-[13.5px] text-muted-foreground leading-relaxed">{body}</p>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <CTA />
+</Layout>

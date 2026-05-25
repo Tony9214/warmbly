@@ -1,0 +1,227 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PageHero from '../components/PageHero.astro';
+import Section from '../components/Section.astro';
+import SectionHead from '../components/SectionHead.astro';
+import Card from '../components/Card.astro';
+import Icon from '../components/Icon.astro';
+import CTA from '../components/CTA.astro';
+
+const plans = [
+  {
+    name: 'Free',
+    price: '$0',
+    cadence: 'forever',
+    summary: 'For founders kicking the tires.',
+    cta: 'Start free',
+    href: 'https://app.warmbly.com/register?plan=free',
+    highlight: false,
+    features: [
+      '1 connected mailbox',
+      'Free warmup pool',
+      '1 active sequence',
+      '500 contacts',
+      'Community support',
+    ],
+  },
+  {
+    name: 'Starter',
+    price: '$39',
+    cadence: 'mailbox / month',
+    summary: 'Small teams sending 1–3k cold a month.',
+    cta: 'Start 14-day trial',
+    href: 'https://app.warmbly.com/register?plan=starter',
+    highlight: false,
+    features: [
+      'Unlimited mailboxes (priced per inbox)',
+      'Premium warmup pool',
+      'Unified inbox & reply detection',
+      'Sequences with branching',
+      '10,000 contacts',
+      'Email support',
+    ],
+  },
+  {
+    name: 'Growth',
+    price: '$79',
+    cadence: 'mailbox / month',
+    summary: 'Sales teams running multi-sender campaigns.',
+    cta: 'Start 14-day trial',
+    href: 'https://app.warmbly.com/register?plan=growth',
+    highlight: true,
+    features: [
+      'Everything in Starter',
+      'CRM, pipelines, deals, tasks',
+      'API & webhooks',
+      'Team roles & assignment',
+      '100,000 contacts',
+      'Priority support',
+      'Quarterly deliverability review',
+    ],
+  },
+  {
+    name: 'Business',
+    price: 'Custom',
+    cadence: 'volume-based',
+    summary: 'Agencies and high-volume teams.',
+    cta: 'Talk to sales',
+    href: '/contact/?topic=sales',
+    highlight: false,
+    features: [
+      'Everything in Growth',
+      'Dedicated worker(s) & IPs',
+      'Up to 15,000 sends / day',
+      'BYOK encryption',
+      'Custom data residency',
+      'SLA & SSO/SAML',
+      'Dedicated CSM',
+    ],
+  },
+];
+
+const compare = [
+  ['Mailboxes',              'Free',                'Starter',              'Growth',                'Business'],
+  ['Connected mailboxes',    '1',                   'Unlimited',            'Unlimited',             'Unlimited'],
+  ['Per-mailbox cold cap',   '20 / day',            '50 / day',             '50 / day',              'Custom (audited)'],
+  ['Warmup pool',            'Free',                'Premium',              'Premium',               'Premium + recovery'],
+  ['Distributed workers',    'Shared free',         'Shared premium',       'Shared premium',        'Dedicated'],
+  ['Unified inbox',          '—',                   '✓',                    '✓',                     '✓'],
+  ['Sequences with branching','1 active',           '✓',                    '✓',                     '✓'],
+  ['Reply detection',        'Basic',               'Advanced',             'Advanced',              'Advanced + custom'],
+  ['CRM',                    '—',                   '—',                    '✓',                     '✓'],
+  ['Contacts',               '500',                 '10,000',               '100,000',               'Unlimited'],
+  ['API & webhooks',         '—',                   'Read-only',            '✓',                     '✓ + IP allowlist'],
+  ['Roles & assignment',     '—',                   '—',                    '✓',                     '✓ + SCIM'],
+  ['SSO / SAML',             '—',                   '—',                    '—',                     '✓'],
+  ['BYOK encryption',        '—',                   '—',                    '—',                     '✓'],
+  ['Data residency',         'US',                  'US',                   'US or EU',              'Custom'],
+  ['Support',                'Community',           'Email',                'Priority',              'Dedicated CSM'],
+];
+---
+<Layout
+  title="Pricing — Warmbly"
+  description="Simple, mailbox-based pricing. Free forever to start. Starter, Growth and Business plans for teams that send more."
+>
+  <PageHero
+    eyebrow="Pricing"
+    title="Mailbox-based. Predictable. No deliverability paywalls."
+    description="You pay for the mailboxes you connect. Warmup, sending, inbox, analytics and CRM are not separate line items."
+  />
+
+  <Section>
+    <div class="grid lg:grid-cols-4 gap-4">
+      {plans.map((p) => (
+        <Card class={p.highlight ? 'border-foreground ring-1 ring-foreground/10 relative' : 'relative'}>
+          {p.highlight && (
+            <span class="absolute -top-2.5 left-5 inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-semibold uppercase tracking-wider bg-foreground text-background">
+              Most popular
+            </span>
+          )}
+          <h3 class="text-[17px] font-semibold">{p.name}</h3>
+          <p class="text-[13px] text-muted-foreground mt-0.5">{p.summary}</p>
+          <div class="mt-5 flex items-baseline gap-1.5">
+            <span class="text-3xl font-extrabold tracking-tight">{p.price}</span>
+            <span class="text-[12.5px] text-muted-foreground">{p.cadence}</span>
+          </div>
+          <a
+            href={p.href}
+            class={`mt-5 inline-flex h-10 px-4 items-center justify-center w-full rounded-md text-[14px] font-medium transition-colors ${p.highlight ? 'bg-foreground text-background hover:bg-foreground/85' : 'bg-surface-2 text-foreground border border-border hover:bg-surface-3'}`}
+          >
+            {p.cta}
+          </a>
+          <div class="my-5 h-px bg-border" />
+          <ul class="space-y-2">
+            {p.features.map((f) => (
+              <li class="text-[13.5px] text-foreground/85 flex items-start gap-2">
+                <Icon name="check" size={13} class="text-success mt-1 shrink-0" />
+                <span>{f}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ))}
+    </div>
+
+    <p class="mt-6 text-[13px] text-muted-foreground text-center">
+      All paid plans include a 14-day trial. No credit card required.
+    </p>
+  </Section>
+
+  <!-- Compare -->
+  <Section variant="muted">
+    <SectionHead
+      eyebrow="Compare"
+      title="Every plan, side by side."
+    />
+    <div class="mt-10 overflow-x-auto rounded-xl border border-border bg-card">
+      <table class="w-full text-[13.5px] min-w-[700px]">
+        <thead class="bg-surface-2/70 text-[12px] uppercase tracking-wider text-muted-foreground">
+          <tr>
+            {compare[0].map((c, i) => (
+              <th class={`text-left font-semibold px-4 py-3 ${i === 0 ? 'w-1/3' : ''}`}>{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          {compare.slice(1).map((row) => (
+            <tr>
+              {row.map((cell, i) => (
+                <td class={`px-4 py-2.5 align-middle ${i === 0 ? 'font-medium' : 'text-muted-foreground'}`}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </Section>
+
+  <!-- Volume calculator -->
+  <Section>
+    <SectionHead
+      eyebrow="Estimate"
+      title="What it costs to send 5,000 cold emails a day."
+      description="Cold mail is mailbox math. 5,000 cold emails a day is ~100 active mailboxes at the safe 50/day cap — not one mailbox cranking out 5,000."
+    />
+    <div class="mt-10 grid md:grid-cols-3 gap-4">
+      {[
+        { plan: 'Starter', mailboxes: 100, per: 39, note: 'Best for an in-house GTM team running one brand.' },
+        { plan: 'Growth',  mailboxes: 100, per: 79, note: 'Most teams pick this for CRM + API + team roles.' },
+        { plan: 'Business',mailboxes: 100, per: 65, note: 'Volume pricing with dedicated workers. Indicative.' },
+      ].map((c) => (
+        <Card>
+          <h3 class="text-[15px] font-semibold">{c.plan}</h3>
+          <div class="mt-3 text-3xl font-extrabold tracking-tight">${(c.mailboxes * c.per).toLocaleString()}<span class="text-base font-medium text-muted-foreground"> / mo</span></div>
+          <div class="mt-1 text-[12.5px] text-muted-foreground">{c.mailboxes} mailboxes × ${c.per}/mo</div>
+          <p class="mt-3 text-[13px] text-muted-foreground leading-relaxed">{c.note}</p>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <!-- Pricing FAQ -->
+  <Section variant="muted">
+    <SectionHead
+      eyebrow="Pricing FAQ"
+      title="The boring but important questions."
+    />
+    <div class="mt-10 grid md:grid-cols-2 gap-4">
+      {[
+        ['Do you charge per email sent?', 'No. We charge per connected mailbox. Inside each mailbox you can send up to its safe daily cap.'],
+        ['Is warmup metered separately?', 'No. Warmup is included on every plan. The pool you sit in changes by tier.'],
+        ['What happens if I disconnect a mailbox?', 'It’s prorated for the month. Reconnecting in the same period doesn’t double-bill you.'],
+        ['Can I mix plan tiers across mailboxes?', 'Not today. Each workspace is on one plan. Multi-workspace works if you need separation.'],
+        ['Do you offer annual pricing?', 'Yes — 20% off if you pay annually. Email finance after signup to switch.'],
+        ['Refund policy?', 'Full refund inside 14 days of a paid purchase if the platform didn’t work for you.'],
+        ['Is there a per-seat charge?', 'No. Add teammates freely. Roles and assignment unlock on Growth.'],
+        ['Do you have a startup program?', 'Yes — 50% off Growth for one year for pre-seed and seed companies on YC, Antler, EF, Techstars or similar.'],
+      ].map(([q, a]) => (
+        <Card>
+          <h3 class="text-[14.5px] font-semibold">{q}</h3>
+          <p class="mt-1.5 text-[13.5px] text-muted-foreground leading-relaxed">{a}</p>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <CTA />
+</Layout>

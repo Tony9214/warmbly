@@ -1,0 +1,181 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PageHero from '../components/PageHero.astro';
+import Section from '../components/Section.astro';
+import SectionHead from '../components/SectionHead.astro';
+import Card from '../components/Card.astro';
+import Icon from '../components/Icon.astro';
+import CTA from '../components/CTA.astro';
+import Eyebrow from '../components/Eyebrow.astro';
+---
+<Layout
+  title="Warmup — Warmbly"
+  description="Reputation-safe email warmup pools with gradual ramps, conversational behavior, and automatic quarantine for misbehaving senders."
+>
+  <PageHero
+    eyebrow="Warmup"
+    title="Warmup that earns reputation, not just inflates it."
+    description="Warmbly’s warmup pools generate low-volume, conversational traffic between warmed mailboxes. Senders ramp gradually. Risky mailboxes are quarantined before mailbox providers ever flag them."
+  />
+
+  <!-- How warmup actually works -->
+  <Section>
+    <SectionHead
+      eyebrow="The mechanics"
+      title="What happens when a mailbox enters the pool."
+      description="No magic. Just well-spaced, plain-text mail between vetted mailboxes — with verification tokens so the system can tell warmup traffic from spam."
+    />
+
+    <div class="mt-12 grid lg:grid-cols-2 gap-4">
+      {[
+        { icon: 'mail',     title: '1. Pool placement',     body: 'Mailboxes are slotted into a pool — free or premium — based on plan. Free and premium pools never share recipients.' },
+        { icon: 'clock',    title: '2. Gradual ramp',       body: 'Start at 10 emails/day, +1/day until the ceiling (default 40). Skipped on weekends and outside business hours by recipient TZ.' },
+        { icon: 'users',    title: '3. Partner rotation',   body: 'A recipient is picked from the pool with recent-partner avoidance so the same two mailboxes don’t pair up over and over.' },
+        { icon: 'reply',    title: '4. Conversational replies', body: 'A configurable share of warmup mail is sent as a reply to an existing thread, not a new message. Real mailboxes have conversations.' },
+        { icon: 'key',      title: '5. Verification tokens', body: 'Every warmup message carries a token. Missing, malformed or replayed tokens count as suspicious activity.' },
+        { icon: 'shield',   title: '6. Spam-score tracking', body: 'Junk classification, invalid tokens, and complaints feed into a rolling spam score per mailbox.' },
+        { icon: 'warning',  title: '7. Auto-quarantine',     body: '≥3 invalid tokens in 24h, or a score above 50, removes the mailbox from the pool until it requalifies.' },
+        { icon: 'rocket',   title: '8. Recovery & re-entry', body: 'Re-entry requires fresh probation: healthy SPF/DKIM/DMARC, no recent complaints, spam placement under 10%.' },
+      ].map((s) => (
+        <Card>
+          <div class="flex items-start gap-4">
+            <div class="w-9 h-9 rounded-lg bg-brand-soft text-brand inline-flex items-center justify-center shrink-0">
+              <Icon name={s.icon} size={18} />
+            </div>
+            <div>
+              <h3 class="text-[15px] font-semibold">{s.title}</h3>
+              <p class="mt-1 text-[13.5px] text-muted-foreground leading-relaxed">{s.body}</p>
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <!-- Defaults table -->
+  <Section variant="muted">
+    <SectionHead
+      eyebrow="Defaults"
+      title="The numbers we ship with — and why."
+      description="Defaults that work for the median sender. You can change them, but you’ll see what we think first."
+    />
+    <div class="mt-10 overflow-hidden rounded-xl border border-border bg-card">
+      <table class="w-full text-[14px]">
+        <thead class="bg-surface-2/70 text-[12px] uppercase tracking-wider text-muted-foreground">
+          <tr>
+            <th class="text-left font-semibold px-5 py-3">Setting</th>
+            <th class="text-left font-semibold px-5 py-3">Default</th>
+            <th class="text-left font-semibold px-5 py-3">Why</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          {[
+            ['Starting volume',   '10 / day',  'Low enough that any provider will treat it as normal individual mailbox activity.'],
+            ['Daily ramp',        '+1 / day',  'Slow enough to let provider reputation stabilise. Aggressive ramps trigger volume-anomaly heuristics.'],
+            ['Volume ceiling',    '40 / day',  'High enough to maintain reputation without crowding out cold campaign budget.'],
+            ['Reply rate',        '30%',       'Conversations make mailbox behavior look normal. Push too high and warmup looks unnatural.'],
+            ['Recent-partner gap','7 days',    'Stops the same two mailboxes from forming a degenerate warmup pair.'],
+            ['Spam-score block',  '> 50',      'Threshold where a mailbox has shown enough warning signals to remove proactively.'],
+            ['Invalid token block', '≥ 3 / 24h', 'A handful of malformed tokens is normal; a flurry isn’t.'],
+            ['Re-entry probation','20 deliveries', 'Enough data to confirm the mailbox is genuinely healthy, not just dormant.'],
+          ].map(([k, v, why]) => (
+            <tr>
+              <td class="px-5 py-3 font-medium">{k}</td>
+              <td class="px-5 py-3 text-foreground/90"><span class="kbd">{v}</span></td>
+              <td class="px-5 py-3 text-muted-foreground">{why}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </Section>
+
+  <!-- Health bands -->
+  <Section>
+    <SectionHead
+      eyebrow="Health bands"
+      title="We act on warning, not catastrophe."
+      description="Most platforms wait until a mailbox is landing in spam 80% of the time before they pull it. By then your reputation is gone. Our bands trigger weeks earlier."
+    />
+
+    <div class="mt-10 grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {[
+        { name: 'Healthy',     color: 'success', bullets: ['Spam placement < 10%', 'Complaint rate < 0.03%', 'Bounce rate < 1%'] },
+        { name: 'Watch',       color: 'warn',    bullets: ['Spam placement ≥ 10%', 'Complaint rate ≥ 0.03%', 'Lower volume, increase spacing'] },
+        { name: 'Quarantined', color: 'warn',    bullets: ['Spam placement ≥ 20%', 'Complaint rate ≥ 0.10%', 'Removed from shared paid pool for 7 days'] },
+        { name: 'Blocked',     color: 'danger',  bullets: ['Spam placement ≥ 40%', 'Complaint rate ≥ 0.30%', '30-day block, manual review to re-enter'] },
+      ].map((band) => (
+        <Card>
+          <div class="flex items-center gap-2 mb-4">
+            <span class={`w-2 h-2 rounded-full bg-${band.color}`} />
+            <h3 class="text-[14.5px] font-semibold">{band.name}</h3>
+          </div>
+          <ul class="space-y-2">
+            {band.bullets.map((b) => (
+              <li class="text-[13px] text-muted-foreground flex items-start gap-2">
+                <Icon name="check" size={12} class="mt-1 shrink-0 text-foreground/40" />
+                <span>{b}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ))}
+    </div>
+
+    <div class="mt-8 rounded-xl border border-warn/30 bg-warn/5 p-5 text-[13.5px] text-foreground/85 leading-relaxed">
+      <div class="flex items-start gap-3">
+        <Icon name="warning" class="text-warn shrink-0 mt-0.5" />
+        <p>
+          Catastrophic band (spam placement ≥ 80%) triggers an immediate long-duration block and a full reputation reset workflow. The mailbox does not automatically rejoin the shared paid pool.
+        </p>
+      </div>
+    </div>
+  </Section>
+
+  <!-- Free vs premium -->
+  <Section variant="muted">
+    <SectionHead
+      eyebrow="Pools"
+      title="Free, premium, dedicated."
+      description="Same warmup engine, different reputation surface. We never silently mix trial mailboxes into paid pools."
+    />
+    <div class="mt-10 grid md:grid-cols-3 gap-4">
+      {[
+        {
+          name: 'Free pool',
+          when: 'Free plan',
+          features: ['Shared with other free senders', 'Lower starting volume', 'Same auto-quarantine thresholds'],
+        },
+        {
+          name: 'Premium pool',
+          when: 'Starter, Growth, Business',
+          features: ['Vetted mailboxes only', 'Stricter quarantine policy', 'Recovery pool for cooldown senders'],
+        },
+        {
+          name: 'Dedicated worker',
+          when: 'Business plan',
+          features: ['Isolated worker process & IP', 'Still participates in premium pool', 'Per-mailbox reputation, not infrastructure shortcut'],
+        },
+      ].map((p) => (
+        <Card>
+          <Eyebrow class="mb-4">{p.when}</Eyebrow>
+          <h3 class="text-[15.5px] font-semibold">{p.name}</h3>
+          <ul class="mt-4 space-y-1.5">
+            {p.features.map((f) => (
+              <li class="text-[13.5px] text-muted-foreground flex items-start gap-2">
+                <Icon name="check" size={13} class="text-success mt-1 shrink-0" />
+                <span>{f}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <CTA
+    title="Warm a new mailbox today."
+    description="Connect Gmail or Outlook, pick a pool, hit start. We handle the rest."
+    primaryLabel="Start warming"
+  />
+</Layout>
