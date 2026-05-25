@@ -100,9 +100,9 @@ type APIKeyUsageSummary struct {
 type APIKeyUsageBucket struct {
 	Bucket       time.Time `json:"bucket"`
 	Total        int64     `json:"total"`
-	Success      int64     `json:"success"`        // 2xx
-	ClientErrors int64     `json:"client_errors"`  // 4xx
-	ServerErrors int64     `json:"server_errors"`  // 5xx
+	Success      int64     `json:"success"`       // 2xx
+	ClientErrors int64     `json:"client_errors"` // 4xx
+	ServerErrors int64     `json:"server_errors"` // 5xx
 	AvgLatencyMs float64   `json:"avg_latency_ms"`
 }
 
