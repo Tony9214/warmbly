@@ -35,6 +35,7 @@ import type MiniCampaign from "@/lib/api/models/app/campaigns/MiniCampaign";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import useClickOutside from "@/hooks/useClickOutside";
+import useFlipPlacement from "@/hooks/useFlipPlacement";
 import CategoryPicker from "./CategoryPicker";
 
 interface CustomField {
@@ -506,7 +507,10 @@ function CampaignPicker({
     const [search, setSearch] = React.useState("");
     const [enabled, setEnabled] = React.useState(false);
     const ref = React.useRef<HTMLDivElement>(null);
+    const triggerRef = React.useRef<HTMLDivElement>(null);
     useClickOutside(ref, () => setOpen(false));
+    // ~290px: 32px search row + 56 max-h list (224px) + borders.
+    const placement = useFlipPlacement(triggerRef, open, 290);
 
     React.useEffect(() => {
         if (open) setEnabled(true);
@@ -523,7 +527,7 @@ function CampaignPicker({
 
     return (
         <div ref={ref} className="relative">
-            <div className="rounded-md border border-slate-200 bg-white">
+            <div ref={triggerRef} className="rounded-md border border-slate-200 bg-white">
                 {selected.length === 0 ? (
                     <div
                         onClick={() => setOpen((o) => !o)}
@@ -568,11 +572,13 @@ function CampaignPicker({
             <AnimatePresence>
                 {open && (
                     <motion.div
-                        initial={{ opacity: 0, y: -4 }}
+                        initial={{ opacity: 0, y: placement === "top" ? 4 : -4 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
+                        exit={{ opacity: 0, y: placement === "top" ? 4 : -4 }}
                         transition={{ duration: 0.12 }}
-                        className="absolute top-full left-0 right-0 mt-1 z-20 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] overflow-hidden"
+                        className={`absolute left-0 right-0 z-20 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] overflow-hidden ${
+                            placement === "top" ? "bottom-full mb-1" : "top-full mt-1"
+                        }`}
                     >
                         <div className="px-2 py-1.5 border-b border-slate-200 flex items-center gap-1.5">
                             <SearchIcon className="w-3 h-3 text-slate-400" />

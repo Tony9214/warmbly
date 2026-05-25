@@ -527,10 +527,17 @@ function TargetPicker({
     value: ImportColumnMapping;
     onChange: (next: ImportColumnMapping) => void;
 }) {
-    const isCustom = value.target.toString().startsWith("custom:") || (value.target === "ignore" && !!value.custom_key);
+    // Custom-field rows are tagged with target="custom" (sentinel); the
+    // user-typed name lives in custom_key. We also accept the legacy
+    // "custom:<key>" form in case a saved mapping comes in that shape.
+    const isCustom =
+        value.target === "custom" || value.target.toString().startsWith("custom:");
     const stdLabel = STANDARD_TARGETS.find((t) => t.id === value.target)?.label;
+    const customKey = value.custom_key ?? "";
     const label = isCustom
-        ? `Custom: ${value.custom_key ?? ""}`
+        ? customKey
+            ? `Custom: ${customKey}`
+            : "Custom field…"
         : stdLabel ?? "Ignore";
 
     return (
@@ -545,7 +552,9 @@ function TargetPicker({
                         <PopoverMenuItem
                             key={t.id}
                             selected={value.target === t.id && !isCustom}
-                            onSelect={() => onChange({ index: value.index, target: t.id })}
+                            onSelect={() =>
+                                onChange({ index: value.index, target: t.id })
+                            }
                         >
                             {t.label}
                         </PopoverMenuItem>
@@ -556,11 +565,10 @@ function TargetPicker({
                         onSelect={() =>
                             onChange({
                                 index: value.index,
-                                target: "ignore",
-                                custom_key: value.custom_key ?? "",
+                                target: "custom",
+                                custom_key: customKey,
                             })
                         }
-                        closeOnSelect={false}
                     >
                         Use as custom field…
                     </PopoverMenuItem>
@@ -568,10 +576,12 @@ function TargetPicker({
             </PopoverMenu>
             {isCustom && (
                 <TextInput
-                    value={value.custom_key ?? ""}
-                    onChange={(v) => onChange({ ...value, custom_key: v })}
-                    placeholder="key"
-                    className="w-24"
+                    value={customKey}
+                    onChange={(v) =>
+                        onChange({ index: value.index, target: "custom", custom_key: v })
+                    }
+                    placeholder="field name"
+                    className="w-32"
                 />
             )}
         </div>

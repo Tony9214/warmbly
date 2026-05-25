@@ -21,6 +21,7 @@ import toast from "react-hot-toast";
 
 import { useUserProfile } from "@/hooks/context/user";
 import useClickOutside from "@/hooks/useClickOutside";
+import useFlipPlacement from "@/hooks/useFlipPlacement";
 import useCreateCategory from "@/lib/api/hooks/app/categories/useCreateCategory";
 import type Category from "@/lib/api/models/app/Category";
 
@@ -51,7 +52,10 @@ export default function CategoryPicker({
     const [open, setOpen] = React.useState(false);
     const [query, setQuery] = React.useState("");
     const ref = React.useRef<HTMLDivElement>(null);
+    const triggerRef = React.useRef<HTMLDivElement>(null);
     useClickOutside(ref, () => setOpen(false));
+    // ~270px: 33px search input + 56 max-h list (224px) + borders.
+    const placement = useFlipPlacement(triggerRef, open, 270);
 
     // Map id → category for chip rendering. We don't render orphaned
     // ids — if the underlying category was deleted, the chip just
@@ -100,7 +104,7 @@ export default function CategoryPicker({
 
     return (
         <div ref={ref} className={`relative ${className ?? ""}`}>
-            <div className="rounded-md border border-slate-200 bg-white min-h-[34px]">
+            <div ref={triggerRef} className="rounded-md border border-slate-200 bg-white min-h-[34px]">
                 {selectedChips.length === 0 ? (
                     <div
                         onClick={() => setOpen((o) => !o)}
@@ -132,11 +136,13 @@ export default function CategoryPicker({
             <AnimatePresence>
                 {open && (
                     <motion.div
-                        initial={{ opacity: 0, y: -4 }}
+                        initial={{ opacity: 0, y: placement === "top" ? 4 : -4 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
+                        exit={{ opacity: 0, y: placement === "top" ? 4 : -4 }}
                         transition={{ duration: 0.12 }}
-                        className="absolute top-full left-0 right-0 mt-1 z-30 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] overflow-hidden"
+                        className={`absolute left-0 right-0 z-30 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] overflow-hidden ${
+                            placement === "top" ? "bottom-full mb-1" : "top-full mt-1"
+                        }`}
                     >
                         <div className="px-2 py-1.5 border-b border-slate-200">
                             <input
