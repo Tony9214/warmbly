@@ -145,31 +145,40 @@ restart-all:
 # `make up` still gives you the production-style images. Dev is opt-in.
 
 DEV_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
+# Services with a hot-reload override in docker-compose.dev.yml. Used
+# by dev-down / dev-logs to scope to "the things dev mode replaced".
 DEV_SVCS    := backend consumer worker-shared-1 tracking realtime
 
-# Bring up everything in dev / hot-reload mode. Infra services (postgres,
-# kafka, redis, …) come up as normal; the language services run from
-# the *-dev Dockerfiles with bind-mounted source.
+# Bring up the full stack with dev-mode overrides for the language
+# services. Same set of services you'd get from `make up` (infra,
+# mailpit, web, app, one worker), but the 5 language services in
+# DEV_SVCS run from the *-dev Dockerfiles with bind-mounted source.
 #
-# By default this brings up the full dev set so you can work across Go,
-# Rust, and Elixir at the same time. To skip Rust/Elixir, pass
-# `SVCS="backend consumer worker-shared-1"`:
-#   make dev SVCS="backend consumer worker-shared-1"
-SVCS ?= $(DEV_SVCS)
+# We pass no service list on purpose: depends_on doesn't pull in
+# mailpit (only used via SMTP env vars, no edge in the graph) or web,
+# so naming the 5 dev services directly would silently drop them. The
+# user expectation is "dev = up + hot reload", so default to the full
+# default profile.
+#
+# Escape hatch: SVCS="backend consumer worker-shared-1" narrows the
+# `up` to just those services (plus their depends_on chain) if you
+# don't want to spin up Rust/Elixir.
+SVCS ?=
 dev:
 	$(DOCKER_ENV) $(DEV_COMPOSE) up -d --build $(SVCS)
 	@echo ""
-	@echo "Dev mode running for: $(SVCS)"
+	@echo "Dev mode running. Hot reload enabled for: $(DEV_SVCS)"
 	@echo "  Go saves           → ~2-5s rebuild (air)"
 	@echo "  Rust saves         → ~2-10s rebuild (cargo-watch, debug build)"
 	@echo "  Elixir saves       → in-process reload (Phoenix)"
 	@echo ""
 	@echo "Stream logs:   make dev-logs"
-	@echo "Stop dev:      make dev-down"
+	@echo "Stop dev:      make dev-down    (stops language services only)"
+	@echo "Stop all:      make stop        (everything, incl. infra)"
 
 dev-down:
 	$(DEV_COMPOSE) stop $(DEV_SVCS)
-	@echo "dev services stopped. Run 'make up' for production-style images."
+	@echo "dev language services stopped (infra still up). Run 'make stop' to tear down everything."
 
 dev-logs:
 	$(DEV_COMPOSE) logs -f --tail=200 $(DEV_SVCS)
