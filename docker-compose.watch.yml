@@ -1,0 +1,87 @@
+# Hot-reload override for the Go services.
+#
+# Activated via `make watch` (or `docker compose -f docker-compose.yml
+# -f docker-compose.watch.yml up backend consumer worker-shared-1`).
+#
+# What changes vs. the default compose:
+#   - backend / consumer / worker-shared-1 swap to the go-dev image
+#     (golang + air + librdkafka) instead of their thin runtime alpine.
+#   - Source is bind-mounted at /app so saves are visible inside the
+#     container without any image rebuild.
+#   - Module + build caches live on named volumes (`warmbly_gomodcache`
+#     and `warmbly_gocache`) so they survive container recreates AND
+#     are shared across worktrees that point at the same Docker daemon.
+#   - WARMBLY_CMD tells the shared air.toml which `cmd/` to build.
+#
+# What stays the same:
+#   - Every env var, depends_on, healthcheck, port mapping. All the
+#     interesting wiring is in the base compose; this file only swaps
+#     the build/runtime mechanics.
+#
+# Notes:
+#   - First start of a watch container takes ~30s to compile the binary
+#     into the cache. Every save after that is ~2-5s.
+#   - We disable the existing backend healthcheck because air's restart
+#     loop causes brief health flaps that depends_on doesn't tolerate.
+#     The consumer + worker still wait on `service_started` (alive) so
+#     dependent containers wake up at the right time anyway.
+
+services:
+  backend:
+    image: warmbly-go-dev
+    build:
+      context: .
+      dockerfile: deploy/docker/go-dev.Dockerfile
+    environment:
+      WARMBLY_CMD: backend
+    volumes:
+      - .:/app
+      - warmbly_gomodcache:/go/pkg/mod
+      - warmbly_gocache:/root/.cache/go-build
+    healthcheck:
+      disable: true
+
+  consumer:
+    image: warmbly-go-dev
+    build:
+      context: .
+      dockerfile: deploy/docker/go-dev.Dockerfile
+    environment:
+      WARMBLY_CMD: consumer
+    volumes:
+      - .:/app
+      - warmbly_gomodcache:/go/pkg/mod
+      - warmbly_gocache:/root/.cache/go-build
+    # Consumer waits on backend in the base file; under watch the
+    # backend has no healthcheck, so relax to service_started so
+    # consumer doesn't refuse to come up.
+    depends_on:
+      backend:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_started
+
+  worker-shared-1:
+    image: warmbly-go-dev
+    build:
+      context: .
+      dockerfile: deploy/docker/go-dev.Dockerfile
+    environment:
+      WARMBLY_CMD: worker
+      WORKER_TIER: shared
+    volumes:
+      - .:/app
+      - warmbly_gomodcache:/go/pkg/mod
+      - warmbly_gocache:/root/.cache/go-build
+
+volumes:
+  # `name:` overrides the default `<project>_<volume>` prefixing. Every
+  # worktree that brings up this override file mounts the same physical
+  # volume on the host, so the Go module + build cache populated in one
+  # worktree is immediately warm in every other worktree.
+  warmbly_gomodcache:
+    name: warmbly_gomodcache
+  warmbly_gocache:
+    name: warmbly_gocache

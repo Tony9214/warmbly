@@ -14,7 +14,8 @@ PROTO_GEN_FILES := $(PROTO_DIR)/tasks.pb.go
 
 .PHONY: setup-tools lint proto check-proto \
         dev sim seed reset logs status stop down tools test-seed \
-        restart restart-go restart-all cache-clean
+        restart restart-go restart-all cache-clean \
+        watch watch-down watch-logs
 
 setup-tools:
 	@echo "Installing required Go tools into $(GO_BIN)"
@@ -122,6 +123,37 @@ restart-go:
 restart-all:
 	$(DOCKER_ENV) docker compose build --parallel backend consumer worker-shared-1 tracking realtime
 	docker compose up -d backend consumer worker-shared-1 tracking realtime
+
+# ─── hot-reload (air) ───────────────────────────────────────────────────
+#
+# Bind-mounted source + air file watcher inside a long-running golang
+# container. Edit a .go file → air rebuilds (~2-5s) → restarts the
+# binary in place. No docker image rebuild, no container recreate.
+#
+# First boot takes ~30s to populate the warmbly_gomodcache /
+# warmbly_gocache volumes, but those persist across worktrees (the
+# volume names skip the per-project prefix), so subsequent worktrees
+# start watching almost instantly.
+#
+# The default `make dev` / `make restart-go` flow still uses the
+# production-style Dockerfiles. Watch is opt-in.
+
+WATCH_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.watch.yml
+WATCH_SVCS    := backend consumer worker-shared-1
+
+watch:
+	$(DOCKER_ENV) $(WATCH_COMPOSE) up -d --build $(WATCH_SVCS)
+	@echo ""
+	@echo "Hot-reload running. Edit any .go file under cmd/ or internal/ to trigger a rebuild."
+	@echo "Stream logs:   make watch-logs"
+	@echo "Stop watch:    make watch-down"
+
+watch-down:
+	$(WATCH_COMPOSE) stop $(WATCH_SVCS)
+	@echo "watch services stopped. Run 'make restart-go' to return to production-style builds."
+
+watch-logs:
+	$(WATCH_COMPOSE) logs -f --tail=200 $(WATCH_SVCS)
 
 # Force-drop the BuildKit cache. Useful when something's gone weird
 # (corrupted cache, debugging a "works on a clean build but not after
