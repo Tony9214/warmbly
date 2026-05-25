@@ -92,8 +92,9 @@ type RateLimitStatus struct {
 // DefaultRateLimits returns the default rate limits. Sized to allow paid
 // customers to sustain ~100 req/s on read and write categories, matching
 // the API throughput competitors (Instantly) advertise as of mid-2026.
-// 100 req/s = 6000 req/min. BurstMultiplier=2.0 lets brief spikes hit
-// 200 req/s before throttling kicks in.
+// 100 req/s = 6000 req/min. BurstMultiplier stays at 1.0 — we want a
+// predictable ceiling, not a peak that lets clients double-tap during
+// short windows.
 func DefaultRateLimits() *UserRateLimits {
 	return &UserRateLimits{
 		LimitReadPM:        6000,
@@ -107,7 +108,7 @@ func DefaultRateLimits() *UserRateLimits {
 		LimitWSJoinPM:      30,
 		LimitWSEventPM:     60,
 		MaxConnections:     10,
-		BurstMultiplier:    2.0,
+		BurstMultiplier:    1.0,
 	}
 }
 

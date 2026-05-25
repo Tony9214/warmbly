@@ -9,7 +9,7 @@ ALTER TABLE user_rate_limits ALTER COLUMN limit_bulk_pm SET DEFAULT 600;
 ALTER TABLE user_rate_limits ALTER COLUMN limit_unibox_pm SET DEFAULT 1200;
 ALTER TABLE user_rate_limits ALTER COLUMN limit_analytics_pm SET DEFAULT 600;
 ALTER TABLE user_rate_limits ALTER COLUMN limit_api_calls_daily SET DEFAULT 500000;
-ALTER TABLE user_rate_limits ALTER COLUMN burst_multiplier SET DEFAULT 2.0;
+ALTER TABLE user_rate_limits ALTER COLUMN burst_multiplier SET DEFAULT 1.0;
 
 ALTER TABLE plan_rate_limits ALTER COLUMN limit_read_pm SET DEFAULT 6000;
 ALTER TABLE plan_rate_limits ALTER COLUMN limit_write_pm SET DEFAULT 6000;
@@ -17,7 +17,7 @@ ALTER TABLE plan_rate_limits ALTER COLUMN limit_bulk_pm SET DEFAULT 600;
 ALTER TABLE plan_rate_limits ALTER COLUMN limit_unibox_pm SET DEFAULT 1200;
 ALTER TABLE plan_rate_limits ALTER COLUMN limit_analytics_pm SET DEFAULT 600;
 ALTER TABLE plan_rate_limits ALTER COLUMN limit_api_calls_daily SET DEFAULT 500000;
-ALTER TABLE plan_rate_limits ALTER COLUMN burst_multiplier SET DEFAULT 2.0;
+ALTER TABLE plan_rate_limits ALTER COLUMN burst_multiplier SET DEFAULT 1.0;
 
 -- Bump rows that still hold the pre-existing defaults. Anything custom is
 -- left alone so admin-tuned accounts keep their overrides.
@@ -28,7 +28,7 @@ SET limit_read_pm = 6000,
     limit_unibox_pm = 1200,
     limit_analytics_pm = 600,
     limit_api_calls_daily = 500000,
-    burst_multiplier = 2.0,
+    burst_multiplier = 1.0,
     updated_at = NOW()
 WHERE limit_read_pm = 300
   AND limit_write_pm = 60
@@ -45,7 +45,7 @@ SET limit_read_pm = 6000,
     limit_unibox_pm = 1200,
     limit_analytics_pm = 600,
     limit_api_calls_daily = 500000,
-    burst_multiplier = 2.0,
+    burst_multiplier = 1.0,
     updated_at = NOW()
 WHERE limit_read_pm = 300
   AND limit_write_pm = 60
