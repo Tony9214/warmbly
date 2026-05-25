@@ -32,11 +32,25 @@ export function OrgGate() {
     const setOrganizations = useAppStore((s) => s.setOrganizations);
     const setCurrentOrganization = useAppStore((s) => s.setCurrentOrganization);
     const currentOrg = useAppStore((s) => s.currentOrganization);
-    const switchOrgMutation = useSwitchOrganization();
+
+    // Destructure `mutate` — react-query returns a new wrapper object
+    // each render, but the bound mutate fn is stable. Putting the
+    // whole mutation object in the effect deps below caused the effect
+    // to fire on every render → repeated navigate() calls into
+    // /select-org → "Too many calls to Location or History APIs" and a
+    // setState loop from setOrganizations re-firing each time.
+    const { mutate: switchOrgMutate } = useSwitchOrganization();
 
     // Guard against the single-org auto-pick re-firing while the
     // mutation is in flight (effect re-runs on data changes).
     const autoPickInFlight = useRef(false);
+    // Remember the redirect target we last fired for the current
+    // (list-shape, currentOrg) tuple. Without this guard, a state
+    // update inside this effect (setOrganizations clearing a stale
+    // currentOrganization to null) re-runs the effect before the
+    // router has unmounted us, and we hit history.replaceState twice
+    // in the same task — which throws DOMException in Firefox.
+    const lastRedirectKey = useRef<string | null>(null);
 
     useEffect(() => {
         if (orgs.isPending) return;
@@ -46,9 +60,15 @@ export function OrgGate() {
         const stillMember = currentOrg
             ? list.some((o) => o.id === currentOrg.id)
             : false;
-        if (stillMember) return;
+        if (stillMember) {
+            lastRedirectKey.current = null;
+            return;
+        }
 
         if (list.length === 0) {
+            const key = "empty";
+            if (lastRedirectKey.current === key) return;
+            lastRedirectKey.current = key;
             navigate("/select-org", { replace: true });
             return;
         }
@@ -57,7 +77,7 @@ export function OrgGate() {
             if (autoPickInFlight.current) return;
             autoPickInFlight.current = true;
             const only = list[0];
-            switchOrgMutation.mutate(only.id, {
+            switchOrgMutate(only.id, {
                 onSuccess: () => setCurrentOrganization(only),
                 onError: () => navigate("/select-org", { replace: true }),
                 onSettled: () => {
@@ -67,6 +87,9 @@ export function OrgGate() {
             return;
         }
 
+        const key = `multi:${list.map((o) => o.id).join(",")}`;
+        if (lastRedirectKey.current === key) return;
+        lastRedirectKey.current = key;
         navigate("/select-org", { replace: true });
     }, [
         orgs.isPending,
@@ -74,7 +97,7 @@ export function OrgGate() {
         currentOrg,
         setOrganizations,
         setCurrentOrganization,
-        switchOrgMutation,
+        switchOrgMutate,
         navigate,
     ]);
 
