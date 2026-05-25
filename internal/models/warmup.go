@@ -11,6 +11,7 @@ type WarmupToken struct {
 	TaskID             uuid.UUID  `json:"task_id"`
 	SenderAccountID    uuid.UUID  `json:"sender_account_id"`
 	RecipientAccountID uuid.UUID  `json:"recipient_account_id"`
+	ConversationTheme  string     `json:"conversation_theme"`
 	CreatedAt          time.Time  `json:"created_at"`
 	ConsumedAt         *time.Time `json:"consumed_at,omitempty"`
 	ExpiresAt          time.Time  `json:"expires_at"`

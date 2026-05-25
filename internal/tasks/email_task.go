@@ -124,10 +124,12 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		return nil
 	}
 
-	// STEP 6: Determine if this should be a reply or a new warmup email
+	// STEP 6: Determine if this should be a reply or a new warmup email.
+	// When replying, the body is drawn from the same conversation theme as
+	// the original send so the thread stays topically coherent.
 	replyRate := account.WarmupReplyRate
 	shouldReply := rand.Float64()*100 < float64(replyRate)
-	var subject, emailBody string
+	var subject, emailBody, conversationTheme string
 	var inReplyTo string
 
 	if shouldReply {
@@ -141,7 +143,9 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 			if !strings.HasPrefix(strings.ToLower(subject), "re:") {
 				subject = "Re: " + subject
 			}
-			emailBody = GenerateConversationEmail(randomWarmupConversation(), *account, true)
+			conv := conversationForTheme(candidate.ConversationTheme)
+			conversationTheme = conv.Theme
+			emailBody = GenerateConversationEmail(conv, *account, true)
 		} else {
 			shouldReply = false
 		}
@@ -150,6 +154,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	// STEP 7: Build a new warmup message when not replying
 	if !shouldReply {
 		conversation := randomWarmupConversation()
+		conversationTheme = conversation.Theme
 		subject = generateWarmupSubject()
 		emailBody = GenerateConversationEmail(conversation, *account, false)
 	}
@@ -190,6 +195,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		TaskID:             taskID,
 		SenderAccountID:    account.ID,
 		RecipientAccountID: partner.ID,
+		ConversationTheme:  conversationTheme,
 		ExpiresAt:          time.Now().Add(7 * 24 * time.Hour),
 	}
 	if err := s.warmupRepo.CreateWarmupToken(ctx, tokenRecord); err != nil {
@@ -462,7 +468,32 @@ func generateWarmupSubject() string {
 	return subjects[rand.Intn(len(subjects))]
 }
 
+// conversationForTheme returns a conversation matching the requested theme,
+// falling back to a random conversation if the theme is empty or unknown.
+// Use this when replying so the reply body stays on-topic with the original
+// thread instead of jumping subjects mid-conversation.
+func conversationForTheme(theme string) Conversation {
+	if theme == "" {
+		return randomWarmupConversation()
+	}
+	var matches []Conversation
+	for _, c := range warmupConversations() {
+		if c.Theme == theme {
+			matches = append(matches, c)
+		}
+	}
+	if len(matches) == 0 {
+		return randomWarmupConversation()
+	}
+	return matches[rand.Intn(len(matches))]
+}
+
 func randomWarmupConversation() Conversation {
+	conversations := warmupConversations()
+	return conversations[rand.Intn(len(conversations))]
+}
+
+func warmupConversations() []Conversation {
 	conversations := []Conversation{
 		// Productivity & workflow
 		{ID: uuid.New(), Theme: "productivity", Description: "I have been trying a few workflow changes and wondered what worked best for your week.", Messages: []string{"How do you structure focused work blocks?", "Do you batch similar tasks or tackle them as they come?"}},
@@ -523,5 +554,5 @@ func randomWarmupConversation() Conversation {
 		{ID: uuid.New(), Theme: "gratitude", Description: "I was thinking about the people who have been helpful to me this year and you came to mind.", Messages: []string{"Just wanted to say thanks for being a great connection.", "Appreciate you always being willing to share your perspective."}},
 	}
 
-	return conversations[rand.Intn(len(conversations))]
+	return conversations
 }

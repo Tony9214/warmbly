@@ -56,9 +56,10 @@ type WarmupStatistic struct {
 
 // WarmupReplyCandidate describes a previously sent warmup message that can be replied to.
 type WarmupReplyCandidate struct {
-	MessageID string
-	Subject   string
-	ThreadID  *string
+	MessageID         string
+	Subject           string
+	ThreadID          *string
+	ConversationTheme string
 }
 
 // WarmupRepository defines methods for warmup data access
@@ -538,14 +539,15 @@ func (r *warmupRepository) GetOrCreateDailyStats(ctx context.Context, accountID 
 // CreateWarmupToken creates a warmup verification token
 func (r *warmupRepository) CreateWarmupToken(ctx context.Context, token *models.WarmupToken) error {
 	query := `
-		INSERT INTO warmup_tokens (token, task_id, sender_account_id, recipient_account_id, expires_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO warmup_tokens (token, task_id, sender_account_id, recipient_account_id, conversation_theme, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`
 	_, err := r.db.Exec(ctx, query,
 		token.Token,
 		token.TaskID,
 		token.SenderAccountID,
 		token.RecipientAccountID,
+		token.ConversationTheme,
 		token.ExpiresAt,
 	)
 	return err
@@ -554,7 +556,7 @@ func (r *warmupRepository) CreateWarmupToken(ctx context.Context, token *models.
 // GetWarmupToken retrieves a valid (unconsumed, unexpired) warmup token
 func (r *warmupRepository) GetWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error) {
 	query := `
-		SELECT token, task_id, sender_account_id, recipient_account_id, created_at, consumed_at, expires_at
+		SELECT token, task_id, sender_account_id, recipient_account_id, COALESCE(conversation_theme, ''), created_at, consumed_at, expires_at
 		FROM warmup_tokens
 		WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW()
 	`
@@ -565,6 +567,7 @@ func (r *warmupRepository) GetWarmupToken(ctx context.Context, tokenID uuid.UUID
 		&t.TaskID,
 		&t.SenderAccountID,
 		&t.RecipientAccountID,
+		&t.ConversationTheme,
 		&t.CreatedAt,
 		&t.ConsumedAt,
 		&t.ExpiresAt,
@@ -579,7 +582,7 @@ func (r *warmupRepository) GetWarmupToken(ctx context.Context, tokenID uuid.UUID
 
 func (r *warmupRepository) FindWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error) {
 	query := `
-		SELECT token, task_id, sender_account_id, recipient_account_id, created_at, consumed_at, expires_at
+		SELECT token, task_id, sender_account_id, recipient_account_id, COALESCE(conversation_theme, ''), created_at, consumed_at, expires_at
 		FROM warmup_tokens
 		WHERE token = $1
 	`
@@ -590,6 +593,7 @@ func (r *warmupRepository) FindWarmupToken(ctx context.Context, tokenID uuid.UUI
 		&t.TaskID,
 		&t.SenderAccountID,
 		&t.RecipientAccountID,
+		&t.ConversationTheme,
 		&t.CreatedAt,
 		&t.ConsumedAt,
 		&t.ExpiresAt,
@@ -660,9 +664,11 @@ func (r *warmupRepository) GetRecentlyUsedPartners(ctx context.Context, accountI
 }
 
 // GetLatestReplyCandidate finds the latest completed warmup email from sender to recipient.
+// It also returns the original message's conversation_theme so the reply body can
+// be drawn from the same topical bucket instead of a random conversation.
 func (r *warmupRepository) GetLatestReplyCandidate(ctx context.Context, senderAccountID, recipientAccountID uuid.UUID) (*WarmupReplyCandidate, error) {
 	query := `
-		SELECT t.message_id, COALESCE(et.subject, ''), et.thread_id
+		SELECT t.message_id, COALESCE(et.subject, ''), et.thread_id, COALESCE(wt.conversation_theme, '')
 		FROM warmup_tokens wt
 		JOIN tasks t ON t.id = wt.task_id
 		LEFT JOIN email_tasks et ON et.task_id = t.id
@@ -680,6 +686,7 @@ func (r *warmupRepository) GetLatestReplyCandidate(ctx context.Context, senderAc
 		&candidate.MessageID,
 		&candidate.Subject,
 		&candidate.ThreadID,
+		&candidate.ConversationTheme,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
