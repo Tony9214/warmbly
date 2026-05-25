@@ -1,0 +1,14 @@
+---
+interface Props {
+  id?: string;
+  class?: string;
+  variant?: 'default' | 'muted' | 'bordered';
+}
+const { id, class: className = '', variant = 'default' } = Astro.props;
+const bg = variant === 'muted' ? 'bg-surface' : variant === 'bordered' ? 'bg-background border-y border-border' : 'bg-background';
+---
+<section id={id} class={`${bg} ${className}`}>
+  <div class="container-page py-20 md:py-24">
+    <slot />
+  </div>
+</section>

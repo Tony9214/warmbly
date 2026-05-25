@@ -1,0 +1,96 @@
+---
+import Wordmark from './Wordmark.astro';
+
+const path = Astro.url.pathname;
+const nav: { label: string; href: string; match?: string }[] = [
+  { label: 'Product', href: '/product/', match: '/product' },
+  { label: 'Warmup', href: '/warmup/', match: '/warmup' },
+  { label: 'Deliverability', href: '/deliverability/', match: '/deliverability' },
+  { label: 'Security', href: '/security/', match: '/security' },
+  { label: 'Pricing', href: '/pricing/', match: '/pricing' },
+  { label: 'Learn', href: '/learn/', match: '/learn' },
+];
+
+function active(match?: string) {
+  if (!match) return false;
+  return path === match || path.startsWith(match + '/');
+}
+---
+<header class="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/65">
+  <div class="container-page flex h-14 items-center gap-6">
+    <Wordmark size="md" />
+
+    <nav class="hidden md:flex items-center gap-1 ml-2">
+      {nav.map((n) => (
+        <a
+          href={n.href}
+          class={
+            'h-8 px-3 inline-flex items-center rounded-md text-[13px] transition-colors ' +
+            (active(n.match)
+              ? 'text-foreground bg-surface-2'
+              : 'text-muted-foreground hover:text-foreground hover:bg-surface-2/60')
+          }
+        >
+          {n.label}
+        </a>
+      ))}
+    </nav>
+
+    <div class="ml-auto flex items-center gap-2">
+      <a
+        href="https://app.warmbly.com/login"
+        class="hidden sm:inline-flex h-8 px-3 items-center rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
+      >
+        Log in
+      </a>
+      <a
+        href="https://app.warmbly.com/register"
+        class="inline-flex h-8 px-3.5 items-center rounded-md text-[13px] font-medium text-brand-foreground bg-foreground hover:bg-foreground/85 transition-colors"
+      >
+        Start free
+      </a>
+      <button
+        id="nav-toggle"
+        class="md:hidden inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-2"
+        aria-label="Toggle navigation"
+        aria-expanded="false"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="4" y1="7" x2="20" y2="7" />
+          <line x1="4" y1="12" x2="20" y2="12" />
+          <line x1="4" y1="17" x2="20" y2="17" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="mobile-nav" class="hidden md:hidden border-t border-border bg-background">
+    <div class="container-page py-3 grid gap-1">
+      {nav.map((n) => (
+        <a
+          href={n.href}
+          class={
+            'h-9 px-2 inline-flex items-center rounded-md text-sm ' +
+            (active(n.match)
+              ? 'text-foreground bg-surface-2'
+              : 'text-muted-foreground hover:text-foreground hover:bg-surface-2/60')
+          }
+        >
+          {n.label}
+        </a>
+      ))}
+      <div class="h-px bg-border my-2" />
+      <a href="https://app.warmbly.com/login" class="h-9 px-2 inline-flex items-center rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-surface-2">Log in</a>
+      <a href="https://app.warmbly.com/register" class="h-9 px-2 inline-flex items-center rounded-md text-sm font-medium text-brand-foreground bg-foreground">Start free</a>
+    </div>
+  </div>
+</header>
+
+<script>
+  const toggle = document.getElementById('nav-toggle');
+  const menu = document.getElementById('mobile-nav');
+  toggle?.addEventListener('click', () => {
+    const open = menu?.classList.toggle('hidden') === false;
+    toggle.setAttribute('aria-expanded', String(open));
+  });
+</script>

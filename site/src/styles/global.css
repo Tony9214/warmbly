@@ -1,0 +1,226 @@
+@import 'tailwindcss';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/inter/800.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* ----------------------------------------------------------------
+   Color tokens — mirrors web/src/global.css OKLCH neutrals,
+   with brand sky/indigo accents for the marketing surface.
+---------------------------------------------------------------- */
+
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.15 0.01 260);
+
+  --surface: oklch(0.985 0.002 260);
+  --surface-2: oklch(0.97 0.003 260);
+  --surface-3: oklch(0.94 0.005 260);
+
+  --muted: oklch(0.97 0.003 260);
+  --muted-foreground: oklch(0.50 0.01 260);
+
+  --border: oklch(0.92 0.005 260);
+  --border-strong: oklch(0.86 0.006 260);
+  --input: oklch(0.92 0.005 260);
+  --ring: oklch(0.55 0.01 260);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.01 260);
+
+  /* Brand */
+  --brand: oklch(0.55 0.18 252);
+  --brand-soft: oklch(0.93 0.05 252);
+  --brand-strong: oklch(0.42 0.20 256);
+  --brand-foreground: oklch(0.98 0 0);
+
+  --accent: oklch(0.96 0.005 260);
+  --accent-foreground: oklch(0.20 0.01 260);
+
+  --success: oklch(0.65 0.15 152);
+  --warn: oklch(0.78 0.15 80);
+  --danger: oklch(0.60 0.22 27);
+
+  --primary: oklch(0.20 0.01 260);
+  --primary-foreground: oklch(1 0 0);
+}
+
+.dark {
+  --background: oklch(0.13 0.01 260);
+  --foreground: oklch(0.95 0.005 260);
+
+  --surface: oklch(0.16 0.01 260);
+  --surface-2: oklch(0.18 0.01 260);
+  --surface-3: oklch(0.22 0.01 260);
+
+  --muted: oklch(0.20 0.01 260);
+  --muted-foreground: oklch(0.65 0.01 260);
+
+  --border: oklch(0.26 0.01 260);
+  --border-strong: oklch(0.32 0.01 260);
+  --input: oklch(0.26 0.01 260);
+  --ring: oklch(0.62 0.02 252);
+
+  --card: oklch(0.16 0.01 260);
+  --card-foreground: oklch(0.95 0.005 260);
+
+  --brand: oklch(0.72 0.15 250);
+  --brand-soft: oklch(0.28 0.10 252);
+  --brand-strong: oklch(0.82 0.15 250);
+  --brand-foreground: oklch(0.13 0.01 260);
+
+  --accent: oklch(0.22 0.01 260);
+  --accent-foreground: oklch(0.95 0.005 260);
+
+  --success: oklch(0.72 0.16 152);
+  --warn: oklch(0.78 0.15 80);
+  --danger: oklch(0.70 0.20 22);
+
+  --primary: oklch(0.95 0.005 260);
+  --primary-foreground: oklch(0.13 0.01 260);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+}
+
+/* ----------------------------------------------------------------
+   Base
+---------------------------------------------------------------- */
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--brand) 25%, transparent);
+  color: var(--foreground);
+}
+
+* {
+  border-color: var(--border);
+}
+
+/* ----------------------------------------------------------------
+   Reusable patterns
+---------------------------------------------------------------- */
+
+@utility container-page {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: 1.25rem;
+  max-width: 80rem;
+  @media (min-width: 768px) { padding-inline: 2rem; }
+}
+
+@utility prose-warmbly {
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+/* Tiny grid pattern used by hero sections. */
+.bg-dotgrid {
+  background-image: radial-gradient(circle, color-mix(in oklab, var(--foreground) 12%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.bg-linegrid {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+.hairline {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Subtle background glow behind hero. */
+.hero-glow::before {
+  content: '';
+  position: absolute;
+  inset: -10% -20% auto -20%;
+  height: 70%;
+  background: radial-gradient(60% 60% at 50% 0%, color-mix(in oklab, var(--brand) 22%, transparent), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Inline code style for the docs/learn pages. */
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  padding: 0.1em 0.45em;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+/* Animations */
+
+@keyframes float-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-float-up {
+  animation: float-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.animate-pulse-soft { animation: pulse-soft 2.4s ease-in-out infinite; }

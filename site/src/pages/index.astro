@@ -1,0 +1,313 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Section from '../components/Section.astro';
+import SectionHead from '../components/SectionHead.astro';
+import Card from '../components/Card.astro';
+import Button from '../components/Button.astro';
+import Icon from '../components/Icon.astro';
+import Eyebrow from '../components/Eyebrow.astro';
+
+const features = [
+  { icon: 'flame',   title: 'Built-in warmup',         desc: 'Reputation-safe warmup pools that spin up before you start, and keep running after you do.' },
+  { icon: 'send',    title: 'Distributed sending',     desc: 'Sends across many mailboxes and many machines so no single IP carries the heat.' },
+  { icon: 'inbox',   title: 'Unified inbox',           desc: 'Every reply, bounce, OOO, and click in one console with assignment and search.' },
+  { icon: 'spark',   title: 'Smart sequences',         desc: 'Step delays, variants, conditions, and reply detection — without the dark magic.' },
+  { icon: 'shield',  title: 'Encrypted at rest',       desc: 'Envelope encryption with AWS KMS. Per-user data keys. Worker boundary preserved.' },
+  { icon: 'chart',   title: 'Deliverability analytics', desc: 'Placement, complaints, bounces, and warmup health by mailbox, pool, and worker.' },
+];
+
+const logos = ['Loop', 'Northwind', 'Spruce', 'Heliogen', 'Foundry', 'Quanto', 'Cinder', 'Vellum'];
+
+const stats = [
+  { value: '99.97%', label: 'Worker uptime, last 90 days' },
+  { value: '< 1ms',  label: 'Tracking edge dedupe latency' },
+  { value: '0.04%',  label: 'Mean platform complaint rate' },
+  { value: '12.4k',  label: 'Mailboxes warming right now' },
+];
+---
+<Layout
+  title="Warmbly — cold email that actually lands"
+  description="Warmbly is the deliverability platform for cold email. Warm your inboxes, send at scale, and keep your reputation clean across hundreds of mailboxes."
+>
+  <!-- HERO ------------------------------------------------------------- -->
+  <section class="relative overflow-hidden hero-glow">
+    <div class="absolute inset-0 bg-linegrid opacity-[0.35] dark:opacity-[0.25] pointer-events-none" />
+    <div class="container-page relative pt-20 md:pt-28 pb-16 md:pb-24">
+      <div class="max-w-3xl">
+        <Eyebrow class="mb-5">
+          <Icon name="zap" size={12} />
+          Warmup &amp; sending, one platform
+        </Eyebrow>
+        <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight leading-[1.02] text-foreground">
+          Cold email that actually lands in the inbox.
+        </h1>
+        <p class="mt-6 text-lg md:text-xl text-muted-foreground leading-relaxed max-w-2xl">
+          Warmbly warms your mailboxes, distributes sending across workers and IPs, and watches reputation in real time — so the cold campaign you run on Monday is still landing on Friday.
+        </p>
+        <div class="mt-8 flex flex-wrap items-center gap-3">
+          <Button href="https://app.warmbly.com/register" size="lg">
+            Start free
+            <Icon name="arrowRight" size={16} />
+          </Button>
+          <Button href="/pricing/" size="lg" variant="secondary">See pricing</Button>
+          <span class="text-sm text-muted-foreground ml-1">No credit card. 14-day pro trial.</span>
+        </div>
+
+        <ul class="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+          <li class="inline-flex items-center gap-2"><Icon name="check" size={14} class="text-success" /> SPF, DKIM &amp; DMARC checks</li>
+          <li class="inline-flex items-center gap-2"><Icon name="check" size={14} class="text-success" /> Free + premium warmup pools</li>
+          <li class="inline-flex items-center gap-2"><Icon name="check" size={14} class="text-success" /> Dedicated workers on Business</li>
+          <li class="inline-flex items-center gap-2"><Icon name="check" size={14} class="text-success" /> Native Gmail &amp; Outlook</li>
+        </ul>
+      </div>
+
+      <!-- Mock product surface -->
+      <div class="mt-16 md:mt-20 relative">
+        <div class="rounded-2xl border border-border bg-card shadow-[0_30px_80px_-30px_rgba(15,23,42,0.18)] overflow-hidden">
+          <div class="flex items-center gap-2 px-4 h-9 border-b border-border bg-surface-2/60">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-foreground/15" />
+              <span class="w-2.5 h-2.5 rounded-full bg-foreground/15" />
+              <span class="w-2.5 h-2.5 rounded-full bg-foreground/15" />
+            </div>
+            <span class="text-[11.5px] text-muted-foreground ml-3 font-mono">app.warmbly.com / accounts</span>
+          </div>
+          <div class="grid grid-cols-12 min-h-[420px]">
+            <aside class="hidden md:block col-span-3 border-r border-border p-4">
+              <p class="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">Workspace</p>
+              <nav class="space-y-1 text-[13px]">
+                {['Home','Accounts','Inbox','Campaigns','Contacts','Analytics','CRM','Settings'].map((it, i) => (
+                  <div class={`h-7 px-2 rounded-md flex items-center gap-2 ${i===1 ? 'bg-surface-2 text-foreground' : 'text-muted-foreground'}`}>
+                    <span class="w-1.5 h-1.5 rounded-full bg-foreground/30" />
+                    {it}
+                  </div>
+                ))}
+              </nav>
+              <p class="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground px-1 mt-5 mb-2">Pools</p>
+              <div class="space-y-1 text-[13px] text-muted-foreground">
+                <div class="h-7 px-2 rounded-md flex items-center justify-between"><span>Premium</span><span class="text-[11px] text-success">healthy</span></div>
+                <div class="h-7 px-2 rounded-md flex items-center justify-between"><span>Free</span><span class="text-[11px] text-success">healthy</span></div>
+              </div>
+            </aside>
+            <div class="col-span-12 md:col-span-9 p-4 md:p-6">
+              <div class="flex items-center justify-between mb-4">
+                <div>
+                  <h3 class="text-[15px] font-semibold">Mailbox accounts</h3>
+                  <p class="text-[12.5px] text-muted-foreground">128 mailboxes · 4 workers · 5,420 sent today</p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface-2 border border-border text-muted-foreground">
+                    <span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse-soft" />
+                    workers online
+                  </span>
+                </div>
+              </div>
+              <div class="rounded-lg border border-border overflow-hidden">
+                <div class="grid grid-cols-12 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-surface-2/60 px-4 h-8 items-center">
+                  <div class="col-span-4">Mailbox</div>
+                  <div class="col-span-2">Worker</div>
+                  <div class="col-span-2">Today</div>
+                  <div class="col-span-2">Warmup</div>
+                  <div class="col-span-2">Placement</div>
+                </div>
+                {[
+                  ['founder@acme.co',     'eu-worker-3',  '37/50', '22/40', '98% inbox'],
+                  ['hello@acme.co',       'eu-worker-3',  '24/40', '18/40', '96% inbox'],
+                  ['team@northwind.dev',  'us-worker-7',  '46/50', '34/40', '94% inbox'],
+                  ['intro@northwind.dev', 'us-worker-7',  '42/50', '30/40', '93% inbox'],
+                  ['ml@helio.gen',        'eu-worker-1',  '18/30', '12/30', '97% inbox'],
+                  ['founder@spruce.bio',  'us-worker-2',  '12/40',  '8/30', '99% inbox'],
+                ].map(([m, w, t, wm, p]) => (
+                  <div class="grid grid-cols-12 text-[13px] px-4 h-10 items-center border-t border-border">
+                    <div class="col-span-4 font-medium truncate flex items-center gap-2">
+                      <span class="w-1.5 h-1.5 rounded-full bg-success" />
+                      {m}
+                    </div>
+                    <div class="col-span-2 text-muted-foreground font-mono text-[12px]">{w}</div>
+                    <div class="col-span-2 text-muted-foreground">{t}</div>
+                    <div class="col-span-2 text-muted-foreground">{wm}</div>
+                    <div class="col-span-2 text-success/90">{p}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LOGOS / SOCIAL PROOF --------------------------------------------- -->
+  <section class="border-y border-border bg-surface/50">
+    <div class="container-page py-8">
+      <p class="text-center text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground mb-5">
+        Trusted by founders, sales teams and recruiters at 4,000+ companies
+      </p>
+      <div class="flex flex-wrap items-center justify-center gap-x-10 gap-y-3 opacity-70">
+        {logos.map((l) => (
+          <span class="text-[15px] font-semibold tracking-tight text-foreground/60">{l}</span>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURE GRID ------------------------------------------------------ -->
+  <Section>
+    <SectionHead
+      eyebrow="Everything in one platform"
+      title="Warmup, sending and inbox — engineered together."
+      description="Most tools bolt warmup onto an SMTP relay. We built sending, warmup, analytics and inbox as one system so the signal one part collects is the signal the next part acts on."
+    />
+    <div class="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {features.map((f) => (
+        <Card class="hover:border-border-strong transition-colors">
+          <div class="w-9 h-9 rounded-lg bg-brand-soft text-brand inline-flex items-center justify-center mb-4">
+            <Icon name={f.icon} size={18} />
+          </div>
+          <h3 class="text-[15.5px] font-semibold text-foreground">{f.title}</h3>
+          <p class="mt-1.5 text-[14px] text-muted-foreground leading-relaxed">{f.desc}</p>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <!-- STATS ------------------------------------------------------------- -->
+  <section class="bg-surface border-y border-border">
+    <div class="container-page py-14">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+        {stats.map((s) => (
+          <div class="text-center md:text-left">
+            <div class="text-3xl md:text-4xl font-extrabold tracking-tight">{s.value}</div>
+            <div class="text-[13px] text-muted-foreground mt-1">{s.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS ------------------------------------------------------ -->
+  <Section>
+    <SectionHead
+      eyebrow="How it works"
+      title="From signup to first reply in an afternoon."
+      description="No SMTP wrangling. No DNS spelunking. We walk you through the pieces that actually move deliverability and skip the ones that don't."
+    />
+    <div class="mt-12 grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {[
+        { n: '01', title: 'Connect mailboxes',  body: 'Native OAuth for Google and Microsoft. SMTP + IMAP for everything else.', icon: 'mail' },
+        { n: '02', title: 'Warm up safely',     body: 'Pool placement, gradual ramp, automatic backoff if reputation slips.', icon: 'flame' },
+        { n: '03', title: 'Run campaigns',      body: 'Sequences, variables, A/B variants and reply detection across all senders.', icon: 'send' },
+        { n: '04', title: 'Watch placement',    body: 'Per-mailbox placement, complaint and bounce signals. Quarantine before providers do.', icon: 'chart' },
+      ].map((s) => (
+        <Card>
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-[12px] font-mono text-muted-foreground">{s.n}</span>
+            <Icon name={s.icon} class="text-muted-foreground" />
+          </div>
+          <h3 class="text-[15.5px] font-semibold">{s.title}</h3>
+          <p class="mt-1.5 text-[13.5px] text-muted-foreground leading-relaxed">{s.body}</p>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <!-- DELIVERABILITY POSTURE ------------------------------------------- -->
+  <Section variant="muted">
+    <div class="grid lg:grid-cols-12 gap-12 items-start">
+      <div class="lg:col-span-5">
+        <Eyebrow class="mb-4">Why we're different</Eyebrow>
+        <h2 class="text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">
+          We refuse to be the reason your domain ends up on a blocklist.
+        </h2>
+        <p class="mt-5 text-muted-foreground leading-relaxed">
+          Most cold-email platforms reward you for sending more. We reward you for sending well. Mailbox caps default to 50/day. Workers are capped by the sum of their mailbox budgets — not an arbitrary global number. Shared warmup pools quarantine misbehaving senders before providers do.
+        </p>
+        <div class="mt-8 grid sm:grid-cols-2 gap-3">
+          {[
+            ['50 / day', 'Default per-mailbox cold cap'],
+            ['10 min', 'Default minimum gap between sends'],
+            ['10 / day', 'Warmup starting volume'],
+            ['+1 / day', 'Default warmup ramp'],
+          ].map(([k, v]) => (
+            <div class="rounded-lg border border-border bg-card px-4 py-3">
+              <div class="text-[15.5px] font-semibold">{k}</div>
+              <div class="text-[12.5px] text-muted-foreground">{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div class="lg:col-span-7">
+        <Card class="bg-card/80">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Pool health</p>
+              <h3 class="text-[15.5px] font-semibold">Premium warmup</h3>
+            </div>
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-success/10 border border-success/20 text-success">
+              <span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse-soft" />
+              healthy
+            </span>
+          </div>
+          <div class="grid grid-cols-3 gap-4 mb-6">
+            {[
+              ['Complaint rate', '0.02%', 'success'],
+              ['Bounce rate',    '0.7%',  'success'],
+              ['Spam placement', '3.1%',  'warn'],
+            ].map(([k, v, color]) => (
+              <div class="rounded-lg border border-border bg-surface-2/60 px-3 py-3">
+                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">{k}</div>
+                <div class={`text-[18px] font-semibold mt-0.5 ${color === 'success' ? 'text-success' : 'text-warn'}`}>{v}</div>
+              </div>
+            ))}
+          </div>
+          <div>
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Last 14 days</p>
+            <div class="flex items-end gap-1.5 h-28">
+              {[18,24,32,28,40,36,44,52,48,58,56,62,68,72].map((h) => (
+                <div class="flex-1 rounded-t-md bg-brand/60 dark:bg-brand/70" style={`height:${h}%`} />
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
+    </div>
+  </Section>
+
+  <!-- QUOTE ------------------------------------------------------------- -->
+  <Section>
+    <div class="max-w-4xl mx-auto text-center">
+      <Icon name="star" size={20} class="text-warn mx-auto mb-4" />
+      <p class="text-2xl md:text-3xl font-medium tracking-tight leading-snug">
+        “We had eight mailboxes burning out a week with our old tool. Switched to Warmbly, rebuilt the pool placement, dropped to one mailbox a quarter. The reply rate doubled because half our mail used to land in spam.”
+      </p>
+      <div class="mt-6 inline-flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-brand/20 inline-flex items-center justify-center text-brand font-semibold">M</div>
+        <div class="text-left">
+          <div class="text-sm font-semibold">Maya Okonkwo</div>
+          <div class="text-[12.5px] text-muted-foreground">Head of GTM, Northwind</div>
+        </div>
+      </div>
+    </div>
+  </Section>
+
+  <!-- CTA --------------------------------------------------------------- -->
+  <section class="border-t border-border bg-foreground text-background">
+    <div class="container-page py-20 md:py-24 text-center">
+      <h2 class="text-3xl md:text-5xl font-extrabold tracking-tight leading-tight">
+        Send cold email like you actually want it to work.
+      </h2>
+      <p class="mt-4 text-background/70 max-w-xl mx-auto">
+        Start free. Connect a mailbox. Warm it up. Send your first sequence in an afternoon.
+      </p>
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register" class="inline-flex h-11 px-5 items-center rounded-md text-[15px] font-medium bg-background text-foreground hover:bg-background/90 transition-colors">
+          Start free
+        </a>
+        <a href="/product/" class="inline-flex h-11 px-5 items-center rounded-md text-[15px] font-medium border border-background/20 hover:bg-background/10 transition-colors">
+          Tour the product
+        </a>
+      </div>
+    </div>
+  </section>
+</Layout>
