@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
 )
@@ -62,9 +63,14 @@ func (s *JobsService) HandleFlagsAdd(ctx context.Context, e *models.JobEventFlag
 }
 
 func warmupTokenFromFlags(flags []string) string {
+	// Try current header name first, then legacy "X-Warmbly-Token" so messages
+	// sent before the header rename continue to verify until they age out.
+	prefixes := []string{config.WarmupVerifyHeader + ":", "X-Warmbly-Token:"}
 	for _, flag := range flags {
-		if strings.HasPrefix(flag, "X-Warmbly-Token:") {
-			return strings.TrimPrefix(flag, "X-Warmbly-Token:")
+		for _, p := range prefixes {
+			if strings.HasPrefix(flag, p) {
+				return strings.TrimPrefix(flag, p)
+			}
 		}
 	}
 	return ""

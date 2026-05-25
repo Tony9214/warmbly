@@ -474,9 +474,60 @@ func (s *tasksService) publishWarmupEmailSentEvent(ctx context.Context, task *Ta
 	}
 }
 
-// generateWarmupSubject generates a random warmup email subject
+// generateWarmupSubject picks a warmup subject. To reduce content
+// fingerprinting risk, ~40% of the time we synthesize a subject from
+// slot templates (yielding thousands of unique strings) instead of
+// returning a literal from the static set.
 func generateWarmupSubject() string {
-	subjects := []string{
+	if rand.Float64() < 0.4 {
+		if s := synthesizeWarmupSubject(); s != "" {
+			return s
+		}
+	}
+	subjects := warmupSubjectLiterals()
+	return subjects[rand.Intn(len(subjects))]
+}
+
+// synthesizeWarmupSubject composes a subject from slot fragments. With
+// the current slot dictionaries this yields several thousand distinct
+// strings, which is harder for a vendor corpus-classifier to fingerprint.
+func synthesizeWarmupSubject() string {
+	templates := []string{
+		"{adj} {noun}",
+		"{adj} {noun} {timeRef}",
+		"{verb} {noun}",
+		"{verb} on {noun}",
+		"{question} about {noun}",
+		"{timeRef} {noun}",
+		"{noun} {timeRef}",
+		"Re: {noun}",
+	}
+	adj := []string{"quick", "small", "short", "tiny", "casual", "friendly", "useful", "interesting", "brief", "minor"}
+	noun := []string{"check-in", "follow up", "note", "ping", "thought", "update", "idea", "heads up", "favor", "question", "nudge", "share"}
+	verb := []string{"Following up", "Circling back", "Wanted your take", "Touching base", "Picking up", "Adding"}
+	question := []string{"Quick question", "Curious", "Wanted your view", "Thought"}
+	timeRef := []string{"this week", "before EOD", "when free", "this morning", "today", "later", "if useful"}
+
+	tpl := templates[rand.Intn(len(templates))]
+	r := strings.NewReplacer(
+		"{adj}", capitalize(adj[rand.Intn(len(adj))]),
+		"{noun}", noun[rand.Intn(len(noun))],
+		"{verb}", verb[rand.Intn(len(verb))],
+		"{question}", question[rand.Intn(len(question))],
+		"{timeRef}", timeRef[rand.Intn(len(timeRef))],
+	)
+	return strings.TrimSpace(r.Replace(tpl))
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return ""
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func warmupSubjectLiterals() []string {
+	return []string{
 		// Casual check-ins
 		"Quick question",
 		"Following up",
@@ -534,7 +585,6 @@ func generateWarmupSubject() string {
 		"Quick tip I picked up",
 		"Thought this was insightful",
 	}
-	return subjects[rand.Intn(len(subjects))]
 }
 
 // conversationForTheme returns a conversation matching the requested theme,

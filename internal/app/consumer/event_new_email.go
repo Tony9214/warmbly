@@ -8,12 +8,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/models"
 )
 
 func (s *JobsService) HandleNewEmail(ctx context.Context, e *models.JobEventNewEmail) error {
-	// Check for warmup token header in message headers
-	warmupToken := extractHeaderValue(e.Message, "X-Warmbly-Token")
+	// Check for warmup token header in message headers.
+	// Try the current header name first, then the legacy "X-Warmbly-Token"
+	// so messages in flight during the rollout continue to verify.
+	warmupToken := extractHeaderValue(e.Message, config.WarmupVerifyHeader)
+	if warmupToken == "" {
+		warmupToken = extractHeaderValue(e.Message, "X-Warmbly-Token")
+	}
 	if warmupToken != "" {
 		handled, err := s.handleWarmupEmail(ctx, e, warmupToken)
 		if err != nil {
