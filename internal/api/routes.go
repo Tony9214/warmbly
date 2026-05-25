@@ -287,6 +287,18 @@ func Run(
 			taskOps.POST("/dlq/:id/replay", h.ReplayTaskDeadLetter)
 		}
 
+		// Customer-facing webhooks (org-scoped).
+		webhooks := protected.Group("/webhooks")
+		webhooks.Use(m.RequireOrganization(), m.RateLimitMiddleware(models.RateLimitWrite))
+		{
+			webhooks.GET("", h.ListWebhookEndpoints)
+			webhooks.POST("", h.CreateWebhookEndpoint)
+			webhooks.PATCH("/:id", h.UpdateWebhookEndpoint)
+			webhooks.DELETE("/:id", h.DeleteWebhookEndpoint)
+			webhooks.POST("/:id/rotate-secret", h.RotateWebhookSecret)
+			webhooks.GET("/:id/deliveries", h.ListWebhookDeliveries)
+		}
+
 		// Warmup routing rules (org-scoped). Lets customers define
 		// preferences for premium-pool partner selection — e.g. send
 		// to Gmail recipients only from Google-classified senders.

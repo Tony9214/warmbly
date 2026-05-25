@@ -132,7 +132,7 @@ func (s *emailService) OAuthFinish(ctx context.Context, userID, code, state stri
 		name = deriveNameFromEmail(owner.Email)
 	}
 
-	return s.emailRepository.NewOauthAccount(ctx, userID, models.NewOauthAccount{
+	acc, xerr := s.emailRepository.NewOauthAccount(ctx, userID, models.NewOauthAccount{
 		OrganizationID: sess.OrganizationID,
 		Provider:       provider,
 		Name:           name,
@@ -141,6 +141,10 @@ func (s *emailService) OAuthFinish(ctx context.Context, userID, code, state stri
 		RefreshToken:   tok.RefreshToken,
 		ExpiresAt:      tok.Expiry,
 	})
+	if xerr == nil && acc != nil {
+		s.dispatchAccountConnected(ctx, sess.OrganizationID, acc)
+	}
+	return acc, xerr
 }
 
 // OnboardSMTPIMAP validates the supplied SMTP/IMAP credentials against a live worker, then
@@ -195,7 +199,27 @@ func (s *emailService) OnboardSMTPIMAP(ctx context.Context, userID string, orgID
 		}
 	}
 
+	s.dispatchAccountConnected(ctx, orgID, acc)
 	return acc, nil
+}
+
+// dispatchAccountConnected fires an email_account.connected webhook event
+// to any subscribed endpoints. Failures here are best-effort and never
+// block the onboarding flow.
+func (s *emailService) dispatchAccountConnected(ctx context.Context, orgID *uuid.UUID, acc *models.Email) {
+	if s.webhookService == nil || orgID == nil || acc == nil {
+		return
+	}
+	payload := map[string]any{
+		"email_account_id": acc.ID,
+		"email":            acc.Email,
+		"provider":         acc.Provider,
+		"name":             acc.Name,
+		"created_at":       acc.CreatedAt,
+	}
+	if _, err := s.webhookService.Dispatch(ctx, *orgID, models.WebhookEventEmailAccountConnected, payload); err != nil {
+		sentry.CaptureException(err)
+	}
 }
 
 func (s *emailService) oauthConfigFor(provider models.InboxProvider) (*oauth2.Config, *errx.Error) {

@@ -11,6 +11,13 @@ import (
 	"github.com/warmbly/warmbly/internal/repository"
 )
 
+// WebhookDispatcher is the minimum dispatch interface the warmup service
+// needs. Kept narrow to avoid importing the webhook package (which would
+// create a cycle on init order).
+type WebhookDispatcher interface {
+	Dispatch(ctx context.Context, orgID uuid.UUID, eventType models.WebhookEventType, data any) (uuid.UUID, error)
+}
+
 const (
 	minSpamPlacementSample = 20
 
@@ -60,17 +67,76 @@ type Service interface {
 	// Scheduled health evaluation
 	EvaluateAllParticipants(ctx context.Context) (evaluated int, stateChanges int, err *errx.Error)
 	GetPoolHealthSummary(ctx context.Context) (*models.WarmupPoolHealthSummary, *errx.Error)
+
+	// WireWebhooks attaches the webhook dispatcher post-construction so
+	// health-state transitions fan out to subscribed customer endpoints.
+	WireWebhooks(w WebhookDispatcher, emailRepo repository.EmailRepository)
 }
 
 type service struct {
-	repo repository.WarmupRepository
-	now  func() time.Time
+	repo            repository.WarmupRepository
+	emailRepo       repository.EmailRepository
+	webhooks        WebhookDispatcher
+	now             func() time.Time
 }
 
 func NewService(repo repository.WarmupRepository) Service {
 	return &service{
 		repo: repo,
 		now:  time.Now,
+	}
+}
+
+// WireWebhooks attaches the webhook dispatcher post-construction so health
+// transitions fan out to subscribed customer endpoints. The emailRepo is
+// needed to resolve the org for an account (warmup events are recorded
+// per-account but dispatched per-org).
+func (s *service) WireWebhooks(w WebhookDispatcher, emailRepo repository.EmailRepository) {
+	s.webhooks = w
+	s.emailRepo = emailRepo
+}
+
+// dispatchHealthEvent maps a health-state transition to a webhook event
+// (if any) and dispatches it. Quiet on the healthy↔watch transition since
+// that is too noisy; fires on entry into throttled / quarantined / blocked.
+func (s *service) dispatchHealthEvent(ctx context.Context, accountID uuid.UUID, oldState, newState models.WarmupHealthState, reason string) {
+	if s.webhooks == nil || s.emailRepo == nil || oldState == newState {
+		return
+	}
+	var event models.WebhookEventType
+	switch newState {
+	case models.WarmupHealthBlocked:
+		event = models.WebhookEventWarmupBlocked
+	case models.WarmupHealthQuarantined:
+		event = models.WebhookEventWarmupQuarantined
+	case models.WarmupHealthThrottled, models.WarmupHealthWatch, models.WarmupHealthHealthy:
+		// Fire the generic health_changed event for these — quarantine /
+		// blocked also re-fire it so subscribers can carry a single handler.
+		event = models.WebhookEventWarmupHealthChanged
+	default:
+		return
+	}
+
+	account, _ := s.emailRepo.GetByID(ctx, accountID)
+	if account == nil || account.OrganizationID == nil {
+		return
+	}
+	payload := map[string]any{
+		"email_account_id": accountID,
+		"email":            account.Email,
+		"previous_state":   string(oldState),
+		"new_state":        string(newState),
+		"reason":           reason,
+	}
+	_, _ = s.webhooks.Dispatch(ctx, *account.OrganizationID, event, payload)
+
+	// For block/quarantine, also fire the specific event in addition to
+	// the generic transition so callers can subscribe selectively.
+	switch newState {
+	case models.WarmupHealthBlocked:
+		_, _ = s.webhooks.Dispatch(ctx, *account.OrganizationID, models.WebhookEventWarmupBlocked, payload)
+	case models.WarmupHealthQuarantined:
+		_, _ = s.webhooks.Dispatch(ctx, *account.OrganizationID, models.WebhookEventWarmupQuarantined, payload)
 	}
 }
 
@@ -249,6 +315,13 @@ func (s *service) evaluateAndPersist(ctx context.Context, accountID uuid.UUID, p
 		return nil, errx.InternalError()
 	}
 
+	// Capture the prior state so we can fire a webhook only on real
+	// transitions instead of on every sweep evaluation.
+	priorState := models.WarmupHealthState("")
+	if prev, prevErr := s.repo.GetParticipantHealth(ctx, accountID, poolType); prevErr == nil && prev != nil {
+		priorState = prev.HealthState
+	}
+
 	decision := evaluateMetrics(metrics, s.now().UTC())
 	if err := s.repo.UpdateParticipantHealth(ctx, accountID, decision.State, decision.BlockedUntil, decision.Reason, decision.Score); err != nil {
 		return nil, errx.InternalError()
@@ -257,6 +330,10 @@ func (s *service) evaluateAndPersist(ctx context.Context, accountID uuid.UUID, p
 	health, err := s.repo.GetParticipantHealth(ctx, accountID, poolType)
 	if err != nil {
 		return nil, errx.InternalError()
+	}
+
+	if priorState != "" && health != nil {
+		s.dispatchHealthEvent(ctx, accountID, priorState, health.HealthState, decision.Reason)
 	}
 	return health, nil
 }
