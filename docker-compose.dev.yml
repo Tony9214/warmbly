@@ -86,6 +86,18 @@ services:
     healthcheck:
       disable: true
 
+  # ─── web ──────────────────────────────────────────────────────────────
+  # web still runs the same image as `make up`; we only re-declare it to
+  # weaken the `depends_on: backend` from service_healthy → service_started.
+  # In dev mode backend's healthcheck is disabled (air flaps would defeat
+  # the gate), and compose refuses to bring up any service whose
+  # `service_healthy` target has no healthcheck. web is a Vite dev server,
+  # it doesn't reach out to backend at boot, so service_started is enough.
+  web:
+    depends_on:
+      backend:
+        condition: service_started
+
   # ─── Elixir (realtime) ────────────────────────────────────────────────
   realtime:
     image: warmbly-elixir-dev
