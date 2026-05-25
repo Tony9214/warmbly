@@ -292,6 +292,20 @@ func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (
 		domainsByID = nil
 	}
 
+	// Load customer routing rules (premium pool only — free pool ignores
+	// rules since trial mailboxes don't need provider-shape preferences).
+	var routingRules []models.WarmupRoutingRule
+	var emailsByID map[uuid.UUID]string
+	if poolType == "premium" && s.warmupRoutingRepo != nil && account.OrganizationID != nil {
+		rules, ruleErr := s.warmupRoutingRepo.ListForOrganization(ctx, *account.OrganizationID)
+		if ruleErr == nil && len(rules) > 0 {
+			routingRules = rules
+			if e, eErr := s.warmupRepo.GetPoolParticipantEmails(ctx, poolType, true); eErr == nil {
+				emailsByID = e
+			}
+		}
+	}
+
 	recentPartnerSet := map[uuid.UUID]struct{}{}
 	recentPartnerIDs, err := s.warmupRepo.GetRecentlyUsedPartners(ctx, account.ID, time.Now().Add(-recentPartnerWindow))
 	if err == nil {
@@ -325,7 +339,7 @@ func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (
 		return nil, fmt.Errorf("no available warmup partners")
 	}
 
-	partnerID := pickWeightedPartner(availablePartners, domainsByID, domainCounts)
+	partnerID := pickWeightedPartner(availablePartners, domainsByID, domainCounts, routingRules, account.Email, emailsByID)
 
 	partner, err := s.emailRepo.GetByID(ctx, partnerID)
 	if err != nil {
@@ -335,12 +349,26 @@ func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (
 	return partner, nil
 }
 
-// pickWeightedPartner picks a partner ID using inverse-frequency weights on
-// the partner's recipient domain. Partners whose domain we have not hit
-// recently get a higher weight; partners on saturated domains drop toward 0.
-// If domain data is unavailable, falls back to uniform random selection.
-func pickWeightedPartner(candidates []uuid.UUID, domainsByID map[uuid.UUID]string, domainCounts map[string]int) uuid.UUID {
-	if len(candidates) == 1 || len(domainsByID) == 0 {
+// pickWeightedPartner picks a partner ID using a composite weight:
+//   - inverse-frequency on the partner's recipient domain (diversity)
+//   - customer-defined routing rule multipliers (preference)
+//
+// Rules are evaluated in priority order; the first matching rule for a
+// (sender, recipient) pair applies its weight multiplier. A rule with
+// weight=0 hard-excludes the pair. Falls back to uniform when no signals
+// are available.
+func pickWeightedPartner(
+	candidates []uuid.UUID,
+	domainsByID map[uuid.UUID]string,
+	domainCounts map[string]int,
+	rules []models.WarmupRoutingRule,
+	senderEmail string,
+	emailsByID map[uuid.UUID]string,
+) uuid.UUID {
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+	if len(domainsByID) == 0 && len(rules) == 0 {
 		return candidates[rand.Intn(len(candidates))]
 	}
 
@@ -348,15 +376,23 @@ func pickWeightedPartner(candidates []uuid.UUID, domainsByID map[uuid.UUID]strin
 	var total float64
 	for i, id := range candidates {
 		domain := domainsByID[id]
-		// 1.0 / (1 + count). Untouched domain → 1.0, hit once → 0.5,
-		// hit 4× → 0.2. Keeps every partner reachable but biases away
-		// from saturated buckets.
+		// Diversity base weight.
 		w := 1.0 / float64(1+domainCounts[domain])
+
+		// Routing rule multiplier (premium pool only, when configured).
+		if len(rules) > 0 && len(emailsByID) > 0 {
+			if recipientEmail, ok := emailsByID[id]; ok {
+				w *= routingMultiplier(rules, senderEmail, recipientEmail)
+			}
+		}
+
 		weights[i] = w
 		total += w
 	}
 
 	if total <= 0 {
+		// All candidates hard-excluded by rules. Fall back to uniform so
+		// the system still warms up rather than stalling on misconfigured rules.
 		return candidates[rand.Intn(len(candidates))]
 	}
 
@@ -369,6 +405,18 @@ func pickWeightedPartner(candidates []uuid.UUID, domainsByID map[uuid.UUID]strin
 		}
 	}
 	return candidates[len(candidates)-1]
+}
+
+// routingMultiplier returns the weight multiplier from the first matching
+// rule in priority order (lowest priority value wins). 1.0 when no rule
+// matches — neutral, so unmatched pairs neither preferred nor penalized.
+func routingMultiplier(rules []models.WarmupRoutingRule, senderEmail, recipientEmail string) float64 {
+	for i := range rules {
+		if rules[i].Matches(senderEmail, recipientEmail) {
+			return rules[i].Weight
+		}
+	}
+	return 1.0
 }
 
 func (s *tasksService) resolveWarmupPoolType(ctx context.Context, account *Email) string {

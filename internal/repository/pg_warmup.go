@@ -110,6 +110,7 @@ type WarmupRepository interface {
 
 	// Partner diversity support
 	GetPoolParticipantDomains(ctx context.Context, poolType string, excludeBlocked bool) (map[uuid.UUID]string, error)
+	GetPoolParticipantEmails(ctx context.Context, poolType string, excludeBlocked bool) (map[uuid.UUID]string, error)
 	GetRecentPartnerDomainCounts(ctx context.Context, accountID uuid.UUID, since time.Time) (map[string]int, error)
 }
 
@@ -737,6 +738,40 @@ func (r *warmupRepository) GetPoolParticipantDomains(ctx context.Context, poolTy
 			return nil, err
 		}
 		out[id] = domain
+	}
+	return out, rows.Err()
+}
+
+// GetPoolParticipantEmails returns a map from email_account_id to full
+// email address for every active participant in the given pool. Used by
+// the routing-rule evaluator which needs the full address to classify
+// providers and apply customer-defined rules.
+func (r *warmupRepository) GetPoolParticipantEmails(ctx context.Context, poolType string, excludeBlocked bool) (map[uuid.UUID]string, error) {
+	query := `
+		SELECT wpp.email_account_id, ea.email
+		FROM warmup_pool_participants wpp
+		JOIN warmup_pools wp ON wpp.pool_id = wp.id
+		JOIN email_accounts ea ON ea.id = wpp.email_account_id
+		WHERE wp.pool_type = $1
+	`
+	if excludeBlocked {
+		query += " AND wpp.health_state IN ('healthy', 'watch', 'throttled')"
+	}
+
+	rows, err := r.db.Query(ctx, query, poolType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[uuid.UUID]string)
+	for rows.Next() {
+		var id uuid.UUID
+		var email string
+		if err := rows.Scan(&id, &email); err != nil {
+			return nil, err
+		}
+		out[id] = email
 	}
 	return out, rows.Err()
 }

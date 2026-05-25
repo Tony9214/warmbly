@@ -287,6 +287,18 @@ func Run(
 			taskOps.POST("/dlq/:id/replay", h.ReplayTaskDeadLetter)
 		}
 
+		// Warmup routing rules (org-scoped). Lets customers define
+		// preferences for premium-pool partner selection — e.g. send
+		// to Gmail recipients only from Google-classified senders.
+		warmupRouting := protected.Group("/warmup/routing")
+		warmupRouting.Use(m.RequireOrganization(), m.RateLimitMiddleware(models.RateLimitWrite))
+		{
+			warmupRouting.GET("", h.ListWarmupRoutingRules)
+			warmupRouting.POST("", h.CreateWarmupRoutingRule)
+			warmupRouting.PATCH("/:id", h.UpdateWarmupRoutingRule)
+			warmupRouting.DELETE("/:id", h.DeleteWarmupRoutingRule)
+		}
+
 		// Reply templates (org-scoped)
 		templates := protected.Group("/templates")
 		templates.Use(m.RequireOrganization(), m.RateLimitMiddleware(models.RateLimitWrite))

@@ -98,6 +98,10 @@ type Handler struct {
 	// Warmup health
 	WarmupService warmup.Service
 
+	// Warmup routing rules — customer-defined preferences for premium-pool
+	// partner selection (e.g. Gmail recipients from Google Workspace senders).
+	WarmupRoutingRepo repository.WarmupRoutingRepository
+
 	// Public websocket URL used by frontend clients
 	WebsocketURI string
 

@@ -136,6 +136,7 @@ func main() {
 	var s3ForHandler *storage.Client
 	var userRepoForHandler repository.UserRepository
 	var organizationRepoForHandler repository.OrganizationRepository
+	var warmupRoutingRepoForHandler repository.WarmupRoutingRepository
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -400,6 +401,8 @@ func main() {
 		advancedRepository := repository.NewAdvancedOutreachRepository(primaryDB.Pool)
 		templateRepository := repository.NewTemplateRepository(primaryDB.Pool)
 		warmupRepository := repository.NewWarmupRepository(primaryDB.Pool)
+		warmupRoutingRepository := repository.NewWarmupRoutingRepository(primaryDB.Pool)
+		warmupRoutingRepoForHandler = warmupRoutingRepository
 		campaignProgressRepository := repository.NewCampaignProgressRepository(primaryDB.Pool)
 		campaignLogRepository := repository.NewCampaignLogRepository(primaryDB)
 		warmupService = warmupapp.NewService(warmupRepository)
@@ -547,6 +550,7 @@ func main() {
 			warmupService,
 			taskRepository,
 			warmupRepository,
+			warmupRoutingRepository,
 			campaignProgressRepository,
 			emailRepostory,
 			campaignRepostory,
@@ -643,7 +647,8 @@ func main() {
 		AdvancedService: advancedService,
 
 		// Warmup health
-		WarmupService: warmupService,
+		WarmupService:     warmupService,
+		WarmupRoutingRepo: warmupRoutingRepoForHandler,
 
 		WebsocketURI: websocketURI,
 
