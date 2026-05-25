@@ -13,9 +13,8 @@ PROTO_DIR := internal/tasks/proto
 PROTO_GEN_FILES := $(PROTO_DIR)/tasks.pb.go
 
 .PHONY: setup-tools lint proto check-proto \
-        dev sim seed reset logs status stop down tools test-seed \
-        restart restart-go restart-all cache-clean \
-        watch watch-down watch-logs
+        up dev dev-down dev-logs sim seed reset logs status stop down tools test-seed \
+        restart restart-go restart-all cache-clean
 
 setup-tools:
 	@echo "Installing required Go tools into $(GO_BIN)"
@@ -44,8 +43,11 @@ check-proto:
 
 # ─── dev / simulation stack ─────────────────────────────────────────────
 
-# Start infra + app services (one worker). Foreground.
-dev:
+# Bring up the production-style stack (one worker, foreground).
+# Uses the unchanged docker-compose.yml — every service runs the same
+# image it would run in prod, just wired against local infra. Good
+# for "does the release binary boot?" smoke tests.
+up:
 	docker compose up
 
 # Full simulation: infra + app + premium and dedicated workers.
@@ -124,36 +126,53 @@ restart-all:
 	$(DOCKER_ENV) docker compose build --parallel backend consumer worker-shared-1 tracking realtime
 	docker compose up -d backend consumer worker-shared-1 tracking realtime
 
-# ─── hot-reload (air) ───────────────────────────────────────────────────
+# ─── hot-reload dev mode ────────────────────────────────────────────────
 #
-# Bind-mounted source + air file watcher inside a long-running golang
-# container. Edit a .go file → air rebuilds (~2-5s) → restarts the
-# binary in place. No docker image rebuild, no container recreate.
+# Bind-mounts source into long-running containers so saves are picked
+# up without a docker image rebuild:
 #
-# First boot takes ~30s to populate the warmbly_gomodcache /
-# warmbly_gocache volumes, but those persist across worktrees (the
-# volume names skip the per-project prefix), so subsequent worktrees
-# start watching almost instantly.
+#   - backend / consumer / worker-shared-1   → air watches .go and
+#     rebuilds the binary into ./tmp/main, then restarts in place.
+#   - tracking                                → cargo-watch reruns
+#     `cargo run` on changes under tracking/src.
+#   - realtime                                → mix phx.server — Phoenix
+#     reloads modules in-process; no external watcher.
 #
-# The default `make dev` / `make restart-go` flow still uses the
-# production-style Dockerfiles. Watch is opt-in.
+# Caches (Go mod + build, Cargo registry + target, Mix deps + _build)
+# live on named volumes whose `name:` skips the per-project prefix, so
+# the second worktree to bring up `make dev` starts in seconds.
+#
+# `make up` still gives you the production-style images. Dev is opt-in.
 
-WATCH_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.watch.yml
-WATCH_SVCS    := backend consumer worker-shared-1
+DEV_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
+DEV_SVCS    := backend consumer worker-shared-1 tracking realtime
 
-watch:
-	$(DOCKER_ENV) $(WATCH_COMPOSE) up -d --build $(WATCH_SVCS)
+# Bring up everything in dev / hot-reload mode. Infra services (postgres,
+# kafka, redis, …) come up as normal; the language services run from
+# the *-dev Dockerfiles with bind-mounted source.
+#
+# By default this brings up the full dev set so you can work across Go,
+# Rust, and Elixir at the same time. To skip Rust/Elixir, pass
+# `SVCS="backend consumer worker-shared-1"`:
+#   make dev SVCS="backend consumer worker-shared-1"
+SVCS ?= $(DEV_SVCS)
+dev:
+	$(DOCKER_ENV) $(DEV_COMPOSE) up -d --build $(SVCS)
 	@echo ""
-	@echo "Hot-reload running. Edit any .go file under cmd/ or internal/ to trigger a rebuild."
-	@echo "Stream logs:   make watch-logs"
-	@echo "Stop watch:    make watch-down"
+	@echo "Dev mode running for: $(SVCS)"
+	@echo "  Go saves           → ~2-5s rebuild (air)"
+	@echo "  Rust saves         → ~2-10s rebuild (cargo-watch, debug build)"
+	@echo "  Elixir saves       → in-process reload (Phoenix)"
+	@echo ""
+	@echo "Stream logs:   make dev-logs"
+	@echo "Stop dev:      make dev-down"
 
-watch-down:
-	$(WATCH_COMPOSE) stop $(WATCH_SVCS)
-	@echo "watch services stopped. Run 'make restart-go' to return to production-style builds."
+dev-down:
+	$(DEV_COMPOSE) stop $(DEV_SVCS)
+	@echo "dev services stopped. Run 'make up' for production-style images."
 
-watch-logs:
-	$(WATCH_COMPOSE) logs -f --tail=200 $(WATCH_SVCS)
+dev-logs:
+	$(DEV_COMPOSE) logs -f --tail=200 $(DEV_SVCS)
 
 # Force-drop the BuildKit cache. Useful when something's gone weird
 # (corrupted cache, debugging a "works on a clean build but not after
