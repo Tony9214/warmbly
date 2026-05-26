@@ -1,171 +1,339 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import Cloud from '../components/Cloud.astro';
+import HeroAtmosphere from '../components/HeroAtmosphere.astro';
 import Icon from '../components/Icon.astro';
 import CTA from '../components/CTA.astro';
 
-const kpis = [
-  { label: 'Placement · inbox',  value: '93.4%',  delta: '+1.2 pts',  ok: true },
-  { label: 'Complaint rate',     value: '0.04%',  delta: 'within band', ok: true },
-  { label: 'Bounce rate',        value: '1.8%',   delta: '−0.3 pts',  ok: true },
-  { label: 'Reply rate · cold',  value: '6.1%',   delta: '+0.4 pts',  ok: true },
+// Source: CLAUDE.md analytics + admin sections, internal/repository/*
+
+// Six drill-down layers (real product taxonomy)
+const layers = [
+  { tier: 'Workspace', icon: 'chart',    body: 'Big-picture complaint rate, bounce rate, placement by sender pool, suppression-list growth.' },
+  { tier: 'Pool',      icon: 'flame',    body: 'Warmup pool health, member count, quarantine queue, per-pool spam-score histogram.' },
+  { tier: 'Worker',    icon: 'cpu',      body: 'Per-worker outbound volume, mailbox concentration, IP reputation signals, throttle events.' },
+  { tier: 'Mailbox',   icon: 'inbox',    body: 'Inbox vs spam placement, daily send + warmup volume, complaint and bounce rates per mailbox.' },
+  { tier: 'Sequence',  icon: 'workflow', body: 'Step-by-step open / reply / positive-reply rates, A/B variant performance, drop-off curves.' },
+  { tier: 'Contact',   icon: 'contact',  body: 'Per-recipient timeline of every send, open, click, reply, bounce, classification, suppression event.' },
 ];
 
-// Simple SVG line points
-const trend = [42, 48, 52, 49, 56, 61, 66, 64, 71, 75, 73, 80, 84, 86];
+// What we lead with vs what we treat as noise
+const signal = [
+  { k: 'Inbox placement rate',  why: 'Probed via warmup pool partners. The only number that tells you mail is actually being read.' },
+  { k: 'Complaint rate',         why: 'ARF feedback loops + Gmail Postmaster Tools, aggregated per mailbox. Hard ceiling at 0.10%.' },
+  { k: 'Bounce rate',            why: 'Hard vs soft split per mailbox. SES enforcement begins at 5%, suspension at 10%.' },
+  { k: 'Reply rate',             why: 'Per sequence, per step, per variant. The metric a cold-mail program is actually optimising for.' },
+  { k: 'Positive-reply rate',    why: 'Replies classified as positive (vs OOO, negative, unsubscribe). Strips noise from reply rate.' },
+  { k: 'Suppression growth',     why: 'Share of contacted recipients added to suppression per period. Spikes are a leading indicator.' },
+];
 
-const layers = [
-  { tier: 'Workspace', icon: 'chart',    body: 'Big-picture complaint rate, bounce rate, placement by sender pool, suppression trend.' },
-  { tier: 'Pool',      icon: 'flame',    body: 'Warmup pool health, member count, quarantine queue, spam-score histogram.' },
-  { tier: 'Worker',    icon: 'cpu',      body: 'Per-worker volume, mailbox concentration, IP reputation, throttle events.' },
-  { tier: 'Mailbox',   icon: 'inbox',    body: 'Inbox vs spam placement, daily send + warmup volume, complaint and bounce rates.' },
-  { tier: 'Sequence',  icon: 'workflow', body: 'Step-by-step open / reply / positive-reply rates, A/B variants, drop-off curves.' },
-  { tier: 'Contact',   icon: 'contact',  body: 'Per-recipient timeline of every send, open, click, reply, bounce, classification.' },
+const noise = [
+  { k: 'Open rate',                 why: 'Apple Mail Privacy proxies opens for ~25-45% of B2B inboxes. Gmail caches images. The number is noise dominated.' },
+  { k: 'Cold first-touch CTR',      why: 'Most well-written cold mail has no links. Optimising for clicks incentivises link-heavy content, which is itself a spam-folder signal.' },
+  { k: '"Deliverability score"',    why: 'From vendors who will not publish the formula. Unauditable and gameable.' },
+];
+
+// Real export surfaces
+const exports = [
+  { k: 'On-demand download', v: 'CSV · XLSX · JSON',  why: 'Pick a report, choose fields, download. No row caps.' },
+  { k: 'Scheduled email',    v: 'Daily · weekly',     why: 'Workspace-level summary or a specific saved view to your inbox.' },
+  { k: 'Webhooks',           v: 'HMAC-signed',        why: 'Per-event push for replies, bounces, complaints, suppression and band transitions.' },
+  { k: 'REST API',           v: 'GET / events',       why: 'Pull events into your warehouse. Idempotency keys + rate limits surfaced in headers.' },
+  { k: 'S3 push',            v: 'Hourly · gzipped',   why: 'Newline-delimited JSON to your bucket. Schemas versioned in the event payload.' },
+];
+
+const faq = [
+  ['Why no open rate as a headline number?',     'Apple Mail Privacy Protection prefetches all tracking pixels through Apple proxies for a large share of B2B recipients. The reported open rate is functionally 100% for those mailboxes within minutes of delivery. We surface opens but never use them for deliverability decisions or ranking.'],
+  ['Where does placement data come from?',       'Warmbly\'s warmup pool double-serves as a placement probe. When a partner mailbox receives a warmup message, it reports the folder (Inbox / Promotions / Spam) along with a verification token. That feeds the placement signal for the sending mailbox.'],
+  ['How long is data retained?',                  'Per-event records (sends, replies, opens, bounces) for 18 months by default. Aggregates retained indefinitely. Custom retention available on Enterprise.'],
+  ['Can I export raw events to my warehouse?',    'Yes. Webhooks for real-time push, S3 hourly drops for batched ingestion, or pull through the events API with cursor pagination. Same event schema across all three.'],
 ];
 ---
 <Layout
   title="Analytics · Warmbly"
   description="Deliverability-aware analytics: per-mailbox placement, complaint and bounce rates, warmup health, sequence conversion. No vanity opens."
 >
-  <!-- HERO: KPI tile row floats below the headline -->
-  <section class="relative isolate overflow-hidden text-white" style="background: radial-gradient(ellipse 130% 140% at 72% 28%, #0284c7 0%, #0369a1 25%, #075985 50%, #0c4a6e 80%, #0a3d5c 100%);">
-    <div class="absolute top-0 right-0 w-[440px] opacity-30 pointer-events-none cloud-drift cloud-1" style="mix-blend-mode: screen;">
-      <Cloud variant={5} opacity={1} />
-    </div>
+  <!-- ============================================================
+       HERO · same HeroAtmosphere pattern
+  ============================================================ -->
+  <section class="relative isolate overflow-hidden">
+    <HeroAtmosphere />
 
-    <div class="container-page relative pt-16 md:pt-20 pb-24 md:pb-32 text-center">
-      <div class="text-[11px] uppercase tracking-[0.18em] text-white/55 font-mono mb-4">Analytics</div>
-      <h1 class="text-[36px] sm:text-[52px] md:text-[64px] font-semibold tracking-[-0.03em] leading-[1.02] text-white max-w-3xl mx-auto">
+    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+      <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
+        <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">
+          Analytics
+        </span>
+        Numbers we trust. Not vanity opens.
+      </div>
+
+      <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[72px] lg:text-[80px] font-semibold tracking-[-0.04em] leading-[0.98] text-white max-w-4xl mx-auto">
         Numbers we trust.<br/>Not vanity opens.
       </h1>
-      <p class="mt-5 text-[15.5px] md:text-[17px] text-white/75 max-w-xl mx-auto leading-relaxed">
-        Placement, complaint rate, bounce rate, reply rate, revenue. By mailbox, pool, worker and sequence.
+      <p class="mt-6 text-[17px] md:text-[19px] text-white/80 max-w-2xl mx-auto leading-relaxed">
+        Placement, complaints, bounces, reply rate, positive-reply rate, suppression growth. Per mailbox, per pool, per worker, per sequence. Drill from a workspace KPI to the exact recipient behind it.
       </p>
-    </div>
-  </section>
 
-  <!-- KPI ROW: overlaps into white -->
-  <section class="relative -mt-16 md:-mt-20 pb-16 md:pb-24">
-    <div class="container-page">
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-[color:var(--border)] rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)] bg-white" style="box-shadow: 0 30px 60px -30px rgba(2,32,71,0.3), var(--shadow-sm);">
-        {kpis.map((k) => (
-          <div class="bg-white p-6">
-            <div class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">{k.label}</div>
-            <div class="mt-2 text-[32px] font-semibold tracking-[-0.025em] text-heading leading-none">{k.value}</div>
-            <div class="mt-2 inline-flex items-center gap-1 text-[11.5px] font-mono text-emerald-600">
-              <span class="w-1 h-1 rounded-full bg-emerald-500"></span>
-              {k.delta}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  <!-- DASHBOARD MOCK: chart + per-mailbox table -->
-  <section class="bg-[color:var(--surface-1)] border-y border-[color:var(--border)] py-16 md:py-24">
-    <div class="container-page">
-      <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Workspace view</div>
-      <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading max-w-2xl">
-        One dashboard. Every layer you need.
-      </h2>
-
-      <div class="mt-12 grid lg:grid-cols-[1.5fr_1fr] gap-5">
-        <!-- Inbox placement chart -->
-        <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-6" style="box-shadow: var(--shadow-sm);">
-          <div class="flex items-baseline justify-between mb-2">
-            <div>
-              <div class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">Inbox placement</div>
-              <div class="text-[24px] font-semibold tracking-[-0.02em] text-heading leading-none mt-1">93.4%</div>
-            </div>
-            <div class="inline-flex items-center gap-1.5 text-[12px] text-emerald-600 font-mono">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              Last 14d
-            </div>
-          </div>
-          <svg viewBox="0 0 600 200" class="w-full h-40 mt-4" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="chartFill" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.18"/>
-                <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            {[40, 80, 120, 160].map((y) => (
-              <line x1="0" x2="600" y1={y} y2={y} stroke="#e2e8f0" stroke-width="0.5"/>
-            ))}
-            {(() => {
-              const pts = trend.map((v, i) => `${(i / (trend.length - 1)) * 600},${200 - v * 1.7}`).join(' ');
-              const fillPts = `0,200 ${pts} 600,200`;
-              return (
-                <>
-                  <polygon points={fillPts} fill="url(#chartFill)"/>
-                  <polyline points={pts} fill="none" stroke="#0ea5e9" stroke-width="2"/>
-                  {trend.map((v, i) => (
-                    <circle cx={(i / (trend.length - 1)) * 600} cy={200 - v * 1.7} r="2.5" fill="#0ea5e9"/>
-                  ))}
-                </>
-              );
-            })()}
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register" class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-semibold bg-white hover:bg-white hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.3)] transition-all duration-200 ease-out shadow-[0_4px_14px_-2px_rgba(0,0,0,0.18)]">
+          <span style="color:#075985;">See your dashboard</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
           </svg>
-          <div class="mt-3 grid grid-cols-7 text-[10px] font-mono text-muted-foreground/70">
-            {['D-13', 'D-11', 'D-9', 'D-7', 'D-5', 'D-3', 'D-1'].map((d) => <div>{d}</div>)}
+        </a>
+        <a href="/learn/deliverability/" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
+          Read the handbook
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       DRILL-DOWN LADDER · unique to analytics
+       Six nested layers cascading horizontally, each labelled.
+  ============================================================ -->
+  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
+    <div class="container-page">
+      <div class="rounded-[18px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
+        <div class="px-7 py-4 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex flex-wrap items-baseline justify-between gap-3">
+          <div class="flex items-baseline gap-3">
+            <div class="text-[13px] font-semibold text-heading">Six layers of drill-down</div>
+          </div>
+          <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground">
+            workspace → contact
           </div>
         </div>
 
-        <!-- Per-mailbox table -->
-        <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden" style="box-shadow: var(--shadow-sm);">
-          <div class="px-5 py-4 border-b border-[color:var(--border)]">
-            <div class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">Mailbox health</div>
-            <div class="mt-1 text-[15px] font-semibold text-heading">12 active</div>
-          </div>
-          <div class="divide-y divide-[color:var(--border)]">
-            {[
-              { mb: 'ben@acme.com',  band: 'Healthy',     dot: 'bg-emerald-500', sub: '94.8% inbox · 0.02% spam' },
-              { mb: 'sara@acme.com', band: 'Healthy',     dot: 'bg-emerald-500', sub: '92.1% inbox · 0.04% spam' },
-              { mb: 'mark@acme.com', band: 'Watch',       dot: 'bg-amber-500',   sub: '88.3% inbox · 0.09% spam' },
-              { mb: 'kai@acme.com',  band: 'Healthy',     dot: 'bg-emerald-500', sub: '95.6% inbox · 0.01% spam' },
-              { mb: 'rae@acme.com',  band: 'Quarantined', dot: 'bg-rose-500',    sub: '67.4% inbox · 0.21% spam' },
-            ].map((r) => (
-              <div class="px-5 py-3 grid grid-cols-[1fr_auto] gap-2">
-                <div class="min-w-0">
-                  <div class="text-[12.5px] font-mono text-foreground/85 truncate">{r.mb}</div>
-                  <div class="text-[11px] text-muted-foreground">{r.sub}</div>
+        <!-- Layer ladder · each tier nests inside the previous -->
+        <div class="p-7 md:p-10 overflow-x-auto">
+          <div class="min-w-[820px] space-y-1.5">
+            {layers.map((l, i) => (
+              <div class="grid grid-cols-[80px_180px_1fr] gap-4 items-center" style={`padding-left: ${i * 24}px`}>
+                <div class="font-mono text-[11px] text-muted-foreground">L{i + 1}</div>
+                <div class="flex items-center gap-2.5">
+                  <div class={`w-7 h-7 rounded-[6px] inline-flex items-center justify-center ${i === 0 ? 'bg-[#0c4a6e] text-white' : i === 1 ? 'bg-[#075985] text-white' : i === 2 ? 'bg-[#0369a1] text-white' : i === 3 ? 'bg-[#0284c7] text-white' : i === 4 ? 'bg-[#38bdf8] text-white' : 'bg-[#7dd3fc] text-[#0c4a6e]'}`}>
+                    <Icon name={l.icon} size={14} />
+                  </div>
+                  <div class="text-[14px] font-semibold text-heading">{l.tier}</div>
                 </div>
-                <div class="inline-flex items-center gap-1.5 text-[11px] font-medium text-foreground/80">
-                  <span class={`w-1.5 h-1.5 rounded-full ${r.dot}`}></span>
-                  {r.band}
-                </div>
+                <div class="text-[13px] text-foreground/70 leading-relaxed">{l.body}</div>
               </div>
             ))}
           </div>
         </div>
+
+        <div class="px-7 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex flex-wrap items-center justify-between gap-2 text-[11.5px] font-mono text-muted-foreground">
+          <span>Click any KPI to descend a layer · breadcrumb in the URL</span>
+          <span>Schema versioned in every event payload</span>
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- LAYERS: 6 view cards -->
-  <section class="py-16 md:py-24">
+  <!-- ============================================================
+       SIGNAL vs NOISE · what we measure, what we ignore
+  ============================================================ -->
+  <section class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28">
     <div class="container-page">
-      <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Six layers</div>
-      <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading max-w-2xl">
-        Workspace → pool → worker → mailbox → sequence → contact.
-      </h2>
-      <p class="mt-4 text-[15.5px] text-foreground/75 max-w-2xl">
-        Drill down from a workspace KPI to the exact mailbox and recipient behind it.
-      </p>
+      <div class="max-w-3xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Signal vs noise</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          We lead with six metrics. Three we ignore.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          A metric is a signal only if it is reliable and acts on. Open rate fails both tests today. Click rate on cold first-touch fails the second. Vendor "scores" fail the first.
+        </p>
+      </div>
 
-      <div class="mt-12 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {layers.map((l, i) => (
-          <div class="rounded-[12px] bg-white ring-1 ring-[color:var(--border)] p-5 relative overflow-hidden" style="box-shadow: var(--shadow-sm);">
-            <div class="absolute -top-3 -right-3 text-[64px] font-semibold text-[color:var(--sky-1)] leading-none select-none">
-              {String(i + 1).padStart(2, '0')}
+      <div class="grid lg:grid-cols-[1.4fr_1fr] gap-5">
+        <!-- Signal · 6 -->
+        <div class="rounded-[14px] bg-white ring-1 ring-emerald-100 overflow-hidden">
+          <div class="px-6 py-3.5 bg-emerald-50/60 border-b border-emerald-100 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="text-[12px] uppercase tracking-[0.18em] font-mono text-emerald-700 font-semibold">Signal · headline</span>
             </div>
-            <div class="relative">
-              <div class="w-9 h-9 rounded-[8px] bg-[color:var(--sky-1)] text-[color:var(--sky-6)] ring-1 ring-[color:var(--sky-2)] inline-flex items-center justify-center mb-3">
-                <Icon name={l.icon} size={16} />
+            <span class="text-[10.5px] font-mono text-emerald-700/70">6 metrics</span>
+          </div>
+          <ul class="divide-y divide-[color:var(--border)]">
+            {signal.map((s) => (
+              <li class="px-6 py-4 grid grid-cols-[180px_1fr] gap-4 items-baseline">
+                <div class="text-[13.5px] font-semibold text-heading">{s.k}</div>
+                <div class="text-[12.5px] text-foreground/65 leading-snug">{s.why}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <!-- Noise · 3 -->
+        <div class="rounded-[14px] bg-white ring-1 ring-rose-100 overflow-hidden">
+          <div class="px-6 py-3.5 bg-rose-50/60 border-b border-rose-100 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+              <span class="text-[12px] uppercase tracking-[0.18em] font-mono text-rose-700 font-semibold">Noise · de-emphasised</span>
+            </div>
+            <span class="text-[10.5px] font-mono text-rose-700/70">3 metrics</span>
+          </div>
+          <ul class="divide-y divide-[color:var(--border)]">
+            {noise.map((n) => (
+              <li class="px-6 py-4">
+                <div class="text-[13.5px] font-semibold text-heading">{n.k}</div>
+                <div class="mt-1.5 text-[12.5px] text-foreground/65 leading-snug">{n.why}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       SAMPLE DASHBOARD · illustrative product mock
+  ============================================================ -->
+  <section class="border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Sample dashboard</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          What the workspace view looks like.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          Structural mock. Real numbers depend on your sending. The chart and table panels you see here are the actual product modules.
+        </p>
+      </div>
+
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_24px_48px_-20px_rgba(15,23,42,0.18),0_4px_12px_-6px_rgba(15,23,42,0.05)]">
+        <!-- App chrome -->
+        <div class="px-5 py-3 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex items-center gap-3">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
+          </div>
+          <div class="text-[11.5px] font-mono text-muted-foreground">app.warmbly.com / analytics / workspace</div>
+        </div>
+
+        <!-- KPI strip (illustrative, marked as such) -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-[color:var(--border)]">
+          {[
+            { label: 'Inbox placement', value: '—', sub: 'requires 20 deliveries · 7d' },
+            { label: 'Complaint rate',  value: '—', sub: 'requires 100 deliveries · 30d' },
+            { label: 'Bounce rate',     value: '—', sub: 'hard vs soft split' },
+            { label: 'Reply rate',      value: '—', sub: 'per sequence · per step' },
+          ].map((k) => (
+            <div class="bg-white p-5">
+              <div class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">{k.label}</div>
+              <div class="mt-2 text-[28px] font-semibold tracking-[-0.025em] text-heading leading-none font-mono">{k.value}</div>
+              <div class="mt-2 text-[11.5px] font-mono text-muted-foreground">{k.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        <!-- Body: chart panel + mailbox health table -->
+        <div class="grid lg:grid-cols-[1.5fr_1fr] gap-px bg-[color:var(--border)]">
+          <!-- Placement chart panel -->
+          <div class="bg-white p-6">
+            <div class="flex items-baseline justify-between mb-4">
+              <div>
+                <div class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">Inbox placement · last 14d</div>
+                <div class="text-[15px] font-semibold text-heading mt-1">Trend by sender pool</div>
               </div>
-              <div class="text-[15px] font-semibold text-heading">{l.tier}</div>
-              <p class="mt-1.5 text-[13px] text-foreground/70 leading-relaxed">{l.body}</p>
+              <div class="flex items-center gap-3 text-[10.5px] font-mono text-muted-foreground">
+                <span class="inline-flex items-center gap-1.5"><span class="w-2 h-[2px] bg-[#0284c7]"></span>premium</span>
+                <span class="inline-flex items-center gap-1.5"><span class="w-2 h-[2px] bg-slate-400"></span>free</span>
+              </div>
+            </div>
+            <svg viewBox="0 0 600 180" class="w-full h-44" preserveAspectRatio="none">
+              {[36, 72, 108, 144].map((y) => (
+                <line x1="0" x2="600" y1={y} y2={y} stroke="#e6ebf2" stroke-width="0.5"/>
+              ))}
+              <polyline
+                points={Array.from({ length: 14 }, (_, i) => {
+                  const v = 65 + Math.sin(i * 0.6) * 10 + i * 1.2;
+                  return (i / 13) * 600 + ',' + (180 - v * 1.5);
+                }).join(' ')}
+                fill="none"
+                stroke="#0284c7"
+                stroke-width="2"
+              />
+              <polyline
+                points={Array.from({ length: 14 }, (_, i) => {
+                  const v = 50 + Math.sin(i * 0.5 + 1) * 8 + i * 0.5;
+                  return (i / 13) * 600 + ',' + (180 - v * 1.5);
+                }).join(' ')}
+                fill="none"
+                stroke="#94a3b8"
+                stroke-width="1.5"
+                stroke-dasharray="3 3"
+              />
+            </svg>
+            <div class="mt-2 grid grid-cols-7 text-[10px] font-mono text-muted-foreground/70">
+              {['D-13', 'D-11', 'D-9', 'D-7', 'D-5', 'D-3', 'D-1'].map((d) => <div>{d}</div>)}
+            </div>
+          </div>
+
+          <!-- Mailbox health panel -->
+          <div class="bg-white p-6">
+            <div class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">Mailbox health</div>
+            <div class="text-[15px] font-semibold text-heading mt-1 mb-4">Per-mailbox band</div>
+            <div class="space-y-2.5">
+              {[
+                { name: 'healthy',     pct: 75, color: 'bg-emerald-500' },
+                { name: 'watch',       pct: 17, color: 'bg-amber-500' },
+                { name: 'quarantined', pct: 6,  color: 'bg-rose-500' },
+                { name: 'blocked',     pct: 2,  color: 'bg-slate-600' },
+              ].map((b) => (
+                <div>
+                  <div class="flex items-baseline justify-between mb-1 text-[11.5px] font-mono">
+                    <span class="text-foreground/85">{b.name}</span>
+                    <span class="text-muted-foreground">{b.pct}%</span>
+                  </div>
+                  <div class="relative h-1.5 rounded-full overflow-hidden bg-[color:var(--surface-1)]">
+                    <div class={`absolute inset-y-0 left-0 ${b.color}`} style={`width: ${b.pct}%`}></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div class="px-5 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+          <span>Auto-refresh · 60s</span>
+          <span>Export →</span>
+        </div>
+      </div>
+
+      <p class="mt-4 text-[12px] text-muted-foreground italic">
+        Numbers shown are illustrative for the structural mock. Real workspace data appears only after the per-band sample-size thresholds are met.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       EXPORTS · 2-col spec sheet (warmup defaults pattern)
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-1)]/40 border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Exports</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          Your data is yours.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          Five ways to get the data out. Same event schema across all of them, versioned in the payload.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-x-12 gap-y-px">
+        {exports.map((d, i) => (
+          <div class="grid grid-cols-[1fr_auto] gap-6 py-6 border-b border-[color:var(--border)] items-baseline hover:bg-white/40 -mx-3 px-3 rounded-[6px] transition-colors">
+            <div>
+              <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">
+                {String(i + 1).padStart(2, '0')} · {d.k}
+              </div>
+              <p class="mt-2 text-[13.5px] text-foreground/65 leading-relaxed max-w-md">{d.why}</p>
+            </div>
+            <div class="text-right">
+              <div class="text-[18px] md:text-[20px] font-semibold tracking-[-0.02em] text-heading font-mono whitespace-nowrap">{d.v}</div>
             </div>
           </div>
         ))}
@@ -173,21 +341,52 @@ const layers = [
     </div>
   </section>
 
-  <!-- EXPORTS: thin band, 3 inline pills -->
-  <section class="bg-[color:var(--surface-1)] border-y border-[color:var(--border)] py-12 md:py-16">
-    <div class="container-page flex flex-wrap gap-6 items-center justify-between">
-      <div>
-        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-2">Exports</div>
-        <div class="text-[20px] md:text-[24px] font-semibold tracking-[-0.02em] text-heading">Your data is yours. Export it any time.</div>
+  <!-- ============================================================
+       FAQ · grid-rows accordion
+  ============================================================ -->
+  <section class="py-20 md:py-24">
+    <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">FAQ</div>
+        <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+          Four reporting questions.
+        </h2>
       </div>
-      <div class="flex flex-wrap gap-2">
-        {['CSV · XLSX · JSON', 'Weekly digest email', 'Webhooks · S3 push', 'API access'].map((t) => (
-          <span class="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white text-[12.5px] font-medium text-foreground/80 ring-1 ring-[color:var(--border)]">
-            <Icon name="check" size={11} class="text-[color:var(--sky-6)]" />
-            {t}
-          </span>
+      <div class="divide-y divide-[color:var(--border)]" data-faq>
+        {faq.map(([q, a]) => (
+          <div class="faq-row py-2">
+            <button type="button" class="faq-trigger group w-full flex items-start justify-between gap-4 py-3 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-heading group-hover:text-[#0369a1] transition-colors">{q}</span>
+              <span class="faq-icon shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-[color:var(--surface-1)] ring-1 ring-[color:var(--border)] text-foreground/60 transition-transform duration-300 ease-out">
+                <Icon name="plus" size={12} />
+              </span>
+            </button>
+            <div class="faq-panel grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 ease-out">
+              <div class="overflow-hidden">
+                <p class="pb-4 pr-12 text-[14px] text-foreground/75 leading-relaxed max-w-2xl">{a}</p>
+              </div>
+            </div>
+          </div>
         ))}
       </div>
+
+      <script is:inline>
+        (function () {
+          const faq = document.querySelector('[data-faq]');
+          if (!faq) return;
+          faq.querySelectorAll('.faq-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              const row   = btn.closest('.faq-row');
+              const panel = row.querySelector('.faq-panel');
+              const icon  = btn.querySelector('.faq-icon');
+              const open  = btn.getAttribute('aria-expanded') === 'true';
+              btn.setAttribute('aria-expanded', String(!open));
+              panel.style.gridTemplateRows = open ? '0fr' : '1fr';
+              if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(45deg)';
+            });
+          });
+        })();
+      </script>
     </div>
   </section>
 
