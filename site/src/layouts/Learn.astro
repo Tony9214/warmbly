@@ -1,6 +1,5 @@
 ---
 import Layout from './Layout.astro';
-import Cloud from '../components/Cloud.astro';
 import Icon from '../components/Icon.astro';
 
 interface Props {
@@ -18,84 +17,122 @@ const {
   updated,
 } = Astro.props;
 
-const sidebar: { title: string; links: { label: string; href: string }[] }[] = [
-  {
-    title: 'Foundations',
-    links: [
-      { label: 'Email warmup',            href: '/learn/email-warmup/' },
-      { label: 'Deliverability handbook', href: '/learn/deliverability/' },
-      { label: 'SPF, DKIM, DMARC',        href: '/learn/spf-dkim-dmarc/' },
-      { label: 'Inbox placement',         href: '/learn/inbox-placement/' },
-    ],
-  },
-  {
-    title: 'Sending well',
-    links: [
-      { label: 'Cold email rules',        href: '/learn/cold-email-rules/' },
-      { label: 'Warmup pools',            href: '/learn/warmup-pools/' },
-      { label: 'Reputation recovery',     href: '/learn/reputation-recovery/' },
-    ],
-  },
-  {
-    title: 'Reference',
-    links: [
-      { label: 'Glossary',                href: '/learn/glossary/' },
-    ],
-  },
+// Related articles for the "Continue reading" footer
+const related = [
+  { href: '/learn/email-warmup/',         title: 'Email warmup, properly explained',         read: '11 min' },
+  { href: '/learn/deliverability/',       title: 'The deliverability handbook',              read: '14 min' },
+  { href: '/learn/spf-dkim-dmarc/',       title: 'SPF, DKIM and DMARC, end to end',          read: '12 min' },
+  { href: '/learn/inbox-placement/',      title: 'Inbox placement, not just delivery',       read: '8 min' },
+  { href: '/learn/cold-email-rules/',     title: 'Cold email rules across regions',          read: '10 min' },
+  { href: '/learn/warmup-pools/',         title: 'Warmup pools: free, premium, dedicated',   read: '7 min' },
+  { href: '/learn/reputation-recovery/',  title: 'Recovering a burned mailbox',              read: '9 min' },
 ];
-
 const path = Astro.url.pathname;
+const next = related.filter((r) => r.href !== path).slice(0, 2);
 ---
 <Layout title={title} description={description ?? title}>
-  <!-- Slim sky header for learn articles -->
-  <section class="relative isolate overflow-hidden text-white" style="background: radial-gradient(ellipse 130% 140% at 72% 28%, #0284c7 0%, #0369a1 25%, #075985 50%, #0c4a6e 80%, #0a3d5c 100%);">
-    <div class="absolute top-0 right-0 w-[360px] opacity-25 pointer-events-none cloud-drift cloud-1" style="mix-blend-mode: screen;">
-      <Cloud variant={4} opacity={1} />
-    </div>
-    <div class="container-page relative pt-14 pb-14">
-      <a href="/learn/" class="inline-flex items-center gap-1.5 text-[12px] text-white/65 hover:text-white">
-        <Icon name="arrowRight" size={12} class="rotate-180" />
-        {eyebrow}
+  <!-- TOP BAR -->
+  <div class="bg-white border-b border-[color:var(--border)]">
+    <div class="container-page py-3 flex items-center justify-between text-[11.5px] font-mono">
+      <a href="/learn/" class="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors">
+        <Icon name="arrowRight" size={11} class="rotate-180" />
+        Library
       </a>
-      <h1 class="mt-4 text-[32px] md:text-[44px] font-semibold tracking-[-0.025em] leading-[1.06] text-white max-w-3xl">{title}</h1>
-      <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] font-mono text-white/55">
+      <div class="hidden md:flex items-center gap-4 text-muted-foreground">
+        <span>{eyebrow}</span>
+        <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
         <span>{reading}</span>
-        {updated && <span>· Updated {updated}</span>}
+        {updated && <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>}
+        {updated && <span>Updated {updated}</span>}
       </div>
     </div>
-  </section>
+  </div>
 
-  <div class="container-page py-12 md:py-16 grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-10 lg:gap-16">
-    <aside class="lg:sticky lg:top-20 self-start">
-      {sidebar.map((g) => (
-        <div class="mb-6">
-          <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-2">{g.title}</div>
-          <ul class="space-y-0.5">
-            {g.links.map((l) => (
-              <li>
-                <a
-                  href={l.href}
-                  class={
-                    'block text-[13.5px] -mx-2 px-2 py-1.5 rounded-md transition-colors ' +
-                    (path === l.href
-                      ? 'bg-[color:var(--surface-2)] text-foreground font-medium'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-[color:var(--surface-2)]/60')
-                  }
-                >
-                  {l.label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+  <!-- DOC LAYOUT: sticky chapter rail + main column -->
+  <div class="grid lg:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)]">
+
+    <!-- LEFT RAIL -->
+    <aside class="hidden lg:block border-r border-[color:var(--border)] bg-[color:var(--surface-1)]/40">
+      <div class="sticky top-0 max-h-screen overflow-y-auto py-8 px-6">
+        <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-4">On this page</div>
+        <ol class="learn-chapter-rail space-y-px text-[13px]" data-chapter-rail>
+          <li class="text-[11.5px] text-muted-foreground/60 italic">Loading…</li>
+        </ol>
+      </div>
     </aside>
 
-    <article class="max-w-3xl">
-      {description && <p class="text-[17px] text-foreground/80 leading-relaxed mb-8">{description}</p>}
-      <div class="space-y-6 [&_h2]:text-[22px] [&_h2]:md:text-[26px] [&_h2]:font-semibold [&_h2]:tracking-[-0.02em] [&_h2]:mt-12 [&_h2]:mb-3 [&_h2]:text-heading [&_h3]:text-[16px] [&_h3]:font-semibold [&_h3]:mt-8 [&_h3]:mb-2 [&_h3]:text-heading [&_p]:text-[15.5px] [&_p]:leading-relaxed [&_p]:text-foreground/85 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1.5 [&_ul]:text-[15px] [&_ul]:text-foreground/85 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-1.5 [&_ol]:text-[15px] [&_ol]:text-foreground/85 [&_a]:text-[color:var(--brand)] [&_a:hover]:text-[color:var(--brand-strong)] [&_code]:font-mono [&_code]:text-[0.92em] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-[color:var(--surface-2)] [&_code]:ring-1 [&_code]:ring-[color:var(--border)] [&_blockquote]:border-l-2 [&_blockquote]:border-[color:var(--brand)] [&_blockquote]:pl-4 [&_blockquote]:text-foreground/70 [&_blockquote]:text-[15.5px] [&_pre]:bg-[#0c1224] [&_pre]:text-white/90 [&_pre]:p-4 [&_pre]:rounded-[8px] [&_pre]:overflow-x-auto [&_pre]:text-[13px]">
+    <!-- MAIN COLUMN -->
+    <main class="bg-white learn-main">
+      <!-- Page header -->
+      <header class="border-b border-[color:var(--border)] px-6 md:px-10 lg:px-14 py-10 md:py-14">
+        <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-[#0284c7] mb-3">{eyebrow}</div>
+        <h1 class="text-[40px] md:text-[52px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading max-w-3xl">{title}</h1>
+        {description && (
+          <p class="mt-4 text-[16px] md:text-[17px] text-foreground/70 max-w-2xl leading-relaxed">{description}</p>
+        )}
+      </header>
+
+      <!-- Prose body -->
+      <div class="learn-prose px-6 md:px-10 lg:px-14 py-12 md:py-16 max-w-[820px]
+        [&_h2]:scroll-mt-4 [&_h2]:text-[24px] [&_h2]:md:text-[28px] [&_h2]:font-semibold [&_h2]:tracking-[-0.02em] [&_h2]:leading-[1.15] [&_h2]:text-heading [&_h2]:mt-14 [&_h2]:first:mt-0 [&_h2]:mb-5 [&_h2]:relative
+        [&_h2]:before:content-['§'] [&_h2]:before:absolute [&_h2]:before:-left-7 [&_h2]:before:text-[#0284c7]/30 [&_h2]:before:text-[18px] [&_h2]:before:font-mono [&_h2]:before:top-1
+        [&_h3]:text-[16px] [&_h3]:font-semibold [&_h3]:text-heading [&_h3]:mt-8 [&_h3]:mb-2
+        [&_p]:text-[15.5px] [&_p]:md:text-[16px] [&_p]:leading-[1.75] [&_p]:text-foreground/85 [&_p]:mt-4
+        [&_p:first-child]:mt-0
+        [&_ul]:mt-4 [&_ul]:space-y-2 [&_ul]:text-[15px] [&_ul]:text-foreground/85
+        [&_ul>li]:relative [&_ul>li]:pl-5 [&_ul>li]:leading-[1.6]
+        [&_ul>li]:before:content-['·'] [&_ul>li]:before:absolute [&_ul>li]:before:left-1 [&_ul>li]:before:text-[#0284c7] [&_ul>li]:before:font-bold
+        [&_ol]:mt-4 [&_ol]:list-none [&_ol]:counter-reset:[step] [&_ol]:space-y-2 [&_ol]:text-[15px] [&_ol]:text-foreground/85
+        [&_ol>li]:counter-increment:[step] [&_ol>li]:relative [&_ol>li]:pl-10 [&_ol>li]:leading-[1.6]
+        [&_ol>li]:before:content-[counter(step,decimal-leading-zero)'.'] [&_ol>li]:before:absolute [&_ol>li]:before:left-0 [&_ol>li]:before:top-0 [&_ol>li]:before:text-[12px] [&_ol>li]:before:font-mono [&_ol>li]:before:font-semibold [&_ol>li]:before:text-[#0284c7]
+        [&_a]:text-[#0369a1] [&_a:hover]:text-[#075985] [&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-[#0284c7]/30
+        [&_code]:font-mono [&_code]:text-[0.92em] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-[color:var(--surface-1)] [&_code]:ring-1 [&_code]:ring-[color:var(--border)]
+        [&_blockquote]:my-8 [&_blockquote]:border-l-2 [&_blockquote]:border-[#0284c7] [&_blockquote]:pl-6 [&_blockquote]:py-2 [&_blockquote]:text-[18px] [&_blockquote]:md:text-[22px] [&_blockquote]:font-semibold [&_blockquote]:tracking-[-0.015em] [&_blockquote]:leading-[1.35] [&_blockquote]:text-heading
+        [&_strong]:text-heading [&_strong]:font-semibold
+        [&_pre]:my-5 [&_pre]:bg-[#0c1224] [&_pre]:text-white/85 [&_pre]:p-5 [&_pre]:rounded-[10px] [&_pre]:overflow-x-auto [&_pre]:text-[13px] [&_pre]:leading-[1.6]
+        [&_pre_code]:bg-transparent [&_pre_code]:ring-0 [&_pre_code]:p-0">
         <slot />
       </div>
-    </article>
+
+      <!-- Continue reading -->
+      <footer class="px-6 md:px-10 lg:px-14 py-12 border-t border-[color:var(--border)]">
+        <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-5">Continue reading</div>
+        <div class="grid sm:grid-cols-2 gap-3">
+          {next.map((n) => (
+            <a href={n.href} class="group flex items-center justify-between p-5 rounded-[12px] bg-[color:var(--surface-1)] ring-1 ring-[color:var(--border)] hover:ring-[color:var(--sky-3)] hover:bg-white transition-all">
+              <div>
+                <div class="text-[10.5px] font-mono text-muted-foreground">{n.read} read</div>
+                <div class="mt-1 text-[15px] font-semibold text-heading group-hover:text-[#0369a1] transition-colors">{n.title}</div>
+              </div>
+              <Icon name="arrowRight" size={14} class="text-muted-foreground group-hover:text-[#0369a1] group-hover:translate-x-0.5 transition-all" />
+            </a>
+          ))}
+        </div>
+      </footer>
+    </main>
   </div>
+
+  <script is:inline>
+    // Auto-build chapter rail from H2 elements in the prose body
+    (function () {
+      const rail = document.querySelector('[data-chapter-rail]');
+      const main = document.querySelector('.learn-prose');
+      if (!rail || !main) return;
+      const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const h2s = main.querySelectorAll('h2');
+      if (!h2s.length) return;
+
+      rail.innerHTML = '';
+      h2s.forEach((h2, i) => {
+        if (!h2.id) h2.id = slug(h2.textContent || `section-${i + 1}`);
+        const li = document.createElement('li');
+        const a  = document.createElement('a');
+        a.href   = `#${h2.id}`;
+        a.className = 'group flex items-baseline gap-3 py-1.5 px-2 -mx-2 rounded-md text-foreground/70 hover:bg-white hover:text-[#0369a1] transition-colors';
+        a.innerHTML = `<span class="font-mono text-[10.5px] text-muted-foreground/70 w-5 shrink-0">${String(i + 1).padStart(2, '0')}</span><span class="leading-snug">${h2.textContent}</span>`;
+        li.appendChild(a);
+        rail.appendChild(li);
+      });
+    })();
+  </script>
 </Layout>
