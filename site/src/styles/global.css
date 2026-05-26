@@ -15,49 +15,50 @@
 :root {
   --radius: 14px;
 
-  /* Warmbly palette — warm cornsilk hero, clean white site */
-  --background:  #ffffff;          /* primary site bg */
-  --hero-bg:     #fff5d6;          /* cornsilk hero only */
-  --foreground:  #1a1614;          /* warm near-black */
-  --heading:     #1a1614;
+  /* Warmbly — blue sky theme (matches /web auth layout palette) */
+  --background:  #ffffff;
+  --foreground:  #0f172a;          /* slate-900 */
+  --heading:     #0f172a;
 
   --surface:     #ffffff;
-  --surface-2:   #f6f4ee;          /* warm off-white for section bands */
-  --surface-3:   #ece8de;          /* warm border-ish */
+  --surface-2:   #f5f8fc;          /* very light sky for section bands */
+  --surface-3:   #e6edf6;
 
-  --muted:        #f6f4ee;
-  --muted-foreground: #6f6a62;     /* warm stone */
+  --muted:        #f5f8fc;
+  --muted-foreground: #64748b;     /* slate-500 */
 
-  --border:        #e9e4d6;
-  --border-strong: #d6cfbe;
-  --input:         #e9e4d6;
-  --ring:          #2860e8;
+  --border:        #e2e8f0;        /* slate-200 */
+  --border-strong: #cbd5e1;        /* slate-300 */
+  --input:         #e2e8f0;
+  --ring:          #0ea5e9;        /* sky-500 */
 
   --card: #ffffff;
-  --card-foreground: #1a1614;
+  --card-foreground: #0f172a;
 
-  /* Brand — deep azure (trustworthy, deliverability-coded) */
-  --brand:           #2860e8;
-  --brand-soft:      #e8efff;
-  --brand-strong:    #1a48bf;
+  /* Brand — sky-blue gradient family, matches web/ accent */
+  --brand:           #0284c7;       /* sky-600 — primary buttons + links */
+  --brand-soft:      #e0f2fe;       /* sky-100 */
+  --brand-strong:    #0369a1;       /* sky-700 */
   --brand-foreground:#ffffff;
 
-  /* Warm secondary used for the hero gradient + dawn accents */
-  --warm-1: #ffb27a;               /* peach */
-  --warm-2: #f9b3d6;               /* soft pink */
-  --warm-3: #ffe7a0;               /* warm cream */
-  --cool-1: #a8b6e8;               /* sky lavender */
+  /* Deep-sky hero stops */
+  --sky-1: #7dd3fc;                /* sky-300 */
+  --sky-2: #38bdf8;                /* sky-400 */
+  --sky-3: #0ea5e9;                /* sky-500 */
+  --sky-4: #0284c7;                /* sky-600 */
+  --sky-5: #075985;                /* sky-800 */
+  --sky-6: #0c4a6e;                /* sky-900 */
 
-  --success: #287a52;
-  --warn:    #b8841f;
-  --danger:  #b73a2c;
+  --success: #16a34a;
+  --warn:    #d97706;
+  --danger:  #dc2626;
 
-  --primary: #1a1614;
+  --primary: #0f172a;
   --primary-foreground: #ffffff;
 
-  --shadow-xl: rgba(20, 14, 8, 0.14) 0 32px 70px -8px, rgba(20, 14, 8, 0.10) 0 14px 32px -8px, rgba(20, 14, 8, 0.06) 0 0 0 1px;
-  --shadow-md: rgba(20, 14, 8, 0.10) 0 18px 40px -16px, rgba(20, 14, 8, 0.06) 0 0 0 1px;
-  --shadow-sm: rgba(20, 14, 8, 0.06) 0 4px 14px -4px, rgba(20, 14, 8, 0.05) 0 0 0 1px;
+  --shadow-xl: rgba(2, 132, 199, 0.20) 0 32px 70px -12px, rgba(15, 23, 42, 0.18) 0 18px 36px -16px, rgba(15, 23, 42, 0.06) 0 0 0 1px;
+  --shadow-md: rgba(15, 23, 42, 0.10) 0 18px 40px -16px, rgba(15, 23, 42, 0.05) 0 0 0 1px;
+  --shadow-sm: rgba(15, 23, 42, 0.06) 0 4px 14px -4px, rgba(15, 23, 42, 0.05) 0 0 0 1px;
 }
 
 .dark {
@@ -491,32 +492,75 @@ body {
 .animate-pulse-soft { animation: pulse-soft 2.4s ease-in-out infinite; }
 
 /* ----------------------------------------------------------------
-   Warmbly hero atmosphere — cornsilk base with a slowly drifting
-   multi-stop gradient and outlined SVG clouds animated to float.
-   Light, CSS-only.
+   Warmbly hero atmosphere — deep sky gradient with breathing
+   animation, layered drifting clouds, sun pulse.
+   Mirrors web/src/app/auth/layout.tsx palette.
 ---------------------------------------------------------------- */
 
-.hero-aurora {
+.sky-base {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(60% 50% at 18% 24%, rgba(168, 182, 232, 0.55) 0%, transparent 60%),
-    radial-gradient(55% 48% at 82% 18%, rgba(255, 178, 122, 0.50) 0%, transparent 65%),
-    radial-gradient(70% 60% at 50% 80%, rgba(249, 179, 214, 0.38) 0%, transparent 70%),
-    linear-gradient(180deg, #fff5d6 0%, #fff1c8 60%, #fce9b8 100%);
-  background-size: 130% 130%, 130% 130%, 130% 130%, 100% 100%;
-  background-position: 0% 0%, 100% 0%, 50% 100%, 0% 0%;
-  animation: aurora-drift 28s ease-in-out infinite alternate;
+  background: radial-gradient(ellipse 140% 140% at 72% 25%,
+    #7dd3fc 0%,
+    #38bdf8 18%,
+    #0ea5e9 36%,
+    #0284c7 58%,
+    #075985 82%
+  );
 }
 
-@keyframes aurora-drift {
-  from {
-    background-position: 0% 0%, 100% 0%, 50% 100%, 0% 0%;
-  }
-  to {
-    background-position: 8% 4%, 92% 8%, 46% 96%, 0% 0%;
-  }
+.sky-breathe {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 140% 140% at 72% 25%,
+    rgba(186, 230, 253, 0.85) 0%,
+    rgba(56, 189, 248, 0.42) 18%,
+    rgba(14, 165, 233, 0.18) 36%,
+    transparent 60%
+  );
+  animation: sky-breathe 30s ease-in-out infinite;
+}
+
+@keyframes sky-breathe {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(1.05); }
+}
+
+.sky-haze-bottom {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 55%;
+  pointer-events: none;
+  background: linear-gradient(to top,
+    rgba(125, 211, 252, 0.18) 0%,
+    rgba(56, 189, 248, 0.08) 35%,
+    transparent 100%
+  );
+}
+
+.sun-glow {
+  position: absolute;
+  top: 8%;
+  right: 14%;
+  width: 700px;
+  height: 700px;
+  border-radius: 9999px;
+  pointer-events: none;
+  filter: blur(40px);
+  background: radial-gradient(circle,
+    rgba(253, 230, 138, 0.30) 0%,
+    rgba(253, 186, 116, 0.10) 32%,
+    rgba(186, 230, 253, 0.04) 55%,
+    transparent 70%
+  );
+  animation: sun-pulse 22s ease-in-out infinite;
+}
+
+@keyframes sun-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(1.10); }
 }
 
 .hero-grain {

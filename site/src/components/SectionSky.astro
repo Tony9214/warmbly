@@ -1,0 +1,50 @@
+---
+/**
+ * Soft sky backdrop placed behind a product mock inside a feature
+ * section. Lighter than the hero — sky-50 → white with a couple of
+ * white cloud blurs and a subtle sun bloom. Pure CSS, GPU-cheap.
+ *
+ * Pass `variant` to vary the composition per section.
+ */
+interface Props {
+  variant?: 'morning' | 'noon' | 'dusk';
+  class?: string;
+}
+const { variant = 'morning', class: className = '' } = Astro.props;
+
+const variants = {
+  morning: {
+    grad: 'radial-gradient(80% 60% at 28% 18%, #e0f2fe 0%, #f0f9ff 38%, #ffffff 80%)',
+    sun:  { top: '8%',  right: '12%', color: 'rgba(186, 230, 253, 0.85)' },
+  },
+  noon: {
+    grad: 'radial-gradient(80% 70% at 70% 24%, #e0f2fe 0%, #f0f9ff 42%, #ffffff 82%)',
+    sun:  { top: '4%',  right: '18%', color: 'rgba(186, 230, 253, 0.95)' },
+  },
+  dusk: {
+    grad: 'radial-gradient(80% 70% at 50% 16%, #ede9fe 0%, #f0f9ff 40%, #ffffff 82%)',
+    sun:  { top: '10%', right: '22%', color: 'rgba(196, 181, 253, 0.65)' },
+  },
+};
+const v = variants[variant];
+---
+<div class={`absolute inset-0 pointer-events-none overflow-hidden rounded-[inherit] ${className}`} aria-hidden="true">
+  <div class="absolute inset-0" style={`background: ${v.grad};`}></div>
+
+  <!-- Sun bloom -->
+  <div class="absolute" style={`top: ${v.sun.top}; right: ${v.sun.right}; width: 340px; height: 340px; border-radius: 9999px; background: radial-gradient(circle, ${v.sun.color} 0%, transparent 70%); filter: blur(40px);`}></div>
+
+  <!-- Soft white cloud blurs -->
+  <span class="absolute" style="top: -40px; left: -40px; width: 360px; height: 160px; background: rgba(255,255,255,0.92); border-radius: 50% 50% 22% 22%; filter: blur(50px); opacity: 0.7;"></span>
+  <span class="absolute" style="top: 14%; right: 4%; width: 280px; height: 130px; background: rgba(255,255,255,0.80); border-radius: 50% 50% 22% 22%; filter: blur(55px); opacity: 0.5;"></span>
+  <span class="absolute" style="bottom: 6%; left: 18%; width: 320px; height: 130px; background: rgba(255,255,255,0.75); border-radius: 50% 50% 22% 22%; filter: blur(60px); opacity: 0.45;"></span>
+
+  <!-- Drifting outlined cloud -->
+  <svg
+    class="cloud-drift cloud-2 absolute"
+    style="bottom: 18%; right: 12%; width: 200px; height: 96px; opacity: 0.6;"
+    viewBox="0 0 200 96" fill="none" stroke="rgba(2, 132, 199, 0.30)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+  >
+    <path d="M22 70 Q22 44 56 44 Q68 26 102 28 Q130 20 150 42 Q176 44 182 62 Q194 74 172 80 L56 80 Q22 80 22 70 Z" />
+  </svg>
+</div>

@@ -1,54 +1,66 @@
 ---
 /**
- * Hero atmosphere — Warmbly's own.
+ * Deep-sky hero atmosphere.
  *
- * Layered into a `relative` hero parent. Composes:
- *   - .hero-aurora     animated multi-stop gradient on cornsilk base
- *   - .hero-grain      faint dot grain for canvas texture
- *   - three outlined SVG clouds slowly drifting
- *
- * Pure CSS animations, respects prefers-reduced-motion.
+ * Layers:
+ *   - .sky-base       solid deep-sky radial gradient (auth palette)
+ *   - .sky-breathe    second gradient that breathes opacity/scale
+ *   - .sun-glow       warm pulsing bloom upper-right
+ *   - .sky-haze-bottom soft horizon haze at the bottom
+ *   - drifting outlined clouds (CSS-animated)
+ *   - tiny spark
  */
 ---
-<div class="hero-aurora" aria-hidden="true"></div>
-<div class="hero-grain" aria-hidden="true"></div>
+<div class="sky-base" aria-hidden="true"></div>
+<div class="sky-breathe" aria-hidden="true"></div>
+<div class="sky-haze-bottom" aria-hidden="true"></div>
+<div class="sun-glow" aria-hidden="true"></div>
 
 <svg
   aria-hidden="true"
   class="cloud-drift cloud-1"
-  style="top: 10%; left: 6%; width: 220px; height: 110px;"
-  viewBox="0 0 220 110" fill="none" stroke="rgba(26, 22, 20, 0.18)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+  style="top: 10%; left: 6%; width: 280px; height: 130px;"
+  viewBox="0 0 280 130" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
 >
-  <path d="M30 78 Q30 50 60 50 Q72 28 108 32 Q140 22 162 48 Q190 50 196 70 Q210 84 188 92 L60 92 Q30 92 30 78 Z" />
-  <path d="M70 50 Q86 36 110 38" stroke-width="1" opacity="0.6"/>
+  <path d="M30 96 Q30 60 70 60 Q82 36 130 38 Q160 22 188 48 Q220 50 230 72 Q250 86 226 96 L70 96 Q30 96 30 96 Z" fill="rgba(255,255,255,0.10)"/>
+  <path d="M84 56 Q100 44 130 46" stroke-width="1" opacity="0.6"/>
 </svg>
 
 <svg
   aria-hidden="true"
   class="cloud-drift cloud-2"
-  style="top: 24%; right: 8%; width: 280px; height: 130px;"
-  viewBox="0 0 280 130" fill="none" stroke="rgba(26, 22, 20, 0.16)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+  style="top: 22%; right: 8%; width: 340px; height: 150px;"
+  viewBox="0 0 340 150" fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
 >
-  <path d="M22 96 Q22 60 60 60 Q72 36 116 38 Q150 22 184 48 Q220 42 238 68 Q260 70 256 92 Q252 110 224 110 L60 110 Q22 110 22 96 Z" />
-  <path d="M80 56 Q100 44 130 46" stroke-width="1" opacity="0.55"/>
-  <path d="M170 50 Q190 40 210 50" stroke-width="1" opacity="0.45"/>
+  <path d="M22 116 Q22 70 72 70 Q86 42 138 44 Q176 26 218 56 Q260 50 282 76 Q308 78 304 104 Q298 124 270 124 L72 124 Q22 124 22 116 Z" fill="rgba(255,255,255,0.12)"/>
+  <path d="M96 64 Q120 50 152 52" stroke-width="1" opacity="0.55"/>
+  <path d="M198 58 Q224 46 248 58" stroke-width="1" opacity="0.45"/>
 </svg>
 
 <svg
   aria-hidden="true"
   class="cloud-drift cloud-3"
-  style="top: 56%; left: 26%; width: 180px; height: 86px;"
-  viewBox="0 0 180 86" fill="none" stroke="rgba(26, 22, 20, 0.14)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"
+  style="top: 60%; left: 38%; width: 220px; height: 110px;"
+  viewBox="0 0 220 110" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
 >
-  <path d="M22 62 Q22 38 50 38 Q60 22 92 24 Q116 16 134 36 Q160 38 162 56 Q170 72 146 74 L48 74 Q22 74 22 62 Z" />
+  <path d="M22 80 Q22 50 60 50 Q72 30 110 32 Q140 22 162 46 Q190 48 196 68 Q210 80 188 88 L60 88 Q22 88 22 80 Z" fill="rgba(255,255,255,0.08)"/>
 </svg>
 
-<!-- Tiny decorative spark, top-right -->
+<svg
+  aria-hidden="true"
+  class="cloud-drift cloud-1"
+  style="bottom: 12%; right: 26%; width: 200px; height: 100px;"
+  viewBox="0 0 200 100" fill="none" stroke="rgba(255,255,255,0.30)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
+>
+  <path d="M22 72 Q22 46 58 46 Q70 28 104 30 Q132 22 152 44 Q178 46 184 64 Q196 76 174 82 L58 82 Q22 82 22 72 Z" fill="rgba(255,255,255,0.06)"/>
+</svg>
+
+<!-- Twinkling spark -->
 <svg
   aria-hidden="true"
   class="absolute pointer-events-none animate-pulse-soft"
-  style="top: 8%; right: 18%; width: 18px; height: 18px;"
-  viewBox="0 0 18 18" fill="none"
+  style="top: 14%; left: 22%; width: 14px; height: 14px;"
+  viewBox="0 0 14 14" fill="none"
 >
-  <path d="M9 1 L11 7 L17 9 L11 11 L9 17 L7 11 L1 9 L7 7 Z" fill="rgba(40, 96, 232, 0.85)" />
+  <path d="M7 1 L8.5 5.5 L13 7 L8.5 8.5 L7 13 L5.5 8.5 L1 7 L5.5 5.5 Z" fill="rgba(255,255,255,0.9)" />
 </svg>
