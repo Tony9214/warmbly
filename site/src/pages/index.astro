@@ -175,32 +175,30 @@ const plans = [
 
 
     <!-- ============================================================
-         WARMUP — dark-sky panel, text left + visual right
+         WARMUP — serious dark panel, real metrics
     ============================================================ -->
-    <section class="relative isolate overflow-hidden text-white border-t border-[color:var(--border)]" style="background: linear-gradient(180deg, #0c4a6e 0%, #075985 50%, #0c4a6e 100%);">
-      <img src="/backdrops/cloud-3.webp" alt="" aria-hidden="true" class="absolute -top-10 -left-10 w-[420px] opacity-25 pointer-events-none select-none cloud-drift cloud-1" loading="lazy" decoding="async"/>
-      <img src="/backdrops/cloud-4.webp" alt="" aria-hidden="true" class="absolute -bottom-10 right-0 w-[360px] opacity-20 pointer-events-none select-none cloud-drift cloud-2" loading="lazy" decoding="async"/>
-
-      <div class="container-page py-16 md:py-20 relative">
-        <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
+    <section class="relative isolate overflow-hidden text-white border-t border-[color:var(--border)]" style="background: linear-gradient(180deg, #0c1b2c 0%, #0c2235 50%, #0c1b2c 100%);">
+      <div class="container-page py-20 md:py-28 relative">
+        <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 items-start">
           <div class="lg:col-span-5">
-            <h2 class="text-[36px] md:text-[52px] font-semibold tracking-[-0.035em] leading-[1.04]">
-              Mailboxes warm themselves.
+            <div class="text-[11px] uppercase tracking-[0.18em] text-white/50 font-mono mb-3">Warmup</div>
+            <h2 class="text-[34px] md:text-[44px] font-semibold tracking-[-0.025em] leading-[1.08]">
+              Mailbox warmup, built&nbsp;in.
             </h2>
-            <p class="mt-5 text-[16.5px] text-white/75 leading-relaxed max-w-md">
-              Pool selection, gradual ramps, conversational replies, health monitoring. Already running on every paid mailbox.
+            <p class="mt-5 text-[15.5px] text-white/65 leading-relaxed max-w-md">
+              Pool placement, daily ramps, conversational replies, and per-mailbox health monitoring run automatically on every paid mailbox. The same code that warms also quarantines.
             </p>
-            <a href="/warmup/" class="mt-7 inline-flex items-center gap-1.5 text-[14px] font-medium text-white hover:text-white/80 group">
-              How it works
-              <Icon name="arrowRight" size={13} class="group-hover:translate-x-0.5 transition-transform" />
+            <a href="/warmup/" class="mt-8 inline-flex items-center gap-1.5 text-[13.5px] font-medium text-white border-b border-white/30 hover:border-white pb-px">
+              Read the full doc
+              <Icon name="arrowUpRight" size={13} />
             </a>
           </div>
 
           <div class="lg:col-span-7 grid grid-cols-2 gap-3">
             <!-- Ramp visualization, full row -->
-            <div class="col-span-2 rounded-[14px] bg-white/[0.04] ring-1 ring-white/12 backdrop-blur p-6">
+            <div class="col-span-2 rounded-[12px] bg-white/[0.04] ring-1 ring-white/12 p-6">
               <div class="flex items-center justify-between mb-4">
-                <span class="text-[10.5px] uppercase tracking-[0.14em] text-white/55 font-semibold">Per-mailbox ramp</span>
+                <span class="text-[10.5px] uppercase tracking-[0.16em] text-white/55 font-mono">Per-mailbox ramp</span>
                 <span class="text-[11px] font-mono text-sky-200">10 → 40 / day</span>
               </div>
               <div class="flex items-end gap-1 h-28">
@@ -208,7 +206,7 @@ const plans = [
                   const v = Math.min(40, 10 + i);
                   const h = (v / 40) * 100;
                   return (
-                    <div class="flex-1 rounded-t-md bg-gradient-to-t from-sky-500/70 to-sky-300/90 ring-1 ring-sky-300/10" style={`height:${h}%`}></div>
+                    <div class="flex-1 rounded-t-sm bg-gradient-to-t from-sky-500/70 to-sky-300/90" style={`height:${h}%`}></div>
                   );
                 })}
               </div>
@@ -218,8 +216,8 @@ const plans = [
             </div>
 
             <!-- Health bands -->
-            <div class="rounded-[14px] bg-white/[0.04] ring-1 ring-white/12 backdrop-blur p-5">
-              <span class="text-[10.5px] uppercase tracking-[0.14em] text-white/55 font-semibold">Health bands</span>
+            <div class="rounded-[12px] bg-white/[0.04] ring-1 ring-white/12 p-5">
+              <span class="text-[10.5px] uppercase tracking-[0.16em] text-white/55 font-mono">Health bands</span>
               <div class="mt-4 space-y-2">
                 {[
                   { name: 'Healthy',     color: 'bg-emerald-400', range: '< 10% spam' },
@@ -230,7 +228,7 @@ const plans = [
                 ].map((b) => (
                   <div class="flex items-center gap-2">
                     <span class={`w-2 h-2 rounded-full ${b.color}`}></span>
-                    <span class="text-[12px] text-white/85 flex-1">{b.name}</span>
+                    <span class="text-[12.5px] text-white/85 flex-1">{b.name}</span>
                     <span class="text-[11px] font-mono text-white/45">{b.range}</span>
                   </div>
                 ))}
@@ -238,8 +236,8 @@ const plans = [
             </div>
 
             <!-- Pool diversity -->
-            <div class="rounded-[14px] bg-white/[0.04] ring-1 ring-white/12 backdrop-blur p-5">
-              <span class="text-[10.5px] uppercase tracking-[0.14em] text-white/55 font-semibold">Pool diversity</span>
+            <div class="rounded-[12px] bg-white/[0.04] ring-1 ring-white/12 p-5">
+              <span class="text-[10.5px] uppercase tracking-[0.16em] text-white/55 font-mono">Pool diversity</span>
               <div class="mt-4 grid grid-cols-10 gap-1.5">
                 {Array.from({ length: 50 }).map((_, i) => {
                   const cls = i < 23 ? 'bg-rose-400/85' : i < 35 ? 'bg-sky-400/85' : i < 41 ? 'bg-violet-400/85' : i < 46 ? 'bg-zinc-400/85' : 'bg-emerald-400/85';
@@ -326,15 +324,16 @@ const plans = [
           </div>
 
           <div class="lg:col-span-5 order-1 lg:order-2 feature-card">
-            <h2 class="text-[36px] md:text-[52px] font-semibold tracking-[-0.035em] leading-[1.04] text-heading">
-              All your replies, one inbox.
+            <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Inbox</div>
+            <h2 class="text-[34px] md:text-[44px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+              Reply triage in one place.
             </h2>
-            <p class="mt-5 text-[16.5px] text-foreground/75 leading-relaxed max-w-md">
-              Positive, negative, out-of-office, unsubscribe, bounce. Tagged on arrival. Search across every mailbox. Snooze, assign, reply.
+            <p class="mt-5 text-[15.5px] text-foreground/75 leading-relaxed max-w-md">
+              Classified on arrival: positive, negative, out-of-office, unsubscribe, bounce. Cross-mailbox search. Snooze, assign, reply.
             </p>
-            <a href="/inbox/" class="mt-7 inline-flex items-center gap-1.5 text-[14px] font-medium text-[color:var(--brand)] hover:text-[color:var(--brand-strong)] group">
+            <a href="/inbox/" class="mt-8 inline-flex items-center gap-1.5 text-[13.5px] font-medium text-foreground border-b border-foreground/30 hover:border-foreground pb-px">
               See the inbox
-              <Icon name="arrowRight" size={13} class="group-hover:translate-x-0.5 transition-transform" />
+              <Icon name="arrowUpRight" size={13} />
             </a>
           </div>
         </div>
@@ -348,15 +347,16 @@ const plans = [
       <div class="container-page py-16 md:py-20 relative">
         <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
           <div class="lg:col-span-5">
-            <h2 class="text-[36px] md:text-[52px] font-semibold tracking-[-0.035em] leading-[1.04] text-heading">
-              Build a campaign the way you'd write one.
+            <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Campaigns</div>
+            <h2 class="text-[34px] md:text-[44px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+              Multi-step sequences with branching.
             </h2>
-            <p class="mt-5 text-[16px] text-foreground/75 leading-relaxed max-w-md">
-              Up to 12 steps. A/B variants per step. Branches on opens, replies and bounces. Sends spread across however many mailboxes you connect.
+            <p class="mt-5 text-[15.5px] text-foreground/75 leading-relaxed max-w-md">
+              Up to 12 steps. A/B variants per step. Branches on opens, replies and bounces. Sends distributed across every connected mailbox.
             </p>
-            <a href="/campaigns/" class="mt-7 inline-flex items-center gap-1.5 text-[14px] font-medium text-foreground hover:text-foreground/70 group">
-              Open the builder
-              <Icon name="arrowRight" size={13} class="group-hover:translate-x-0.5 transition-transform" />
+            <a href="/campaigns/" class="mt-8 inline-flex items-center gap-1.5 text-[13.5px] font-medium text-foreground border-b border-foreground/30 hover:border-foreground pb-px">
+              Campaign reference
+              <Icon name="arrowUpRight" size={13} />
             </a>
           </div>
 
@@ -371,69 +371,49 @@ const plans = [
     </section>
 
     <!-- ============================================================
-         COMPARE — narrative two-column, not a table
+         COMPARE — serious data table
     ============================================================ -->
-    <section class="container-page py-16 md:py-20">
-      <div class="text-center max-w-3xl mx-auto">
-        <h2 class="text-[34px] md:text-[52px] font-semibold tracking-[-0.035em] leading-[1.04] text-heading">
-          We won't be the reason your domain ends up on a blocklist.
-        </h2>
+    <section class="container-page py-20 md:py-28">
+      <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 mb-10">
+        <div class="lg:col-span-5">
+          <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">How we differ</div>
+          <h2 class="text-[34px] md:text-[44px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+            Defaults that protect reputation.
+          </h2>
+        </div>
+        <div class="lg:col-span-7">
+          <p class="text-[15.5px] text-foreground/75 leading-relaxed">
+            Cold-email platforms typically optimise for volume. Warmbly optimises for sender reputation. The numbers below ship as defaults and the system enforces them.
+          </p>
+        </div>
       </div>
 
-      <div class="mt-14 grid md:grid-cols-2 gap-4">
-        <!-- Warmbly card -->
-        <div class="relative rounded-[18px] bg-gradient-to-br from-[color:var(--brand-soft)] to-white ring-2 ring-[color:var(--brand)] p-8"
-             style="box-shadow: var(--shadow-md);">
-          <div class="absolute -top-2.5 left-8 inline-flex items-center h-5 px-2 rounded-full text-[10px] font-semibold uppercase tracking-[0.08em] bg-[color:var(--brand)] text-white">
-            Warmbly
-          </div>
-          <ul class="mt-4 space-y-4">
+      <div class="overflow-hidden rounded-[10px] ring-1 ring-[color:var(--border)] bg-white">
+        <table class="w-full text-[13.5px]">
+          <thead>
+            <tr class="border-b border-[color:var(--border)] bg-[color:var(--surface-2)]/60">
+              <th class="text-left font-medium text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground py-3.5 px-5">Setting</th>
+              <th class="text-left font-medium text-[10.5px] uppercase tracking-[0.16em] text-[color:var(--brand)] py-3.5 px-5">Warmbly</th>
+              <th class="text-left font-medium text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground py-3.5 px-5">Typical cold-email tool</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[color:var(--border)]">
             {[
-              { k: 'Per-mailbox cold cap',    v: '50 / day default. Raised only with positive reputation.' },
-              { k: 'Warmup pool',             v: 'Vetted, monitored, quarantined on warning bands' },
-              { k: 'Reputation response',     v: 'Acts at 10% spam placement (months before providers)' },
-              { k: 'Worker concentration',    v: 'Capped at the sum of mailbox budgets, never one big sender' },
-              { k: 'Compliance signals',      v: 'SPF / DKIM / DMARC validated on every connect' },
-            ].map((it) => (
-              <li class="flex items-start gap-3">
-                <span class="mt-1.5 shrink-0 w-4 h-4 rounded-full bg-[color:var(--brand)] grid place-items-center">
-                  <Icon name="check" size={10} class="text-white" />
-                </span>
-                <div>
-                  <div class="text-[13px] font-semibold text-heading">{it.k}</div>
-                  <div class="text-[13.5px] text-foreground/75 leading-snug mt-0.5">{it.v}</div>
-                </div>
-              </li>
+              { k: 'Per-mailbox cold cap',     ours: '50 / day default',                  theirs: '200+ / day on request' },
+              { k: 'Warmup pool composition',  ours: 'Vetted, monitored, quarantined',    theirs: 'Mixed with trial mailboxes' },
+              { k: 'Reputation response',      ours: 'Acts at 10% spam placement',        theirs: 'Acts at 80%+ spam placement' },
+              { k: 'Worker concentration',     ours: 'Sum of mailbox budgets',            theirs: 'Flat per-worker ceiling' },
+              { k: 'Auth validation on connect', ours: 'SPF · DKIM · DMARC checked',      theirs: 'Manual DNS setup, no check' },
+              { k: 'Source available',         ours: 'Apache 2.0 on GitHub',              theirs: 'Closed source' },
+            ].map((r) => (
+              <tr class="hover:bg-[color:var(--surface-2)]/30 transition-colors">
+                <td class="py-3.5 px-5 font-medium text-heading">{r.k}</td>
+                <td class="py-3.5 px-5 text-foreground">{r.ours}</td>
+                <td class="py-3.5 px-5 text-muted-foreground">{r.theirs}</td>
+              </tr>
             ))}
-          </ul>
-        </div>
-
-        <!-- Other tools card -->
-        <div class="rounded-[18px] bg-white ring-1 ring-[color:var(--border)] p-8"
-             style="box-shadow: var(--shadow-sm);">
-          <div class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-semibold uppercase tracking-[0.08em] bg-[color:var(--surface-2)] text-muted-foreground border border-[color:var(--border)]">
-            Most cold-email tools
-          </div>
-          <ul class="mt-4 space-y-4">
-            {[
-              { k: 'Per-mailbox cold cap',    v: '200+ / day if you ask. Sells you "more volume"' },
-              { k: 'Warmup pool',             v: 'Mixed with trial mailboxes; same pool for everyone' },
-              { k: 'Reputation response',     v: 'Acts at 80%+ spam placement. By then it’s too late' },
-              { k: 'Worker concentration',    v: 'Flat per-worker ceiling. One IP carries the load.' },
-              { k: 'Compliance signals',      v: 'You configure DNS, they assume it worked' },
-            ].map((it) => (
-              <li class="flex items-start gap-3">
-                <span class="mt-1.5 shrink-0 w-4 h-4 rounded-full bg-amber-100 grid place-items-center">
-                  <Icon name="warning" size={10} class="text-amber-600" />
-                </span>
-                <div>
-                  <div class="text-[13px] font-semibold text-foreground/80">{it.k}</div>
-                  <div class="text-[13.5px] text-muted-foreground leading-snug mt-0.5">{it.v}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -590,28 +570,13 @@ const plans = [
           </div>
         </div>
 
-        <div class="mt-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5 items-stretch">
+        <div class="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-[color:var(--border)] ring-1 ring-[color:var(--border)] rounded-[10px] overflow-hidden">
           {plans.map((p, idx) => (
-            <div class={`pricing-card relative flex flex-col rounded-[18px] bg-white p-7 overflow-hidden ${
-              p.highlight ? 'ring-2 ring-[color:var(--brand)] lg:scale-[1.02] z-10' : 'ring-1 ring-[color:var(--border)]'
-            }`} style={p.highlight ? 'box-shadow: var(--shadow-xl);' : 'box-shadow: var(--shadow-sm);'} data-card-idx={idx}>
-
-              {/* Continuously sweeping gradient ring on the featured card */}
-              {p.highlight && (
-                <div class="absolute inset-0 pointer-events-none rounded-[18px] overflow-hidden" aria-hidden="true">
-                  <div class="absolute -top-20 -right-16 w-[260px] h-[260px] rounded-full" style="background: radial-gradient(circle, rgba(125,211,252,0.55) 0%, transparent 70%); filter: blur(34px);"></div>
-                  <img src="/backdrops/cloud-4.webp" alt="" class="absolute -top-6 -right-6 w-[180px] opacity-55 pointer-events-none select-none" loading="lazy" decoding="async" />
-                  <div class="pricing-sweep absolute inset-0 rounded-[18px]"></div>
-                </div>
-              )}
-
+            <div class={`pricing-card relative flex flex-col bg-white p-7 ${
+              p.highlight ? '' : ''
+            }`} data-card-idx={idx}>
               <div class="relative flex flex-col h-full">
-                {p.highlight && (
-                  <span class="absolute -top-2 right-0 inline-flex items-center h-6 px-2.5 rounded-full text-[10px] font-semibold uppercase tracking-[0.10em] bg-[color:var(--brand)] text-white shadow-[0_4px_12px_-2px_rgba(2,132,199,0.55)]">
-                    Most popular
-                  </span>
-                )}
-                <h3 class={`text-[16px] font-semibold ${p.highlight ? 'text-[color:var(--brand)]' : 'text-heading'}`}>{p.name}</h3>
+                <h3 class={`text-[14px] font-semibold uppercase tracking-[0.12em] ${p.highlight ? 'text-[color:var(--brand)]' : 'text-heading'}`}>{p.name}</h3>
                 <p class="mt-1.5 text-[12.5px] text-muted-foreground leading-snug min-h-[40px]">{p.summary}</p>
 
                 <div class="mt-6 flex items-baseline gap-1.5">
