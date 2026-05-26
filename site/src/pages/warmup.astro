@@ -124,21 +124,26 @@ const faq = [
             <line x1="40" x2="700" y1={200 - (40 / 50) * 180} y2={200 - (40 / 50) * 180} stroke="#0c4a6e" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
 
             <!-- Ramp polygon -->
-            {(() => {
-              const pts = [];
-              for (let day = 0; day <= 30; day++) {
+            <polygon
+              points={'40,200 ' + Array.from({ length: 31 }, (_, day) => {
                 const v = Math.min(10 + day, 40);
                 const x = 40 + (day / 30) * 660;
                 const y = 200 - (v / 50) * 180;
-                pts.push(`${x},${y}`);
-              }
-              return (
-                <>
-                  <polygon points={`40,200 ${pts.join(' ')} 700,200`} fill="url(#rampFill)"/>
-                  <polyline points={pts.join(' ')} fill="none" stroke="#0284c7" stroke-width="2"/>
-                </>
-              );
-            })()}
+                return x + ',' + y;
+              }).join(' ') + ' 700,200'}
+              fill="url(#rampFill)"
+            />
+            <polyline
+              points={Array.from({ length: 31 }, (_, day) => {
+                const v = Math.min(10 + day, 40);
+                const x = 40 + (day / 30) * 660;
+                const y = 200 - (v / 50) * 180;
+                return x + ',' + y;
+              }).join(' ')}
+              fill="none"
+              stroke="#0284c7"
+              stroke-width="2"
+            />
 
             <!-- Day-1 marker -->
             <g>
