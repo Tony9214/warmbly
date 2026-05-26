@@ -197,6 +197,154 @@ body {
   z-index: 0;
 }
 
+/* ----------------------------------------------------------------
+   Auth-style sky — deep blue with cloud blurs, sun glow.
+   Same palette as web/src/app/auth/layout.tsx but flattened to
+   pure CSS (no SVG turbulence filters) so it's light to load.
+   The hero owns its own sky; the bottom of the hero masks to white
+   so the white page picks up below.
+---------------------------------------------------------------- */
+
+.hero-sky {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 140% 140% at 72% 25%,
+      #7dd3fc 0%,
+      #38bdf8 18%,
+      #0ea5e9 36%,
+      #0284c7 58%,
+      #075985 82%
+    );
+}
+
+/* Soft sun glow in the upper-right */
+.hero-sun {
+  position: absolute;
+  top: 0; right: 0;
+  width: 900px; height: 900px;
+  pointer-events: none;
+  background: radial-gradient(circle,
+    rgba(253, 230, 138, 0.30) 0%,
+    rgba(253, 186, 116, 0.10) 32%,
+    rgba(56, 189, 248, 0.04) 55%,
+    transparent 70%
+  );
+  filter: blur(8px);
+  transform: translate(20%, -20%);
+}
+
+/* Atmospheric upper-left scatter */
+.hero-haze {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 40%,
+      rgba(186, 230, 253, 0.18) 0%,
+      transparent 60%
+    ),
+    radial-gradient(ellipse 70% 30% at 60% 80%,
+      rgba(125, 211, 252, 0.20) 0%,
+      transparent 70%
+    );
+}
+
+/* Bottom of hero fades into pure white — no white wash on top */
+.hero-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    transparent 0%,
+    transparent 62%,
+    rgba(255,255,255,0.5) 82%,
+    #ffffff 100%
+  );
+}
+
+/* Cloud — three soft, blurred white blobs that read as a cumulus.
+   No SVG filters; just border-radius + blur on layered divs. */
+.cloud {
+  position: absolute;
+  pointer-events: none;
+}
+.cloud-back, .cloud-mid, .cloud-front {
+  position: absolute;
+  border-radius: 50% 50% 40% 40%;
+  filter: blur(22px);
+}
+.cloud-back  { background: rgba(255, 255, 255, 0.95); }
+.cloud-mid   { background: rgba(232, 240, 254, 0.85); filter: blur(28px); }
+.cloud-front { background: rgba(186, 207, 230, 0.70); filter: blur(34px); }
+
+/* Sky variants for the page header (transparent over sky) */
+.header-on-sky {
+  background: transparent !important;
+  border-color: transparent !important;
+  backdrop-filter: none !important;
+}
+.header-on-sky a,
+.header-on-sky button,
+.header-on-sky span,
+.header-on-sky svg { color: white; }
+.header-on-sky .nav-link {
+  color: rgba(255, 255, 255, 0.78);
+}
+.header-on-sky .nav-link:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.10);
+}
+.header-on-sky .nav-link.is-active {
+  color: white;
+  background: rgba(255, 255, 255, 0.14);
+}
+.header-on-sky .cta-primary {
+  background: white;
+  color: #0c4a6e;
+}
+.header-on-sky .cta-primary:hover { background: rgba(255, 255, 255, 0.9); }
+.header-on-sky .cta-ghost {
+  color: rgba(255, 255, 255, 0.85);
+}
+.header-on-sky .cta-ghost:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.10);
+}
+
+/* Hairline + soft inner-edge for product mock cards */
+.glass-card {
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 1px 0 0 color-mix(in oklab, white 70%, transparent) inset,
+    0 30px 80px -40px color-mix(in oklab, oklch(0.20 0.06 250) 30%, transparent),
+    0 8px 24px -16px color-mix(in oklab, oklch(0.20 0.06 250) 20%, transparent);
+}
+.dark .glass-card {
+  box-shadow:
+    0 1px 0 0 color-mix(in oklab, white 8%, transparent) inset,
+    0 30px 80px -40px black,
+    0 8px 24px -16px black;
+}
+
+/* Subtle marquee for logo strip */
+@keyframes marquee-x {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track {
+  animation: marquee-x 38s linear infinite;
+}
+
+/* Mask the edges of a horizontal marquee to fade in/out */
+.marquee-mask {
+  mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+}
+
 /* Inline code style for the docs/learn pages. */
 .kbd {
   font-family: var(--font-mono);
