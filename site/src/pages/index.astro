@@ -194,7 +194,7 @@ const plans = [
     <!-- ============================================================
          WARMUP — airy sky panel with clouds (Air-style feel)
     ============================================================ -->
-    <section class="relative isolate overflow-hidden text-white border-t border-[color:var(--border)]" style="background: radial-gradient(ellipse 130% 140% at 72% 28%, #0284c7 0%, #0369a1 25%, #075985 50%, #0c4a6e 80%, #0a3d5c 100%);">
+    <section class="relative isolate overflow-hidden text-white" style="background: radial-gradient(ellipse 130% 140% at 72% 28%, #0284c7 0%, #0369a1 25%, #075985 50%, #0c4a6e 80%, #0a3d5c 100%);">
       <img src="/backdrops/cloud-3.webp" alt="" aria-hidden="true" class="absolute -top-10 -left-10 w-[460px] opacity-30 pointer-events-none select-none cloud-drift cloud-1" loading="lazy" decoding="async" style="mix-blend-mode: screen;"/>
       <img src="/backdrops/cloud-5.webp" alt="" aria-hidden="true" class="absolute top-10 right-0 w-[520px] opacity-22 pointer-events-none select-none cloud-drift cloud-2" loading="lazy" decoding="async" style="mix-blend-mode: screen;"/>
       <img src="/backdrops/cloud-4.webp" alt="" aria-hidden="true" class="absolute -bottom-12 left-1/4 w-[420px] opacity-18 pointer-events-none select-none cloud-drift cloud-3" loading="lazy" decoding="async" style="mix-blend-mode: screen;"/>
@@ -221,20 +221,19 @@ const plans = [
         <!-- Warmup dashboard panel — individual mailbox rows -->
         <div class="rounded-[14px] bg-white/[0.04] ring-1 ring-white/12 backdrop-blur overflow-hidden">
           <!-- Header bar -->
-          <div class="flex items-center gap-3 px-6 h-12 border-b border-white/10">
+          <div class="flex items-center gap-3 px-6 h-12">
             <span class="text-[10.5px] uppercase tracking-[0.16em] text-white/55 font-mono">Warmup</span>
             <span class="text-white/30">/</span>
             <span class="text-[12.5px] text-white/80">Acme · 6 mailboxes</span>
-            <span class="ml-auto inline-flex items-center gap-1.5 px-2 h-5 rounded-full text-[10.5px] font-semibold bg-emerald-400/15 text-emerald-300 border border-emerald-400/25">
+            <span class="ml-auto inline-flex items-center gap-1.5 text-[11px] font-mono text-emerald-300">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>pool active
             </span>
           </div>
 
           <!-- Table header -->
-          <div class="grid grid-cols-12 px-6 py-2.5 text-[10px] uppercase tracking-[0.14em] text-white/40 font-mono border-b border-white/10">
-            <div class="col-span-4">Mailbox</div>
-            <div class="col-span-1 text-right">Day</div>
-            <div class="col-span-4">Ramp</div>
+          <div class="grid grid-cols-12 gap-4 px-6 py-2.5 text-[10px] uppercase tracking-[0.14em] text-white/40 font-mono">
+            <div class="col-span-5">Mailbox</div>
+            <div class="col-span-4">Ramp progress</div>
             <div class="col-span-1 text-right">Today</div>
             <div class="col-span-2 text-right">Status</div>
           </div>
@@ -248,47 +247,27 @@ const plans = [
             { e: 'partnerships@acme.co',day:  7, today: 15, cap: 40, status: 'watch',    tone: 'amber' },
             { e: 'support@acme.co',     day:  3, today: 11, cap: 40, status: 'healthy',  tone: 'emerald' },
           ].map((m) => (
-            <div class="grid grid-cols-12 items-center px-6 py-3 border-b border-white/5 last:border-b-0">
-              <div class="col-span-4 flex items-center gap-2 min-w-0">
+            <div class="grid grid-cols-12 gap-4 items-center px-6 py-3">
+              <div class="col-span-5 flex items-center gap-2.5 min-w-0">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
                 <span class="text-[13px] font-mono text-white truncate">{m.e}</span>
+                <span class="text-[11px] font-mono text-white/45 shrink-0">day {m.day}</span>
               </div>
-              <div class="col-span-1 text-right text-[11.5px] font-mono text-white/55">{m.day}</div>
-              <div class="col-span-4 pr-3">
-                <div class="flex items-end gap-[2px] h-7">
-                  {Array.from({ length: 21 }).map((_, i) => {
-                    const visible = i < Math.min(21, m.day);
-                    const v = Math.min(40, 10 + i);
-                    const h = (v / 40) * 100;
-                    return (
-                      <div
-                        class={`flex-1 rounded-t-[1px] ${visible ? 'bg-gradient-to-t from-sky-500/60 to-sky-300' : 'bg-white/8'}`}
-                        style={`height:${visible ? h : 12}%`}
-                      ></div>
-                    );
-                  })}
-                </div>
+              <div class="col-span-4 h-1.5 rounded-full bg-white/8 overflow-hidden">
+                <div class="h-full rounded-full bg-gradient-to-r from-sky-400 to-sky-200" style={`width: ${Math.min(100, (m.day / 30) * 100)}%`}></div>
               </div>
               <div class="col-span-1 text-right text-[12.5px] font-mono text-white tabular-nums">
                 {m.today}<span class="text-white/35">/{m.cap}</span>
               </div>
-              <div class="col-span-2 flex justify-end">
-                {m.tone === 'emerald' && (
-                  <span class="inline-flex items-center gap-1.5 px-2 h-5 rounded-full text-[10px] font-semibold uppercase tracking-[0.10em] bg-emerald-400/10 text-emerald-300 border border-emerald-400/20">
-                    <span class="w-1 h-1 rounded-full bg-emerald-400"></span>{m.status}
-                  </span>
-                )}
-                {m.tone === 'amber' && (
-                  <span class="inline-flex items-center gap-1.5 px-2 h-5 rounded-full text-[10px] font-semibold uppercase tracking-[0.10em] bg-amber-400/10 text-amber-300 border border-amber-400/20">
-                    <span class="w-1 h-1 rounded-full bg-amber-400"></span>{m.status}
-                  </span>
-                )}
+              <div class="col-span-2 flex justify-end items-center gap-1.5">
+                <span class={`w-1.5 h-1.5 rounded-full ${m.tone === 'emerald' ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+                <span class={`text-[11px] font-mono uppercase tracking-[0.10em] ${m.tone === 'emerald' ? 'text-emerald-300' : 'text-amber-300'}`}>{m.status}</span>
               </div>
             </div>
           ))}
 
           <!-- Footer band: pool providers -->
-          <div class="px-6 py-4 border-t border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11.5px]">
+          <div class="px-6 py-4 mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11.5px]">
             <span class="text-[10.5px] uppercase tracking-[0.16em] text-white/55 font-mono mr-2">Pool</span>
             {[
               { name: 'Gmail 46%',    color: 'bg-rose-400' },
@@ -494,39 +473,52 @@ const plans = [
 
         <!-- Auto-scrolling step timeline (no scrollbar, loops forever) -->
         <div class="relative marquee-mask overflow-hidden">
-          <ol class="flex items-stretch gap-3 w-max marquee-track-slow">
+          <!-- Faint connecting rail behind the cards -->
+          <div class="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gradient-to-r from-transparent via-[color:var(--border-strong)] to-transparent opacity-60"></div>
+
+          <ol class="relative flex items-stretch gap-0 w-max marquee-track-slow py-1">
             {Array.from({ length: 2 }).map(() => (
               <>
                 {[
-                  { n: 1, k: 'SEND',   t: 'Intro · plain text',            m: '2 variants' },
-                  { n: 2, k: 'WAIT',   t: '3 business days',                m: 'if no reply' },
-                  { n: 3, k: 'SEND',   t: 'Follow-up · context line',       m: '4 variants' },
-                  { n: 4, k: 'BRANCH', t: 'If opened twice',                m: 'send earlier' },
-                  { n: 5, k: 'SEND',   t: 'Soft close · short ask',          m: '2 variants' },
-                  { n: 6, k: 'WAIT',   t: '7 business days',                m: 'silence' },
-                  { n: 7, k: 'SEND',   t: 'Final · breakup note',           m: '1 variant' },
-                  { n: 8, k: 'END',    t: 'Stop · mark contact done',       m: '' },
-                ].map((s, i, arr) => (
-                  <>
-                    <li class={`relative shrink-0 w-[240px] rounded-[10px] bg-white ring-1 ring-[color:var(--border)] p-4 ${s.k === 'SEND' ? 'ring-[color:var(--border-strong)]' : ''}`}
-                         style="box-shadow: var(--shadow-sm);">
-                      <div class="flex items-center gap-2">
-                        <span class={`text-[9.5px] font-mono font-semibold uppercase tracking-[0.16em] ${
-                          s.k === 'SEND'   ? 'text-[color:var(--brand)]' :
-                          s.k === 'WAIT'   ? 'text-muted-foreground' :
-                          s.k === 'BRANCH' ? 'text-violet-700' :
-                                              'text-rose-700'
-                        }`}>{s.k}</span>
-                        <span class="ml-auto text-[10.5px] font-mono text-muted-foreground">step {String(s.n).padStart(2, '0')}</span>
+                  { n: 1, k: 'SEND',   t: 'Intro · plain text',            m: '2 variants',  icon: 'send' },
+                  { n: 2, k: 'WAIT',   t: '3 business days',                m: 'if no reply', icon: 'clock' },
+                  { n: 3, k: 'SEND',   t: 'Follow-up · context line',       m: '4 variants',  icon: 'send' },
+                  { n: 4, k: 'BRANCH', t: 'If opened twice',                m: 'send earlier',icon: 'workflow' },
+                  { n: 5, k: 'SEND',   t: 'Soft close · short ask',          m: '2 variants',  icon: 'send' },
+                  { n: 6, k: 'WAIT',   t: '7 business days',                m: 'silence',     icon: 'clock' },
+                  { n: 7, k: 'SEND',   t: 'Final · breakup note',           m: '1 variant',   icon: 'send' },
+                  { n: 8, k: 'END',    t: 'Stop · mark contact done',       m: 'sequence done', icon: 'check' },
+                ].map((s) => {
+                  const tone = s.k === 'SEND'  ? { bg: 'bg-sky-50',    text: 'text-sky-700',     dot: 'bg-sky-500' } :
+                              s.k === 'WAIT'   ? { bg: 'bg-slate-50',  text: 'text-slate-500',   dot: 'bg-slate-400' } :
+                              s.k === 'BRANCH' ? { bg: 'bg-violet-50', text: 'text-violet-700',  dot: 'bg-violet-500' } :
+                                                  { bg: 'bg-emerald-50',text: 'text-emerald-700', dot: 'bg-emerald-500' };
+                  return (
+                    <li class="shrink-0 flex items-center">
+                      <!-- step card -->
+                      <div class="w-[260px] rounded-[12px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden" style="box-shadow: var(--shadow-sm);">
+                        <div class={`flex items-center gap-2 px-4 h-8 ${tone.bg}`}>
+                          <span class={`w-1.5 h-1.5 rounded-full ${tone.dot}`}></span>
+                          <span class={`text-[10px] font-mono font-semibold uppercase tracking-[0.16em] ${tone.text}`}>{s.k}</span>
+                          <span class="ml-auto text-[10px] font-mono text-muted-foreground">{String(s.n).padStart(2, '0')}</span>
+                        </div>
+                        <div class="px-4 py-3.5">
+                          <div class="flex items-start gap-2.5">
+                            <Icon name={s.icon} size={15} class="text-foreground/55 mt-0.5 shrink-0" />
+                            <div class="min-w-0">
+                              <div class="text-[13.5px] font-medium text-heading leading-snug">{s.t}</div>
+                              <div class="mt-1 text-[11px] font-mono text-muted-foreground">{s.m}</div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      <div class="mt-3 text-[13.5px] font-medium text-heading leading-snug">{s.t}</div>
-                      {s.m && <div class="mt-1 text-[11px] font-mono text-muted-foreground">{s.m}</div>}
+                      <!-- connector arrow -->
+                      <div class="shrink-0 px-2.5 text-[color:var(--border-strong)]" aria-hidden="true">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 7h8M7.5 3.5L11 7l-3.5 3.5"/></svg>
+                      </div>
                     </li>
-                    <li class="shrink-0 flex items-center text-muted-foreground" aria-hidden="true">
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 7h8M7.5 3.5L11 7l-3.5 3.5"/></svg>
-                    </li>
-                  </>
-                ))}
+                  );
+                })}
               </>
             ))}
           </ol>
