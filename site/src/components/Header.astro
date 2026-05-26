@@ -64,46 +64,25 @@ function active(match?: string) {
               </svg>
             </a>
 
-            <!-- Mega-menu panel · list + preview pattern -->
-            <div class="mega-panel absolute left-0 top-full pt-2 pointer-events-none opacity-0 transition-all duration-200 ease-out" style="width: 580px; max-width: 92vw;">
-              <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden" style="box-shadow: 0 28px 70px -22px rgba(2,32,71,0.28), 0 10px 28px -10px rgba(15,23,42,0.10);">
-                <div class="grid grid-cols-[210px_1fr]">
-                  <!-- LEFT: bare product list -->
-                  <ol class="bg-[color:var(--surface-1)]/60 border-r border-[color:var(--border)] py-2 mega-list" data-mega-list>
-                    {products.map((it, i) => {
-                      const isCurrent = path === it.href || path.startsWith(it.href);
-                      return (
-                        <li>
-                          <a
-                            href={it.href}
-                            data-preview={String(i)}
-                            aria-current={isCurrent ? 'page' : undefined}
-                            class={`mega-row group flex items-baseline gap-3 px-4 py-2.5 text-[13.5px] transition-colors duration-150 ${isCurrent ? 'text-[#0369a1] font-semibold' : 'text-foreground/75 hover:text-[#0369a1]'}`}
-                          >
-                            <span class={`font-mono text-[10.5px] w-5 shrink-0 transition-colors ${isCurrent ? 'text-[#0284c7]' : 'text-muted-foreground/55'}`}>{String(i + 1).padStart(2, '0')}</span>
-                            <span class="flex-1">{it.title}</span>
-                            {isCurrent && <span class="w-1.5 h-1.5 rounded-full bg-[#0284c7]"></span>}
-                          </a>
-                        </li>
-                      );
-                    })}
-                  </ol>
-
-                  <!-- RIGHT: live preview pane -->
-                  <div class="relative bg-white p-6" data-mega-preview>
-                    {products.map((it, i) => (
-                      <div data-preview-pane={String(i)} class={`preview-pane absolute inset-0 p-6 flex flex-col transition-opacity duration-200 ${i === 0 ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                        <div class="text-[10px] uppercase tracking-[0.22em] font-mono text-[#0284c7]">{it.tag}</div>
-                        <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-heading leading-[1.1]">{it.title}</h3>
-                        <p class="mt-3 text-[13.5px] text-foreground/70 leading-relaxed flex-1">{it.desc}</p>
-                        <a href={it.href} class="mt-4 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#0369a1] hover:text-[#075985] self-start">
-                          Open {it.title}
-                          <Icon name="arrowRight" size={11} />
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+            <!-- Mega-menu panel · minimal single column -->
+            <div class="mega-panel absolute left-0 top-full pt-2 pointer-events-none opacity-0 transition-all duration-200 ease-out" style="width: 260px; max-width: 92vw;">
+              <div class="rounded-[12px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden p-1.5" style="box-shadow: 0 20px 48px -16px rgba(2,32,71,0.22), 0 6px 18px -6px rgba(15,23,42,0.08);">
+                {products.map((it) => {
+                  const isCurrent = path === it.href || path.startsWith(it.href);
+                  return (
+                    <a
+                      href={it.href}
+                      aria-current={isCurrent ? 'page' : undefined}
+                      class={`mega-item group flex items-center justify-between px-3 py-2 rounded-[8px] text-[13.5px] transition-colors duration-150 ${isCurrent ? 'bg-[color:var(--sky-1)]/70 text-[#0369a1] font-semibold' : 'text-foreground/80 hover:bg-[color:var(--surface-1)] hover:text-foreground'}`}
+                    >
+                      <span>{it.title}</span>
+                      {isCurrent
+                        ? <span class="w-1.5 h-1.5 rounded-full bg-[#0284c7]"></span>
+                        : <svg width="10" height="10" viewBox="0 0 12 12" fill="none" class="text-foreground/30 group-hover:text-foreground/70 group-hover:translate-x-0.5 transition-all" aria-hidden="true"><path d="M3.5 3l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      }
+                    </a>
+                  );
+                })}
               </div>
             </div>
           </div>
