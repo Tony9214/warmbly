@@ -3,14 +3,14 @@ import Layout from '../../layouts/Layout.astro';
 import Icon from '../../components/Icon.astro';
 
 const chapters = [
-  { num: '01', id: 'definition',    title: 'What deliverability actually means' },
-  { num: '02', id: 'signals',       title: 'The signals that decide placement' },
-  { num: '03', id: 'thresholds',    title: 'The thresholds you must respect' },
-  { num: '04', id: 'mailbox-first', title: 'Why mailbox-first beats worker-first' },
-  { num: '05', id: 'recipe',        title: 'The cold-email send recipe' },
-  { num: '06', id: 'measure',       title: 'What to measure' },
-  { num: '07', id: 'noise',         title: 'What not to measure' },
-  { num: '08', id: 'problem',       title: 'When you spot a problem' },
+  { num: '01', id: 'definition',    title: 'Definition' },
+  { num: '02', id: 'signals',       title: 'Signals' },
+  { num: '03', id: 'thresholds',    title: 'Thresholds' },
+  { num: '04', id: 'mailbox-first', title: 'Framing' },
+  { num: '05', id: 'recipe',        title: 'Send recipe' },
+  { num: '06', id: 'measure',       title: 'Measure' },
+  { num: '07', id: 'noise',         title: 'Ignore' },
+  { num: '08', id: 'problem',       title: 'Incident' },
 ];
 ---
 <Layout
@@ -18,282 +18,383 @@ const chapters = [
   description="A full mental model for getting cold mail into the inbox, and keeping it there. Authentication, warmup, volume, reputation."
 >
   <!-- ============================================================
-       MASTHEAD — newspaper-style title block, wide and quiet
+       TOP BAR — minimal nav
   ============================================================ -->
-  <section class="border-b border-foreground/15 bg-white">
-    <div class="container-page py-8">
-      <div class="flex items-center justify-between text-[10.5px] uppercase tracking-[0.22em] font-mono text-foreground/55">
-        <a href="/learn/" class="hover:text-foreground inline-flex items-center gap-1.5">
-          <Icon name="arrowRight" size={10} class="rotate-180" />
-          Learn
-        </a>
-        <div class="hidden md:block">Warmbly Handbook · Volume 1</div>
-        <div>Updated 2026-05-08</div>
+  <div class="bg-white border-b border-[color:var(--border)]">
+    <div class="container-page py-3 flex items-center justify-between text-[11.5px] font-mono">
+      <a href="/learn/" class="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors">
+        <Icon name="arrowRight" size={11} class="rotate-180" />
+        Library
+      </a>
+      <div class="hidden md:flex items-center gap-4 text-muted-foreground">
+        <span>Handbook v2.4</span>
+        <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
+        <span>14 min</span>
+        <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
+        <span>Updated 2026-05-08</span>
       </div>
     </div>
-    <div class="container-page pt-10 md:pt-16 pb-12 md:pb-20">
-      <div class="text-[11px] uppercase tracking-[0.22em] font-mono text-[#0284c7] mb-5">Chapter 1 · Foundations</div>
-      <h1 class="font-semibold tracking-[-0.045em] leading-[0.92] text-heading text-[64px] sm:text-[88px] md:text-[120px] lg:text-[152px] max-w-[1100px]">
-        The deliverability handbook.
-      </h1>
-      <div class="mt-10 grid lg:grid-cols-[1fr_auto] gap-8 items-end">
-        <p class="text-[18px] md:text-[22px] text-foreground/70 leading-[1.4] max-w-2xl">
+  </div>
+
+  <!-- ============================================================
+       DOC LAYOUT — sticky chapter rail · prose left · examples right
+  ============================================================ -->
+  <div class="grid lg:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)]">
+
+    <!-- LEFT RAIL: sticky chapter nav -->
+    <aside class="hidden lg:block border-r border-[color:var(--border)] bg-[color:var(--surface-1)]/40">
+      <div class="sticky top-0 max-h-screen overflow-y-auto py-8 px-6">
+        <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-4">Handbook</div>
+        <ol class="space-y-px text-[13px]">
+          {chapters.map((c) => (
+            <li>
+              <a href={`#${c.id}`} class="group flex items-baseline gap-3 py-1.5 px-2 -mx-2 rounded-md text-foreground/70 hover:bg-white hover:text-[#0369a1] transition-colors">
+                <span class="font-mono text-[10.5px] text-muted-foreground/70 w-5 shrink-0">{c.num}</span>
+                <span class="leading-snug">{c.title}</span>
+              </a>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </aside>
+
+    <!-- RIGHT: page header + 2-col doc rows -->
+    <main class="bg-white">
+      <!-- Page header -->
+      <header class="border-b border-[color:var(--border)] px-6 md:px-10 lg:px-14 py-10 md:py-14">
+        <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-[#0284c7] mb-3">Foundations · Essential</div>
+        <h1 class="text-[40px] md:text-[52px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading max-w-3xl">
+          The deliverability handbook.
+        </h1>
+        <p class="mt-4 text-[16px] md:text-[17px] text-foreground/70 max-w-2xl leading-relaxed">
           A full mental model for getting cold mail into the inbox, and keeping it there.
         </p>
-        <div class="flex items-center gap-8 text-[11px] uppercase tracking-[0.18em] font-mono text-foreground/55">
-          <div><span class="block text-[18px] font-semibold text-heading tracking-[-0.02em] font-mono">14</span>min read</div>
-          <div><span class="block text-[18px] font-semibold text-heading tracking-[-0.02em] font-mono">08</span>chapters</div>
-          <div><span class="block text-[18px] font-semibold text-heading tracking-[-0.02em] font-mono">06</span>cross-links</div>
+      </header>
+
+      <!-- ========== Chapter 01 ========== -->
+      <section id="definition" class="scroll-mt-4 px-6 md:px-10 lg:px-14 py-14 md:py-16 border-b border-[color:var(--border)]">
+        <div class="grid xl:grid-cols-[1fr_1fr] gap-10 xl:gap-16">
+          <div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[10.5px] font-mono text-[#0284c7] tracking-[0.18em]">01 · DEFINITION</span>
+            </div>
+            <h2 class="text-[24px] md:text-[28px] font-semibold tracking-[-0.02em] leading-[1.15] text-heading mb-5">
+              What deliverability actually means.
+            </h2>
+            <p class="text-[15.5px] leading-[1.7] text-foreground/85">
+              Deliverability is whether your message lands in the recipient's primary inbox, not whether the SMTP transaction returned 250. The latter is delivery. The former is placement. Almost every conversation about deliverability conflates the two.
+            </p>
+            <p class="mt-4 text-[15.5px] leading-[1.7] text-foreground/85">
+              A mailbox provider can accept your message (delivery) and then immediately drop it into the Spam folder, the Promotions tab, or filter it out of the inbox entirely. None of that fails the SMTP transaction. Most cold-mail tools only see the green check.
+            </p>
+          </div>
+          <div class="xl:pl-4">
+            <div class="rounded-[10px] ring-1 ring-[color:var(--border)] bg-[color:var(--surface-1)] overflow-hidden">
+              <div class="px-4 py-2.5 border-b border-[color:var(--border)] text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">
+                Two concepts
+              </div>
+              <div class="divide-y divide-[color:var(--border)]">
+                <div class="px-4 py-3.5">
+                  <div class="text-[11px] font-mono text-emerald-700 mb-1">delivery</div>
+                  <div class="text-[13.5px] text-foreground/80">SMTP returned 250. Message accepted.</div>
+                </div>
+                <div class="px-4 py-3.5">
+                  <div class="text-[11px] font-mono text-[#0284c7] mb-1">placement</div>
+                  <div class="text-[13.5px] text-foreground/80">Where it landed: inbox, spam, Promotions, or filtered out.</div>
+                </div>
+              </div>
+            </div>
+            <p class="mt-3 text-[12px] text-muted-foreground italic">
+              Most cold-mail tools only see delivery.
+            </p>
+          </div>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       INDEX — full-width chapter list, no sidebar
-  ============================================================ -->
-  <section class="bg-[color:var(--surface-1)] border-b border-[color:var(--border)]">
-    <div class="container-page py-8">
-      <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-5">Chapters</div>
-      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-2">
-        {chapters.map((c) => (
-          <a href={`#${c.id}`} class="group flex items-baseline gap-3 py-2 text-foreground/75 hover:text-[#0369a1] transition-colors border-b border-[color:var(--border)]">
-            <span class="text-[11px] font-mono text-muted-foreground w-6">{c.num}</span>
-            <span class="text-[13.5px] leading-snug">{c.title}</span>
-          </a>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       BODY — single wide reading column, no sidebar
-       Drop-cap, generous typography, ornamental section dividers
-  ============================================================ -->
-  <article class="bg-white">
-    <div class="container-page py-16 md:py-24 max-w-[820px] !mx-auto">
-
-      <!-- Chapter 01 -->
-      <section id="definition" class="scroll-mt-24">
-        <div class="flex items-baseline gap-4 mb-5">
-          <span class="text-[12px] font-mono text-[#0284c7] font-semibold">01</span>
-          <div class="flex-1 h-px bg-[color:var(--border)]"></div>
-        </div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading mb-8">
-          What deliverability actually means.
-        </h2>
-        <p class="first-letter:text-[80px] first-letter:font-semibold first-letter:tracking-[-0.04em] first-letter:leading-[0.85] first-letter:float-left first-letter:mr-3 first-letter:mt-1 first-letter:text-[#0369a1] text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          Deliverability is whether your message lands in the recipient's primary inbox, not whether the SMTP transaction returned 250. The latter is delivery. The former is placement. Almost every conversation about deliverability conflates the two.
-        </p>
-        <p class="mt-5 text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          A mailbox provider can accept your message (delivery) and then immediately drop it into the Spam folder, the Promotions tab, or filter it out of the inbox entirely. None of that fails the SMTP transaction. Most cold-mail tools only see the green check.
-        </p>
       </section>
 
-      <!-- Chapter 02 -->
-      <section id="signals" class="scroll-mt-24 mt-20">
-        <div class="flex items-baseline gap-4 mb-5">
-          <span class="text-[12px] font-mono text-[#0284c7] font-semibold">02</span>
-          <div class="flex-1 h-px bg-[color:var(--border)]"></div>
+      <!-- ========== Chapter 02 ========== -->
+      <section id="signals" class="scroll-mt-4 px-6 md:px-10 lg:px-14 py-14 md:py-16 border-b border-[color:var(--border)]">
+        <div class="grid xl:grid-cols-[1fr_1fr] gap-10 xl:gap-16">
+          <div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[10.5px] font-mono text-[#0284c7] tracking-[0.18em]">02 · SIGNALS</span>
+            </div>
+            <h2 class="text-[24px] md:text-[28px] font-semibold tracking-[-0.02em] leading-[1.15] text-heading mb-5">
+              The signals that decide placement.
+            </h2>
+            <h3 class="text-[16px] font-semibold text-heading mt-6 mb-2">Authentication</h3>
+            <p class="text-[15px] leading-[1.7] text-foreground/85">
+              SPF, DKIM and DMARC are not extras. They are the baseline. A misaligned DMARC record can cap an otherwise healthy mailbox at 60% inbox placement. See our <a href="/learn/spf-dkim-dmarc/" class="text-[#0369a1] hover:text-[#075985] underline underline-offset-2 decoration-[#0284c7]/30">SPF, DKIM, DMARC guide</a>.
+            </p>
+            <h3 class="text-[16px] font-semibold text-heading mt-6 mb-2">Sender reputation</h3>
+            <p class="text-[15px] leading-[1.7] text-foreground/85">
+              Mailbox providers maintain a moving reputation score per sending IP, per sending domain, and per "from" mailbox. Three vectors, all watched. A clean domain on a bad shared IP still suffers.
+            </p>
+            <h3 class="text-[16px] font-semibold text-heading mt-6 mb-2">Recipient engagement</h3>
+            <p class="text-[15px] leading-[1.7] text-foreground/85">
+              Did the recipient open? Reply? Move to Inbox from Spam? Add to address book? Each of those is a positive signal. Delete-without-reading and mark-as-spam are the negative ones.
+            </p>
+            <h3 class="text-[16px] font-semibold text-heading mt-6 mb-2">Content</h3>
+            <p class="text-[15px] leading-[1.7] text-foreground/85">
+              Cold mail with link-heavy HTML, image-only bodies, suspicious link patterns (bit.ly to a .top domain), or aggressive personalisation tokens raises flags. Plain text is the safest medium.
+            </p>
+            <h3 class="text-[16px] font-semibold text-heading mt-6 mb-2">Volume and pattern</h3>
+            <p class="text-[15px] leading-[1.7] text-foreground/85">
+              Sudden bursts. Big day-over-day spikes. Mail outside business hours from a mailbox that historically only sends 9 to 5. Mailbox providers model "normal" and flag deviation.
+            </p>
+          </div>
+          <div class="xl:pl-4">
+            <div class="xl:sticky xl:top-6">
+              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">Signal weight</div>
+              <div class="rounded-[10px] ring-1 ring-[color:var(--border)] bg-white overflow-hidden">
+                {[
+                  ['Authentication', 'Mandatory', 'rose'],
+                  ['Sender reputation', 'High', 'rose'],
+                  ['Recipient engagement', 'High', 'amber'],
+                  ['Content', 'Medium', 'amber'],
+                  ['Volume and pattern', 'High', 'rose'],
+                ].map(([name, weight, tone]) => (
+                  <div class="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 border-b border-[color:var(--border)] last:border-b-0 items-center text-[13.5px]">
+                    <span class="text-foreground/85">{name}</span>
+                    <span class={`inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[11px] ${tone === 'rose' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>{weight}</span>
+                  </div>
+                ))}
+              </div>
+              <p class="mt-3 text-[12px] text-muted-foreground italic">
+                Weights are directional, not absolute. Providers do not publish formulas.
+              </p>
+            </div>
+          </div>
         </div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading mb-8">
-          The signals that decide placement.
-        </h2>
-
-        <h3 class="text-[20px] font-semibold tracking-[-0.015em] text-heading mt-8 mb-3">Authentication</h3>
-        <p class="text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          SPF, DKIM and DMARC are not extras. They are the baseline. A misaligned DMARC record can cap an otherwise healthy mailbox at 60% inbox placement. See our <a href="/learn/spf-dkim-dmarc/" class="text-[#0369a1] hover:text-[#075985] underline underline-offset-2 decoration-[#0284c7]/30">SPF, DKIM, DMARC guide</a>.
-        </p>
-
-        <h3 class="text-[20px] font-semibold tracking-[-0.015em] text-heading mt-8 mb-3">Sender reputation</h3>
-        <p class="text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          Mailbox providers maintain a moving reputation score per sending IP, per sending domain, and per "from" mailbox. Three vectors, all watched. A clean domain on a bad shared IP still suffers.
-        </p>
-
-        <h3 class="text-[20px] font-semibold tracking-[-0.015em] text-heading mt-8 mb-3">Recipient engagement</h3>
-        <p class="text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          Did the recipient open? Reply? Move to Inbox from Spam? Add to address book? Each of those is a positive signal. Delete-without-reading and mark-as-spam are the negative ones.
-        </p>
-
-        <h3 class="text-[20px] font-semibold tracking-[-0.015em] text-heading mt-8 mb-3">Content</h3>
-        <p class="text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          Cold mail with link-heavy HTML, image-only bodies, suspicious link patterns (bit.ly to a .top domain), or aggressive personalisation tokens raises flags. Plain text is the safest medium.
-        </p>
-
-        <h3 class="text-[20px] font-semibold tracking-[-0.015em] text-heading mt-8 mb-3">Volume and pattern</h3>
-        <p class="text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          Sudden bursts. Big day-over-day spikes. Mail outside business hours from a mailbox that historically only sends 9 to 5. Mailbox providers model "normal" and flag deviation.
-        </p>
       </section>
 
-      <!-- Chapter 03 -->
-      <section id="thresholds" class="scroll-mt-24 mt-20">
-        <div class="flex items-baseline gap-4 mb-5">
-          <span class="text-[12px] font-mono text-[#0284c7] font-semibold">03</span>
-          <div class="flex-1 h-px bg-[color:var(--border)]"></div>
+      <!-- ========== Chapter 03 ========== -->
+      <section id="thresholds" class="scroll-mt-4 px-6 md:px-10 lg:px-14 py-14 md:py-16 border-b border-[color:var(--border)]">
+        <div class="grid xl:grid-cols-[1fr_1fr] gap-10 xl:gap-16">
+          <div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[10.5px] font-mono text-[#0284c7] tracking-[0.18em]">03 · THRESHOLDS</span>
+            </div>
+            <h2 class="text-[24px] md:text-[28px] font-semibold tracking-[-0.02em] leading-[1.15] text-heading mb-5">
+              The thresholds you must respect.
+            </h2>
+            <p class="text-[15.5px] leading-[1.7] text-foreground/85">
+              These are the public bands published by the major providers. Stay well under the warning band; treat the killswitch as the point of no return.
+            </p>
+            <p class="mt-4 text-[15.5px] leading-[1.7] text-foreground/85">
+              Microsoft Exchange Online's own documentation says to use a specialised bulk provider for legitimate bulk commercial email.
+            </p>
+          </div>
+          <div class="xl:pl-4">
+            <div class="rounded-[10px] ring-1 ring-[color:var(--border)] bg-white overflow-hidden">
+              <div class="grid grid-cols-[1.4fr_1fr_1fr] px-4 py-2.5 bg-[color:var(--surface-1)] border-b border-[color:var(--border)] text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">
+                <div>Provider · metric</div>
+                <div>Warning</div>
+                <div>Killswitch</div>
+              </div>
+              {[
+                { provider: 'Google · spam rate',          warn: '0.10%',  kill: '0.30%' },
+                { provider: 'Amazon SES · complaints',     warn: '0.10%',  kill: '0.50%' },
+                { provider: 'Amazon SES · bounces',        warn: '5.0%',   kill: '10%' },
+                { provider: 'Microsoft Exchange Online',   warn: 'disc.',  kill: 'bulk = specialist' },
+              ].map((t) => (
+                <div class="grid grid-cols-[1.4fr_1fr_1fr] px-4 py-3 border-b border-[color:var(--border)] last:border-b-0 items-center text-[13px]">
+                  <div class="font-medium text-heading">{t.provider}</div>
+                  <div><span class="inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[11.5px] bg-amber-50 text-amber-700">{t.warn}</span></div>
+                  <div><span class="inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[11.5px] bg-rose-50 text-rose-700">{t.kill}</span></div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading mb-8">
-          The thresholds you must respect.
-        </h2>
-        <ul class="space-y-4 text-[17px] md:text-[18px] leading-[1.6] text-foreground/85">
-          <li class="grid grid-cols-[28px_1fr] gap-3 items-baseline">
-            <span class="text-[12px] font-mono text-[#0284c7] font-semibold">·</span>
-            <span><strong class="text-heading font-semibold">Google bulk sender guidance.</strong> Keep spam rate below 0.10%. Never reach 0.30%.</span>
-          </li>
-          <li class="grid grid-cols-[28px_1fr] gap-3 items-baseline">
-            <span class="text-[12px] font-mono text-[#0284c7] font-semibold">·</span>
-            <span><strong class="text-heading font-semibold">Amazon SES complaints.</strong> Below 0.10% for best results. At 0.10% the account is auto-reviewed; at 0.50% it can be paused.</span>
-          </li>
-          <li class="grid grid-cols-[28px_1fr] gap-3 items-baseline">
-            <span class="text-[12px] font-mono text-[#0284c7] font-semibold">·</span>
-            <span><strong class="text-heading font-semibold">Amazon SES bounces.</strong> Below 5%. At 5% the account is reviewed; at 10% sending may pause.</span>
-          </li>
-          <li class="grid grid-cols-[28px_1fr] gap-3 items-baseline">
-            <span class="text-[12px] font-mono text-[#0284c7] font-semibold">·</span>
-            <span><strong class="text-heading font-semibold">Microsoft Exchange Online.</strong> Their own documentation says to use a specialised bulk provider for legitimate bulk commercial email.</span>
-          </li>
-        </ul>
       </section>
 
-      <!-- Chapter 04 -->
-      <section id="mailbox-first" class="scroll-mt-24 mt-20">
-        <div class="flex items-baseline gap-4 mb-5">
-          <span class="text-[12px] font-mono text-[#0284c7] font-semibold">04</span>
-          <div class="flex-1 h-px bg-[color:var(--border)]"></div>
+      <!-- ========== Chapter 04 ========== -->
+      <section id="mailbox-first" class="scroll-mt-4 px-6 md:px-10 lg:px-14 py-14 md:py-16 border-b border-[color:var(--border)]">
+        <div class="grid xl:grid-cols-[1fr_1fr] gap-10 xl:gap-16">
+          <div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[10.5px] font-mono text-[#0284c7] tracking-[0.18em]">04 · FRAMING</span>
+            </div>
+            <h2 class="text-[24px] md:text-[28px] font-semibold tracking-[-0.02em] leading-[1.15] text-heading mb-5">
+              Why mailbox-first beats worker-first.
+            </h2>
+            <p class="text-[15.5px] leading-[1.7] text-foreground/85">
+              Plenty of cold-email platforms reason about volume as a worker-level number (worker X can do 5,000 sends per day). That breaks the moment you scale, because reputation lives at the mailbox and IP level.
+            </p>
+            <p class="mt-4 text-[15.5px] leading-[1.7] text-foreground/85">
+              The correct framing: each mailbox has a safe budget (the platform default is 100 per day for cold). A worker's safe outbound volume is the sum of its mailboxes' budgets. Never an independent ceiling. To send more, add more healthy mailboxes, not more pressure to existing ones.
+            </p>
+          </div>
+          <div class="xl:pl-4 space-y-3">
+            <div class="rounded-[10px] ring-1 ring-rose-100 bg-rose-50/40 p-5">
+              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-rose-700 mb-2">Wrong framing</div>
+              <pre class="text-[13px] font-mono text-foreground/85 leading-[1.6] overflow-x-auto"><code>worker.cap = 5000</code></pre>
+              <p class="mt-3 text-[12.5px] text-foreground/65">Flat per-worker ceilings ignore where reputation lives.</p>
+            </div>
+            <div class="rounded-[10px] ring-1 ring-emerald-100 bg-emerald-50/40 p-5">
+              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-emerald-700 mb-2">Right framing</div>
+              <pre class="text-[13px] font-mono text-foreground/85 leading-[1.6] overflow-x-auto"><code>worker.cap = Σ mailbox.coldBudget</code></pre>
+              <p class="mt-3 text-[12.5px] text-foreground/65">Volume scales by adding healthy mailboxes, not cranking existing ones.</p>
+            </div>
+          </div>
         </div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading mb-8">
-          Why mailbox-first beats worker-first.
-        </h2>
-        <p class="text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          Plenty of cold-email platforms reason about volume as a worker-level number (worker X can do 5,000 sends per day). That breaks the moment you scale, because reputation lives at the mailbox and IP level.
-        </p>
-        <p class="mt-5 text-[17px] md:text-[18px] leading-[1.75] text-foreground/85">
-          The correct framing: each mailbox has a safe budget (the platform default is 100 per day for cold). A worker's safe outbound volume is the sum of its mailboxes' budgets. Never an independent ceiling. To send more, add more healthy mailboxes, not more pressure to existing ones.
-        </p>
       </section>
 
-      <!-- Chapter 05 -->
-      <section id="recipe" class="scroll-mt-24 mt-20">
-        <div class="flex items-baseline gap-4 mb-5">
-          <span class="text-[12px] font-mono text-[#0284c7] font-semibold">05</span>
-          <div class="flex-1 h-px bg-[color:var(--border)]"></div>
+      <!-- ========== Chapter 05 ========== -->
+      <section id="recipe" class="scroll-mt-4 px-6 md:px-10 lg:px-14 py-14 md:py-16 border-b border-[color:var(--border)]">
+        <div class="grid xl:grid-cols-[1fr_1fr] gap-10 xl:gap-16">
+          <div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[10.5px] font-mono text-[#0284c7] tracking-[0.18em]">05 · THE RECIPE</span>
+            </div>
+            <h2 class="text-[24px] md:text-[28px] font-semibold tracking-[-0.02em] leading-[1.15] text-heading mb-5">
+              The cold-email send recipe.
+            </h2>
+            <p class="text-[15.5px] leading-[1.7] text-foreground/85">
+              Ten steps. Do all of them. Skip any one and you trade short-term volume for reputation later.
+            </p>
+            <p class="mt-4 text-[15.5px] leading-[1.7] text-foreground/85">
+              The recipe assumes a fresh sub-domain and a warmed mailbox. If either is missing, fix that first.
+            </p>
+          </div>
+          <div class="xl:pl-4">
+            <ol class="rounded-[10px] ring-1 ring-[color:var(--border)] bg-white overflow-hidden">
+              {[
+                'Use a sub-domain for cold sending (outreach.acme.com). Reputation issues stay scoped.',
+                'Configure SPF, DKIM and DMARC on the sub-domain. Start at p=none, then quarantine after 2 weeks.',
+                'Warm every cold sending mailbox for at least 3 weeks before campaigns start.',
+                'Cap each mailbox at 100 cold emails per day with a 10-minute minimum gap.',
+                'Spread campaign sends across multiple mailboxes. Do not concentrate volume.',
+                'Plain text by default. No tracking pixels unless you need opens.',
+                'Two or three follow-ups, not eight.',
+                'Suppression aware. Bounces, complaints and unsubscribes propagate.',
+                'Monitor placement weekly. Act on watch band, not catastrophe.',
+                'Keep warmup running in parallel with cold campaigns.',
+              ].map((step, i) => (
+                <li class="grid grid-cols-[44px_1fr] gap-3 px-4 py-3 border-b border-[color:var(--border)] last:border-b-0 items-baseline">
+                  <span class="text-[11px] font-mono text-[#0284c7] font-semibold">{String(i + 1).padStart(2, '0')}</span>
+                  <span class="text-[13.5px] text-foreground/85 leading-[1.55]">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading mb-8">
-          The cold-email send recipe.
-        </h2>
-        <ol class="space-y-4">
-          {[
-            'Use a sub-domain for cold sending (outreach.acme.com). Reputation issues stay scoped.',
-            'Configure SPF, DKIM and DMARC on the sub-domain. Start at p=none; move to p=quarantine after you have watched DMARC reports for two weeks.',
-            'Warm every cold sending mailbox for at least 3 weeks before campaigns start.',
-            'Cap each mailbox at the platform default: 100 cold emails per day with a 10-minute minimum gap.',
-            'Spread campaign sends across multiple mailboxes. Do not concentrate volume.',
-            'Plain text by default. No tracking pixels unless you absolutely need opens. No image-only bodies.',
-            'Two or three follow-ups, not eight. Each follow-up below the previous reply rate.',
-            'Suppression-aware. Bounces, complaints and unsubscribes suppress across all sequences.',
-            'Monitor placement weekly. Act on the watch band, not the catastrophic band.',
-            'Keep warmup running in parallel with cold campaigns.',
-          ].map((step, i) => (
-            <li class="grid grid-cols-[40px_1fr] gap-4 items-baseline text-[17px] md:text-[18px] leading-[1.7] text-foreground/85">
-              <span class="text-[13px] font-mono text-[#0284c7] font-semibold">{String(i + 1).padStart(2, '0')}.</span>
-              <span>{step}</span>
-            </li>
-          ))}
-        </ol>
       </section>
 
-      <!-- Chapter 06 -->
-      <section id="measure" class="scroll-mt-24 mt-20">
-        <div class="flex items-baseline gap-4 mb-5">
-          <span class="text-[12px] font-mono text-[#0284c7] font-semibold">06</span>
-          <div class="flex-1 h-px bg-[color:var(--border)]"></div>
+      <!-- ========== Chapter 06 ========== -->
+      <section id="measure" class="scroll-mt-4 px-6 md:px-10 lg:px-14 py-14 md:py-16 border-b border-[color:var(--border)]">
+        <div class="grid xl:grid-cols-[1fr_1fr] gap-10 xl:gap-16">
+          <div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[10.5px] font-mono text-[#0284c7] tracking-[0.18em]">06 · MEASURE</span>
+            </div>
+            <h2 class="text-[24px] md:text-[28px] font-semibold tracking-[-0.02em] leading-[1.15] text-heading mb-5">
+              What to measure.
+            </h2>
+            <p class="text-[15.5px] leading-[1.7] text-foreground/85">
+              Six numbers worth watching, in priority order. The first three are non-negotiable: if any of them drifts, pause and investigate.
+            </p>
+            <p class="mt-4 text-[15.5px] leading-[1.7] text-foreground/85">
+              Track each per mailbox, then aggregate. Workspace-level numbers hide local failures.
+            </p>
+          </div>
+          <div class="xl:pl-4">
+            <div class="rounded-[10px] ring-1 ring-[color:var(--border)] bg-white overflow-hidden divide-y divide-[color:var(--border)]">
+              {[
+                ['Inbox placement rate', 'Probed via warmup partners and seed lists.'],
+                ['Complaint rate',       'Per mailbox and per workspace.'],
+                ['Bounce rate',          'Hard vs soft split.'],
+                ['Reply rate',           'Per sequence, per step, per variant.'],
+                ['Positive-reply rate',  'Strips OOO, unsubscribe, negative noise.'],
+                ['Suppression growth',   'As a share of contacted recipients.'],
+              ].map(([k, v]) => (
+                <div class="grid grid-cols-[160px_1fr] gap-4 px-4 py-3 items-baseline">
+                  <div class="text-[13px] font-semibold text-heading">{k}</div>
+                  <div class="text-[13px] text-foreground/70 leading-snug">{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading mb-8">
-          What to measure.
-        </h2>
-        <ul class="space-y-3 text-[17px] md:text-[18px] leading-[1.6] text-foreground/85">
-          {[
-            ['Inbox placement rate',  'per mailbox, probed via warmup partners and seed lists.'],
-            ['Complaint rate',        'per mailbox and per workspace.'],
-            ['Bounce rate',           'per mailbox, broken into hard versus soft.'],
-            ['Reply rate',            'per sequence, per step, per variant.'],
-            ['Positive-reply rate.',  'Replies classified as positive vs OOO, negative, unsubscribe.'],
-            ['Suppression growth',    'as a percentage of contacted recipients.'],
-          ].map(([k, v]) => (
-            <li class="grid grid-cols-[28px_1fr] gap-3 items-baseline">
-              <span class="text-[12px] font-mono text-[#0284c7] font-semibold">·</span>
-              <span><strong class="text-heading font-semibold">{k}</strong> {v}</span>
-            </li>
-          ))}
-        </ul>
       </section>
 
-      <!-- Chapter 07 -->
-      <section id="noise" class="scroll-mt-24 mt-20">
-        <div class="flex items-baseline gap-4 mb-5">
-          <span class="text-[12px] font-mono text-[#0284c7] font-semibold">07</span>
-          <div class="flex-1 h-px bg-[color:var(--border)]"></div>
+      <!-- ========== Chapter 07 ========== -->
+      <section id="noise" class="scroll-mt-4 px-6 md:px-10 lg:px-14 py-14 md:py-16 border-b border-[color:var(--border)]">
+        <div class="grid xl:grid-cols-[1fr_1fr] gap-10 xl:gap-16">
+          <div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[10.5px] font-mono text-[#0284c7] tracking-[0.18em]">07 · IGNORE</span>
+            </div>
+            <h2 class="text-[24px] md:text-[28px] font-semibold tracking-[-0.02em] leading-[1.15] text-heading mb-5">
+              What not to measure.
+            </h2>
+            <p class="text-[15.5px] leading-[1.7] text-foreground/85">
+              Three numbers that look like signal but are noise. Tracking them invites optimising for the wrong thing.
+            </p>
+          </div>
+          <div class="xl:pl-4 space-y-3">
+            {[
+              { k: 'Open rate',                  v: 'Apple Mail Privacy proxies opens, Gmail caches images. The number is noise.' },
+              { k: 'Click-through (cold first-touch)', v: 'Most cold mail has no links, and "click anything" is itself a spam-folder signal.' },
+              { k: '"Deliverability score"',     v: 'From vendors who will not tell you the formula.' },
+            ].map((n) => (
+              <div class="rounded-[10px] ring-1 ring-rose-100 bg-rose-50/30 p-4 flex items-start gap-3">
+                <Icon name="warning" size={14} class="text-rose-500 shrink-0 mt-1" />
+                <div>
+                  <div class="text-[13.5px] font-semibold text-heading">{n.k}</div>
+                  <p class="mt-1 text-[12.5px] text-foreground/70 leading-relaxed">{n.v}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading mb-8">
-          What not to measure.
-        </h2>
-        <ul class="space-y-3 text-[17px] md:text-[18px] leading-[1.6] text-foreground/85">
-          <li class="grid grid-cols-[28px_1fr] gap-3 items-baseline">
-            <span class="text-[12px] font-mono text-rose-500 font-semibold">·</span>
-            <span><strong class="text-heading font-semibold">Open rate.</strong> Apple Mail Privacy proxies opens, Gmail caches images. The number is noise.</span>
-          </li>
-          <li class="grid grid-cols-[28px_1fr] gap-3 items-baseline">
-            <span class="text-[12px] font-mono text-rose-500 font-semibold">·</span>
-            <span><strong class="text-heading font-semibold">Click-through on cold first-touch.</strong> Most cold mail has no links, and "click anything" is itself a spam-folder signal.</span>
-          </li>
-          <li class="grid grid-cols-[28px_1fr] gap-3 items-baseline">
-            <span class="text-[12px] font-mono text-rose-500 font-semibold">·</span>
-            <span><strong class="text-heading font-semibold">"Deliverability score"</strong> from vendors who will not tell you the formula.</span>
-          </li>
-        </ul>
       </section>
 
-      <!-- Chapter 08 -->
-      <section id="problem" class="scroll-mt-24 mt-20">
-        <div class="flex items-baseline gap-4 mb-5">
-          <span class="text-[12px] font-mono text-[#0284c7] font-semibold">08</span>
-          <div class="flex-1 h-px bg-[color:var(--border)]"></div>
+      <!-- ========== Chapter 08 ========== -->
+      <section id="problem" class="scroll-mt-4 px-6 md:px-10 lg:px-14 py-14 md:py-16 border-b border-[color:var(--border)]">
+        <div class="grid xl:grid-cols-[1fr_1fr] gap-10 xl:gap-16">
+          <div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[10.5px] font-mono text-[#0284c7] tracking-[0.18em]">08 · INCIDENT</span>
+            </div>
+            <h2 class="text-[24px] md:text-[28px] font-semibold tracking-[-0.02em] leading-[1.15] text-heading mb-5">
+              When you spot a problem.
+            </h2>
+            <p class="text-[15.5px] leading-[1.7] text-foreground/85">
+              A drift in any tracked number gets escalated to a six-step runbook. Treat each step as required.
+            </p>
+            <p class="mt-4 text-[15.5px] leading-[1.7] text-foreground/85">
+              For a deeper recovery flow once a mailbox is already quarantined, read <a href="/learn/reputation-recovery/" class="text-[#0369a1] hover:text-[#075985] underline underline-offset-2 decoration-[#0284c7]/30">the recovery playbook</a>.
+            </p>
+          </div>
+          <div class="xl:pl-4">
+            <ol class="rounded-[10px] ring-1 ring-[color:var(--border)] bg-white overflow-hidden">
+              {[
+                'Pause campaigns from the affected mailbox immediately.',
+                'Check the mailbox health band. If "watch" or worse, do not resume yet.',
+                'Verify SPF, DKIM, DMARC alignment has not drifted.',
+                'Drop warmup volume on the mailbox to 5 or 10 per day for a week.',
+                'If quarantined, expect a 7-day cooldown. If blocked, expect 30 days plus manual review.',
+                'Run the recovery playbook.',
+              ].map((step, i) => (
+                <li class="grid grid-cols-[44px_1fr] gap-3 px-4 py-3 border-b border-[color:var(--border)] last:border-b-0 items-baseline">
+                  <span class="text-[11px] font-mono text-[#0284c7] font-semibold">{String(i + 1).padStart(2, '0')}</span>
+                  <span class="text-[13.5px] text-foreground/85 leading-[1.55]">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading mb-8">
-          When you spot a problem.
-        </h2>
-        <ol class="space-y-4">
-          {[
-            'Pause campaigns from the affected mailbox immediately.',
-            'Check the mailbox health band. If "watch" or worse, do not resume yet.',
-            'Verify SPF, DKIM, DMARC alignment has not drifted.',
-            'Drop warmup volume on the mailbox back to 5 or 10 per day for a week.',
-            'If quarantined, expect a 7-day cooldown. If blocked, expect 30 days plus manual review.',
-          ].map((step, i) => (
-            <li class="grid grid-cols-[40px_1fr] gap-4 items-baseline text-[17px] md:text-[18px] leading-[1.7] text-foreground/85">
-              <span class="text-[13px] font-mono text-[#0284c7] font-semibold">{String(i + 1).padStart(2, '0')}.</span>
-              <span>{step}</span>
-            </li>
-          ))}
-          <li class="grid grid-cols-[40px_1fr] gap-4 items-baseline text-[17px] md:text-[18px] leading-[1.7] text-foreground/85">
-            <span class="text-[13px] font-mono text-[#0284c7] font-semibold">06.</span>
-            <span>Run <a href="/learn/reputation-recovery/" class="text-[#0369a1] hover:text-[#075985] underline underline-offset-2 decoration-[#0284c7]/30">the recovery playbook</a>.</span>
-          </li>
-        </ol>
       </section>
 
-      <!-- Closing pull-quote, full-bleed feel -->
-      <div class="mt-24 mb-10">
-        <div class="text-center text-[32px] font-mono text-[#0284c7]/40">§</div>
-      </div>
-      <blockquote class="border-y border-foreground/15 py-10 px-2">
-        <p class="text-[24px] md:text-[30px] font-semibold tracking-[-0.02em] leading-[1.3] text-heading text-center">
-          The right time to fix deliverability is before you have a deliverability problem. The next-best time is the day the watch band trips, not the week you notice replies dropped.
-        </p>
-      </blockquote>
+      <!-- Footer with closing rule + continue reading -->
+      <footer class="px-6 md:px-10 lg:px-14 py-16">
+        <div class="border-l-2 border-[#0284c7] pl-6 py-2 mb-12">
+          <p class="text-[18px] md:text-[22px] font-semibold tracking-[-0.015em] leading-[1.35] text-heading max-w-3xl">
+            Fix deliverability before you have a problem. Act on the watch band, not the catastrophe band.
+          </p>
+        </div>
 
-      <!-- End-of-chapter footer -->
-      <div class="mt-16 pt-10 border-t border-[color:var(--border)]">
         <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-5">Continue reading</div>
         <div class="grid sm:grid-cols-2 gap-3">
           {[
@@ -309,7 +410,7 @@ const chapters = [
             </a>
           ))}
         </div>
-      </div>
-    </div>
-  </article>
+      </footer>
+    </main>
+  </div>
 </Layout>

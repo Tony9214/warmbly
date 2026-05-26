@@ -173,147 +173,82 @@ const levelTone = (l: string) => {
   </section>
 
   <!-- ============================================================
-       LIBRARY — sky atmosphere band with floating article cards
+       LIBRARY + REFERENCE — single inline section, no sky bg.
+       Articles left, glossary preview right as a reference panel.
   ============================================================ -->
-  <section class="relative isolate overflow-hidden py-20 md:py-28">
-    <!-- Sky atmosphere bg -->
-    <div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(180deg, #ffffff 0%, #f0f9ff 22%, #e0f2fe 60%, #bae6fd 100%);"></div>
-    <!-- Floating clouds -->
-    <div class="absolute top-[8%] left-[-80px] w-[420px] opacity-50 pointer-events-none cloud-drift cloud-1" style="mix-blend-mode: multiply;">
-      <Cloud variant={5} opacity={0.7} />
-    </div>
-    <div class="absolute top-[28%] right-[-100px] w-[380px] opacity-45 pointer-events-none cloud-drift cloud-2" style="mix-blend-mode: multiply;">
-      <Cloud variant={2} opacity={0.65} />
-    </div>
-    <div class="absolute bottom-[12%] left-[18%] w-[280px] opacity-30 pointer-events-none cloud-drift cloud-3" style="mix-blend-mode: multiply;">
-      <Cloud variant={3} opacity={0.55} />
-    </div>
-
-    <div class="container-page relative">
-      <div class="mb-14 max-w-3xl">
-        <div class="text-[11px] uppercase tracking-[0.18em] text-[#075985] font-mono mb-3">The library</div>
-        <h2 class="text-[32px] md:text-[48px] font-semibold tracking-[-0.03em] leading-[1.04] text-heading">
-          Six essays. One handbook.
+  <section class="bg-white py-20 md:py-28">
+    <div class="container-page">
+      <div class="mb-12 max-w-3xl">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">The library</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.04] text-heading">
+          Six essays and a reference.
         </h2>
-        <p class="mt-4 text-[15.5px] md:text-[17px] text-foreground/70">
-          Written by the people who built the warmup pool. Read in any order.
-        </p>
       </div>
 
-      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
-        {rest.map((a, i) => {
-          const sky = i % 3 === 0
-            ? 'linear-gradient(180deg, #38bdf8 0%, #0284c7 100%)'
-            : i % 3 === 1
-            ? 'linear-gradient(180deg, #0284c7 0%, #075985 100%)'
-            : 'linear-gradient(180deg, #075985 0%, #0c4a6e 100%)';
-          return (
-            <a href={a.href} class="article-card group relative flex flex-col rounded-[16px] bg-white overflow-hidden ring-1 ring-[color:var(--border)] hover:-translate-y-1 hover:shadow-[0_30px_60px_-25px_rgba(2,32,71,0.25),0_8px_24px_-10px_rgba(15,23,42,0.08)] transition-all" style="box-shadow: 0 4px 16px -6px rgba(15,23,42,0.06);">
-              <!-- Vertical sky accent stripe -->
-              <div class="absolute left-0 top-0 bottom-0 w-[6px] transition-all group-hover:w-[8px]" style={`background: ${sky}`}></div>
-
-              <div class="pl-7 pr-6 pt-7 pb-6 flex flex-col flex-1">
-                <!-- Top: number + read time -->
-                <div class="flex items-baseline justify-between mb-5">
-                  <span class="text-[11px] font-mono text-foreground/45 tracking-[0.12em]">
-                    No. {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <span class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-foreground/55">
-                    {a.read} min
-                  </span>
-                </div>
-
-                <!-- Title -->
-                <h3 class="text-[20px] md:text-[22px] font-semibold tracking-[-0.02em] leading-[1.2] text-heading group-hover:text-[#0369a1] transition-colors">
-                  {a.title}
-                </h3>
-
-                <!-- Excerpt -->
-                <p class="mt-3 text-[13.5px] text-foreground/65 leading-relaxed flex-1">
-                  {a.body}
-                </p>
-
-                <!-- Footer: topic + arrow -->
-                <div class="mt-6 pt-4 border-t border-[color:var(--border)] flex items-center justify-between">
-                  <span class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-foreground/55">{a.topic}</span>
-                  <Icon name="arrowRight" size={14} class="text-foreground/40 group-hover:text-[#0369a1] group-hover:translate-x-1 transition-all" />
-                </div>
-              </div>
-            </a>
-          );
-        })}
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       GLOSSARY — deep-sky atmospheric panel, distinct from library
-  ============================================================ -->
-  <section class="relative isolate overflow-hidden text-white">
-    <!-- Deep sky background -->
-    <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(ellipse 130% 100% at 50% 0%, #0c4a6e 0%, #075985 40%, #0a3d5c 100%);"></div>
-    <div class="absolute top-0 right-[-60px] w-[440px] opacity-25 pointer-events-none cloud-drift cloud-1" style="mix-blend-mode: screen;">
-      <Cloud variant={5} opacity={0.8} />
-    </div>
-    <div class="absolute bottom-[-40px] left-[-60px] w-[320px] opacity-20 pointer-events-none cloud-drift cloud-2" style="mix-blend-mode: screen;">
-      <Cloud variant={3} opacity={0.7} />
-    </div>
-
-    <div class="container-page relative py-20 md:py-28">
-      <div class="grid lg:grid-cols-[1fr_1.4fr] gap-12 lg:gap-20 items-start">
-        <!-- Left: title block -->
+      <div class="grid lg:grid-cols-[1.7fr_1fr] gap-10 lg:gap-14 items-start">
+        <!-- Library: article rows -->
         <div>
-          <div class="text-[11px] uppercase tracking-[0.18em] text-white/55 font-mono mb-3">Reference</div>
-          <h2 class="text-[32px] md:text-[48px] font-semibold tracking-[-0.03em] leading-[1.04] text-white">
-            The vocabulary,<br/>defined plainly.
-          </h2>
-          <p class="mt-5 text-[15.5px] md:text-[17px] text-white/75 max-w-md leading-relaxed">
-            Every deliverability term we use across the platform. Short, definitive, no jargon.
-          </p>
-
-          <div class="mt-8 grid grid-cols-3 gap-6 max-w-sm">
-            <div>
-              <div class="text-[28px] font-semibold text-white tracking-[-0.02em] font-mono">42</div>
-              <div class="mt-1 text-[10.5px] uppercase tracking-[0.16em] font-mono text-white/55">Terms</div>
-            </div>
-            <div>
-              <div class="text-[28px] font-semibold text-white tracking-[-0.02em] font-mono">5</div>
-              <div class="mt-1 text-[10.5px] uppercase tracking-[0.16em] font-mono text-white/55">Min read</div>
-            </div>
-            <div>
-              <div class="text-[28px] font-semibold text-white tracking-[-0.02em] font-mono">12</div>
-              <div class="mt-1 text-[10.5px] uppercase tracking-[0.16em] font-mono text-white/55">Cross-links</div>
-            </div>
+          <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-4 flex items-center gap-3">
+            <span>Essays</span>
+            <span class="flex-1 h-px bg-[color:var(--border)]"></span>
+            <span class="text-[10.5px] font-mono text-muted-foreground/70">{rest.length}</span>
           </div>
-
-          <a href="/learn/glossary/" class="mt-10 inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14px] font-semibold bg-white hover:bg-white hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.3)] transition-all duration-200 ease-out shadow-[0_4px_14px_-2px_rgba(0,0,0,0.18)]">
-            <span style="color:#075985;">Open the glossary</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
-            </svg>
-          </a>
-        </div>
-
-        <!-- Right: sample entries as a glass card -->
-        <div class="rounded-[16px] bg-white/[0.06] backdrop-blur ring-1 ring-white/15 p-7 md:p-8">
-          <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-white/55 mb-5">Sample entries</div>
-          <div class="divide-y divide-white/10">
-            {[
-              { term: 'SPF',            defn: 'Sender Policy Framework. Authorises which servers can send for a domain.' },
-              { term: 'DKIM',           defn: 'Cryptographic signature proving a message was not altered in transit.' },
-              { term: 'DMARC',          defn: 'Policy that tells receivers what to do when SPF or DKIM fails.' },
-              { term: 'Placement',      defn: 'Whether accepted mail lands in inbox, Promotions or spam.' },
-              { term: 'Complaint rate', defn: 'Share of delivered messages recipients mark as spam.' },
-              { term: 'ARF',            defn: 'Abuse Reporting Format. Standardised feedback loop messages from providers.' },
-            ].map((t) => (
-              <div class="grid grid-cols-[130px_1fr] gap-4 py-3 items-baseline">
-                <span class="inline-flex items-center h-6 px-2 rounded-md bg-white/15 ring-1 ring-white/25 text-[12px] font-mono font-semibold text-white w-fit">{t.term}</span>
-                <span class="text-[13px] text-white/80 leading-snug">{t.defn}</span>
-              </div>
+          <div class="divide-y divide-[color:var(--border)]">
+            {rest.map((a, i) => (
+              <a href={a.href} class="article-row group grid grid-cols-[36px_1fr_auto] gap-4 py-5 items-baseline hover:bg-[color:var(--surface-1)]/60 -mx-3 px-3 rounded-[8px] transition-colors">
+                <span class="text-[11px] font-mono text-muted-foreground tracking-[0.06em] pt-1">{String(i + 1).padStart(2, '0')}</span>
+                <div>
+                  <h3 class="text-[17px] md:text-[19px] font-semibold tracking-[-0.015em] leading-[1.25] text-heading group-hover:text-[#0369a1] transition-colors">
+                    {a.title}
+                  </h3>
+                  <div class="mt-1.5 flex items-center gap-3 text-[11.5px] font-mono text-muted-foreground">
+                    <span class="uppercase tracking-[0.12em]">{a.topic}</span>
+                    <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
+                    <span>{a.read} min</span>
+                  </div>
+                </div>
+                <Icon name="arrowRight" size={13} class="text-muted-foreground group-hover:text-[#0369a1] group-hover:translate-x-1 transition-all self-center" />
+              </a>
             ))}
           </div>
-          <div class="mt-5 text-[11.5px] font-mono text-white/55">+ 36 more inside</div>
         </div>
+
+        <!-- Reference: inline glossary panel -->
+        <aside class="lg:sticky lg:top-24 self-start" style="align-self: start;">
+          <div class="rounded-[14px] bg-[color:var(--surface-1)] ring-1 ring-[color:var(--border)] p-6 md:p-7">
+            <div class="flex items-baseline justify-between mb-4">
+              <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Reference</div>
+              <a href="/learn/glossary/" class="text-[11.5px] font-medium text-[#0369a1] hover:text-[#075985]">Open all →</a>
+            </div>
+            <h3 class="text-[20px] font-semibold tracking-[-0.02em] text-heading">Glossary</h3>
+            <p class="mt-1.5 text-[13px] text-foreground/65 leading-relaxed">
+              Deliverability vocabulary, defined plainly.
+            </p>
+
+            <div class="mt-5 pt-5 border-t border-[color:var(--border)] divide-y divide-[color:var(--border)]">
+              {[
+                { term: 'SPF',            defn: 'Authorises which servers can send for a domain.' },
+                { term: 'DKIM',           defn: 'Signature proving a message was not altered.' },
+                { term: 'DMARC',          defn: 'Tells receivers what to do when SPF/DKIM fails.' },
+                { term: 'Placement',      defn: 'Inbox, Promotions, or spam after acceptance.' },
+                { term: 'Complaint rate', defn: 'Share of recipients marking mail as spam.' },
+                { term: 'ARF',            defn: 'Standard feedback-loop format from providers.' },
+              ].map((t) => (
+                <div class="py-3 first:pt-0 last:pb-0">
+                  <div class="flex items-baseline gap-2 mb-0.5">
+                    <span class="inline-flex items-center h-5 px-1.5 rounded text-[11px] font-mono font-semibold bg-white text-[#075985] ring-1 ring-[color:var(--sky-2)]">{t.term}</span>
+                  </div>
+                  <p class="text-[12.5px] text-foreground/70 leading-snug">{t.defn}</p>
+                </div>
+              ))}
+            </div>
+
+            <div class="mt-5 pt-5 border-t border-[color:var(--border)] flex items-center justify-between text-[11.5px] font-mono text-muted-foreground">
+              <span>42 terms total</span>
+              <span>5 min read</span>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   </section>
