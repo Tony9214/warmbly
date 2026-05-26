@@ -56,15 +56,14 @@ const compare = [
   </section>
 
   <!-- ============================================================
-       HERO MOCK — app screenshot on a painted-sky backdrop
+       HERO MOCK — full app shell screenshot on a backdrop
+       (DashboardMock renders its own AppHeader + AppNav + content)
   ============================================================ -->
   <section class="container-page pb-20 md:pb-28">
-    <div class="relative rounded-[28px] overflow-hidden p-6 md:p-12 lg:p-16">
+    <div class="relative rounded-[28px] overflow-hidden p-6 md:p-10 lg:p-14">
       <PaintedSky flavor="dawn" />
-      <div class="relative">
-        <AppFrame url="app.warmbly.com / accounts">
-          <DashboardMock />
-        </AppFrame>
+      <div class="relative rounded-xl overflow-hidden border border-slate-200 shadow-[0_30px_80px_-30px_rgba(15,23,42,0.30)]">
+        <DashboardMock />
       </div>
     </div>
   </section>
