@@ -75,7 +75,7 @@ function active(match?: string) {
             </a>
 
             <!-- Mega-menu panel -->
-            <div class="mega-panel absolute left-1/2 -translate-x-1/2 top-full pt-2 pointer-events-none opacity-0 -translate-y-1 transition-all duration-200 ease-out" style="width: 720px; max-width: 90vw;">
+            <div class="mega-panel absolute left-0 top-full pt-2 pointer-events-none opacity-0 transition-all duration-200 ease-out" style="width: 720px; max-width: 90vw;">
               <div class="rounded-[16px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden" style="box-shadow: 0 24px 60px -20px rgba(15,23,42,0.25), 0 8px 24px -8px rgba(15,23,42,0.08);">
 
                 <!-- Top: overview + columns -->
@@ -222,9 +222,12 @@ function active(match?: string) {
 </header>
 
 <style>
+  .mega-panel {
+    transform: translateY(-4px);
+  }
   .mega-panel.open {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translateY(0);
     pointer-events: auto;
   }
   .mega-wrapper.open .mega-caret { transform: rotate(180deg); }
