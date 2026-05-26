@@ -339,7 +339,7 @@ for (let wk = 0; wk < 5; wk++) {
   </section>
 
   <!-- ============================================================
-       HEALTH BANDS — full comparison table (pricing matrix pattern)
+       HEALTH BANDS · horizontal threshold gauge (unique)
   ============================================================ -->
   <section class="py-20 md:py-28">
     <div class="container-page">
@@ -349,158 +349,209 @@ for (let wk = 0; wk < 5; wk++) {
           Bands that act before providers do.
         </h2>
         <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
-          These thresholds are stricter than Google's and Amazon SES's published enforcement points. We pull a mailbox out of the shared pool weeks before it would get a public complaint.
+          Spam placement on the X axis. Each band starts where the previous one ends. Warmbly's thresholds (in sky) sit well to the left of Google's and SES's published enforcement points (in rose) so we pull a mailbox out of the shared pool weeks before it would earn a public complaint.
         </p>
       </div>
 
-      <div class="overflow-x-auto rounded-[14px] ring-1 ring-[color:var(--border)] bg-white shadow-[0_24px_48px_-20px_rgba(15,23,42,0.12),0_4px_12px_-6px_rgba(15,23,42,0.05)]">
-        <table class="w-full min-w-[820px] text-[13.5px] border-separate border-spacing-0">
-          <thead>
-            <tr class="bg-[color:var(--surface-1)] border-b border-[color:var(--border)]">
-              <th class="text-left px-5 py-4">
-                <span class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground font-medium">Band</span>
-              </th>
-              <th class="text-left px-5 py-4">
-                <span class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground font-medium">Spam placement</span>
-              </th>
-              <th class="text-left px-5 py-4">
-                <span class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground font-medium">Complaint rate</span>
-              </th>
-              <th class="text-left px-5 py-4">
-                <span class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground font-medium">Bounce rate</span>
-              </th>
-              <th class="text-left px-5 py-4">
-                <span class="text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground font-medium">Action</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {bands.map((b) => {
-              const t = toneClass(b.tone);
-              return (
-                <tr class="border-t border-[color:var(--border)]">
-                  <td class="px-5 py-4">
-                    <span class={`inline-flex items-center gap-1.5 h-6 px-2 rounded text-[12px] font-medium font-mono ${t.chip}`}>
-                      <span class={`w-1.5 h-1.5 rounded-full ${t.dot}`}></span>
-                      {b.name}
-                    </span>
-                  </td>
-                  <td class="px-5 py-4 font-mono text-foreground/85">{b.spam}</td>
-                  <td class="px-5 py-4 font-mono text-foreground/85">{b.complaint}</td>
-                  <td class="px-5 py-4 font-mono text-foreground/85">{b.bounce}</td>
-                  <td class="px-5 py-4 text-foreground/75">{b.action}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <!-- The gauge -->
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-7 md:p-10">
+        <!-- Header -->
+        <div class="flex items-baseline justify-between mb-7">
+          <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Spam placement · 0% → 100%</div>
+          <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Per-mailbox rolling window</div>
+        </div>
 
-      <p class="mt-4 text-[12.5px] text-muted-foreground italic">
-        Spam-placement band requires at least 20 warmup deliveries in the past 7 days; complaint band requires at least 100 delivered messages in the past 30 days.
-      </p>
+        <!-- The gauge bar with 4 bands -->
+        <div class="relative h-12 rounded-[6px] overflow-hidden flex">
+          <div class="flex-[10] bg-emerald-100 relative">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-emerald-700">HEALTHY · 0–10%</span>
+            </div>
+          </div>
+          <div class="flex-[10] bg-amber-100 relative">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-amber-700">WATCH · 10–20%</span>
+            </div>
+          </div>
+          <div class="flex-[20] bg-rose-100 relative">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-rose-700">QUARANTINED · 20–40%</span>
+            </div>
+          </div>
+          <div class="flex-[60] relative" style="background: linear-gradient(90deg, #fda4af 0%, #9f1239 100%);">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-white">BLOCKED · 40%+</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tick marks below -->
+        <div class="relative mt-1.5 h-3">
+          {[0, 10, 20, 40, 80, 100].map((pct) => (
+            <div class="absolute" style={`left: ${pct}%; transform: translateX(-50%);`}>
+              <div class="w-px h-2 bg-[color:var(--border)] mx-auto"></div>
+              <div class="text-[10px] font-mono text-muted-foreground mt-1 text-center">{pct}%</div>
+            </div>
+          ))}
+          <!-- Google + SES enforcement markers -->
+          <div class="absolute" style="left: 80%; transform: translateX(-50%); top: 18px;">
+            <div class="text-[10px] font-mono text-rose-700 font-semibold uppercase tracking-[0.14em]">↑ providers act</div>
+          </div>
+        </div>
+
+        <!-- Band detail rows -->
+        <div class="mt-10 grid md:grid-cols-2 lg:grid-cols-4 gap-px bg-[color:var(--border)] rounded-[10px] overflow-hidden ring-1 ring-[color:var(--border)]">
+          {bands.map((b) => {
+            const t = toneClass(b.tone);
+            return (
+              <div class="bg-white p-5">
+                <div class="flex items-center gap-2">
+                  <span class={`w-2 h-2 rounded-full ${t.dot}`}></span>
+                  <span class="text-[13px] font-semibold text-heading">{b.name}</span>
+                </div>
+                <div class="mt-4 space-y-1.5 text-[11.5px] font-mono">
+                  <div class="flex justify-between"><span class="text-muted-foreground">Spam</span><span class="text-heading font-semibold">{b.spam}</span></div>
+                  <div class="flex justify-between"><span class="text-muted-foreground">Complaint</span><span class="text-heading font-semibold">{b.complaint}</span></div>
+                  <div class="flex justify-between"><span class="text-muted-foreground">Bounce</span><span class="text-heading font-semibold">{b.bounce}</span></div>
+                </div>
+                <p class="mt-4 pt-4 border-t border-[color:var(--border)] text-[12.5px] text-foreground/70 leading-snug">{b.action}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <p class="mt-5 text-[11.5px] text-muted-foreground italic">
+          Spam-placement band requires at least 20 warmup deliveries in the past 7 days. Complaint band requires at least 100 delivered messages in the past 30 days.
+        </p>
+      </div>
     </div>
   </section>
 
   <!-- ============================================================
-       POOL ISOLATION · unique to warmup
-       A single horizontal "rings of trust" diagram with the three
-       pool layers stacked, plus a one-line rule for each.
+       POOL ISOLATION · 4 stacked surfaces as block-diagram cards
   ============================================================ -->
   <section class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28">
     <div class="container-page">
       <div class="max-w-2xl mb-12">
         <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Pool isolation</div>
         <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
-          Same engine. Three isolation surfaces.
+          Four pools. Zero crossover.
         </h2>
         <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
-          Free pool mailboxes never silently appear in the premium pool. Recovery pool is for paid mailboxes serving a cooldown. Dedicated infrastructure is isolation at the worker layer, not a reputation shortcut.
+          Mailboxes never silently move between pools. A free-trial mailbox stays in the free pool. A quarantined paid mailbox drops into recovery, not back to premium. Dedicated infrastructure runs alongside without sharing IPs.
         </p>
       </div>
 
-      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
-        <!-- Row: Free pool -->
-        <div class="grid grid-cols-[160px_1fr_auto] gap-6 px-7 py-6 items-center border-b border-[color:var(--border)]">
-          <div class="flex items-center gap-3">
-            <span class="w-3 h-3 rounded-full bg-slate-400"></span>
-            <span class="text-[14px] font-semibold text-heading">Free pool</span>
+      <!-- 4 isolation cards in a 2x2 grid with a clear visual ranking -->
+      <div class="grid md:grid-cols-2 gap-4 lg:gap-5">
+        <!-- Free pool -->
+        <div class="relative rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+          <div class="h-1.5 bg-slate-300"></div>
+          <div class="p-6">
+            <div class="flex items-baseline justify-between mb-1">
+              <div class="text-[18px] font-semibold tracking-[-0.02em] text-heading">Free pool</div>
+              <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground">Free trial</div>
+            </div>
+            <div class="text-[12px] font-mono text-muted-foreground mb-4">trial mailboxes only</div>
+            <ul class="space-y-2 text-[13px] text-foreground/75">
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-slate-500 mt-1 shrink-0"/><span>Recipients drawn exclusively from other free-plan mailboxes.</span></li>
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-slate-500 mt-1 shrink-0"/><span>Same auto-quarantine thresholds as premium.</span></li>
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-slate-500 mt-1 shrink-0"/><span>Cannot send to premium-pool mailboxes.</span></li>
+            </ul>
           </div>
-          <div class="text-[13.5px] text-foreground/70">
-            Trial mailboxes only. Recipients are drawn exclusively from other free-plan mailboxes. Same auto-quarantine thresholds.
-          </div>
-          <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground text-right whitespace-nowrap">Free trial</div>
         </div>
 
-        <!-- Row: Premium pool · featured -->
-        <div class="grid grid-cols-[160px_1fr_auto] gap-6 px-7 py-6 items-center border-b border-[color:var(--border)] bg-[color:var(--sky-1)]/40">
-          <div class="flex items-center gap-3">
-            <span class="w-3 h-3 rounded-full bg-[#0284c7]"></span>
-            <span class="text-[14px] font-semibold text-[#0369a1]">Premium pool</span>
+        <!-- Premium pool · featured -->
+        <div class="relative rounded-[14px] bg-white overflow-hidden ring-2 ring-[#0284c7]/35 shadow-[0_20px_40px_-20px_rgba(2,132,199,0.3)]">
+          <div class="h-1.5 bg-[#0284c7]"></div>
+          <div class="absolute top-1.5 right-4 inline-flex items-center h-5 px-2 rounded-b text-[10px] font-semibold uppercase tracking-[0.14em] font-mono bg-[#0284c7] text-white">
+            Most paid plans
           </div>
-          <div class="text-[13.5px] text-foreground/80">
-            Vetted paid mailboxes only. Stricter quarantine bands than free. Quarantined senders move to the recovery pool, not back to the main premium pool.
+          <div class="p-6">
+            <div class="flex items-baseline justify-between mb-1">
+              <div class="text-[18px] font-semibold tracking-[-0.02em] text-[#0369a1]">Premium pool</div>
+              <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-[#0284c7]">Starter · Grow · Business</div>
+            </div>
+            <div class="text-[12px] font-mono text-[#0284c7]/80 mb-4">vetted paid mailboxes only</div>
+            <ul class="space-y-2 text-[13px] text-foreground/85">
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-[#0284c7] mt-1 shrink-0"/><span>Stricter quarantine bands than free pool.</span></li>
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-[#0284c7] mt-1 shrink-0"/><span>Quarantined senders move to recovery, not back to premium.</span></li>
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-[#0284c7] mt-1 shrink-0"/><span>Recipients only drawn from other healthy premium mailboxes.</span></li>
+            </ul>
           </div>
-          <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-[#0284c7] text-right whitespace-nowrap">Starter · Grow · Business</div>
         </div>
 
-        <!-- Row: Recovery pool -->
-        <div class="grid grid-cols-[160px_1fr_auto] gap-6 px-7 py-6 items-center border-b border-[color:var(--border)]">
-          <div class="flex items-center gap-3">
-            <span class="w-3 h-3 rounded-full bg-amber-500"></span>
-            <span class="text-[14px] font-semibold text-heading">Recovery pool</span>
+        <!-- Recovery pool -->
+        <div class="relative rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+          <div class="h-1.5 bg-amber-500"></div>
+          <div class="p-6">
+            <div class="flex items-baseline justify-between mb-1">
+              <div class="text-[18px] font-semibold tracking-[-0.02em] text-heading">Recovery pool</div>
+              <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground">Automatic</div>
+            </div>
+            <div class="text-[12px] font-mono text-muted-foreground mb-4">quarantined mailboxes serving cooldown</div>
+            <ul class="space-y-2 text-[13px] text-foreground/75">
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-amber-600 mt-1 shrink-0"/><span>7-day cooldown after quarantine trigger.</span></li>
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-amber-600 mt-1 shrink-0"/><span>Must pass 20-delivery probation to re-enter premium.</span></li>
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-amber-600 mt-1 shrink-0"/><span>Completely isolated from healthy premium senders.</span></li>
+            </ul>
           </div>
-          <div class="text-[13.5px] text-foreground/70">
-            Quarantined paid mailboxes during their 7-day cooldown. Isolated from healthy premium senders. Must pass 20-delivery probation before re-entry.
-          </div>
-          <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground text-right whitespace-nowrap">Automatic</div>
         </div>
 
-        <!-- Row: Dedicated -->
-        <div class="grid grid-cols-[160px_1fr_auto] gap-6 px-7 py-6 items-center">
-          <div class="flex items-center gap-3">
-            <span class="w-3 h-3 rounded-full bg-foreground"></span>
-            <span class="text-[14px] font-semibold text-heading">Dedicated</span>
+        <!-- Dedicated -->
+        <div class="relative rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+          <div class="h-1.5 bg-foreground"></div>
+          <div class="p-6">
+            <div class="flex items-baseline justify-between mb-1">
+              <div class="text-[18px] font-semibold tracking-[-0.02em] text-heading">Dedicated</div>
+              <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground">Enterprise</div>
+            </div>
+            <div class="text-[12px] font-mono text-muted-foreground mb-4">isolated worker + IP per org</div>
+            <ul class="space-y-2 text-[13px] text-foreground/75">
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-foreground mt-1 shrink-0"/><span>One worker process and IP allocated to one organisation.</span></li>
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-foreground mt-1 shrink-0"/><span>Still participates in the premium pool for warmup recipients.</span></li>
+              <li class="flex items-start gap-2"><Icon name="check" size={12} class="text-foreground mt-1 shrink-0"/><span>Infrastructure isolation, not a reputation shortcut.</span></li>
+            </ul>
           </div>
-          <div class="text-[13.5px] text-foreground/70">
-            Isolated worker process and IP for one organisation. Still participates in the premium pool. Infrastructure isolation, not a reputation shortcut.
-          </div>
-          <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground text-right whitespace-nowrap">Enterprise</div>
         </div>
       </div>
     </div>
   </section>
 
   <!-- ============================================================
-       DEFAULTS SPEC — full data with rationale
+       DEFAULTS · clean 2-column spec sheet with big mono values
   ============================================================ -->
-  <section class="py-20 md:py-24">
-    <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-16 items-start">
-      <div>
+  <section class="py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
         <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Defaults</div>
-        <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
           The numbers we ship with.
         </h2>
-        <p class="mt-4 text-[14.5px] text-foreground/70 leading-relaxed max-w-md">
-          Defaults that work for the median sender. Override per mailbox if you have a real reason. The "why" column is the reasoning we will defend in an incident.
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          Tuned for the median sender. Override per mailbox if you have a real reason. The right column is the reasoning we will defend in an incident review.
         </p>
       </div>
 
-      <div class="rounded-[12px] ring-1 ring-[color:var(--border)] bg-white overflow-hidden">
-        <div class="grid grid-cols-[1fr_120px_1.6fr] px-5 py-3 bg-[color:var(--surface-1)] border-b border-[color:var(--border)] text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">
-          <div>Setting</div>
-          <div>Default</div>
-          <div>Why</div>
-        </div>
-        {defaults.map((d) => (
-          <div class="grid grid-cols-[1fr_120px_1.6fr] gap-4 px-5 py-3.5 border-b border-[color:var(--border)] last:border-b-0 items-baseline text-[13px]">
-            <div class="font-medium text-heading">{d.k}</div>
+      <!-- 2-column grid of spec rows with big mono values -->
+      <div class="grid md:grid-cols-2 gap-x-12 gap-y-px">
+        {defaults.map((d, i) => (
+          <div class="group grid grid-cols-[1fr_auto] gap-6 py-6 border-b border-[color:var(--border)] items-baseline transition-colors hover:bg-[color:var(--surface-1)]/40 -mx-3 px-3 rounded-[6px]">
             <div>
-              <span class="inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[12px] bg-[color:var(--sky-1)] text-[#075985] ring-1 ring-[color:var(--sky-2)]">{d.v}</span>
+              <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">
+                {String(i + 1).padStart(2, '0')} · {d.k}
+              </div>
+              <p class="mt-2 text-[13.5px] text-foreground/65 leading-relaxed max-w-md">{d.why}</p>
             </div>
-            <div class="text-foreground/70 text-[12.5px]">{d.why}</div>
+            <div class="text-right">
+              <div class="text-[22px] md:text-[26px] font-semibold tracking-[-0.02em] text-heading font-mono whitespace-nowrap">{d.v}</div>
+            </div>
           </div>
         ))}
+      </div>
+
+      <div class="mt-8 text-[11.5px] font-mono text-muted-foreground">
+        Source: <span class="text-foreground/75">internal/scheduler/warmup_scheduler.go</span> · <span class="text-foreground/75">internal/repository/pg_warmup.go</span>
       </div>
     </div>
   </section>
