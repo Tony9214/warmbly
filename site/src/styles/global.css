@@ -15,39 +15,49 @@
 :root {
   --radius: 0.625rem;
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.15 0.01 260);
+  /* Adora palette */
+  --background: #ffffff;          /* Canvas White */
+  --foreground: #353241;          /* Slate Text */
+  --heading: #21164c;             /* Rich Violet — headings + brand presence */
 
-  --surface: oklch(0.985 0.002 260);
-  --surface-2: oklch(0.97 0.003 260);
-  --surface-3: oklch(0.94 0.005 260);
+  --surface: #ffffff;              /* Card White */
+  --surface-2: #eeeeee;            /* Soft Gray Fill */
+  --surface-3: #e0e0db;            /* Cloud Mist */
 
-  --muted: oklch(0.97 0.003 260);
-  --muted-foreground: oklch(0.50 0.01 260);
+  --muted: #eeeeee;
+  --muted-foreground: #6b6878;     /* derived: slightly lighter than slate text */
 
-  --border: oklch(0.92 0.005 260);
-  --border-strong: oklch(0.86 0.006 260);
-  --input: oklch(0.92 0.005 260);
-  --ring: oklch(0.55 0.01 260);
+  --border: #e0e0db;               /* Cloud Mist */
+  --border-strong: #cdcdc9;
+  --input: #e0e0db;
+  --ring: #592eff;                 /* Action Violet */
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0.01 260);
+  --card: #ffffff;
+  --card-foreground: #353241;
 
-  /* Brand */
-  --brand: oklch(0.55 0.18 252);
-  --brand-soft: oklch(0.93 0.05 252);
-  --brand-strong: oklch(0.42 0.20 256);
-  --brand-foreground: oklch(0.98 0 0);
+  /* Adora accent system */
+  --brand: #592eff;                /* Action Violet — primary CTA fill */
+  --brand-soft: #efeaff;           /* very light violet for chips */
+  --brand-strong: #4422d6;
+  --brand-foreground: #ffffff;
 
-  --accent: oklch(0.96 0.005 260);
-  --accent-foreground: oklch(0.20 0.01 260);
+  /* Decorative gradient-accent-card palette */
+  --air-blue:    #bcf2ff;
+  --lush-green:  #dfff9d;
+  --sunset-pink: #ffaae6;
+  --neon-pink:   #f843c2;
+  --aqua-blue:   #2ed6ff;
+  --electric-green: #a2ea13;
+
+  --accent: #efeaff;
+  --accent-foreground: #21164c;
 
   --success: oklch(0.65 0.15 152);
-  --warn: oklch(0.78 0.15 80);
-  --danger: oklch(0.60 0.22 27);
+  --warn:    oklch(0.78 0.15 80);
+  --danger:  oklch(0.60 0.22 27);
 
-  --primary: oklch(0.20 0.01 260);
-  --primary-foreground: oklch(1 0 0);
+  --primary: #21164c;              /* Rich Violet for primary text emphasis */
+  --primary-foreground: #ffffff;
 }
 
 .dark {
@@ -88,6 +98,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-heading: var(--heading);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
@@ -103,6 +114,12 @@
   --color-brand-soft: var(--brand-soft);
   --color-brand-strong: var(--brand-strong);
   --color-brand-foreground: var(--brand-foreground);
+  --color-air-blue: var(--air-blue);
+  --color-lush-green: var(--lush-green);
+  --color-sunset-pink: var(--sunset-pink);
+  --color-neon-pink: var(--neon-pink);
+  --color-aqua-blue: var(--aqua-blue);
+  --color-electric-green: var(--electric-green);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-success: var(--success);
