@@ -4,6 +4,7 @@ import Icon from '../components/Icon.astro';
 import DashboardMock from '../components/DashboardMock.astro';
 import InboxMock from '../components/InboxMock.astro';
 import WarmupMock from '../components/WarmupMock.astro';
+import HeroAtmosphere from '../components/HeroAtmosphere.astro';
 
 const compare = [
   ['Per-mailbox cold cap',     '50 / day default',                 '200 / day if you ask for it'],
@@ -11,59 +12,109 @@ const compare = [
   ['Reputation reaction',      'Acts on the watch band (10%)',     'Acts on the catastrophe band (80%)'],
   ['Worker concentration',     'Capped by sum of mailbox budgets', 'Flat per-worker ceiling'],
 ];
+
+const plans = [
+  {
+    name: 'Free',
+    price: '$0',
+    cadence: 'forever',
+    summary: 'For founders kicking the tires.',
+    cta: 'Start free',
+    href: 'https://app.warmbly.com/register?plan=free',
+    highlight: false,
+    features: [
+      '1 connected mailbox',
+      'Free warmup pool',
+      '1 active sequence',
+      '500 contacts',
+      'Community support',
+    ],
+  },
+  {
+    name: 'Growth',
+    price: '$79',
+    cadence: '/ mailbox / month',
+    summary: 'Sales teams running multi-sender campaigns.',
+    cta: 'Start 14-day trial',
+    href: 'https://app.warmbly.com/register?plan=growth',
+    highlight: true,
+    features: [
+      'Unlimited mailboxes',
+      'Premium warmup pool',
+      'Unified inbox & reply detection',
+      'Sequences with branching',
+      'CRM · pipelines · deals · tasks',
+      'API & signed webhooks',
+      '100k contacts',
+      'Priority support',
+    ],
+  },
+  {
+    name: 'Business',
+    price: 'Custom',
+    cadence: 'volume-based',
+    summary: 'Agencies and high-volume teams.',
+    cta: 'Talk to sales',
+    href: '/contact/?topic=sales',
+    highlight: false,
+    features: [
+      'Dedicated worker(s) & IPs',
+      'Up to 15,000 sends / day',
+      'BYOK encryption',
+      'Custom data residency',
+      'SSO / SAML, SCIM',
+      'Dedicated CSM',
+    ],
+  },
+];
 ---
 <Layout
   title="Warmbly — cold email that actually lands"
   description="Warmbly is the deliverability platform for cold email. Warm your mailboxes, send at scale, keep your reputation clean across hundreds of mailboxes."
 >
   <!-- ============================================================
-       HERO — parchment base, big ink headline, filled-ink primary
+       HERO — cornsilk atmosphere, headline + CTAs,
+              dashboard mock overlaps down into white section
   ============================================================ -->
-  <section class="container-page pt-16 md:pt-24 pb-10 md:pb-14">
-    <a href="/changelog/" class="group inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white border border-border text-[12px] text-foreground/80 shadow-[0_1px_0_rgba(0,0,0,0.04)]">
-      <span class="inline-flex items-center h-5 px-2 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-foreground text-background">New</span>
-      Per-mailbox health bands &amp; auto-quarantine recovery
-      <Icon name="arrowRight" size={12} class="text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
-    </a>
+  <section class="relative isolate overflow-hidden" style="background: var(--hero-bg);">
+    <HeroAtmosphere />
 
-    <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[72px] lg:text-[80px] font-semibold tracking-[-0.035em] leading-[0.98] text-heading max-w-5xl">
-      Cold email that actually lands in the inbox.
-    </h1>
-
-    <p class="mt-6 text-[17px] md:text-[19px] text-muted-foreground max-w-2xl leading-relaxed">
-      Warmbly warms your mailboxes, distributes sending across workers and IPs, and watches reputation in real time — so the cold campaign you run on Monday is still landing on Friday.
-    </p>
-
-    <div class="mt-8 flex flex-wrap items-center gap-3">
-      <a href="https://app.warmbly.com/register"
-         class="inline-flex h-10 px-4 items-center gap-2 rounded-[8px] text-[14px] font-medium text-background bg-foreground hover:bg-foreground/85 transition-colors">
-        Start free
-        <Icon name="arrowRight" size={14} />
+    <div class="container-page relative pt-16 md:pt-24 pb-8 md:pb-12 text-center">
+      <a href="/changelog/" class="group inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/70 backdrop-blur border border-[color:var(--border)] text-[12px] text-foreground/80 shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+        <span class="inline-flex items-center h-5 px-2 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-foreground text-background">New</span>
+        Per-mailbox health bands &amp; auto-quarantine
+        <Icon name="arrowRight" size={12} class="text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
       </a>
-      <a href="/product/"
-         class="inline-flex h-10 px-4 items-center gap-2 rounded-[8px] text-[14px] font-medium text-foreground bg-surface-2 hover:bg-surface-3 transition-colors">
-        Tour the product
-        <Icon name="arrowUpRight" size={13} />
-      </a>
+
+      <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[76px] lg:text-[88px] font-semibold tracking-[-0.04em] leading-[0.96] text-heading max-w-5xl mx-auto">
+        Cold email that <span class="italic font-medium" style="color: var(--brand)">actually</span> lands in the inbox.
+      </h1>
+
+      <p class="mt-6 text-[17px] md:text-[19px] text-foreground/75 max-w-2xl mx-auto leading-relaxed">
+        Warmbly warms your mailboxes, distributes sending across workers and IPs, and watches reputation in real time — so the cold campaign you run on Monday is still landing on Friday.
+      </p>
+
+      <div class="mt-9 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register"
+           class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-medium text-background bg-foreground hover:bg-foreground/85 transition-colors shadow-[0_10px_24px_-12px_rgba(20,14,8,0.45)]">
+          Start free
+          <Icon name="arrowRight" size={14} />
+        </a>
+        <a href="/product/"
+           class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-medium text-foreground bg-white/80 backdrop-blur border-2 border-[color:var(--brand)] hover:bg-white transition-colors">
+          <span style="color: var(--brand)">Tour the product</span>
+          <Icon name="arrowUpRight" size={13} class="text-[color:var(--brand)]" />
+        </a>
+      </div>
+      <p class="mt-4 text-[12.5px] text-foreground/55">
+        Free forever for one mailbox · 14-day Growth trial · no credit card.
+      </p>
     </div>
-  </section>
 
-  <!-- ============================================================
-       HERO MOCK — wide, short app shell on warm backdrop
-  ============================================================ -->
-  <section class="container-page pb-20 md:pb-28">
-    <div class="relative rounded-[14px] overflow-hidden p-4 sm:p-6 md:p-8 lg:p-10">
-      <img
-        src="/backdrops/hero.svg"
-        alt=""
-        aria-hidden="true"
-        loading="eager"
-        fetchpriority="high"
-        decoding="async"
-        class="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
-      />
+    <!-- Dashboard mock — overlaps down past the hero into the white section -->
+    <div class="container-page relative pt-6 md:pt-10 -mb-[140px] md:-mb-[200px] lg:-mb-[240px]">
       <div
-        class="relative rounded-[10px] overflow-hidden ring-1 ring-black/[0.08] max-w-[1180px] mx-auto"
+        class="relative rounded-[14px] overflow-hidden ring-1 ring-black/[0.08] max-w-[1180px] mx-auto"
         style="box-shadow: var(--shadow-xl);"
       >
         <DashboardMock />
@@ -72,64 +123,66 @@ const compare = [
   </section>
 
   <!-- ============================================================
-       FEATURE 1 — Warmup (text left, mock right, parchment bg)
+       White section — padded top to make room for the overlap
   ============================================================ -->
-  <section class="container-page py-20 md:py-28 border-t border-border">
-    <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 items-start">
-      <div class="lg:col-span-5">
-        <div class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-4">Warmup</div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.025em] leading-[1.04] text-heading">
-          A warmup pool that quarantines before mailbox providers do.
-        </h2>
-        <p class="mt-5 text-[16px] text-muted-foreground leading-relaxed">
-          Free and premium pools never mix. Spam-score tracking, verification tokens and recent-partner avoidance keep traffic natural. Anything past the watch band gets pulled.
-        </p>
-        <ul class="mt-7 space-y-3 text-[14.5px]">
-          {[
-            'Start 10/day, ramp +1/day, ceiling 40/day',
-            '≥ 3 invalid tokens / 24h → auto-block',
-            'Spam score > 50 → recovery pool',
-            'Re-entry requires fresh probation',
-          ].map((l) => (
-            <li class="flex items-start gap-2.5">
-              <Icon name="check" size={14} class="text-foreground mt-1 shrink-0" />
-              <span>{l}</span>
-            </li>
-          ))}
-        </ul>
-        <a href="/warmup/" class="mt-8 inline-flex items-center gap-1.5 text-[14px] font-medium text-foreground group">
-          See how warmup works
-          <Icon name="arrowRight" size={13} class="group-hover:translate-x-0.5 transition-transform" />
-        </a>
-      </div>
+  <section style="padding-top: 160px;" class="md:[padding-top:220px] lg:[padding-top:260px]">
+    <div class="container-page py-16 md:py-24">
+      <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 items-start">
+        <div class="lg:col-span-5">
+          <div class="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-medium mb-4">Warmup</div>
+          <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+            A warmup pool that quarantines before mailbox providers do.
+          </h2>
+          <p class="mt-5 text-[16px] text-foreground/75 leading-relaxed">
+            Free and premium pools never mix. Spam-score tracking, verification tokens and recent-partner avoidance keep traffic natural. Anything past the watch band gets pulled.
+          </p>
+          <ul class="mt-7 space-y-3 text-[14.5px]">
+            {[
+              'Start 10/day, ramp +1/day, ceiling 40/day',
+              '≥ 3 invalid tokens / 24h → auto-block',
+              'Spam score > 50 → recovery pool',
+              'Re-entry requires fresh probation',
+            ].map((l) => (
+              <li class="flex items-start gap-2.5">
+                <Icon name="check" size={14} class="text-foreground mt-1 shrink-0" />
+                <span>{l}</span>
+              </li>
+            ))}
+          </ul>
+          <a href="/warmup/" class="mt-8 inline-flex items-center gap-1.5 text-[14px] font-medium text-[color:var(--brand)] hover:text-[color:var(--brand-strong)] group">
+            See how warmup works
+            <Icon name="arrowRight" size={13} class="group-hover:translate-x-0.5 transition-transform" />
+          </a>
+        </div>
 
-      <div class="lg:col-span-7">
-        <div class="relative bg-white rounded-[10px] overflow-hidden ring-1 ring-black/[0.06]"
-             style="box-shadow: var(--shadow-md);">
-          <WarmupMock />
+        <div class="lg:col-span-7">
+          <div class="relative bg-white rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)] lift-on-hover"
+               style="box-shadow: var(--shadow-md);">
+            <WarmupMock />
+          </div>
         </div>
       </div>
     </div>
   </section>
 
   <!-- ============================================================
-       FEATURE 2 — Inbox (mock left, text right)
+       FEATURE — Unified inbox (mock left, text right)
   ============================================================ -->
-  <section class="border-y border-border">
+  <section class="border-y border-[color:var(--border)]" style="background: var(--surface-2);">
     <div class="container-page py-20 md:py-28">
       <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 items-start">
         <div class="lg:col-span-7 order-2 lg:order-1">
-          <div class="relative bg-white rounded-[10px] overflow-hidden ring-1 ring-black/[0.06]"
+          <div class="relative bg-white rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)] lift-on-hover"
                style="box-shadow: var(--shadow-md);">
             <InboxMock />
           </div>
         </div>
         <div class="lg:col-span-5 order-1 lg:order-2">
-          <div class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-4">Unified inbox</div>
-          <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.025em] leading-[1.04] text-heading">
+          <div class="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-medium mb-4">Unified inbox</div>
+          <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
             One inbox for every mailbox you send from.
           </h2>
-          <p class="mt-5 text-[16px] text-muted-foreground leading-relaxed">
+          <p class="mt-5 text-[16px] text-foreground/75 leading-relaxed">
             No more bouncing between Gmail tabs to handle replies from your eight cold mailboxes. Reply detection survives quoted text. OOO and unsubscribe auto-suppress.
           </p>
           <ul class="mt-7 space-y-3 text-[14.5px]">
@@ -145,7 +198,7 @@ const compare = [
               </li>
             ))}
           </ul>
-          <a href="/inbox/" class="mt-8 inline-flex items-center gap-1.5 text-[14px] font-medium text-foreground group">
+          <a href="/inbox/" class="mt-8 inline-flex items-center gap-1.5 text-[14px] font-medium text-[color:var(--brand)] hover:text-[color:var(--brand-strong)] group">
             Explore the inbox <Icon name="arrowRight" size={13} class="group-hover:translate-x-0.5 transition-transform" />
           </a>
         </div>
@@ -154,16 +207,16 @@ const compare = [
   </section>
 
   <!-- ============================================================
-       FEATURE 3 — Sending engine (text left, mock right)
+       FEATURE — Sending engine (text left, mock right)
   ============================================================ -->
   <section class="container-page py-20 md:py-28">
     <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 items-start">
       <div class="lg:col-span-5">
-        <div class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-4">Sending engine</div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.025em] leading-[1.04] text-heading">
+        <div class="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-medium mb-4">Sending engine</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
           A distributed send plane, not a glorified SMTP relay.
         </h2>
-        <p class="mt-5 text-[16px] text-muted-foreground leading-relaxed">
+        <p class="mt-5 text-[16px] text-foreground/75 leading-relaxed">
           One worker per machine. Each with its own IP. We add workers before we make any single one carry more weight.
         </p>
         <ul class="mt-7 space-y-3 text-[14.5px]">
@@ -182,22 +235,15 @@ const compare = [
       </div>
 
       <div class="lg:col-span-7">
-        <div class="relative bg-white rounded-[10px] overflow-hidden ring-1 ring-black/[0.06]"
+        <div class="relative bg-white rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)] lift-on-hover"
              style="box-shadow: var(--shadow-md);">
-          <div class="h-10 px-4 border-b border-slate-200 flex items-center gap-2 bg-[#fafafa]">
-            <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
-            <span class="mx-auto inline-flex items-center gap-2 h-6 px-3 rounded bg-white border border-slate-200 text-[11.5px] text-slate-500 font-mono">warmbly.com / workers</span>
-            <span class="w-12"></span>
-          </div>
           <div class="bg-white">
-            <div class="h-12 px-5 border-b border-slate-200 flex items-center gap-3">
-              <span class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">Workers</span>
-              <div class="h-4 w-px bg-slate-200"></div>
-              <span class="text-[12.5px] text-slate-600">4 workers · 128 mailboxes · 5,420 sent today</span>
+            <div class="h-12 px-5 border-b border-[color:var(--border)] flex items-center gap-3">
+              <span class="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-medium">Workers</span>
+              <div class="h-4 w-px bg-[color:var(--border)]"></div>
+              <span class="text-[12.5px] text-foreground/70">4 workers · 128 mailboxes · 5,420 sent today</span>
             </div>
-            <div class="divide-y divide-slate-200/60">
+            <div class="divide-y divide-[color:var(--border)]">
               {[
                 { name: 'eu-worker-3', region: 'eu-west-1', mb: 38, sent: 1842, ip: '52.18.214.91' },
                 { name: 'us-worker-7', region: 'us-east-1', mb: 32, sent: 1456, ip: '54.221.190.17' },
@@ -207,15 +253,15 @@ const compare = [
                 <div class="px-5 py-3 grid grid-cols-12 items-center text-[12.5px] gap-3">
                   <div class="col-span-4 flex items-center gap-2">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    <span class="font-mono text-slate-900 font-medium">{w.name}</span>
-                    <span class="text-slate-400 font-mono text-[11px]">· {w.region}</span>
+                    <span class="font-mono text-foreground font-medium">{w.name}</span>
+                    <span class="text-muted-foreground font-mono text-[11px]">· {w.region}</span>
                   </div>
-                  <div class="col-span-2 text-slate-500 font-mono text-[11.5px]">{w.ip}</div>
-                  <div class="col-span-2 text-slate-500 tabular-nums">{w.mb} mailboxes</div>
-                  <div class="col-span-2 text-slate-500 tabular-nums">{w.sent.toLocaleString()} today</div>
+                  <div class="col-span-2 text-muted-foreground font-mono text-[11.5px]">{w.ip}</div>
+                  <div class="col-span-2 text-muted-foreground tabular-nums">{w.mb} mailboxes</div>
+                  <div class="col-span-2 text-muted-foreground tabular-nums">{w.sent.toLocaleString()} today</div>
                   <div class="col-span-2">
-                    <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                      <div class="h-full rounded-full bg-slate-900" style={`width:${(w.mb / 50) * 100}%`}></div>
+                    <div class="h-1.5 rounded-full bg-[color:var(--surface-2)] overflow-hidden">
+                      <div class="h-full rounded-full" style={`width:${(w.mb / 50) * 100}%; background:var(--brand);`}></div>
                     </div>
                   </div>
                 </div>
@@ -228,31 +274,31 @@ const compare = [
   </section>
 
   <!-- ============================================================
-       COMPARE STRIP
+       COMPARE
   ============================================================ -->
-  <section class="border-y border-border bg-surface-2/60">
+  <section class="border-y border-[color:var(--border)]" style="background: var(--surface-2);">
     <div class="container-page py-20 md:py-24">
       <div class="max-w-3xl">
-        <div class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-4">Why we’re different</div>
+        <div class="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-medium mb-4">Why we’re different</div>
         <h2 class="text-[32px] md:text-[48px] font-semibold tracking-[-0.03em] leading-[1.04] text-heading">
           We refuse to be the reason your domain ends up on a blocklist.
         </h2>
-        <p class="mt-4 text-muted-foreground leading-relaxed max-w-2xl">
+        <p class="mt-4 text-foreground/75 leading-relaxed max-w-2xl">
           Most cold-email platforms reward you for sending more. We reward you for sending well. Defaults that keep you safe even if you never touch them.
         </p>
       </div>
 
-      <div class="mt-10 rounded-[10px] bg-white overflow-hidden ring-1 ring-border"
-           style="box-shadow: var(--shadow-md);">
-        <div class="grid grid-cols-12 px-5 md:px-8 h-12 items-center text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground border-b border-border bg-surface-2/60">
+      <div class="mt-10 rounded-[14px] bg-white overflow-hidden ring-1 ring-[color:var(--border)]"
+           style="box-shadow: var(--shadow-sm);">
+        <div class="grid grid-cols-12 px-5 md:px-8 h-12 items-center text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground border-b border-[color:var(--border)] bg-[color:var(--surface-2)]/40">
           <div class="col-span-4">Setting</div>
           <div class="col-span-4">Warmbly</div>
           <div class="col-span-4">Other cold-email tools</div>
         </div>
         {compare.map(([k, ours, theirs]) => (
-          <div class="grid grid-cols-12 px-5 md:px-8 py-4 items-start border-b border-border last:border-b-0 text-[14px]">
+          <div class="grid grid-cols-12 px-5 md:px-8 py-4 items-start border-b border-[color:var(--border)] last:border-b-0 text-[14px]">
             <div class="col-span-4 font-medium text-heading">{k}</div>
-            <div class="col-span-4 text-foreground flex items-start gap-2"><Icon name="check" size={14} class="text-foreground mt-1 shrink-0" /><span>{ours}</span></div>
+            <div class="col-span-4 text-foreground flex items-start gap-2"><Icon name="check" size={14} class="text-[color:var(--brand)] mt-1 shrink-0" /><span>{ours}</span></div>
             <div class="col-span-4 text-muted-foreground flex items-start gap-2"><Icon name="warning" size={14} class="text-muted-foreground mt-1 shrink-0" /><span>{theirs}</span></div>
           </div>
         ))}
@@ -261,29 +307,29 @@ const compare = [
   </section>
 
   <!-- ============================================================
-       BENTO — clean white cards on parchment
+       BENTO
   ============================================================ -->
   <section class="container-page py-24 md:py-28">
     <div class="max-w-3xl">
-      <div class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-4">One platform</div>
+      <div class="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-medium mb-4">One platform</div>
       <h2 class="text-[32px] md:text-[48px] font-semibold tracking-[-0.03em] leading-[1.04] text-heading">
         Warmup, sending, inbox — engineered together.
       </h2>
-      <p class="mt-4 text-muted-foreground leading-relaxed max-w-2xl">
+      <p class="mt-4 text-foreground/75 leading-relaxed max-w-2xl">
         The signal one part collects is the signal the next part acts on.
       </p>
     </div>
 
     <div class="mt-12 grid grid-cols-1 md:grid-cols-6 gap-3">
-      <div class="md:col-span-2 rounded-[10px] bg-white ring-1 ring-border p-6 flex flex-col">
-        <Icon name="shield" class="text-foreground" />
+      <div class="md:col-span-2 rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-6 flex flex-col lift-on-hover" style="box-shadow: var(--shadow-sm);">
+        <Icon name="shield" class="text-[color:var(--brand)]" />
         <h3 class="mt-4 text-[16px] font-semibold tracking-[-0.01em] text-heading">Quarantines on warning, not catastrophe</h3>
-        <p class="mt-2 text-[13.5px] text-muted-foreground leading-relaxed">
+        <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed">
           Watch band kicks in at 10% spam placement — months before mailbox providers act.
         </p>
         <div class="mt-auto pt-5 grid grid-cols-4 gap-1.5">
           {['Healthy','Watch','Quarantined','Blocked'].map((b, i) => (
-            <div class={`rounded-[6px] px-1.5 py-1 text-center text-[10px] font-semibold tracking-wider ring-1 ${
+            <div class={`rounded-md px-1.5 py-1 text-center text-[10px] font-semibold tracking-wider ring-1 ${
               i === 0 ? 'ring-emerald-200 text-emerald-700 bg-emerald-50' :
               i === 1 ? 'ring-amber-200 text-amber-700 bg-amber-50' :
               i === 2 ? 'ring-orange-200 text-orange-700 bg-orange-50' :
@@ -292,17 +338,17 @@ const compare = [
         </div>
       </div>
 
-      <div class="md:col-span-2 rounded-[10px] bg-white ring-1 ring-border p-6 flex flex-col">
-        <Icon name="chart" class="text-foreground" />
+      <div class="md:col-span-2 rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-6 flex flex-col lift-on-hover" style="box-shadow: var(--shadow-sm);">
+        <Icon name="chart" class="text-[color:var(--brand)]" />
         <h3 class="mt-4 text-[16px] font-semibold tracking-[-0.01em] text-heading">Placement, not open rate</h3>
-        <p class="mt-2 text-[13.5px] text-muted-foreground leading-relaxed">
+        <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed">
           We probe inbox placement through the pool, then act on it.
         </p>
         <div class="mt-auto pt-5 flex items-center justify-center">
           <div class="relative w-28 h-28">
             <svg viewBox="0 0 36 36" class="w-full h-full -rotate-90">
-              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e6e5e0" stroke-width="2.6"></circle>
-              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#1b1b1b" stroke-width="2.6" stroke-dasharray="96 100" stroke-linecap="round"></circle>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#ece8de" stroke-width="2.6"></circle>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--brand)" stroke-width="2.6" stroke-dasharray="96 100" stroke-linecap="round"></circle>
             </svg>
             <div class="absolute inset-0 flex flex-col items-center justify-center">
               <span class="text-xl font-semibold tracking-tight text-heading">96%</span>
@@ -312,10 +358,10 @@ const compare = [
         </div>
       </div>
 
-      <div class="md:col-span-2 rounded-[10px] bg-white ring-1 ring-border p-6 flex flex-col">
-        <Icon name="cpu" class="text-foreground" />
+      <div class="md:col-span-2 rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-6 flex flex-col lift-on-hover" style="box-shadow: var(--shadow-sm);">
+        <Icon name="cpu" class="text-[color:var(--brand)]" />
         <h3 class="mt-4 text-[16px] font-semibold tracking-[-0.01em] text-heading">Distributed across workers &amp; IPs</h3>
-        <p class="mt-2 text-[13.5px] text-muted-foreground leading-relaxed">
+        <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed">
           One worker per machine. Each with its own IP. Migrable on the fly.
         </p>
         <div class="mt-auto pt-5 space-y-2">
@@ -328,18 +374,18 @@ const compare = [
               <div class="flex items-center justify-between text-[11.5px] font-mono text-muted-foreground mb-1">
                 <span>{w.name}</span><span>{w.pct}%</span>
               </div>
-              <div class="h-1.5 rounded-full bg-surface-2 overflow-hidden">
-                <div class="h-full rounded-full bg-foreground" style={`width:${w.pct}%`}></div>
+              <div class="h-1.5 rounded-full bg-[color:var(--surface-2)] overflow-hidden">
+                <div class="h-full rounded-full" style={`width:${w.pct}%; background:var(--brand);`}></div>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <div class="md:col-span-3 rounded-[10px] bg-white ring-1 ring-border p-6">
-        <Icon name="workflow" class="text-foreground" />
+      <div class="md:col-span-3 rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-6 lift-on-hover" style="box-shadow: var(--shadow-sm);">
+        <Icon name="workflow" class="text-[color:var(--brand)]" />
         <h3 class="mt-4 text-[16px] font-semibold tracking-[-0.01em] text-heading">Sequences with branching, A/B and TZ-aware delays</h3>
-        <p class="mt-2 text-[13.5px] text-muted-foreground leading-relaxed">
+        <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed">
           Up to 12 steps. Variants per step. Business-hour delays by recipient time zone.
         </p>
         <div class="mt-5 grid grid-cols-4 gap-2">
@@ -349,7 +395,7 @@ const compare = [
             { n: 'Step 3', t: 'Follow-up · context', m: '4 variants' },
             { n: 'Step 4', t: 'Soft break · 7 days', m: 'if no open' },
           ].map((s) => (
-            <div class="rounded-[6px] ring-1 ring-border p-2.5">
+            <div class="rounded-[10px] ring-1 ring-[color:var(--border)] p-2.5">
               <div class="flex items-center justify-between text-[9.5px] font-mono text-muted-foreground uppercase tracking-wider">
                 <span>{s.n}</span><span class="text-foreground/60">{s.m}</span>
               </div>
@@ -359,10 +405,10 @@ const compare = [
         </div>
       </div>
 
-      <div class="md:col-span-3 rounded-[10px] bg-white ring-1 ring-border p-6">
-        <Icon name="users" class="text-foreground" />
+      <div class="md:col-span-3 rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-6 lift-on-hover" style="box-shadow: var(--shadow-sm);">
+        <Icon name="users" class="text-[color:var(--brand)]" />
         <h3 class="mt-4 text-[16px] font-semibold tracking-[-0.01em] text-heading">Vetted pool, real reputation surface</h3>
-        <p class="mt-2 text-[13.5px] text-muted-foreground leading-relaxed">
+        <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed">
           Premium pool diversity across Gmail, Outlook, iCloud, Yahoo and self-hosted IMAP.
         </p>
         <div class="mt-5 grid grid-cols-5 gap-2">
@@ -373,7 +419,7 @@ const compare = [
             { name: 'iCloud',    pct:  9 },
             { name: 'Self-IMAP', pct:  9 },
           ].map((p) => (
-            <div class="rounded-[6px] ring-1 ring-border p-2.5">
+            <div class="rounded-[10px] ring-1 ring-[color:var(--border)] p-2.5">
               <div class="text-[11px] font-medium text-heading">{p.name}</div>
               <div class="text-[11px] text-muted-foreground font-mono">{p.pct}%</div>
             </div>
@@ -383,64 +429,98 @@ const compare = [
     </div>
   </section>
 
-
   <!-- ============================================================
-       PRICING TEASER
+       PRICING — redesigned with feature lists, highlighted middle
   ============================================================ -->
-  <section class="container-page py-24 md:py-28">
-    <div class="max-w-3xl">
-      <div class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-4">Pricing</div>
-      <h2 class="text-[32px] md:text-[48px] font-semibold tracking-[-0.03em] leading-[1.04] text-heading">
-        Per mailbox. Predictable. No deliverability paywall.
-      </h2>
-      <p class="mt-4 text-muted-foreground leading-relaxed max-w-2xl">
-        Warmup, sending, the inbox, analytics and CRM are not separate line items. You pay for the mailboxes you connect.
-      </p>
-    </div>
+  <section class="border-y border-[color:var(--border)]" style="background: var(--surface-2);">
+    <div class="container-page py-24 md:py-32">
+      <div class="text-center max-w-2xl mx-auto">
+        <div class="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-medium mb-4">Pricing</div>
+        <h2 class="text-[32px] md:text-[52px] font-semibold tracking-[-0.03em] leading-[1.04] text-heading">
+          Per mailbox. Predictable.
+        </h2>
+        <p class="mt-4 text-foreground/75 leading-relaxed">
+          Warmup, sending, the inbox, analytics and CRM are not separate line items. You pay for the mailboxes you connect.
+        </p>
+      </div>
 
-    <div class="mt-10 grid md:grid-cols-3 gap-3">
-      {[
-        { name: 'Free',     price: '$0',  per: 'forever',         href: 'https://app.warmbly.com/register?plan=free',    cta: 'Start free',  highlight: false },
-        { name: 'Starter',  price: '$39', per: 'mailbox / month', href: 'https://app.warmbly.com/register?plan=starter', cta: 'Start trial', highlight: false },
-        { name: 'Growth',   price: '$79', per: 'mailbox / month', href: 'https://app.warmbly.com/register?plan=growth',  cta: 'Start trial', highlight: true  },
-      ].map((p) => (
-        <div class={`rounded-[10px] bg-white p-6 ring-1 ${p.highlight ? 'ring-foreground' : 'ring-border'}`}>
-          <h3 class="text-[15px] font-semibold text-heading">{p.name}</h3>
-          <div class="mt-3 flex items-baseline gap-1.5">
-            <span class="text-[32px] font-semibold tracking-[-0.02em] text-heading">{p.price}</span>
-            <span class="text-[12.5px] text-muted-foreground">{p.per}</span>
+      <div class="mt-14 grid lg:grid-cols-3 gap-4 lg:gap-5">
+        {plans.map((p) => (
+          <div
+            class={`relative flex flex-col rounded-[18px] bg-white p-7 transition-shadow duration-300 ${
+              p.highlight
+                ? 'ring-2 ring-[color:var(--brand)] lg:scale-[1.02] z-10'
+                : 'ring-1 ring-[color:var(--border)]'
+            }`}
+            style={p.highlight ? 'box-shadow: var(--shadow-xl);' : 'box-shadow: var(--shadow-sm);'}
+          >
+            {p.highlight && (
+              <span class="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center h-6 px-3 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.08em] bg-[color:var(--brand)] text-white">
+                Most popular
+              </span>
+            )}
+            <div class="flex items-baseline justify-between mb-3">
+              <h3 class={`text-[16px] font-semibold ${p.highlight ? 'text-[color:var(--brand)]' : 'text-heading'}`}>{p.name}</h3>
+              {p.highlight && <span class="text-[11px] font-mono text-muted-foreground">14-day trial</span>}
+            </div>
+            <p class="text-[13.5px] text-foreground/70 leading-relaxed">{p.summary}</p>
+
+            <div class="mt-6 flex items-baseline gap-2">
+              <span class="text-[42px] font-semibold tracking-[-0.03em] text-heading leading-none">{p.price}</span>
+              <span class="text-[13px] text-muted-foreground">{p.cadence}</span>
+            </div>
+
+            <a
+              href={p.href}
+              class={`mt-6 inline-flex h-11 px-4 items-center justify-center rounded-[10px] text-[14px] font-medium transition-colors ${
+                p.highlight
+                  ? 'bg-[color:var(--brand)] text-white hover:bg-[color:var(--brand-strong)] shadow-[0_10px_24px_-12px_rgba(40,96,232,0.65)]'
+                  : 'bg-foreground text-background hover:bg-foreground/85'
+              }`}
+            >
+              {p.cta}
+            </a>
+
+            <div class="my-6 h-px bg-[color:var(--border)]"></div>
+            <ul class="space-y-2.5">
+              {p.features.map((f) => (
+                <li class="flex items-start gap-2.5 text-[13.5px] text-foreground/90">
+                  <Icon name="check" size={13} class={p.highlight ? 'text-[color:var(--brand)] mt-1 shrink-0' : 'text-foreground/55 mt-1 shrink-0'} />
+                  <span>{f}</span>
+                </li>
+              ))}
+            </ul>
           </div>
-          <a href={p.href} class={`mt-5 inline-flex h-10 px-4 items-center justify-center w-full rounded-[8px] text-[13.5px] font-medium ${p.highlight ? 'bg-foreground text-background hover:bg-foreground/85' : 'bg-surface-2 text-foreground hover:bg-surface-3'}`}>
-            {p.cta}
-          </a>
-        </div>
-      ))}
-    </div>
-    <div class="mt-6 text-center">
-      <a href="/pricing/" class="inline-flex items-center gap-1.5 text-[13.5px] font-medium text-foreground hover:text-foreground/70">
-        See the full comparison <Icon name="arrowRight" size={13} />
-      </a>
+        ))}
+      </div>
+
+      <div class="mt-10 text-center">
+        <a href="/pricing/" class="inline-flex items-center gap-1.5 text-[13.5px] font-medium text-[color:var(--brand)] hover:text-[color:var(--brand-strong)]">
+          See the full comparison <Icon name="arrowRight" size={13} />
+        </a>
+      </div>
     </div>
   </section>
 
   <!-- ============================================================
-       FINAL CTA — ink slab on parchment
+       FINAL CTA — cornsilk band echoing the hero
   ============================================================ -->
-  <section class="container-page pb-20 md:pb-28">
-    <div class="rounded-[14px] bg-foreground text-background p-10 md:p-16 lg:p-20">
-      <h2 class="text-[36px] md:text-[56px] lg:text-[64px] font-semibold tracking-[-0.03em] leading-[1.02] max-w-3xl">
+  <section class="relative isolate overflow-hidden" style="background: var(--hero-bg);">
+    <div class="hero-aurora" aria-hidden="true" style="opacity: 0.85;"></div>
+    <div class="container-page relative py-24 md:py-32 text-center">
+      <h2 class="text-[36px] md:text-[58px] lg:text-[68px] font-semibold tracking-[-0.035em] leading-[1.02] text-heading mx-auto max-w-3xl">
         Send cold email like you actually want it to land.
       </h2>
-      <p class="mt-5 text-[16px] text-background/70 max-w-xl">
+      <p class="mt-5 text-[16px] text-foreground/70 max-w-xl mx-auto">
         Connect a mailbox in a minute. Warm it up. Send your first sequence in an afternoon.
       </p>
-      <div class="mt-8 flex flex-wrap items-center gap-3">
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
         <a href="https://app.warmbly.com/register"
-           class="inline-flex h-10 px-4 items-center gap-2 rounded-[8px] text-[14px] font-medium bg-background text-foreground hover:bg-background/90">
-          Download for free <Icon name="arrowRight" size={14} />
+           class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-medium bg-foreground text-background hover:bg-foreground/85 shadow-[0_10px_24px_-12px_rgba(20,14,8,0.45)]">
+          Start free <Icon name="arrowRight" size={14} />
         </a>
         <a href="/learn/"
-           class="inline-flex h-10 px-4 items-center rounded-[8px] text-[14px] font-medium border border-background/20 text-background hover:bg-background/10">
+           class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/80 backdrop-blur border-2 border-[color:var(--brand)] text-[color:var(--brand)] hover:bg-white">
           Read the deliverability handbook
         </a>
       </div>

@@ -1,0 +1,54 @@
+---
+/**
+ * Hero atmosphere — Warmbly's own.
+ *
+ * Layered into a `relative` hero parent. Composes:
+ *   - .hero-aurora     animated multi-stop gradient on cornsilk base
+ *   - .hero-grain      faint dot grain for canvas texture
+ *   - three outlined SVG clouds slowly drifting
+ *
+ * Pure CSS animations, respects prefers-reduced-motion.
+ */
+---
+<div class="hero-aurora" aria-hidden="true"></div>
+<div class="hero-grain" aria-hidden="true"></div>
+
+<svg
+  aria-hidden="true"
+  class="cloud-drift cloud-1"
+  style="top: 10%; left: 6%; width: 220px; height: 110px;"
+  viewBox="0 0 220 110" fill="none" stroke="rgba(26, 22, 20, 0.18)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+>
+  <path d="M30 78 Q30 50 60 50 Q72 28 108 32 Q140 22 162 48 Q190 50 196 70 Q210 84 188 92 L60 92 Q30 92 30 78 Z" />
+  <path d="M70 50 Q86 36 110 38" stroke-width="1" opacity="0.6"/>
+</svg>
+
+<svg
+  aria-hidden="true"
+  class="cloud-drift cloud-2"
+  style="top: 24%; right: 8%; width: 280px; height: 130px;"
+  viewBox="0 0 280 130" fill="none" stroke="rgba(26, 22, 20, 0.16)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+>
+  <path d="M22 96 Q22 60 60 60 Q72 36 116 38 Q150 22 184 48 Q220 42 238 68 Q260 70 256 92 Q252 110 224 110 L60 110 Q22 110 22 96 Z" />
+  <path d="M80 56 Q100 44 130 46" stroke-width="1" opacity="0.55"/>
+  <path d="M170 50 Q190 40 210 50" stroke-width="1" opacity="0.45"/>
+</svg>
+
+<svg
+  aria-hidden="true"
+  class="cloud-drift cloud-3"
+  style="top: 56%; left: 26%; width: 180px; height: 86px;"
+  viewBox="0 0 180 86" fill="none" stroke="rgba(26, 22, 20, 0.14)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"
+>
+  <path d="M22 62 Q22 38 50 38 Q60 22 92 24 Q116 16 134 36 Q160 38 162 56 Q170 72 146 74 L48 74 Q22 74 22 62 Z" />
+</svg>
+
+<!-- Tiny decorative spark, top-right -->
+<svg
+  aria-hidden="true"
+  class="absolute pointer-events-none animate-pulse-soft"
+  style="top: 8%; right: 18%; width: 18px; height: 18px;"
+  viewBox="0 0 18 18" fill="none"
+>
+  <path d="M9 1 L11 7 L17 9 L11 11 L9 17 L7 11 L1 9 L7 7 Z" fill="rgba(40, 96, 232, 0.85)" />
+</svg>
