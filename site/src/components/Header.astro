@@ -233,56 +233,67 @@ function active(match?: string) {
   .mega-wrapper.open .mega-caret { transform: rotate(180deg); }
 </style>
 
-<script>
-  // Mobile nav toggle
-  const toggle = document.getElementById('nav-toggle');
-  const menu = document.getElementById('mobile-nav');
-  toggle?.addEventListener('click', () => {
-    const open = menu?.classList.toggle('hidden') === false;
-    toggle.setAttribute('aria-expanded', String(open));
-  });
+<script is:inline>
+  (function () {
+    // Mobile nav toggle
+    var toggle = document.getElementById('nav-toggle');
+    var menu = document.getElementById('mobile-nav');
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        var open = menu && menu.classList.toggle('hidden') === false;
+        toggle.setAttribute('aria-expanded', String(!!open));
+      });
+    }
 
-  // Hover-bridge mega-menu (delayed close so cursor can move into panel)
-  document.querySelectorAll<HTMLElement>('[data-mega]').forEach((wrapper) => {
-    const panel = wrapper.querySelector<HTMLElement>('.mega-panel');
-    if (!panel) return;
-    let closeTimer: number | null = null;
+    // Hover-bridge mega-menu (delayed close so cursor can move into panel)
+    var wrappers = document.querySelectorAll('[data-mega]');
+    wrappers.forEach(function (wrapper) {
+      var panel = wrapper.querySelector('.mega-panel');
+      if (!panel) return;
+      var closeTimer = null;
 
-    const open = () => {
-      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-      wrapper.classList.add('open');
-      panel.classList.add('open');
-    };
-    const scheduleClose = () => {
-      if (closeTimer) clearTimeout(closeTimer);
-      closeTimer = window.setTimeout(() => {
-        wrapper.classList.remove('open');
-        panel.classList.remove('open');
-      }, 140);
-    };
-
-    wrapper.addEventListener('mouseenter', open);
-    wrapper.addEventListener('mouseleave', scheduleClose);
-    panel.addEventListener('mouseenter', open);
-    panel.addEventListener('mouseleave', scheduleClose);
-    // Close on Escape
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        wrapper.classList.remove('open');
-        panel.classList.remove('open');
+      function open() {
+        if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+        wrapper.classList.add('open');
+        panel.classList.add('open');
       }
-    });
-  });
+      function scheduleClose() {
+        if (closeTimer) clearTimeout(closeTimer);
+        closeTimer = setTimeout(function () {
+          wrapper.classList.remove('open');
+          panel.classList.remove('open');
+        }, 250);
+      }
 
-  // If the header is rendered "on sky", flip it to the solid look once
-  // the hero's bottom sentinel scrolls past the header. Pure IO, no
-  // scroll listener — cheap.
-  const header = document.getElementById('site-header');
-  if (header?.dataset.onSky === 'true') {
-    const sentinel = document.getElementById('hero-sentinel');
-    if (sentinel) {
-      const io = new IntersectionObserver(
-        ([entry]) => {
+      wrapper.addEventListener('mouseenter', open);
+      wrapper.addEventListener('mouseleave', scheduleClose);
+      panel.addEventListener('mouseenter', open);
+      panel.addEventListener('mouseleave', scheduleClose);
+      // Keep open on focus too (keyboard)
+      wrapper.addEventListener('focusin', open);
+      wrapper.addEventListener('focusout', function (e) {
+        if (!wrapper.contains(e.relatedTarget)) scheduleClose();
+      });
+    });
+
+    // Close on Escape (global, all panels)
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      wrappers.forEach(function (w) {
+        w.classList.remove('open');
+        var p = w.querySelector('.mega-panel');
+        if (p) p.classList.remove('open');
+      });
+    });
+
+    // If the header is rendered "on sky", flip it to solid once the hero's
+    // bottom sentinel scrolls past the header.
+    var header = document.getElementById('site-header');
+    if (header && header.dataset.onSky === 'true') {
+      var sentinel = document.getElementById('hero-sentinel');
+      if (sentinel) {
+        var io = new IntersectionObserver(function (entries) {
+          var entry = entries[0];
           if (entry.isIntersecting) {
             header.classList.add('header-on-sky');
             header.classList.remove('border-b', 'border-border/70', 'bg-background/70', 'backdrop-blur-md');
@@ -290,10 +301,9 @@ function active(match?: string) {
             header.classList.remove('header-on-sky');
             header.classList.add('border-b', 'border-border/70', 'bg-background/70', 'backdrop-blur-md');
           }
-        },
-        { rootMargin: '-56px 0px 0px 0px', threshold: 0 },
-      );
-      io.observe(sentinel);
+        }, { rootMargin: '-56px 0px 0px 0px', threshold: 0 });
+        io.observe(sentinel);
+      }
     }
-  }
+  })();
 </script>
