@@ -1,14 +1,9 @@
 ---
+import Cloud from './Cloud.astro';
 /**
- * Deep-sky hero atmosphere.
- *
- * Layers:
- *   - .sky-base       solid deep-sky radial gradient (auth palette)
- *   - .sky-breathe    second gradient that breathes opacity/scale
- *   - .sun-glow       warm pulsing bloom upper-right
- *   - .sky-haze-bottom soft horizon haze at the bottom
- *   - drifting outlined clouds (CSS-animated)
- *   - tiny spark
+ * Deep-sky hero atmosphere with realistic painterly clouds.
+ * No feDisplacementMap (Safari-safe). Clouds are hand-drawn bezier
+ * shapes with linear-gradient shading.
  */
 ---
 <div class="sky-base" aria-hidden="true"></div>
@@ -16,50 +11,28 @@
 <div class="sky-haze-bottom" aria-hidden="true"></div>
 <div class="sun-glow" aria-hidden="true"></div>
 
-<svg
-  aria-hidden="true"
-  class="cloud-drift cloud-1"
-  style="top: 10%; left: 6%; width: 280px; height: 130px;"
-  viewBox="0 0 280 130" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
->
-  <path d="M30 96 Q30 60 70 60 Q82 36 130 38 Q160 22 188 48 Q220 50 230 72 Q250 86 226 96 L70 96 Q30 96 30 96 Z" fill="rgba(255,255,255,0.10)"/>
-  <path d="M84 56 Q100 44 130 46" stroke-width="1" opacity="0.6"/>
-</svg>
-
-<svg
-  aria-hidden="true"
-  class="cloud-drift cloud-2"
-  style="top: 22%; right: 8%; width: 340px; height: 150px;"
-  viewBox="0 0 340 150" fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
->
-  <path d="M22 116 Q22 70 72 70 Q86 42 138 44 Q176 26 218 56 Q260 50 282 76 Q308 78 304 104 Q298 124 270 124 L72 124 Q22 124 22 116 Z" fill="rgba(255,255,255,0.12)"/>
-  <path d="M96 64 Q120 50 152 52" stroke-width="1" opacity="0.55"/>
-  <path d="M198 58 Q224 46 248 58" stroke-width="1" opacity="0.45"/>
-</svg>
-
-<svg
-  aria-hidden="true"
-  class="cloud-drift cloud-3"
-  style="top: 60%; left: 38%; width: 220px; height: 110px;"
-  viewBox="0 0 220 110" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
->
-  <path d="M22 80 Q22 50 60 50 Q72 30 110 32 Q140 22 162 46 Q190 48 196 68 Q210 80 188 88 L60 88 Q22 88 22 80 Z" fill="rgba(255,255,255,0.08)"/>
-</svg>
-
-<svg
-  aria-hidden="true"
-  class="cloud-drift cloud-1"
-  style="bottom: 12%; right: 26%; width: 200px; height: 100px;"
-  viewBox="0 0 200 100" fill="none" stroke="rgba(255,255,255,0.30)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"
->
-  <path d="M22 72 Q22 46 58 46 Q70 28 104 30 Q132 22 152 44 Q178 46 184 64 Q196 76 174 82 L58 82 Q22 82 22 72 Z" fill="rgba(255,255,255,0.06)"/>
-</svg>
+<!-- Cloud bank — five painterly clouds drifting at different speeds -->
+<div class="cloud-drift cloud-1 absolute pointer-events-none" style="top: 6%; left: 4%; width: 360px;">
+  <Cloud variant={2} opacity={0.95} />
+</div>
+<div class="cloud-drift cloud-2 absolute pointer-events-none" style="top: 4%; right: 6%; width: 420px;">
+  <Cloud variant={5} opacity={0.92} />
+</div>
+<div class="cloud-drift cloud-3 absolute pointer-events-none" style="top: 38%; left: 18%; width: 300px;">
+  <Cloud variant={3} opacity={0.78} />
+</div>
+<div class="cloud-drift cloud-1 absolute pointer-events-none" style="top: 32%; right: 22%; width: 240px;">
+  <Cloud variant={4} opacity={0.70} />
+</div>
+<div class="cloud-drift cloud-2 absolute pointer-events-none" style="top: 58%; left: 40%; width: 220px;">
+  <Cloud variant={1} opacity={0.62} />
+</div>
 
 <!-- Twinkling spark -->
 <svg
   aria-hidden="true"
   class="absolute pointer-events-none animate-pulse-soft"
-  style="top: 14%; left: 22%; width: 14px; height: 14px;"
+  style="top: 16%; left: 30%; width: 14px; height: 14px;"
   viewBox="0 0 14 14" fill="none"
 >
   <path d="M7 1 L8.5 5.5 L13 7 L8.5 8.5 L7 13 L5.5 8.5 L1 7 L5.5 5.5 Z" fill="rgba(255,255,255,0.9)" />
