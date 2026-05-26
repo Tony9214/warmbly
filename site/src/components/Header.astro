@@ -70,37 +70,20 @@ function active(match?: string) {
               <div class="bg-white border-b border-[color:var(--border)]" style="box-shadow: 0 40px 90px -30px rgba(2,32,71,0.3), 0 12px 36px -10px rgba(15,23,42,0.08);">
                 <!-- Body: container-width content -->
                 <div class="container-page">
-                  <div class="grid lg:grid-cols-[320px_1fr]">
-                    <!-- LEFT: brand block on a soft sky wash -->
-                    <div class="relative py-10 pr-10 overflow-hidden border-b lg:border-b-0 lg:border-r border-[color:var(--border)]">
-                      <div class="absolute inset-0 pointer-events-none -ml-8 pl-8" style="background: linear-gradient(160deg, #f0f9ff 0%, #e0f2fe 60%, #bae6fd 100%);"></div>
-                      <svg viewBox="0 0 320 240" class="absolute -top-6 -right-10 w-[320px] opacity-50 pointer-events-none" aria-hidden="true">
-                        <defs>
-                          <radialGradient id="hdrPanelCloud2" cx="50%" cy="50%" r="50%">
-                            <stop offset="0%" stop-color="white" stop-opacity="0.95"/>
-                            <stop offset="55%" stop-color="white" stop-opacity="0.15"/>
-                            <stop offset="100%" stop-color="white" stop-opacity="0"/>
-                          </radialGradient>
-                        </defs>
-                        <ellipse cx="220" cy="70"  rx="110" ry="38" fill="url(#hdrPanelCloud2)"/>
-                        <ellipse cx="110" cy="160" rx="80"  ry="26" fill="url(#hdrPanelCloud2)" opacity="0.6"/>
-                      </svg>
-                      <div class="relative">
-                        <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-[#075985]">The platform</div>
-                        <h3 class="mt-4 text-[30px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.05] text-heading">
-                          The cold-email platform.
-                        </h3>
-                        <p class="mt-3 text-[14px] text-foreground/70 leading-relaxed max-w-xs">
-                          Six systems designed to work together. Warmup that earns reputation, sending that respects it.
-                        </p>
-                        <div class="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11.5px] font-mono text-foreground/55">
-                          <span class="inline-flex items-center gap-1.5">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            All systems operational
-                          </span>
-                          <a href="https://github.com/warmbly/warmbly" target="_blank" rel="noopener" class="hover:text-foreground transition-colors">Apache 2.0</a>
-                        </div>
-                      </div>
+                  <div class="grid lg:grid-cols-[300px_1fr]">
+                    <!-- LEFT: clean white intro block -->
+                    <div class="py-10 pr-10 border-b lg:border-b-0 lg:border-r border-[color:var(--border)]">
+                      <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-foreground/55">The platform</div>
+                      <h3 class="mt-4 text-[32px] md:text-[40px] font-semibold tracking-[-0.03em] leading-[1.02] text-heading">
+                        Six systems.<br/>One platform.
+                      </h3>
+                      <p class="mt-4 text-[14px] text-foreground/65 leading-relaxed max-w-xs">
+                        Warmup that earns reputation. Sending that respects it. Inbox that triages every reply.
+                      </p>
+                      <a href="/learn/deliverability/" class="mt-6 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-[#0369a1] hover:text-[#075985]">
+                        Read the handbook
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3.5 3l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      </a>
                     </div>
 
                     <!-- RIGHT: 3x2 product grid -->
@@ -113,19 +96,16 @@ function active(match?: string) {
                           <a
                             href={it.href}
                             aria-current={isCurrent ? 'page' : undefined}
-                            class={`mega-card group flex flex-col p-7 ${colBreak ? 'lg:border-r border-[color:var(--border)]' : ''} ${rowBreak ? 'border-b border-[color:var(--border)]' : ''} ${isCurrent ? 'bg-[color:var(--sky-1)]/70' : 'hover:bg-[color:var(--surface-1)]'}`}
-                            style="transition: background-color 140ms ease-out;"
+                            style={`--stagger: ${i * 35}ms; transition: background-color 140ms ease-out;`}
+                            class={`mega-card group flex flex-col p-7 ${colBreak ? 'lg:border-r border-[color:var(--border)]' : ''} ${rowBreak ? 'border-b border-[color:var(--border)]' : ''} ${isCurrent ? 'bg-[color:var(--sky-1)]/60' : 'hover:bg-[color:var(--surface-1)]'}`}
                           >
-                            <div class="flex items-baseline justify-between mb-3">
-                              <span class="font-mono text-[10.5px] text-foreground/45 tracking-[0.14em]">{String(i + 1).padStart(2, '0')}</span>
-                              <span class={`text-[9.5px] font-mono uppercase tracking-[0.18em] ${isCurrent ? 'text-[#0284c7]' : 'text-foreground/45'}`}>{it.tag}</span>
-                            </div>
-                            <div class={`text-[18px] font-semibold tracking-[-0.015em] ${isCurrent ? 'text-[#0369a1]' : 'text-heading group-hover:text-[#0369a1]'}`} style="transition: color 140ms ease-out;">
+                            <div class="text-[10px] uppercase tracking-[0.22em] font-mono text-foreground/45 mb-3">{it.tag}</div>
+                            <div class={`text-[18px] font-semibold tracking-[-0.015em] flex items-center gap-2 ${isCurrent ? 'text-[#0369a1]' : 'text-heading group-hover:text-[#0369a1]'}`} style="transition: color 140ms ease-out;">
                               {it.title}
-                              {isCurrent && <span class="inline-block ml-1.5 w-1.5 h-1.5 rounded-full bg-[#0284c7] align-middle"></span>}
+                              {isCurrent && <span class="w-1.5 h-1.5 rounded-full bg-[#0284c7]"></span>}
                             </div>
                             <p class="mt-2 text-[13px] text-foreground/60 leading-relaxed flex-1">{it.desc.split('.')[0]}.</p>
-                            <div class="mt-4 inline-flex items-center gap-1 text-[11.5px] font-medium text-foreground/45 group-hover:text-[#0369a1]" style="transition: color 140ms ease-out;">
+                            <div class="mt-5 inline-flex items-center gap-1 text-[11.5px] font-medium text-foreground/45 group-hover:text-[#0369a1]" style="transition: color 140ms ease-out;">
                               Open
                               <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3.5 3l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             </div>
@@ -260,54 +240,76 @@ function active(match?: string) {
       });
     }
 
-    // Hover-bridge mega-menu (delayed close so cursor can move into panel)
+    // Mega-menu — hover state driven by hit-testing the cursor against
+    // both the trigger and the panel. Avoids the fixed-positioning
+    // mouseleave quirks that caused the panel to flicker shut as soon
+    // as the cursor entered it.
     var wrappers = document.querySelectorAll('[data-mega]');
     wrappers.forEach(function (wrapper) {
       var panel = wrapper.querySelector('.mega-panel');
       if (!panel) return;
       var closeTimer = null;
+      var moveHandler = null;
+      var isOpen = false;
+
+      function inside(x, y, el) {
+        if (!el) return false;
+        var r = el.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      }
 
       function open() {
         if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+        if (isOpen) return;
+        isOpen = true;
         wrapper.classList.add('open');
         panel.classList.add('open');
+        // Stagger-animate cards on each open
+        var cards = panel.querySelectorAll('.mega-card');
+        cards.forEach(function (c, i) {
+          c.style.opacity = '0';
+          c.style.transform = 'translateY(6px)';
+          c.style.transition = 'none';
+          setTimeout(function () {
+            c.style.transition = 'opacity 220ms ease-out, transform 280ms cubic-bezier(0.22,1,0.36,1), background-color 140ms ease-out';
+            c.style.opacity = '1';
+            c.style.transform = 'translateY(0)';
+          }, 40 + i * 32);
+        });
+        // Track cursor globally so we know when to close
+        if (!moveHandler) {
+          moveHandler = function (e) {
+            if (closeTimer) return; // already scheduled
+            if (!inside(e.clientX, e.clientY, wrapper) && !inside(e.clientX, e.clientY, panel)) {
+              scheduleClose();
+            }
+          };
+          document.addEventListener('mousemove', moveHandler);
+        }
       }
       function scheduleClose() {
         if (closeTimer) clearTimeout(closeTimer);
         closeTimer = setTimeout(function () {
+          isOpen = false;
           wrapper.classList.remove('open');
           panel.classList.remove('open');
-        }, 250);
+          if (moveHandler) {
+            document.removeEventListener('mousemove', moveHandler);
+            moveHandler = null;
+          }
+        }, 180);
+      }
+      function cancelClose() {
+        if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
       }
 
       wrapper.addEventListener('mouseenter', open);
-      wrapper.addEventListener('mouseleave', scheduleClose);
-      panel.addEventListener('mouseenter', open);
-      panel.addEventListener('mouseleave', scheduleClose);
-      // Keep open on focus too (keyboard)
+      panel.addEventListener('mouseenter', cancelClose);
+
+      // Keyboard support
       wrapper.addEventListener('focusin', open);
       wrapper.addEventListener('focusout', function (e) {
         if (!wrapper.contains(e.relatedTarget)) scheduleClose();
-      });
-
-      // Hover-preview: swap the right pane to follow the hovered list row
-      var rows = panel.querySelectorAll('[data-preview]');
-      var panes = panel.querySelectorAll('[data-preview-pane]');
-      function showPane(idx) {
-        panes.forEach(function (p) {
-          var i = p.getAttribute('data-preview-pane');
-          if (i === idx) {
-            p.classList.remove('opacity-0', 'pointer-events-none');
-            p.classList.add('opacity-100');
-          } else {
-            p.classList.add('opacity-0', 'pointer-events-none');
-            p.classList.remove('opacity-100');
-          }
-        });
-      }
-      rows.forEach(function (row) {
-        row.addEventListener('mouseenter', function () { showPane(row.getAttribute('data-preview')); });
-        row.addEventListener('focus', function () { showPane(row.getAttribute('data-preview')); });
       });
     });
 
