@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
@@ -25,6 +26,11 @@ type Client struct {
 	Oauth2      *models.Oauth2Service
 
 	client *imapclient.Client
+
+	// mu serializes commands that change SELECTed mailbox or mutate state.
+	// Warmup actions (MOVE/STORE) run on a different code path than the sync
+	// loop and must not interleave with FetchChanges.
+	mu sync.Mutex
 
 	OnUpdate func(ctx context.Context, email *models.EmailMessageData) error
 
