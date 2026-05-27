@@ -27,10 +27,10 @@ type UserRepository interface {
 
 type userRepository struct {
 	DB  *db.DB
-	kms *kms.KMS
+	kms kms.Provider
 }
 
-func NewUserRepostory(db *db.DB, kms *kms.KMS) UserRepository {
+func NewUserRepostory(db *db.DB, kms kms.Provider) UserRepository {
 	return &userRepository{
 		DB:  db,
 		kms: kms,

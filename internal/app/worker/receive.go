@@ -4,26 +4,20 @@ import (
 	"context"
 	"time"
 
-	cfk "github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/rs/zerolog/log"
+	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
 	"github.com/warmbly/warmbly/internal/models"
 )
 
-func (w *WorkerService) Receive(msg *cfk.Message) error {
+// Receive is the eventbus.Handler that drives the worker's event loop. It
+// decodes the wire payload via the injected codec.Codec and dispatches to
+// HandleEvent.
+func (w *WorkerService) Receive(ctx context.Context, msg eventbus.Message) error {
 	var event models.WorkerEvent
-
-	if w.KafkaConsumer.Avrov2 != nil {
-		if err := w.KafkaConsumer.Avrov2.Deser.DeserializeInto(*msg.TopicPartition.Topic, msg.Value, &event); err != nil {
-			log.Debug().Err(err).Msg("Receive Avro DeserializeInto")
-			return err
-		}
-	} else {
-		log.Error().Msg("Avro v2 deserializer not configured on worker consumer")
-		return nil
+	if err := w.Codec.Deserialize(ctx, msg.Topic, msg.Payload, &event); err != nil {
+		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-
-	return w.HandleEvent(ctx, &event)
+	return w.HandleEvent(hctx, &event)
 }

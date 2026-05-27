@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/app/cipher"
+	"github.com/warmbly/warmbly/internal/infrastructure/codec"
+	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/models"
@@ -58,18 +58,20 @@ type SendEmailParams struct {
 }
 
 type publisher struct {
-	producer      *kafka.Producer
-	storageClient *storage.Client
-	avrov2        *kafka.Avrov2
+	bus           eventbus.EventBus
+	storageClient storage.Store
+	codec         codec.Codec
 	cipherService cipher.CipherService
 }
 
-// NewPublisher creates a new event publisher
-func NewPublisher(producer *kafka.Producer, storageClient *storage.Client, avrov2 *kafka.Avrov2, cipherService cipher.CipherService) Publisher {
+// NewPublisher creates a new event publisher. bus is the transport (Kafka or
+// NATS); codec is the serialization (Avro or JSON). Both come from FromEnv
+// constructors in cmd/*/main.go.
+func NewPublisher(bus eventbus.EventBus, storageClient storage.Store, c codec.Codec, cipherService cipher.CipherService) Publisher {
 	return &publisher{
-		producer:      producer,
+		bus:           bus,
 		storageClient: storageClient,
-		avrov2:        avrov2,
+		codec:         c,
 		cipherService: cipherService,
 	}
 }
@@ -165,14 +167,8 @@ func (p *publisher) StoreEmailBody(ctx context.Context, taskID, userID uuid.UUID
 	// Generate S3 key
 	s3Key := fmt.Sprintf("emails/%s/%s.emsg", time.Now().Format("2006/01/02"), taskID.String())
 
-	// Upload to S3
-	_, err = p.storageClient.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(p.storageClient.Bucket),
-		Key:         aws.String(s3Key),
-		Body:        bytes.NewReader(data),
-		ContentType: aws.String("application/octet-stream"),
-	})
-	if err != nil {
+	// Upload to storage
+	if err := p.storageClient.Put(ctx, s3Key, bytes.NewReader(data), "application/octet-stream"); err != nil {
 		return "", fmt.Errorf("failed to upload email body to S3: %w", err)
 	}
 
@@ -258,32 +254,31 @@ func (p *publisher) PublishRemoveEmail(ctx context.Context, workerID uuid.UUID, 
 	return p.publish(workerTopic, remove.EmailID, workerEvent)
 }
 
-// publish serializes and publishes an event to Kafka using Avro v2
+// publish serializes (via codec) and publishes (via bus) an event.
 func (p *publisher) publish(topic, key string, event interface{}) error {
-	if p.producer == nil {
-		// Producer not configured, skip publishing
+	if p.bus == nil {
+		// Bus not configured, skip publishing.
 		return nil
 	}
 
-	var data []byte
-	var err error
-
-	if p.avrov2 != nil {
-		data, err = p.avrov2.Ser.Serialize(topic, event)
-	} else {
-		// Fallback: this shouldn't happen in production
-		sentry.CaptureException(fmt.Errorf("avro v2 serializer not configured, topic: %s", topic))
-		return fmt.Errorf("avro v2 serializer not configured")
+	if p.codec == nil {
+		sentry.CaptureException(fmt.Errorf("codec not configured, topic: %s", topic))
+		return fmt.Errorf("codec not configured")
 	}
+	if p.bus == nil {
+		sentry.CaptureException(fmt.Errorf("event bus not configured, topic: %s", topic))
+		return fmt.Errorf("event bus not configured")
+	}
+
+	ctx := context.Background()
+	data, err := p.codec.Serialize(ctx, topic, event)
 	if err != nil {
 		sentry.CaptureException(fmt.Errorf("failed to serialize event: %w", err))
 		return err
 	}
-
-	if err := p.producer.Produce(topic, []byte(key), data); err != nil {
-		sentry.CaptureException(fmt.Errorf("failed to produce event: %w", err))
+	if err := p.bus.Publish(ctx, topic, key, data); err != nil {
+		sentry.CaptureException(fmt.Errorf("failed to publish event: %w", err))
 		return err
 	}
-
 	return nil
 }

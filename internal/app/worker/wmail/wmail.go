@@ -56,7 +56,7 @@ type WMail struct {
 	SmtpImapData *SmtpImapData
 
 	Cache                     *cache.Cache
-	Storage                   *storage.Client
+	Storage                   storage.Store
 	EmailMessageMapRepository repository.EmailMessageMapRepository
 	CipherService             cipher.CipherService
 
@@ -71,7 +71,7 @@ func NewWMail(
 	data *models.AddWorkerEmail,
 	OnEvent func(eventType models.JobEventType, key string, body any) error,
 	terminate func(),
-	cache *cache.Cache, storage *storage.Client,
+	cache *cache.Cache, storage storage.Store,
 	emailMessageMapRepository repository.EmailMessageMapRepository,
 	cipherService cipher.CipherService,
 ) (*WMail, *errx.MailError) {

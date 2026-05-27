@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/warmbly/warmbly/internal/client/netbind"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"golang.org/x/oauth2"
@@ -27,6 +28,11 @@ type Client struct {
 	AuthType    models.AuthType
 	Credentials *models.Service
 	Oauth2      *models.Oauth2Service
+
+	// BindIP optionally pins outbound TCP to a specific local source address.
+	// When nil, WORKER_BIND_IP is consulted; when still unset, the OS default
+	// route is used.
+	BindIP *net.TCPAddr
 }
 
 func (c *Client) Send(
@@ -117,7 +123,7 @@ func (c *Client) sendRaw(ctx context.Context, from string, to []string, data []b
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	dialer := netbind.Dialer(c.BindIP)
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return errx.ErrMailServerUnreachable

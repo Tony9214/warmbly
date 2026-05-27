@@ -32,6 +32,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/webhook"
 	"github.com/warmbly/warmbly/internal/app/worker"
 	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
+	"github.com/warmbly/warmbly/internal/infrastructure/encryptedkeys"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/notify"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -110,13 +111,24 @@ type Handler struct {
 	WebsocketURI string
 
 	// Object storage for user-uploaded artifacts (avatars, etc.).
-	Storage *storage.Client
+	Storage storage.Store
+
+	// Encrypted-DEK store. Served to workers over HTTPS at
+	// /api/v1/internal/dek/:userID so workers don't need direct Postgres
+	// access. Backend processes use Postgres directly; workers use the
+	// HTTP-proxy implementation.
+	EncryptedKeys encryptedkeys.Store
 
 	// Direct repositories used by handlers that don't yet have a
 	// service layer (avatars, etc.). Keep narrow and add a service
 	// only when business logic accumulates.
-	UserRepo repository.UserRepository
-	OrgRepo  repository.OrganizationRepository
+	UserRepo                 repository.UserRepository
+	OrgRepo                  repository.OrganizationRepository
+	StorageBackendRepo       repository.StorageBackendRepository
+	CloudCredentialRepo      repository.CloudCredentialRepository
+	ProvisioningTemplateRepo repository.ProvisioningTemplateRepository
+	ProvisioningJobRepo      repository.ProvisioningJobRepository
+	ProvisioningPolicyRepo   repository.ProvisioningPolicyRepository
 
 	// Danger zone (delayed deletions for orgs & user accounts)
 	DangerZoneService dangerzone.Service

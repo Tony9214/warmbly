@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/pkg/emsg"
 )
@@ -19,18 +18,16 @@ func (s *uniboxService) GetBody(
 	userID, id uuid.UUID,
 ) (*emsg.EmailBlob, error) {
 	key := GetEmailKey(userID, id)
-	object, err := s.s3.GetObject(
-		ctx,
-		&s3.GetObjectInput{
-			Bucket: &s.s3.Bucket,
-			Key:    &key,
-		},
-	)
+	body, err := s.blob.Get(ctx, key)
 	if err != nil {
 		return nil, err
 	}
+	defer body.Close()
 
-	obj, err := emsg.DecodeBinary(object.Body)
+	obj, err := emsg.DecodeBinary(body)
+	if err != nil {
+		return nil, err
+	}
 
 	return obj, nil
 }
@@ -53,13 +50,5 @@ func (s *uniboxService) PutBody(
 		return err
 	}
 
-	if _, err := s.s3.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: &s.s3.Bucket,
-		Key:    &key,
-		Body:   bytes.NewReader(body),
-	}); err != nil {
-		return err
-	}
-
-	return nil
+	return s.blob.Put(ctx, key, bytes.NewReader(body), "")
 }

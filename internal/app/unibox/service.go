@@ -43,13 +43,13 @@ type UniboxService interface {
 type uniboxService struct {
 	uniboxRepository repository.UniboxRepository
 	cache            *cache.Cache
-	s3               *storage.Client
+	blob             storage.Store
 }
 
-func NewService(cache *cache.Cache, s3 *storage.Client, uniboxRepository repository.UniboxRepository) UniboxService {
+func NewService(cache *cache.Cache, blob storage.Store, uniboxRepository repository.UniboxRepository) UniboxService {
 	return &uniboxService{
 		uniboxRepository: uniboxRepository,
 		cache:            cache,
-		s3:               s3,
+		blob:             blob,
 	}
 }

@@ -2,11 +2,13 @@ package worker
 
 import (
 	"context"
+	"sync"
 
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/worker/mailmanager"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
-	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
+	"github.com/warmbly/warmbly/internal/infrastructure/codec"
+	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -17,14 +19,21 @@ import (
 type WorkerService struct {
 	ID                        string
 	CipherService             cipher.CipherService
-	KafkaProducer             *kafka.Producer
-	KafkaConsumer             *kafka.Consumer
+	Bus                       eventbus.EventBus
+	Codec                     codec.Codec
 	QueueURL                  string
 	Cache                     *cache.Cache
-	Storage                   *storage.Client
+	Storage                   storage.Store
 	EmailMessageMapRepository repository.EmailMessageMapRepository
 
 	mailManager *mailmanager.MailManager
+
+	// HealthCounters tracks the per-window send-side telemetry the worker
+	// reports via JobEventTypeWorkerHealth. Lazily initialised by
+	// ensureCounters so accessors are safe to call before RunHealth has
+	// started.
+	HealthCounters *HealthCounters
+	healthOnce     sync.Once
 
 	errorEvents   chan zapcore.Entry
 	logger        *zap.Logger

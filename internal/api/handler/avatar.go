@@ -262,12 +262,20 @@ func readAvatarUpload(c *gin.Context) ([]byte, string, string, *errx.Error) {
 	return body, mime, ext, nil
 }
 
-func putPublicObject(ctx context.Context, store *storage.Client, key string, body []byte, mime string) (string, *errx.Error) {
+func putPublicObject(ctx context.Context, store storage.Store, key string, body []byte, mime string) (string, *errx.Error) {
 	if store == nil {
 		return "", errx.New(errx.ServiceUnavailable, "object storage not configured")
 	}
-	_, err := store.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:       aws.String(store.Bucket),
+	// Avatars need a permanent public-read URL with long-lived cache headers.
+	// The generic Store interface can't express ACL or CacheControl, and the
+	// hardcoded https://<bucket>.s3.amazonaws.com URL format is S3-only — so
+	// fall through to the S3 client when available, otherwise reject.
+	s3client, ok := store.(*storage.Client)
+	if !ok {
+		return "", errx.New(errx.ServiceUnavailable, "avatar uploads require an S3-compatible backend")
+	}
+	_, err := s3client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:       aws.String(s3client.Bucket),
 		Key:          aws.String(key),
 		Body:         bytes.NewReader(body),
 		ContentType:  aws.String(mime),
@@ -277,7 +285,7 @@ func putPublicObject(ctx context.Context, store *storage.Client, key string, bod
 	if err != nil {
 		return "", errx.InternalError()
 	}
-	return fmt.Sprintf(avatarPublicURLFormat, store.Bucket, key), nil
+	return fmt.Sprintf(avatarPublicURLFormat, s3client.Bucket, key), nil
 }
 
 // Imports below are referenced so the file compiles cleanly even if
