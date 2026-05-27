@@ -1,0 +1,391 @@
+---
+import Layout from '../layouts/Layout.astro';
+import HeroAtmosphere from '../components/HeroAtmosphere.astro';
+import Icon from '../components/Icon.astro';
+import CTA from '../components/CTA.astro';
+
+// Real reply classifications + auto-actions from internal/app/consumer/event_new_email.go
+const classifications = [
+  { label: 'Positive',    tone: 'emerald', auto: 'Surface to assignee · keep sequence paused', body: 'Confirmed meeting, asked for proposal, expressed buying intent, requested next step.' },
+  { label: 'Negative',    tone: 'rose',    auto: 'Suppress recipient · pause sequence',         body: 'Said no, asked to stop, sent legal/abuse signal. Treated as a suppression event.' },
+  { label: 'Referral',    tone: 'violet',  auto: 'Mark for follow-up · keep paused',            body: 'Pointed you to a different person at the same company.' },
+  { label: 'OOO',         tone: 'amber',   auto: 'Re-queue after parsed end date',              body: 'Out-of-office auto-reply. End date parsed from the body when present.' },
+  { label: 'Unsubscribe', tone: 'slate',   auto: 'Workspace-wide suppression',                  body: 'Either an explicit STOP/UNSUBSCRIBE reply or a list-unsubscribe header click.' },
+  { label: 'Bounce',      tone: 'stone',   auto: 'Hard → suppress · soft → retry → suppress',   body: 'SMTP bounce. Hard (5.x.x) is permanent. Soft (4.x.x) retries up to 3 times.' },
+];
+
+const toneClass = (t: string) => {
+  if (t === 'emerald') return { bg: 'bg-emerald-50',  text: 'text-emerald-700', dot: 'bg-emerald-500',  chip: 'bg-emerald-50 text-emerald-700' };
+  if (t === 'rose')    return { bg: 'bg-rose-50',     text: 'text-rose-700',    dot: 'bg-rose-500',     chip: 'bg-rose-50 text-rose-700' };
+  if (t === 'violet')  return { bg: 'bg-violet-50',   text: 'text-violet-700',  dot: 'bg-violet-500',   chip: 'bg-violet-50 text-violet-700' };
+  if (t === 'amber')   return { bg: 'bg-amber-50',    text: 'text-amber-700',   dot: 'bg-amber-500',    chip: 'bg-amber-50 text-amber-700' };
+  if (t === 'slate')   return { bg: 'bg-slate-100',   text: 'text-slate-700',   dot: 'bg-slate-500',    chip: 'bg-slate-100 text-slate-700' };
+  return                       { bg: 'bg-stone-100',  text: 'text-stone-700',   dot: 'bg-stone-500',    chip: 'bg-stone-100 text-stone-700' };
+};
+
+// Thread mock (illustrative, marked as such)
+const threads = [
+  { from: 'Maya Chen',   sub: 'Re: Saw your demo last week, quick question on pricing',  mailbox: 'ben@acme.com',  cls: 0, time: '2m',  preview: 'This actually maps to what we were looking at. Could you send over a proposal for ~30 seats?' },
+  { from: 'Theo Park',   sub: 'Out of office: Re: 15 min next Tuesday?',                  mailbox: 'ben@acme.com',  cls: 3, time: '14m', preview: 'I will be out until June 3rd with limited email access. For urgent items contact…' },
+  { from: 'Mailer Daemon', sub: 'Undeliverable: mail to lena@deletedcorp.io',            mailbox: 'sara@acme.com', cls: 5, time: '32m', preview: 'Address rejected: 550 5.1.1 The email account that you tried to reach does not exist.' },
+  { from: 'Eli Soriano', sub: 'Not me, try Dana on our infra team',                       mailbox: 'sara@acme.com', cls: 2, time: '1h',  preview: 'I am no longer the right person for this. Reach out to dana.k@stratech.io who runs platform.' },
+  { from: 'Priya Bhatt', sub: 'Re: thought you would find this useful',                  mailbox: 'mark@acme.com', cls: 0, time: '2h',  preview: 'Yes! Booked time on your calendar for Thursday. Looking forward to it.' },
+  { from: 'Rowan Cole',  sub: 'Re: a question about your sequence cadence',              mailbox: 'mark@acme.com', cls: 1, time: '3h',  preview: 'Please stop emailing me. We picked another vendor six months ago.' },
+];
+
+// Real product capabilities
+const capabilities = [
+  { icon: 'reply',   k: 'Six classifications',  v: 'Positive · Negative · Referral · OOO · Unsubscribe · Bounce. Decided on arrival, before the human sees the thread.' },
+  { icon: 'users',   k: 'Assignment',           v: 'Threads route to teammates by domain, round-robin, or manual pick. Reassign with a single click.' },
+  { icon: 'clock',   k: 'Snooze + reminders',   v: 'Push a thread to next week. Reminders fire if the recipient goes silent for the configured window.' },
+  { icon: 'search',  k: 'Cross-mailbox search', v: 'One search across every connected mailbox. Threads stay tied to the originating campaign and sequence step.' },
+  { icon: 'filter',  k: 'Saved views',          v: 'Mailbox, sequence, classification, assignee, sentiment, domain, custom CRM field. Filters serialise to URL.' },
+  { icon: 'bell',    k: 'Realtime push',        v: 'WebSocket push for replies, bounces, complaints. Browser notifications opt-in. No notifications on opens.' },
+];
+
+const faq = [
+  ['How accurate is reply classification?',         'Classifier is rule + small-model hybrid. Quoted-text stripped, signature blocks ignored, OOO and unsubscribe detected before sentiment. Misclassifications appear as a "review needed" tag; correcting one trains the workspace-scoped classifier.'],
+  ['Does the inbox replace my Gmail or Outlook?',   'No. Threads still live in the underlying mailbox. The unified inbox is a read + reply surface on top of them, fully synced with provider state via IMAP/Graph/Gmail API.'],
+  ['What gets pushed to Slack or webhook?',         'Positive replies and quarantine transitions by default. Configurable per workspace: every classification, just positives, or off. Webhooks include the full classified payload.'],
+  ['How are threads kept in sync with the provider?','Sync runs every 60 seconds per mailbox plus push notifications where the provider supports them (Gmail watch, Microsoft Graph subscriptions). Actions in the unified inbox propagate back via the provider API.'],
+];
+---
+<Layout
+  title="Unified inbox · Warmbly"
+  description="Every reply, bounce, OOO and complaint across every mailbox in one console. Classified on arrival. Assignable. Searchable."
+>
+  <!-- ============================================================
+       HERO · HeroAtmosphere (shared)
+  ============================================================ -->
+  <section class="relative isolate overflow-hidden">
+    <HeroAtmosphere />
+
+    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+      <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
+        <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">
+          Unified inbox
+        </span>
+        Every reply across every mailbox · classified on arrival
+      </div>
+
+      <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[72px] lg:text-[80px] font-semibold tracking-[-0.04em] leading-[0.98] text-white max-w-4xl mx-auto">
+        Every reply.<br/>One console.
+      </h1>
+      <p class="mt-6 text-[17px] md:text-[19px] text-white/80 max-w-2xl mx-auto leading-relaxed">
+        Stop bouncing between Gmail and Outlook tabs to triage eight mailboxes. Every conversation lands here, classified on arrival, assignable to a teammate, with the matching auto-action already fired.
+      </p>
+
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register" class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-semibold bg-white hover:bg-white hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.3)] transition-all duration-200 ease-out shadow-[0_4px_14px_-2px_rgba(0,0,0,0.18)]">
+          <span style="color:#075985;">Try the unified inbox</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+          </svg>
+        </a>
+        <a href="#classifications" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
+          See the classifications
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       UNIBOX MOCK · mirrors the actual product (ConversationList +
+       ThreadView). No app shell, no URL chrome.
+  ============================================================ -->
+  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
+    <div class="container-page">
+      <div class="rounded-[14px] bg-white ring-1 ring-slate-200 overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)] h-[600px]">
+        <div class="grid grid-cols-[340px_minmax(0,1fr)] h-full">
+          <!-- ===== LEFT: ConversationList ===== -->
+          <div class="flex flex-col border-r border-slate-200 min-h-0">
+            <!-- SectionBar -->
+            <div class="h-9 px-3 border-b border-slate-200 flex items-center gap-2 shrink-0">
+              <span class="text-[11px] font-medium text-slate-700">Inbox</span>
+              <span class="font-mono text-[10px] tabular-nums text-sky-600">7</span>
+              <button type="button" class="ml-auto size-6 rounded text-slate-400 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center" aria-label="Advanced filters">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>
+              </button>
+            </div>
+
+            <!-- Search + quick filters -->
+            <div class="px-3 py-2 shrink-0 border-b border-slate-200 space-y-2">
+              <div class="h-7 px-2.5 rounded-md bg-slate-50 ring-1 ring-slate-200 flex items-center gap-2 text-[11.5px] text-slate-400">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <span>Search subject…</span>
+              </div>
+              <div class="flex items-center gap-0.5">
+                {[
+                  { id: 'all', label: 'All', active: true },
+                  { id: 'unread', label: 'Unread', active: false, count: 7 },
+                  { id: 'today', label: 'Today', active: false },
+                  { id: 'week', label: 'This week', active: false },
+                ].map((f) => (
+                  <button type="button" class={`shrink-0 h-6 px-2 rounded text-[11.5px] font-medium transition-colors inline-flex items-center gap-1 ${f.active ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}>
+                    {f.label}
+                    {f.count !== undefined && <span class={`font-mono tabular-nums text-[10px] ${f.active ? 'text-white/80' : 'text-sky-600'}`}>{f.count}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <!-- Conversation list -->
+            <div class="flex-1 overflow-y-auto divide-y divide-slate-200/60">
+              {threads.map((t, i) => {
+                const isSelected = i === 0;
+                const unread = i < 4;
+                const initials = t.from.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+                return (
+                  <button type="button" class={`group w-full text-left px-3 py-2.5 transition-colors flex items-start gap-2.5 relative ${isSelected ? 'bg-sky-50/80' : 'hover:bg-slate-50/80'}`}>
+                    {unread && <span aria-hidden class="absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-r bg-sky-500"></span>}
+                    <div class={`size-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-semibold ${isSelected ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {initials}
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-baseline justify-between gap-2">
+                        <span class={`text-[12.5px] truncate ${unread ? 'text-slate-900 font-semibold' : 'text-slate-800 font-medium'}`}>{t.from}</span>
+                        <span class="font-mono text-[10px] text-slate-400 tabular-nums shrink-0">{t.time}</span>
+                      </div>
+                      <div class="text-[12px] text-slate-700 truncate mt-0.5">{t.sub}</div>
+                      <div class="text-[11px] text-slate-400 truncate mt-0.5">{t.preview}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <!-- ===== RIGHT: ThreadView ===== -->
+          <div class="flex flex-col bg-white min-h-0">
+            <!-- Top header bar -->
+            <div class="h-12 px-5 border-b border-slate-200 flex items-center gap-3 shrink-0">
+              <span class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">Thread</span>
+              <div class="h-4 w-px bg-slate-200"></div>
+              <span class="text-[12.5px] text-slate-900 font-medium truncate">Re: Saw your demo last week, quick question on pricing</span>
+              <div class="ml-auto flex items-center gap-1 shrink-0">
+                <button type="button" aria-label="Mark unread" class="size-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/><path d="m16 19 2 2 4-4"/></svg>
+                </button>
+                <button type="button" aria-label="Archive" class="size-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+                </button>
+                <button type="button" aria-label="Delete" class="size-7 rounded-md text-slate-500 hover:text-red-600 hover:bg-red-50 inline-flex items-center justify-center transition-colors">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Sub-header: messages + participants -->
+            <div class="h-9 px-5 border-b border-slate-200 flex items-center gap-2 shrink-0 bg-slate-50/40">
+              <span class="text-[11px] font-medium text-slate-700">3 messages</span>
+              <span class="font-mono text-[10px] tabular-nums text-sky-600">2</span>
+              <span class="ml-auto inline-flex items-center gap-1.5 h-5 px-1.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 font-mono uppercase tracking-[0.08em]">
+                <span class="w-1 h-1 rounded-full bg-emerald-500"></span>
+                positive
+              </span>
+            </div>
+
+            <!-- Thread body -->
+            <div class="flex-1 overflow-y-auto divide-y divide-slate-200/60">
+              <!-- Message 1 -->
+              <article class="px-5 py-4">
+                <div class="flex items-baseline justify-between mb-2">
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-[12.5px] font-semibold text-slate-900">Maya Chen</span>
+                    <span class="text-[11px] text-slate-400 font-mono">maya@lumenrobotics.io</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 font-mono">2m ago</span>
+                </div>
+                <div class="text-[12.5px] text-slate-800 leading-[1.65] space-y-2.5">
+                  <p>Hi Ben,</p>
+                  <p>This actually maps to what we were looking at. Could you send over a proposal for ~30 seats? Want to bring it to my CFO this week.</p>
+                  <p>— Maya</p>
+                </div>
+              </article>
+
+              <!-- Auto-action strip -->
+              <div class="px-5 py-3 bg-slate-50/60 space-y-1.5">
+                <div class="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                  <Icon name="check" size={11} class="text-emerald-600 shrink-0"/>
+                  auto-paused sequence acme-fy26-q2 for this contact
+                </div>
+                <div class="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                  <Icon name="check" size={11} class="text-emerald-600 shrink-0"/>
+                  routed to assignee · @ben
+                </div>
+                <div class="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                  <Icon name="check" size={11} class="text-emerald-600 shrink-0"/>
+                  posted to #sales-positive in Slack
+                </div>
+              </div>
+
+              <!-- Message 2 (collapsed preview) -->
+              <article class="px-5 py-3.5">
+                <div class="flex items-baseline justify-between">
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-[12.5px] font-medium text-slate-700">Ben Cole</span>
+                    <span class="text-[11px] text-slate-400 truncate">sent step 02 · soft follow-up</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 font-mono shrink-0">3d ago</span>
+                </div>
+              </article>
+
+              <!-- Message 3 (collapsed preview) -->
+              <article class="px-5 py-3.5">
+                <div class="flex items-baseline justify-between">
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-[12.5px] font-medium text-slate-700">Ben Cole</span>
+                    <span class="text-[11px] text-slate-400 truncate">sent step 01 · initial outreach</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 font-mono shrink-0">7d ago</span>
+                </div>
+              </article>
+            </div>
+
+            <!-- ReplyComposer -->
+            <div class="border-t border-slate-200 shrink-0">
+              <div class="px-5 py-3">
+                <div class="rounded-md ring-1 ring-slate-200 bg-slate-50/40 px-3 py-2 text-[12px] text-slate-400">Reply to Maya Chen…</div>
+              </div>
+              <div class="px-5 pb-3 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1">
+                  <button type="button" class="size-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors" aria-label="Attach">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                  </button>
+                  <button type="button" class="size-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors" aria-label="Template">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9.93 13.5 14.07 13.5 12 8"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-3z"/></svg>
+                  </button>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button type="button" class="h-7 px-2.5 rounded-md text-[11.5px] font-medium text-slate-700 hover:bg-slate-100 transition-colors">Save draft</button>
+                  <button type="button" class="h-7 px-3 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[11.5px] font-semibold transition-colors">Send</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       CLASSIFICATIONS · the real auto-action per category (unique)
+  ============================================================ -->
+  <section id="classifications" class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28 scroll-mt-4">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Classifications</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          Six categories. Six auto-actions.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          Every reply is classified before a human sees it. Each classification fires its own deterministic action: pause the sequence, suppress the contact, re-queue after the OOO window, or surface it to the assignee.
+        </p>
+      </div>
+
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+        <div class="grid grid-cols-[140px_1fr_220px] px-7 py-3 bg-[color:var(--surface-1)] border-b border-[color:var(--border)] text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">
+          <div>Class</div>
+          <div>Detected when</div>
+          <div>Auto-action</div>
+        </div>
+        {classifications.map((c) => {
+          const t = toneClass(c.tone);
+          return (
+            <div class="grid grid-cols-[140px_1fr_220px] gap-4 px-7 py-4 border-b border-[color:var(--border)] last:border-b-0 items-start">
+              <div>
+                <span class={`inline-flex items-center gap-1.5 h-6 px-2 rounded text-[12px] font-medium font-mono ${t.chip}`}>
+                  <span class={`w-1.5 h-1.5 rounded-full ${t.dot}`}></span>
+                  {c.label}
+                </span>
+              </div>
+              <div class="text-[13.5px] text-foreground/80 leading-relaxed">{c.body}</div>
+              <div class="text-[12.5px] font-mono text-foreground/65 leading-snug">{c.auto}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p class="mt-4 text-[12px] text-muted-foreground italic">
+        Classifications you override train a workspace-scoped model. The defaults stay rule-driven for transparency.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       CAPABILITIES · clean spec list, no icon grid
+  ============================================================ -->
+  <section class="py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">What it does</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          Built for cold-email reply triage. Not a generic helpdesk.
+        </h2>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-x-12 gap-y-px">
+        {capabilities.map((c, i) => (
+          <div class="grid grid-cols-[40px_1fr] gap-4 py-6 border-b border-[color:var(--border)] items-baseline">
+            <div class="text-[10.5px] font-mono text-muted-foreground tracking-[0.16em] pt-1">{String(i + 1).padStart(2, '0')}</div>
+            <div>
+              <div class="text-[15.5px] font-semibold text-heading">{c.k}</div>
+              <p class="mt-1.5 text-[13.5px] text-foreground/70 leading-relaxed">{c.v}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FAQ · grid-rows accordion
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-1)]/40 border-t border-[color:var(--border)] py-20 md:py-24">
+    <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">FAQ</div>
+        <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+          Four reply questions.
+        </h2>
+      </div>
+      <div class="divide-y divide-[color:var(--border)]" data-faq>
+        {faq.map(([q, a]) => (
+          <div class="faq-row py-2">
+            <button type="button" class="faq-trigger group w-full flex items-start justify-between gap-4 py-3 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-heading group-hover:text-[#0369a1] transition-colors">{q}</span>
+              <span class="faq-icon shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-white ring-1 ring-[color:var(--border)] text-foreground/60 transition-transform duration-300 ease-out">
+                <Icon name="plus" size={12} />
+              </span>
+            </button>
+            <div class="faq-panel grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 ease-out">
+              <div class="overflow-hidden">
+                <p class="pb-4 pr-12 text-[14px] text-foreground/75 leading-relaxed max-w-2xl">{a}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <script is:inline>
+        (function () {
+          const faq = document.querySelector('[data-faq]');
+          if (!faq) return;
+          faq.querySelectorAll('.faq-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              const row   = btn.closest('.faq-row');
+              const panel = row.querySelector('.faq-panel');
+              const icon  = btn.querySelector('.faq-icon');
+              const open  = btn.getAttribute('aria-expanded') === 'true';
+              btn.setAttribute('aria-expanded', String(!open));
+              panel.style.gridTemplateRows = open ? '0fr' : '1fr';
+              if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(45deg)';
+            });
+          });
+        })();
+      </script>
+    </div>
+  </section>
+
+  <CTA primaryLabel="Try the unified inbox" />
+</Layout>

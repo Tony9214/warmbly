@@ -1,0 +1,349 @@
+---
+import Layout from '../layouts/Layout.astro';
+import HeroAtmosphere from '../components/HeroAtmosphere.astro';
+import Icon from '../components/Icon.astro';
+import CTA from '../components/CTA.astro';
+
+// Source: CLAUDE.md analytics + admin sections, internal/repository/*
+
+// What we lead with vs what we treat as noise
+const signal = [
+  { k: 'Inbox placement rate',  why: 'Probed via warmup pool partners. The only number that tells you mail is actually being read.' },
+  { k: 'Complaint rate',         why: 'ARF feedback loops + Gmail Postmaster Tools, aggregated per mailbox. Hard ceiling at 0.10%.' },
+  { k: 'Bounce rate',            why: 'Hard vs soft split per mailbox. SES enforcement begins at 5%, suspension at 10%.' },
+  { k: 'Reply rate',             why: 'Per sequence, per step, per variant. The metric a cold-mail program is actually optimising for.' },
+  { k: 'Positive-reply rate',    why: 'Replies classified as positive (vs OOO, negative, unsubscribe). Strips noise from reply rate.' },
+  { k: 'Suppression growth',     why: 'Share of contacted recipients added to suppression per period. Spikes are a leading indicator.' },
+];
+
+const noise = [
+  { k: 'Open rate',                 why: 'Apple Mail Privacy proxies opens for ~25-45% of B2B inboxes. Gmail caches images. The number is noise dominated.' },
+  { k: 'Cold first-touch CTR',      why: 'Most well-written cold mail has no links. Optimising for clicks incentivises link-heavy content, which is itself a spam-folder signal.' },
+  { k: '"Deliverability score"',    why: 'From vendors who will not publish the formula. Unauditable and gameable.' },
+];
+
+// Real export surfaces
+const exports = [
+  { k: 'On-demand download', v: 'CSV · XLSX · JSON',  why: 'Pick a report, choose fields, download. No row caps.' },
+  { k: 'Scheduled email',    v: 'Daily · weekly',     why: 'Workspace-level summary or a specific saved view to your inbox.' },
+  { k: 'Webhooks',           v: 'HMAC-signed',        why: 'Per-event push for replies, bounces, complaints, suppression and band transitions.' },
+  { k: 'REST API',           v: 'GET / events',       why: 'Pull events into your warehouse. Idempotency keys + rate limits surfaced in headers.' },
+  { k: 'S3 push',            v: 'Hourly · gzipped',   why: 'Newline-delimited JSON to your bucket. Schemas versioned in the event payload.' },
+];
+
+const faq = [
+  ['Why no open rate as a headline number?',     'Apple Mail Privacy Protection prefetches all tracking pixels through Apple proxies for a large share of B2B recipients. The reported open rate is functionally 100% for those mailboxes within minutes of delivery. We surface opens but never use them for deliverability decisions or ranking.'],
+  ['Where does placement data come from?',       'Warmbly\'s warmup pool double-serves as a placement probe. When a partner mailbox receives a warmup message, it reports the folder (Inbox / Promotions / Spam) along with a verification token. That feeds the placement signal for the sending mailbox.'],
+  ['How long is data retained?',                  'Per-event records (sends, replies, opens, bounces) for 18 months by default. Aggregates retained indefinitely. Custom retention available on Enterprise.'],
+  ['Can I export raw events to my warehouse?',    'Yes. Webhooks for real-time push, S3 hourly drops for batched ingestion, or pull through the events API with cursor pagination. Same event schema across all three.'],
+];
+---
+<Layout
+  title="Analytics · Warmbly"
+  description="Deliverability-aware analytics: per-mailbox placement, complaint and bounce rates, warmup health, sequence conversion. No vanity opens."
+>
+  <!-- ============================================================
+       HERO · same HeroAtmosphere pattern
+  ============================================================ -->
+  <section class="relative isolate overflow-hidden">
+    <HeroAtmosphere />
+
+    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+      <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
+        <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">
+          Analytics
+        </span>
+        Numbers we trust. Not vanity opens.
+      </div>
+
+      <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[72px] lg:text-[80px] font-semibold tracking-[-0.04em] leading-[0.98] text-white max-w-4xl mx-auto">
+        Numbers we trust.<br/>Not vanity opens.
+      </h1>
+      <p class="mt-6 text-[17px] md:text-[19px] text-white/80 max-w-2xl mx-auto leading-relaxed">
+        Placement, complaints, bounces, reply rate, positive-reply rate, suppression growth. Per mailbox, per pool, per worker, per sequence. Drill from a workspace KPI to the exact recipient behind it.
+      </p>
+
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register" class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-semibold bg-white hover:bg-white hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.3)] transition-all duration-200 ease-out shadow-[0_4px_14px_-2px_rgba(0,0,0,0.18)]">
+          <span style="color:#075985;">See your dashboard</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+          </svg>
+        </a>
+        <a href="/learn/deliverability/" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
+          Read the handbook
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       DASHBOARD MOCK · floats below the hero, mirrors the real
+       product page (web/src/app/app/analytics/page.tsx).
+  ============================================================ -->
+  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
+    <div class="container-page">
+      <div class="rounded-[14px] bg-white ring-1 ring-slate-200 overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)] flex flex-col">
+
+        <!-- PageTopbar -->
+        <div class="h-14 px-5 border-b border-slate-200 flex items-center gap-3 shrink-0 bg-white">
+          <div>
+            <div class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">Analytics</div>
+            <div class="mt-0.5 text-[13px] text-slate-900 font-medium">Deliverability across the workspace</div>
+          </div>
+          <div class="ml-auto inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+            {['7d', '30d', '90d'].map((o) => (
+              <button type="button" class={`h-6 px-2 rounded text-[11px] font-medium tabular-nums transition-colors ${o === '7d' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-900'}`}>
+                {o}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <!-- StatStrip · 4 cols -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 border-b border-slate-200">
+          {[
+            { label: 'Total sent',  value: '12,847', sub: 'last 7 days' },
+            { label: 'Open rate',   value: '34.2%',  sub: 'after delivery' },
+            { label: 'Reply rate',  value: '6.1%',   sub: 'incl. positive' },
+            { label: 'Bounce rate', value: '1.8%',   sub: 'hard + soft' },
+          ].map((s, i) => (
+            <div class={`p-5 ${i < 3 ? 'lg:border-r border-slate-200' : ''} ${i < 2 ? 'border-b lg:border-b-0 border-slate-200' : ''}`}>
+              <div class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">{s.label}</div>
+              <div class="mt-1.5 text-[24px] font-semibold tracking-[-0.02em] text-slate-900 leading-none font-mono tabular-nums">{s.value}</div>
+              <div class="mt-1.5 text-[11px] text-slate-400 font-mono">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        <!-- Body: chart + breakdown -->
+        <div class="grid lg:grid-cols-[1fr_320px] min-h-0">
+          <section class="flex flex-col min-h-0 lg:border-r border-slate-200">
+            <div class="h-9 px-4 border-b border-slate-200 flex items-center gap-2 shrink-0">
+              <span class="text-[11px] font-medium text-slate-700">Email performance</span>
+            </div>
+            <div class="flex-1 flex flex-col px-5 py-4">
+              <div class="h-52 flex items-end gap-0.5">
+                {Array.from({ length: 28 }).map((_, i) => {
+                  const v = 22 + Math.sin(i * 0.5) * 18 + ((i * 13) % 17);
+                  return (
+                    <div class="flex-1 flex items-end">
+                      <div class="w-full rounded-sm bg-sky-100" style={`height: ${v}%`}></div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div class="flex justify-between mt-2 font-mono text-[10px] text-slate-400">
+                <span>7d ago</span>
+                <span>today</span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="flex flex-col min-h-0 bg-slate-50/40">
+            <div class="h-9 px-4 border-b border-slate-200 flex items-center gap-2 shrink-0">
+              <span class="text-[11px] font-medium text-slate-700">Breakdown</span>
+            </div>
+            <div class="divide-y divide-slate-200/60">
+              {[
+                { label: 'Delivered', dot: 'bg-emerald-500', v: '12,847' },
+                { label: 'Opened',    dot: 'bg-sky-500',     v: '4,394' },
+                { label: 'Replied',   dot: 'bg-violet-500',  v: '783' },
+                { label: 'Bounced',   dot: 'bg-amber-500',   v: '231' },
+                { label: 'Spam',      dot: 'bg-red-500',     v: '5' },
+              ].map((q) => (
+                <div class="h-9 px-4 flex items-center gap-2">
+                  <span class={`w-1.5 h-1.5 rounded-full ${q.dot}`}></span>
+                  <span class="text-[12px] text-slate-700">{q.label}</span>
+                  <span class="ml-auto font-mono text-[11px] text-slate-500 tabular-nums">{q.v}</span>
+                </div>
+              ))}
+            </div>
+          </aside>
+        </div>
+
+        <!-- Warmup section bar + mailbox strip -->
+        <div class="h-9 px-4 border-t border-b border-slate-200 flex items-center gap-2 shrink-0">
+          <span class="text-[11px] font-medium text-slate-700">Warmup</span>
+          <a href="#" class="ml-auto inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900 transition-colors">
+            All accounts
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+          </a>
+        </div>
+        <div class="px-5 py-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { mb: 'ben@acme.com',  day: 22, today: 32, cap: 40, state: 'healthy' },
+            { mb: 'sara@acme.com', day: 14, today: 24, cap: 40, state: 'healthy' },
+            { mb: 'mark@acme.com', day: 31, today: 40, cap: 40, state: 'watch'   },
+            { mb: 'kai@acme.com',  day:  9, today: 19, cap: 40, state: 'healthy' },
+          ].map((m) => {
+            const pct = Math.round((m.today / m.cap) * 100);
+            const chip = m.state === 'watch' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700';
+            const dot  = m.state === 'watch' ? 'bg-amber-500' : 'bg-emerald-500';
+            const bar  = m.state === 'watch' ? 'bg-amber-500' : 'bg-sky-500';
+            return (
+              <div class="rounded-md ring-1 ring-slate-200 bg-white p-3">
+                <div class="flex items-baseline justify-between gap-2">
+                  <span class="font-mono text-[11px] text-slate-700 truncate">{m.mb}</span>
+                  <span class={`inline-flex items-center gap-1 h-4 px-1 rounded text-[9.5px] font-medium ${chip}`}>
+                    <span class={`w-1 h-1 rounded-full ${dot}`}></span>
+                    {m.state}
+                  </span>
+                </div>
+                <div class="mt-2 flex items-baseline gap-1 font-mono">
+                  <span class="text-[18px] font-semibold text-slate-900 tabular-nums">{m.today}</span>
+                  <span class="text-[10px] text-slate-400">/ {m.cap} today · D{m.day}</span>
+                </div>
+                <div class="mt-2 h-1 rounded-full bg-slate-100 overflow-hidden">
+                  <div class={`h-full ${bar}`} style={`width: ${pct}%`}></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       SIGNAL vs NOISE · what we measure, what we ignore
+  ============================================================ -->
+  <section class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-3xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Signal vs noise</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          We lead with six metrics. Three we ignore.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          A metric is a signal only if it is reliable and acts on. Open rate fails both tests today. Click rate on cold first-touch fails the second. Vendor "scores" fail the first.
+        </p>
+      </div>
+
+      <div class="grid lg:grid-cols-[1.4fr_1fr] gap-5">
+        <!-- Signal · 6 -->
+        <div class="rounded-[14px] bg-white ring-1 ring-emerald-100 overflow-hidden">
+          <div class="px-6 py-3.5 bg-emerald-50/60 border-b border-emerald-100 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="text-[12px] uppercase tracking-[0.18em] font-mono text-emerald-700 font-semibold">Signal · headline</span>
+            </div>
+            <span class="text-[10.5px] font-mono text-emerald-700/70">6 metrics</span>
+          </div>
+          <ul class="divide-y divide-[color:var(--border)]">
+            {signal.map((s) => (
+              <li class="px-6 py-4 grid grid-cols-[180px_1fr] gap-4 items-baseline">
+                <div class="text-[13.5px] font-semibold text-heading">{s.k}</div>
+                <div class="text-[12.5px] text-foreground/65 leading-snug">{s.why}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <!-- Noise · 3 -->
+        <div class="rounded-[14px] bg-white ring-1 ring-rose-100 overflow-hidden">
+          <div class="px-6 py-3.5 bg-rose-50/60 border-b border-rose-100 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+              <span class="text-[12px] uppercase tracking-[0.18em] font-mono text-rose-700 font-semibold">Noise · de-emphasised</span>
+            </div>
+            <span class="text-[10.5px] font-mono text-rose-700/70">3 metrics</span>
+          </div>
+          <ul class="divide-y divide-[color:var(--border)]">
+            {noise.map((n) => (
+              <li class="px-6 py-4">
+                <div class="text-[13.5px] font-semibold text-heading">{n.k}</div>
+                <div class="mt-1.5 text-[12.5px] text-foreground/65 leading-snug">{n.why}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ============================================================
+       EXPORTS · 2-col spec sheet (warmup defaults pattern)
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-1)]/40 border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Exports</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          Your data is yours.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          Five ways to get the data out. Same event schema across all of them, versioned in the payload.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-x-12 gap-y-px">
+        {exports.map((d, i) => (
+          <div class="grid grid-cols-[1fr_auto] gap-6 py-6 border-b border-[color:var(--border)] items-baseline hover:bg-white/40 -mx-3 px-3 rounded-[6px] transition-colors">
+            <div>
+              <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">
+                {String(i + 1).padStart(2, '0')} · {d.k}
+              </div>
+              <p class="mt-2 text-[13.5px] text-foreground/65 leading-relaxed max-w-md">{d.why}</p>
+            </div>
+            <div class="text-right">
+              <div class="text-[18px] md:text-[20px] font-semibold tracking-[-0.02em] text-heading font-mono whitespace-nowrap">{d.v}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FAQ · grid-rows accordion
+  ============================================================ -->
+  <section class="py-20 md:py-24">
+    <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">FAQ</div>
+        <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+          Four reporting questions.
+        </h2>
+      </div>
+      <div class="divide-y divide-[color:var(--border)]" data-faq>
+        {faq.map(([q, a]) => (
+          <div class="faq-row py-2">
+            <button type="button" class="faq-trigger group w-full flex items-start justify-between gap-4 py-3 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-heading group-hover:text-[#0369a1] transition-colors">{q}</span>
+              <span class="faq-icon shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-[color:var(--surface-1)] ring-1 ring-[color:var(--border)] text-foreground/60 transition-transform duration-300 ease-out">
+                <Icon name="plus" size={12} />
+              </span>
+            </button>
+            <div class="faq-panel grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 ease-out">
+              <div class="overflow-hidden">
+                <p class="pb-4 pr-12 text-[14px] text-foreground/75 leading-relaxed max-w-2xl">{a}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <script is:inline>
+        (function () {
+          const faq = document.querySelector('[data-faq]');
+          if (!faq) return;
+          faq.querySelectorAll('.faq-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              const row   = btn.closest('.faq-row');
+              const panel = row.querySelector('.faq-panel');
+              const icon  = btn.querySelector('.faq-icon');
+              const open  = btn.getAttribute('aria-expanded') === 'true';
+              btn.setAttribute('aria-expanded', String(!open));
+              panel.style.gridTemplateRows = open ? '0fr' : '1fr';
+              if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(45deg)';
+            });
+          });
+        })();
+      </script>
+    </div>
+  </section>
+
+  <CTA />
+</Layout>

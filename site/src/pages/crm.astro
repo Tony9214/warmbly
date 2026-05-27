@@ -1,0 +1,399 @@
+---
+import Layout from '../layouts/Layout.astro';
+import HeroAtmosphere from '../components/HeroAtmosphere.astro';
+import Icon from '../components/Icon.astro';
+import CTA from '../components/CTA.astro';
+
+// Real product entities from CLAUDE.md + internal/repository/*
+const objects = [
+  { name: 'Contacts',    rel: 'belongs_to: workspace',                              count: 'unlimited',  body: 'Imported, deduped, categorised. Suppression-aware everywhere they appear.' },
+  { name: 'Categories',  rel: 'reuses the existing group table (no parallel tags)', count: 'unlimited',  body: 'Reuse the existing category group table. No parallel "tags" system to drift out of sync.' },
+  { name: 'Pipelines',   rel: 'belongs_to: workspace',                              count: 'per team',   body: 'Pick a pipeline template or build your own. Drag-and-drop stages with weighted forecast.' },
+  { name: 'Deals',       rel: 'belongs_to: contact, pipeline',                      count: 'per pipe',   body: 'Value, close date, owner, custom fields, activity log. Linked to the contact and the campaign.' },
+  { name: 'Tasks',       rel: 'belongs_to: contact, deal, sequence step',           count: 'reminder',   body: 'Reminder tasks tied to a contact, deal, or sequence step. Due-date roll-up at the workspace level.' },
+  { name: 'Templates',   rel: 'belongs_to: workspace',                              count: 'shared',     body: 'Saved templates for replies, intros and sequence steps. Same variable engine as sequences.' },
+];
+
+const stageTone = (t: string) => {
+  if (t === 'slate')   return { dot: 'bg-slate-400', chip: 'bg-slate-100 text-slate-700' };
+  if (t === 'sky')     return { dot: 'bg-sky-500',   chip: 'bg-sky-50 text-sky-700' };
+  if (t === 'violet')  return { dot: 'bg-violet-500',chip: 'bg-violet-50 text-violet-700' };
+  if (t === 'amber')   return { dot: 'bg-amber-500', chip: 'bg-amber-50 text-amber-700' };
+  return                      { dot: 'bg-emerald-500',chip: 'bg-emerald-50 text-emerald-700' };
+};
+
+// Real deal detail view: one deal with its full activity timeline
+const dealFields = [
+  ['Value',       '$45,000'],
+  ['Close date',  '2026-06-30'],
+  ['Owner',       'Ben Cole'],
+  ['Stage',       'Negotiation'],
+  ['Source',      'Sequence · acme-fy26-q2'],
+  ['Probability', '60%'],
+];
+
+const dealActivity = [
+  { t: '2026-05-27 · 09:14', type: 'reply',      who: 'Rowan Cole',  body: 'Replied positively · classified as Positive · sequence auto-paused' },
+  { t: '2026-05-26 · 11:02', type: 'note',       who: 'Ben Cole',    body: 'Sent over the seat-tiered proposal. Asked about CSV import for legacy records.' },
+  { t: '2026-05-25 · 14:38', type: 'meeting',    who: 'Ben Cole',    body: 'Demo · 30 min · attended by Rowan + Dana (infra lead)' },
+  { t: '2026-05-22 · 16:01', type: 'stage',      who: 'system',      body: 'Moved from Demoed → Negotiation by Ben Cole' },
+  { t: '2026-05-21 · 08:46', type: 'task',       who: 'Ben Cole',    body: 'Created task · Send proposal · due 2026-05-26' },
+  { t: '2026-05-19 · 10:12', type: 'reply',      who: 'Rowan Cole',  body: 'Replied · classified as Positive · "yes please send slides"' },
+  { t: '2026-05-15 · 09:00', type: 'send',       who: 'sequence',    body: 'Step 02 · soft follow-up · variant B · sent from ben@acme.com' },
+  { t: '2026-05-12 · 09:00', type: 'send',       who: 'sequence',    body: 'Step 01 · initial outreach · variant A · sent from ben@acme.com' },
+];
+
+const activityKind = (k: string) => {
+  if (k === 'reply')   return { icon: 'reply',    chip: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' };
+  if (k === 'meeting') return { icon: 'users',    chip: 'bg-violet-50 text-violet-700',   dot: 'bg-violet-500' };
+  if (k === 'note')    return { icon: 'list',     chip: 'bg-amber-50 text-amber-700',     dot: 'bg-amber-500' };
+  if (k === 'stage')   return { icon: 'workflow', chip: 'bg-sky-50 text-sky-700',         dot: 'bg-sky-500' };
+  if (k === 'task')    return { icon: 'check',    chip: 'bg-slate-100 text-slate-700',    dot: 'bg-slate-500' };
+  return                       { icon: 'send',     chip: 'bg-slate-100 text-slate-700',    dot: 'bg-slate-400' };
+};
+
+// Real contacts power-tools (CSV/XLSX import + JSON export + dedup + bulk)
+const power = [
+  { k: 'Import wizard', v: 'CSV · XLSX',          why: 'Column mapping with custom-field detection. Dedup pass before a single row hits the table.' },
+  { k: 'Export',        v: 'CSV · XLSX · JSON',   why: 'Field picker. Scope to current view, current segment, or the whole workspace.' },
+  { k: 'Dedup',         v: 'email · domain · key', why: 'Pick the dedup key. Merge conflicting fields with a per-attribute winner.' },
+  { k: 'Bulk update',   v: 'from saved view',     why: 'Categories, owners, custom fields, suppression state. Reversible.' },
+];
+
+const faq = [
+  ['Will this replace Salesforce or HubSpot?',           'No, and it does not try. The CRM is built for the cold-outbound workflow: contact → sequence → reply → meeting. If you already run on Salesforce, two-way sync keeps both in step.'],
+  ['Does suppression cross over from sequences?',         'Yes. Marking a contact as suppressed or having one auto-suppressed by a reply applies workspace-wide. No sequence in the workspace will ever retry that contact.'],
+  ['Can I use multiple pipelines at once?',               'Yes. Each pipeline is its own board with its own stages. A deal lives in one pipeline at a time. Common templates: SDR pipeline, AE pipeline, partner pipeline.'],
+  ['What syncs with my Gmail or Outlook?',                'Replies received in the unified inbox attach to the matching contact and deal. Sent messages from the platform also attach. We do not pull every email in the mailbox.'],
+];
+---
+<Layout
+  title="CRM · Warmbly"
+  description="A light CRM that does not pretend to be Salesforce. Pipelines, deals, tasks, contacts and templates that live next to your sending."
+>
+  <!-- ============================================================
+       HERO · HeroAtmosphere (shared)
+  ============================================================ -->
+  <section class="relative isolate overflow-hidden">
+    <HeroAtmosphere />
+
+    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+      <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
+        <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">
+          CRM
+        </span>
+        Pipelines, deals and tasks · next to your sending
+      </div>
+
+      <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[72px] lg:text-[80px] font-semibold tracking-[-0.04em] leading-[0.98] text-white max-w-4xl mx-auto">
+        A CRM that lives<br/>next to your sending.
+      </h1>
+      <p class="mt-6 text-[17px] md:text-[19px] text-white/80 max-w-2xl mx-auto leading-relaxed">
+        Six entities, one workspace. Built for the cold-outbound workflow: contact → sequence → reply → meeting. No four-week implementation. No 200-page admin guide.
+      </p>
+
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register" class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-semibold bg-white hover:bg-white hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.3)] transition-all duration-200 ease-out shadow-[0_4px_14px_-2px_rgba(0,0,0,0.18)]">
+          <span style="color:#075985;">Open a pipeline</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+          </svg>
+        </a>
+        <a href="#data-model" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
+          See the data model
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       DEAL DETAIL VIEW · the real record screen, not a kanban
+  ============================================================ -->
+  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
+    <div class="container-page">
+      <div class="rounded-[16px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
+        <!-- Deal header -->
+        <div class="px-8 py-6 border-b border-[color:var(--border)] grid lg:grid-cols-[1fr_auto] gap-6 items-center">
+          <div>
+            <div class="flex items-center gap-3 flex-wrap">
+              <span class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Deal</span>
+              <span class="text-[10.5px] font-mono text-muted-foreground/70">DEAL-2026-0184</span>
+            </div>
+            <h3 class="mt-2 text-[24px] md:text-[28px] font-semibold tracking-[-0.025em] text-heading leading-[1.1]">
+              Stratech
+            </h3>
+            <div class="mt-2 flex items-center gap-2.5 flex-wrap">
+              <span class="inline-flex items-center gap-1.5 h-6 px-2 rounded-full bg-amber-50 text-amber-700 text-[11px] font-medium font-mono uppercase tracking-[0.08em]">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                Negotiation
+              </span>
+              <span class="text-[12.5px] text-foreground/60">Rowan Cole · VP Platform</span>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-x-8 gap-y-1 text-right">
+            <div>
+              <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Value</div>
+              <div class="mt-1 text-[24px] font-semibold tracking-[-0.02em] text-heading font-mono">$45k</div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Close</div>
+              <div class="mt-1 text-[14px] font-medium text-heading font-mono pt-1.5">Jun 30</div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Weighted</div>
+              <div class="mt-1 text-[14px] font-medium text-heading font-mono pt-1.5">$27k</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Body: 2-column (fields | activity) -->
+        <div class="grid lg:grid-cols-[300px_1fr]">
+          <!-- LEFT: fields + contact -->
+          <aside class="border-b lg:border-b-0 lg:border-r border-[color:var(--border)] flex flex-col bg-[color:var(--surface-1)]/30">
+            <!-- Fields block -->
+            <div class="p-7">
+              <div class="text-[10px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-4">Fields</div>
+              <dl class="space-y-3 text-[12.5px]">
+                {dealFields.map(([k, v]) => (
+                  <div class="flex items-baseline justify-between gap-3">
+                    <dt class="text-foreground/55">{k}</dt>
+                    <dd class="text-foreground font-mono">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+
+            <!-- Contact block -->
+            <div class="px-7 py-6 border-t border-[color:var(--border)]">
+              <div class="text-[10px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-4">Primary contact</div>
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 inline-flex items-center justify-center text-[13px] font-semibold shrink-0">RC</div>
+                <div class="min-w-0 flex-1">
+                  <div class="text-[14px] font-semibold text-heading truncate">Rowan Cole</div>
+                  <div class="text-[11.5px] text-foreground/55 truncate">VP Platform · Stratech</div>
+                </div>
+              </div>
+              <div class="mt-4 space-y-1.5 text-[12px] font-mono text-foreground/65">
+                <div class="truncate">rowan@stratech.io</div>
+                <div>+1 415 555 0162</div>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-1.5">
+                {['enterprise', 'platform', 'q2-list'].map((tag) => (
+                  <span class="inline-flex items-center h-5 px-1.5 rounded text-[10.5px] font-mono bg-white ring-1 ring-[color:var(--border)] text-foreground/65">{tag}</span>
+                ))}
+              </div>
+            </div>
+
+            <!-- Actions: full-width, clean -->
+            <div class="mt-auto p-7 border-t border-[color:var(--border)] grid grid-cols-2 gap-2">
+              <button type="button" class="inline-flex justify-center items-center h-9 px-3 rounded-[8px] bg-foreground text-background text-[12.5px] font-semibold hover:bg-[#1f2937] transition-colors">Log activity</button>
+              <button type="button" class="inline-flex justify-center items-center h-9 px-3 rounded-[8px] bg-white ring-1 ring-[color:var(--border)] text-foreground text-[12.5px] font-medium hover:bg-[color:var(--surface-2)] transition-colors">Add task</button>
+            </div>
+          </aside>
+
+          <!-- RIGHT: activity timeline -->
+          <div class="p-7 md:p-8">
+            <div class="flex items-baseline justify-between mb-5">
+              <div class="text-[10px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Activity · last 14 days</div>
+              <div class="text-[11px] font-mono text-muted-foreground">{dealActivity.length} events</div>
+            </div>
+
+            <ol class="relative">
+              <div class="absolute left-[15px] top-2 bottom-2 w-px bg-[color:var(--border)]"></div>
+              {dealActivity.map((a) => {
+                const k = activityKind(a.type);
+                return (
+                  <li class="relative grid grid-cols-[32px_1fr_auto] gap-4 py-3.5 items-baseline">
+                    <span class="relative z-10 w-8 h-8 rounded-full bg-white ring-1 ring-[color:var(--border)] inline-flex items-center justify-center text-foreground/65 self-start">
+                      <Icon name={k.icon} size={13} />
+                    </span>
+                    <div>
+                      <div class="flex items-baseline gap-2 flex-wrap">
+                        <span class={`inline-flex items-center gap-1 h-4.5 px-1.5 rounded text-[10px] font-medium font-mono uppercase tracking-[0.08em] ${k.chip}`}>
+                          {a.type}
+                        </span>
+                        <span class="text-[11px] font-mono text-foreground/55">{a.who}</span>
+                      </div>
+                      <p class="mt-1.5 text-[13.5px] text-foreground/80 leading-snug">{a.body}</p>
+                    </div>
+                    <span class="text-[10.5px] font-mono text-muted-foreground/70 whitespace-nowrap self-start pt-1">{a.t}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        </div>
+
+        <div class="px-8 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+          <span>Two-way sync · HubSpot · Salesforce · Pipedrive</span>
+          <span>Activity logged via webhook</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       DATA MODEL · 6 entities laid out as a real ER table (unique)
+  ============================================================ -->
+  <section id="data-model" class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28 scroll-mt-4">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Data model</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          Six entities. Six tables. No magic.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          The CRM is built around six real entities. Each maps to a Postgres table you can query through the API. Categories reuse the existing group table so tagging never drifts out of sync.
+        </p>
+      </div>
+
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+        <div class="grid grid-cols-[160px_1fr_140px] px-7 py-3 bg-[color:var(--surface-1)] border-b border-[color:var(--border)] text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">
+          <div>Entity</div>
+          <div>Relations + description</div>
+          <div class="text-right">Cardinality</div>
+        </div>
+        {objects.map((o, i) => (
+          <div class="grid grid-cols-[160px_1fr_140px] gap-4 px-7 py-4 border-b border-[color:var(--border)] last:border-b-0 items-baseline">
+            <div>
+              <div class="text-[14px] font-semibold text-heading">{o.name}</div>
+              <div class="mt-1 text-[10.5px] font-mono text-[#0284c7]">{String(i + 1).padStart(2, '0')}</div>
+            </div>
+            <div>
+              <div class="text-[11px] font-mono text-muted-foreground">{o.rel}</div>
+              <p class="mt-1.5 text-[13.5px] text-foreground/80 leading-relaxed">{o.body}</p>
+            </div>
+            <div class="text-right text-[12px] font-mono text-foreground/65">{o.count}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       CONTACTS POWER TOOLS · split with mini contacts table
+  ============================================================ -->
+  <section class="border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page grid lg:grid-cols-[1fr_1.3fr] gap-12 lg:gap-16 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Contacts power tools</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          Import, dedup, export, bulk update.
+        </h2>
+        <p class="mt-5 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+          Contacts is where the spreadsheet usually wins. Not here. CSV / XLSX import with a column-mapping wizard, dedup before rows land, JSON export with a field picker.
+        </p>
+
+        <div class="mt-7 divide-y divide-[color:var(--border)] border-y border-[color:var(--border)]">
+          {power.map((p, i) => (
+            <div class="grid grid-cols-[32px_1fr_auto] gap-3 py-3 items-baseline">
+              <span class="text-[10.5px] font-mono text-muted-foreground tracking-[0.16em]">{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <div class="text-[13.5px] font-semibold text-heading">{p.k}</div>
+                <div class="mt-0.5 text-[12px] text-foreground/65 leading-snug">{p.why}</div>
+              </div>
+              <span class="font-mono text-[11px] text-[#0284c7] whitespace-nowrap">{p.v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <!-- Mini contacts table -->
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden" style="box-shadow: var(--shadow-sm);">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70">
+          <div class="text-[11.5px] font-mono text-muted-foreground">app.warmbly.com / contacts</div>
+          <div class="flex items-center gap-2 text-[11.5px] font-mono">
+            <span class="inline-flex items-center gap-1 text-emerald-700">
+              <span class="w-1 h-1 rounded-full bg-emerald-500"></span>
+              2,431 rows · 0 dupes
+            </span>
+          </div>
+        </div>
+        <div class="grid grid-cols-[1.5fr_1.2fr_1fr_auto] text-[10px] font-mono uppercase tracking-[0.14em] text-muted-foreground px-5 py-2.5 bg-[color:var(--surface-1)]/40 border-b border-[color:var(--border)]">
+          <div>Name</div><div>Email</div><div>Company</div><div>Stage</div>
+        </div>
+        <div class="divide-y divide-[color:var(--border)]">
+          {[
+            { name: 'Maya Chen',     email: 'maya@lumenrobotics.io',  co: 'Lumen Robotics',  stage: 'Demoed',      tone: 'violet' },
+            { name: 'Theo Park',     email: 'theo@northwind.co',      co: 'Northwind Co.',   stage: 'Reached',     tone: 'sky' },
+            { name: 'Eli Soriano',   email: 'eli@vela.cargo',         co: 'Vela Logistics',  stage: 'New',         tone: 'slate' },
+            { name: 'Priya Bhatt',   email: 'priya@glasshouse.dev',   co: 'Glasshouse Labs', stage: 'Demoed',      tone: 'violet' },
+            { name: 'Rowan Cole',    email: 'rowan@stratech.io',      co: 'Stratech',        stage: 'Negotiation', tone: 'amber' },
+            { name: 'Dana Kowalski', email: 'dana.k@stratech.io',     co: 'Stratech',        stage: 'Reached',     tone: 'sky' },
+            { name: 'Lena Park',     email: 'lena@pennahealth.com',   co: 'Penna Health',    stage: 'Closed won',  tone: 'emerald' },
+            { name: 'Sam Iverson',   email: 'sam@nimbusops.dev',      co: 'Nimbus Ops',      stage: 'Demoed',      tone: 'violet' },
+          ].map((r) => {
+            const t = stageTone(r.tone);
+            return (
+              <div class="grid grid-cols-[1.5fr_1.2fr_1fr_auto] gap-3 px-5 py-2.5 items-center hover:bg-[color:var(--sky-1)]/30 transition-colors">
+                <div class="text-[13px] font-medium text-foreground truncate">{r.name}</div>
+                <div class="text-[12px] font-mono text-foreground/70 truncate">{r.email}</div>
+                <div class="text-[12.5px] text-foreground/85 truncate">{r.co}</div>
+                <div>
+                  <span class={`inline-flex items-center gap-1 h-5 px-1.5 rounded text-[10.5px] font-medium ${t.chip}`}>
+                    {r.stage}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div class="px-5 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+          <span>Bulk select · update categories / owner / suppression</span>
+          <span>Export →</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FAQ · grid-rows accordion
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-1)]/40 py-20 md:py-24">
+    <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">FAQ</div>
+        <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+          Four CRM questions.
+        </h2>
+      </div>
+      <div class="divide-y divide-[color:var(--border)]" data-faq>
+        {faq.map(([q, a]) => (
+          <div class="faq-row py-2">
+            <button type="button" class="faq-trigger group w-full flex items-start justify-between gap-4 py-3 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-heading group-hover:text-[#0369a1] transition-colors">{q}</span>
+              <span class="faq-icon shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-white ring-1 ring-[color:var(--border)] text-foreground/60 transition-transform duration-300 ease-out">
+                <Icon name="plus" size={12} />
+              </span>
+            </button>
+            <div class="faq-panel grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 ease-out">
+              <div class="overflow-hidden">
+                <p class="pb-4 pr-12 text-[14px] text-foreground/75 leading-relaxed max-w-2xl">{a}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <script is:inline>
+        (function () {
+          const faq = document.querySelector('[data-faq]');
+          if (!faq) return;
+          faq.querySelectorAll('.faq-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              const row   = btn.closest('.faq-row');
+              const panel = row.querySelector('.faq-panel');
+              const icon  = btn.querySelector('.faq-icon');
+              const open  = btn.getAttribute('aria-expanded') === 'true';
+              btn.setAttribute('aria-expanded', String(!open));
+              panel.style.gridTemplateRows = open ? '0fr' : '1fr';
+              if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(45deg)';
+            });
+          });
+        })();
+      </script>
+    </div>
+  </section>
+
+  <CTA />
+</Layout>
