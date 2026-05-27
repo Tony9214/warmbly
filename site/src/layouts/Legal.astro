@@ -34,14 +34,21 @@ const path = Astro.url.pathname;
   <!-- HERO -->
   <section class="relative isolate overflow-hidden" id="legal-hero">
     <HeroAtmosphere />
+    <!-- Readability scrim: deepens the sky behind the title so the cloud
+         tops never wash the white type into invisibility. -->
+    <div
+      aria-hidden="true"
+      class="absolute inset-0 pointer-events-none"
+      style="background: linear-gradient(180deg, rgba(7,89,133,0.55) 0%, rgba(3,105,161,0.35) 55%, rgba(2,132,199,0.0) 100%);"
+    ></div>
     <div class="container-page relative pt-14 md:pt-20 pb-14 md:pb-20">
-      <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-white/75 mb-3">Legal</div>
-      <h1 class="text-[36px] md:text-[48px] font-semibold tracking-[-0.025em] leading-[1.06] text-white max-w-3xl">
+      <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-white mb-3 [text-shadow:0_1px_2px_rgba(2,32,71,0.45)]">Legal</div>
+      <h1 class="text-[36px] md:text-[48px] font-semibold tracking-[-0.025em] leading-[1.06] text-white max-w-3xl [text-shadow:0_2px_8px_rgba(2,32,71,0.45)]">
         {title}
       </h1>
-      <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11.5px] font-mono text-white/75">
+      <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11.5px] font-mono text-white/90 [text-shadow:0_1px_2px_rgba(2,32,71,0.45)]">
         <span>Effective {effective}</span>
-        <span class="w-1 h-1 rounded-full bg-white/40"></span>
+        <span class="w-1 h-1 rounded-full bg-white/60"></span>
         <span>Last updated {updated}</span>
       </div>
     </div>
