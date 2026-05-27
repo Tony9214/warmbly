@@ -5,8 +5,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
+	"github.com/warmbly/warmbly/internal/infrastructure/encryptedkeys"
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
-	"github.com/warmbly/warmbly/internal/repository"
 )
 
 type CipherService interface {
@@ -14,15 +14,15 @@ type CipherService interface {
 }
 
 type cipherService struct {
-	userEncryptedKeysRepository repository.UserEncryptedKeysRepository
-	cache                       *cache.Cache
-	kms                         *kms.KMS
+	encryptedKeys encryptedkeys.Store
+	cache         *cache.Cache
+	kms           kms.Provider
 }
 
-func NewService(kms *kms.KMS, cache *cache.Cache, userEncryptedKeysRepository repository.UserEncryptedKeysRepository) CipherService {
+func NewService(kms kms.Provider, cache *cache.Cache, encryptedKeys encryptedkeys.Store) CipherService {
 	return &cipherService{
-		kms:                         kms,
-		cache:                       cache,
-		userEncryptedKeysRepository: userEncryptedKeysRepository,
+		kms:           kms,
+		cache:         cache,
+		encryptedKeys: encryptedKeys,
 	}
 }
