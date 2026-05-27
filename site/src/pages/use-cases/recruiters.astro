@@ -161,17 +161,17 @@ const tipsForRecruiters = [
         <!-- Header strip -->
         <div class="px-7 py-4 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex flex-wrap items-baseline justify-between gap-3">
           <div class="flex items-baseline gap-3">
-            <div class="text-[13px] font-semibold text-heading">staff-platform-fy26-q2</div>
+            <div class="text-[13px] font-semibold text-heading">Sequence preview</div>
             <span class="inline-flex items-center gap-1.5 h-5 px-2 rounded-full bg-[color:var(--sky-1)] text-[#0369a1] text-[10.5px] font-medium font-mono uppercase tracking-[0.08em]">
               <span class="w-1 h-1 rounded-full bg-[#0284c7]"></span>
-              Preview · {candidate.first_name}
+              Plain text
             </span>
-            <span class="text-[10.5px] font-mono uppercase tracking-[0.14em] text-muted-foreground">3 steps · plain text</span>
+            <span class="text-[10.5px] font-mono uppercase tracking-[0.14em] text-muted-foreground">3 steps</span>
           </div>
           <div class="flex items-center gap-4 text-[10.5px] font-mono text-muted-foreground">
-            <span>from: ben@vector-talent.com</span>
+            <span>From recruiter mailbox</span>
             <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
-            <span>to: priya@stripe.com</span>
+            <span>To candidate</span>
           </div>
         </div>
 
@@ -205,10 +205,10 @@ const tipsForRecruiters = [
 
           <!-- Variables expansion footer -->
           <div class="mt-7 pt-5 border-t border-[color:var(--border)] grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-[11.5px] font-mono">
-            <div><span class="text-muted-foreground">first_name</span> <span class="text-heading">→ {candidate.first_name}</span></div>
-            <div><span class="text-muted-foreground">current_company</span> <span class="text-heading">→ {candidate.current_company}</span></div>
-            <div><span class="text-muted-foreground">current_role</span> <span class="text-heading">→ {candidate.current_role}</span></div>
-            <div><span class="text-muted-foreground">why_now</span> <span class="text-heading truncate inline-block max-w-full align-bottom">→ {candidate.why_now}</span></div>
+            <div><span class="text-muted-foreground">first_name</span> <span class="text-heading">candidate first name</span></div>
+            <div><span class="text-muted-foreground">current_company</span> <span class="text-heading">where they work now</span></div>
+            <div><span class="text-muted-foreground">open_role</span> <span class="text-heading">role you are hiring</span></div>
+            <div><span class="text-muted-foreground">sender.first_name</span> <span class="text-heading">recruiter signature</span></div>
           </div>
         </div>
       </div>
