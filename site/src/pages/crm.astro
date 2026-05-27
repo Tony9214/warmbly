@@ -14,35 +14,42 @@ const objects = [
   { name: 'Templates',   rel: 'belongs_to: workspace',                              count: 'shared',     body: 'Saved templates for replies, intros and sequence steps. Same variable engine as sequences.' },
 ];
 
-// Kanban demo (illustrative, marked as such)
-const stages = [
-  { name: 'New',         tone: 'slate',   count: 28, deals: [
-    { co: 'Lumen Robotics',  val: '$24k', owner: 'BC' },
-    { co: 'Northwind Co.',   val: '$12k', owner: 'BC' },
-    { co: 'Vela Logistics',  val: '$8k',  owner: 'SR' },
-  ]},
-  { name: 'Reached',     tone: 'sky',     count: 14, deals: [
-    { co: 'Glasshouse Labs', val: '$18k', owner: 'MR' },
-    { co: 'Stratech',        val: '$45k', owner: 'BC' },
-  ]},
-  { name: 'Demoed',      tone: 'violet',  count: 9,  deals: [
-    { co: 'Acme Inc.',       val: '$36k', owner: 'SR' },
-    { co: 'Nimbus Ops',      val: '$22k', owner: 'BC' },
-  ]},
-  { name: 'Negotiation', tone: 'amber',   count: 4,  deals: [
-    { co: 'Penna Health',    val: '$30k', owner: 'MR' },
-  ]},
-  { name: 'Closed won',  tone: 'emerald', count: 6,  deals: [
-    { co: 'Vela Logistics',  val: '$8k',  owner: 'SR' },
-  ]},
-];
-
 const stageTone = (t: string) => {
   if (t === 'slate')   return { dot: 'bg-slate-400', chip: 'bg-slate-100 text-slate-700' };
   if (t === 'sky')     return { dot: 'bg-sky-500',   chip: 'bg-sky-50 text-sky-700' };
   if (t === 'violet')  return { dot: 'bg-violet-500',chip: 'bg-violet-50 text-violet-700' };
   if (t === 'amber')   return { dot: 'bg-amber-500', chip: 'bg-amber-50 text-amber-700' };
   return                      { dot: 'bg-emerald-500',chip: 'bg-emerald-50 text-emerald-700' };
+};
+
+// Real deal detail view: one deal with its full activity timeline
+const dealFields = [
+  ['Value',       '$45,000'],
+  ['Close date',  '2026-06-30'],
+  ['Owner',       'Ben Cole'],
+  ['Stage',       'Negotiation'],
+  ['Source',      'Sequence · acme-fy26-q2'],
+  ['Probability', '60%'],
+];
+
+const dealActivity = [
+  { t: '2026-05-27 · 09:14', type: 'reply',      who: 'Rowan Cole',  body: 'Replied positively · classified as Positive · sequence auto-paused' },
+  { t: '2026-05-26 · 11:02', type: 'note',       who: 'Ben Cole',    body: 'Sent over the seat-tiered proposal. Asked about CSV import for legacy records.' },
+  { t: '2026-05-25 · 14:38', type: 'meeting',    who: 'Ben Cole',    body: 'Demo · 30 min · attended by Rowan + Dana (infra lead)' },
+  { t: '2026-05-22 · 16:01', type: 'stage',      who: 'system',      body: 'Moved from Demoed → Negotiation by Ben Cole' },
+  { t: '2026-05-21 · 08:46', type: 'task',       who: 'Ben Cole',    body: 'Created task · Send proposal · due 2026-05-26' },
+  { t: '2026-05-19 · 10:12', type: 'reply',      who: 'Rowan Cole',  body: 'Replied · classified as Positive · "yes please send slides"' },
+  { t: '2026-05-15 · 09:00', type: 'send',       who: 'sequence',    body: 'Step 02 · soft follow-up · variant B · sent from ben@acme.com' },
+  { t: '2026-05-12 · 09:00', type: 'send',       who: 'sequence',    body: 'Step 01 · initial outreach · variant A · sent from ben@acme.com' },
+];
+
+const activityKind = (k: string) => {
+  if (k === 'reply')   return { icon: 'reply',    chip: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' };
+  if (k === 'meeting') return { icon: 'users',    chip: 'bg-violet-50 text-violet-700',   dot: 'bg-violet-500' };
+  if (k === 'note')    return { icon: 'list',     chip: 'bg-amber-50 text-amber-700',     dot: 'bg-amber-500' };
+  if (k === 'stage')   return { icon: 'workflow', chip: 'bg-sky-50 text-sky-700',         dot: 'bg-sky-500' };
+  if (k === 'task')    return { icon: 'check',    chip: 'bg-slate-100 text-slate-700',    dot: 'bg-slate-500' };
+  return                       { icon: 'send',     chip: 'bg-slate-100 text-slate-700',    dot: 'bg-slate-400' };
 };
 
 // Real contacts power-tools (CSV/XLSX import + JSON export + dedup + bulk)
@@ -100,56 +107,134 @@ const faq = [
   </section>
 
   <!-- ============================================================
-       KANBAN BOARD · floating product mock (unique)
+       DEAL DETAIL VIEW · the real record screen, not a kanban
   ============================================================ -->
   <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
     <div class="container-page">
       <div class="rounded-[16px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
+        <!-- Window chrome -->
         <div class="px-5 py-3 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex items-center gap-3">
           <div class="flex items-center gap-1.5">
             <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
             <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
             <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
           </div>
-          <div class="text-[11.5px] font-mono text-muted-foreground">app.warmbly.com / pipelines / q2-outbound</div>
-          <div class="ml-auto flex items-center gap-3 text-[11px] font-mono text-muted-foreground">
-            <span>61 deals · $312k weighted</span>
-            <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
-            <span>3 owners</span>
+          <div class="text-[11.5px] font-mono text-muted-foreground truncate">
+            app.warmbly.com / deals / stratech-fy26-q2
           </div>
         </div>
 
-        <div class="p-5 md:p-6 grid grid-cols-2 md:grid-cols-5 gap-3">
-          {stages.map((st) => {
-            const t = stageTone(st.tone);
-            return (
-              <div class="rounded-[10px] bg-[color:var(--surface-1)] p-3">
-                <div class="flex items-center justify-between mb-3 px-1">
-                  <div class="flex items-center gap-2">
-                    <span class={`w-1.5 h-1.5 rounded-full ${t.dot}`}></span>
-                    <span class="text-[12px] font-semibold text-heading">{st.name}</span>
-                  </div>
-                  <span class="text-[10.5px] font-mono text-muted-foreground">{st.count}</span>
+        <!-- Deal header -->
+        <div class="px-7 py-5 border-b border-[color:var(--border)] grid lg:grid-cols-[1fr_auto] gap-4 items-baseline">
+          <div>
+            <div class="flex items-baseline gap-3 flex-wrap">
+              <h3 class="text-[22px] md:text-[26px] font-semibold tracking-[-0.02em] text-heading">Stratech</h3>
+              <span class="inline-flex items-center gap-1.5 h-6 px-2 rounded-full bg-amber-50 text-amber-700 text-[11px] font-medium font-mono uppercase tracking-[0.08em]">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                Negotiation
+              </span>
+              <span class="text-[11.5px] font-mono text-muted-foreground">DEAL-2026-0184</span>
+            </div>
+            <div class="mt-1.5 text-[12.5px] text-foreground/60 font-mono">
+              Primary contact: Rowan Cole · rowan@stratech.io
+            </div>
+          </div>
+          <div class="flex items-baseline gap-6">
+            <div>
+              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Value</div>
+              <div class="mt-1 text-[24px] font-semibold tracking-[-0.02em] text-heading font-mono">$45k</div>
+            </div>
+            <div>
+              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Close</div>
+              <div class="mt-1 text-[14px] font-medium text-heading font-mono">Jun 30</div>
+            </div>
+            <div>
+              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Weighted</div>
+              <div class="mt-1 text-[14px] font-medium text-heading font-mono">$27k · 60%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Body: 2-column (fields | activity) -->
+        <div class="grid lg:grid-cols-[280px_1fr]">
+          <!-- LEFT: deal fields + contact -->
+          <aside class="border-b lg:border-b-0 lg:border-r border-[color:var(--border)] p-7 bg-[color:var(--surface-1)]/30">
+            <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">Fields</div>
+            <div class="space-y-2.5">
+              {dealFields.map(([k, v]) => (
+                <div class="grid grid-cols-[100px_1fr] gap-3 items-baseline text-[12.5px]">
+                  <div class="text-foreground/55">{k}</div>
+                  <div class="text-foreground font-mono">{v}</div>
                 </div>
-                <div class="space-y-2">
-                  {st.deals.map((d) => (
-                    <div class="rounded-[8px] bg-white ring-1 ring-[color:var(--border)] p-2.5">
-                      <div class="text-[12.5px] font-medium text-heading truncate">{d.co}</div>
-                      <div class="mt-1 flex items-center justify-between">
-                        <span class="text-[11px] font-mono text-[#0284c7]">{d.val}</span>
-                        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[color:var(--sky-1)] text-[9px] font-semibold text-[#0369a1]">{d.owner}</span>
-                      </div>
-                    </div>
-                  ))}
+              ))}
+            </div>
+
+            <div class="mt-7 pt-5 border-t border-[color:var(--border)]">
+              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">Contact</div>
+              <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 inline-flex items-center justify-center text-[12px] font-semibold shrink-0">RC</div>
+                <div class="min-w-0">
+                  <div class="text-[13.5px] font-semibold text-heading truncate">Rowan Cole</div>
+                  <div class="text-[11.5px] font-mono text-foreground/60 truncate">VP Platform · Stratech</div>
                 </div>
               </div>
-            );
-          })}
+              <div class="mt-3 text-[12px] font-mono text-foreground/65 break-all">rowan@stratech.io</div>
+              <div class="mt-1 text-[12px] font-mono text-foreground/65">+1 415 555 0162</div>
+              <div class="mt-3 flex flex-wrap gap-1.5">
+                {['enterprise', 'platform-engineer', 'q2-list'].map((tag) => (
+                  <span class="inline-flex items-center h-5 px-1.5 rounded text-[10.5px] font-mono bg-white ring-1 ring-[color:var(--border)] text-foreground/70">{tag}</span>
+                ))}
+              </div>
+            </div>
+
+            <div class="mt-7 pt-5 border-t border-[color:var(--border)] flex items-center gap-2">
+              <button type="button" class="inline-flex h-8 px-3 rounded-[8px] bg-foreground text-background text-[12px] font-semibold hover:bg-[#1f2937] transition-colors">Log activity</button>
+              <button type="button" class="inline-flex h-8 px-3 rounded-[8px] ring-1 ring-[color:var(--border)] text-foreground text-[12px] hover:bg-white transition-colors">Add task</button>
+            </div>
+          </aside>
+
+          <!-- RIGHT: activity timeline -->
+          <div class="p-7">
+            <div class="flex items-baseline justify-between mb-4">
+              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Activity · last 14 days</div>
+              <div class="flex items-center gap-3 text-[10.5px] font-mono text-muted-foreground">
+                <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-emerald-500"></span>positive</span>
+                <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-violet-500"></span>meeting</span>
+                <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-sky-500"></span>stage</span>
+              </div>
+            </div>
+
+            <!-- Timeline -->
+            <ol class="relative">
+              <div class="absolute left-[15px] top-3 bottom-3 w-px bg-[color:var(--border)]"></div>
+              {dealActivity.map((a) => {
+                const k = activityKind(a.type);
+                return (
+                  <li class="relative grid grid-cols-[32px_1fr] gap-4 py-3.5">
+                    <span class={`relative z-10 w-8 h-8 rounded-full bg-white ring-1 ring-[color:var(--border)] inline-flex items-center justify-center text-foreground/75`}>
+                      <Icon name={k.icon} size={13} />
+                    </span>
+                    <div>
+                      <div class="flex items-baseline gap-2 flex-wrap">
+                        <span class={`inline-flex items-center gap-1 h-4.5 px-1.5 rounded text-[10px] font-medium font-mono uppercase tracking-[0.08em] ${k.chip}`}>
+                          <span class={`w-1 h-1 rounded-full ${k.dot}`}></span>
+                          {a.type}
+                        </span>
+                        <span class="text-[11px] font-mono text-foreground/55">{a.who}</span>
+                        <span class="text-[11px] font-mono text-muted-foreground/70 ml-auto">{a.t}</span>
+                      </div>
+                      <p class="mt-1 text-[13.5px] text-foreground/80 leading-snug">{a.body}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
         </div>
 
         <div class="px-5 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
-          <span>Drag between stages · activity logged to the contact + deal</span>
           <span>Two-way sync · HubSpot · Salesforce · Pipedrive</span>
+          <span>Webhook → CRM · 200 OK</span>
         </div>
       </div>
     </div>
