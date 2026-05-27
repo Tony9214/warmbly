@@ -45,6 +45,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/user"
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/app/worker"
+	"github.com/warmbly/warmbly/internal/app/fleet"
 	"github.com/warmbly/warmbly/internal/app/settings"
 	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
 	"github.com/warmbly/warmbly/internal/config"
@@ -94,6 +95,10 @@ func main() {
 	var cipherService cipher.CipherService
 	var encryptedKeys encryptedkeys.Store
 	var storageBackendRepo repository.StorageBackendRepository
+	var cloudCredentialRepo repository.CloudCredentialRepository
+	var provisioningTemplateRepo repository.ProvisioningTemplateRepository
+	var provisioningJobRepo repository.ProvisioningJobRepository
+	var provisioningPolicyRepo repository.ProvisioningPolicyRepository
 	var tasksService tasks.TasksService
 	var advancedService advanced.Service
 
@@ -476,6 +481,10 @@ func main() {
 		// were chosen via env vars and changing them at runtime would orphan
 		// existing ciphertext / DEKs.
 		storageBackendRepo = repository.NewStorageBackendRepository(primaryDB)
+		cloudCredentialRepo = repository.NewCloudCredentialRepository(primaryDB)
+		provisioningTemplateRepo = repository.NewProvisioningTemplateRepository(primaryDB)
+		provisioningJobRepo = repository.NewProvisioningJobRepository(primaryDB)
+		provisioningPolicyRepo = repository.NewProvisioningPolicyRepository(primaryDB)
 		settingsRegistrar := settings.NewRegistrar(storageBackendRepo)
 		if err := settingsRegistrar.RegisterAll(ctx, []settings.Backend{
 			{Kind: "kms", Provider: kms.Name(), Display: kms.Name(), ReadOnly: true},
@@ -486,6 +495,26 @@ func main() {
 			sentry.CaptureException(err)
 			log.Printf("storage_backends registrar: %v", err)
 		}
+
+		// Autonomous fleet management background loops. Each runs on its own
+		// interval and writes every action to decision_log. Cancel them via
+		// the root context on shutdown.
+		decisionLogRepo := repository.NewDecisionLogRepository(primaryDB)
+		go (&fleet.Rebalancer{
+			WorkerRepo: workerRepository,
+			Decisions:  decisionLogRepo,
+		}).Run(ctx)
+		go (&fleet.Scaler{
+			WorkerRepo:   workerRepository,
+			PolicyRepo:   provisioningPolicyRepo,
+			TemplateRepo: provisioningTemplateRepo,
+			JobRepo:      provisioningJobRepo,
+			Decisions:    decisionLogRepo,
+		}).Run(ctx)
+		go (&fleet.QuarantineEvaluator{
+			WorkerRepo: workerRepository,
+			Decisions:  decisionLogRepo,
+		}).Run(ctx)
 
 		// Worker orchestrator. The env config below is the FALLBACK that gets
 		// written into /etc/warmbly/worker.env when a worker has no profile
@@ -700,7 +729,11 @@ func main() {
 		EncryptedKeys:      encryptedKeys,
 		UserRepo:           userRepoForHandler,
 		OrgRepo:            organizationRepoForHandler,
-		StorageBackendRepo: storageBackendRepo,
+		StorageBackendRepo:       storageBackendRepo,
+		CloudCredentialRepo:      cloudCredentialRepo,
+		ProvisioningTemplateRepo: provisioningTemplateRepo,
+		ProvisioningJobRepo:      provisioningJobRepo,
+		ProvisioningPolicyRepo:   provisioningPolicyRepo,
 
 		// Danger zone
 		DangerZoneService: dangerZoneService,
