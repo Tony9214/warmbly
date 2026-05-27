@@ -114,9 +114,13 @@ type Handler struct {
 	// Direct repositories used by handlers that don't yet have a
 	// service layer (avatars, etc.). Keep narrow and add a service
 	// only when business logic accumulates.
-	UserRepo           repository.UserRepository
-	OrgRepo            repository.OrganizationRepository
-	StorageBackendRepo repository.StorageBackendRepository
+	UserRepo                 repository.UserRepository
+	OrgRepo                  repository.OrganizationRepository
+	StorageBackendRepo       repository.StorageBackendRepository
+	CloudCredentialRepo      repository.CloudCredentialRepository
+	ProvisioningTemplateRepo repository.ProvisioningTemplateRepository
+	ProvisioningJobRepo      repository.ProvisioningJobRepository
+	ProvisioningPolicyRepo   repository.ProvisioningPolicyRepository
 
 	// Danger zone (delayed deletions for orgs & user accounts)
 	DangerZoneService dangerzone.Service
