@@ -1,186 +1,385 @@
-# Warmbly
+<p align="center">
+  <img src="docs/assets/banner.png" alt="Warmbly" width="640" />
+</p>
 
-Open-source email warmup and cold outreach platform.
+<h1 align="center">Warmbly</h1>
 
-## Overview
+<p align="center">
+  <strong>The open-source cold email and mailbox warmup platform you can actually self-host.</strong>
+  <br />
+  No AWS lock-in. Distributed senders. Multi-IP workers. Admin UI included.
+</p>
 
-Warmbly is split into a **control plane** (API, consumer, tracking, realtime, web) and a **worker fleet** (distributed sender processes running on VPSes around the world). The control plane runs in one place; workers run on as many machines as you want so cold mail flows through many distinct IPs.
+<p align="center">
+  <a href="#quick-start"><img src="https://img.shields.io/badge/get%20started-5_minutes-22c55e?style=flat-square" alt="Quick start" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square" alt="License" /></a>
+  <img src="https://img.shields.io/badge/go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go" />
+  <img src="https://img.shields.io/badge/postgres-16-336791?style=flat-square&logo=postgresql&logoColor=white" alt="Postgres" />
+  <img src="https://img.shields.io/badge/self--hostable-yes-22c55e?style=flat-square" alt="Self-hostable" />
+  <img src="https://img.shields.io/badge/aws--required-no-22c55e?style=flat-square" alt="No AWS required" />
+</p>
 
-Workers are added and managed from the admin dashboard over SSH. Credentials are stored encrypted (KMS envelope encryption) and live-editable. Worker images can auto-update from GitHub Releases when a new tag is published.
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#self-hosting">Self-hosting</a> ·
+  <a href="#admin-ui">Admin UI</a> ·
+  <a href="docs/VENDOR_LOCKIN.md">No lock-in</a>
+</p>
 
-The project is open source and self-hostable end-to-end.
+<br />
+
+<p align="center">
+  <img src="docs/assets/dashboard-preview.png" alt="Warmbly dashboard preview" width="900" />
+</p>
+
+<br />
+
+---
+
+## Why Warmbly
+
+Most cold email platforms force you into one of two corners. Hosted SaaS — fast
+to start, but your sender reputation lives in someone else's IP pool, and your
+data lives in someone else's database. Or roll-your-own — full control, six
+months of plumbing before you send the first email.
+
+Warmbly is the third option: a real cold-outreach platform that runs on **your
+infrastructure, your IPs, your database**, without making you give up the
+features you'd expect from a hosted SaaS.
+
+You can run it on a single $5 VPS with SQLite-free Postgres. You can run it
+across a Hetzner CX32 fleet with 16 IPs per box. The same code handles both.
+
+## Features
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### 🛡️ Self-hostable
+Single binary per service. No required calls to AWS, GCP, Stripe, or
+Cloudflare. Postgres + Redis + NATS is the whole infrastructure stack.
+
+</td>
+<td width="33%" valign="top">
+
+### 🌐 Distributed workers
+One worker per IP, many workers per VPS. Multi-IP install in one command.
+Reputation per IP, not per VPS.
+
+</td>
+<td width="33%" valign="top">
+
+### 🔌 Pluggable everything
+Swap KMS, blob store, event bus, codec at deploy time. AWS or local AES.
+Kafka or NATS JetStream. S3 or filesystem.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🎛️ Admin UI
+Production-grade React + Vite admin app with workers, egresses,
+mailboxes, warmup, audit, and settings.
+
+</td>
+<td valign="top">
+
+### 🔐 Envelope encryption
+KMS-wrapped per-user DEKs. Workers fetch them over HTTPS, never touch
+Postgres directly. Constant-time bearer-token auth on internal endpoints.
+
+</td>
+<td valign="top">
+
+### ✉️ Real warmup
+Pool-based warmup with anti-abuse signals, spam-score tracking, and
+auto-blocking on token-forgery patterns. Free vs premium pool isolation.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📊 Multi-tier worker fleet
+Shared free, shared premium, dedicated per-org. Tier migrations with
+mailbox rebalancing. Per-egress health bands.
+
+</td>
+<td valign="top">
+
+### 🧪 Mailbox-first safety
+Per-mailbox send caps (default 50/day), spacing (default 600s), warmup
+ramp from 10 to 40/day. Worker volume = sum of mailbox budgets, not a
+flat per-worker limit.
+
+</td>
+<td valign="top">
+
+### 🛰️ Real-time tracking
+Open/click pixel + redirect service (Rust), with deduplication at both
+the tracker and the consumer level. Replay-resistant.
+
+</td>
+</tr>
+</table>
+
+<br />
+
+## Quick start
+
+The fastest path to a running stack — one VPS, one command, everything local:
+
+```bash
+# Clone, install deps, boot everything
+git clone https://github.com/warmbly/warmbly && cd warmbly
+make infra   # Postgres, Redis, NATS, Kafka, Schema Registry, MailHog (~1 min)
+make app     # backend, consumer, worker, tracking, realtime, dashboard (~30s)
+
+# Open the dashboard
+open http://localhost:5173
+
+# Open the admin app
+open http://localhost:5174
+```
+
+That's it. Hot reload is wired for every language service (Go, Rust, Elixir,
+React).
+
+For production: see [Self-hosting](#self-hosting) below.
+
+## Admin UI
+
+The admin app lives at `web-admin/`, separate from the user dashboard, with a
+clear amber accent so admins never confuse the two.
+
+<p align="center">
+  <img src="docs/assets/admin-preview.png" alt="Warmbly admin app" width="900" />
+</p>
+
+What it covers:
+
+- **Overview** — fleet health, mailbox counts, send rates, bounce rates
+- **Workers** — physical worker processes, SSH lifecycle (test / install / restart / upgrade / logs)
+- **Egresses** — sending identities (worker × IP), health scores, quarantine
+- **Mailboxes** — every connected mailbox across the platform
+- **Warmup** — pools, participants, blocked accounts, appeals
+- **Settings** — KMS / blob store / encrypted-keys / event bus / cache / transports — all selectable backends
+- **Audit log** — every admin action with diffs
 
 ## Architecture
 
-The frontend (React) talks to three control-plane services: the **Backend API** (Go), **Realtime** (Elixir/Phoenix), and **Tracking** (Rust). All three publish events to **Kafka** (Avro + Schema Registry). The **Consumer** (Go) reads those events and updates Postgres state. **Workers** (Go) execute sends and mailbox sync, subscribing to per-worker Kafka topics; they never touch Postgres directly.
+```
+                    ┌─────────────────────────────────┐
+                    │           Admin UI              │
+                    │       (React + Vite app)        │
+                    └────────────────┬────────────────┘
+                                     │
+                                     ▼
+┌────────────────┐   HTTPS   ┌─────────────────────────────────────┐
+│   Dashboard    │ ◄───────► │            Backend API              │
+│    (React)     │           │           (Go, Gin, REST)           │
+└────────────────┘           │                                     │
+                             │  ┌──────────┐ ┌────────────────┐    │
+                             │  │ Settings │ │ /api/v1/       │    │
+                             │  │ Registrar│ │  internal/dek  │    │
+                             │  └──────────┘ └────────┬───────┘    │
+                             └──┬────────────────┬────┴────────────┘
+                                │                │       │
+                                ▼                ▼       │
+                      ┌─────────────────┐  ┌──────────┐  │
+                      │   PostgreSQL    │  │  Redis   │  │
+                      │ users, accounts │  │  cache   │  │
+                      │ DEKs (via PG)   │  │ ratelim  │  │
+                      └─────────────────┘  └──────────┘  │
+                                                         │
+                  ┌──────────────────────────────────────┘
+                  │
+                  ▼  Kafka / NATS JetStream events
+┌─────────────────────────────────────────────────────────────────┐
+│                  Distributed worker fleet                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐         │
+│  │ Worker 1 │  │ Worker 2 │  │ Worker 3 │  │ Worker N │  ...    │
+│  │  IP A    │  │  IP B    │  │  IP C    │  │  IP X    │         │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘         │
+│       │              │              │              │             │
+│       └──────────────┴──────────────┴──────────────┘             │
+│                            │                                     │
+│                            ▼                                     │
+│              Outbound SMTP / IMAP / OAuth APIs                   │
+│            (Gmail, Microsoft 365, Zoho, custom)                  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-| Component | Technology |
-|-----------|------------|
-| Backend API | Go 1.25, Gin |
-| Consumer | Go, Kafka consumer |
-| Worker | Go, distributed across VPSes |
-| Tracking | Rust, Axum |
-| Realtime | Elixir 1.18, Phoenix Channels |
-| Primary DB | PostgreSQL 16 |
-| Cache | Redis 7 |
-| Message bus | Kafka + Schema Registry |
-| Object store | S3 (or compatible) |
-| Encryption root | AWS KMS (or compatible) |
-| Per-user secrets | DynamoDB (or compatible) |
+**Control plane:** backend API + consumer + Postgres + Redis + event bus.
+Decides what to send and where; owns all stateful data.
 
-## Services
+**Execution plane:** distributed worker fleet. One Go binary per VPS, one
+worker process per IP. Workers receive commands over the event bus, fetch DEKs
+over HTTPS, and emit telemetry back. **Workers never connect to Postgres.**
 
-| Service | Port (local) | Plane | Description |
-|---------|------|-------|-------------|
-| Backend | 8080 | control | REST API, auth, business logic, worker orchestration |
-| Tracking | 3000 | control | Open/click pixel + redirect service |
-| Realtime | 4000 | control | WebSocket gateway |
-| Consumer | – | control | Kafka event processor |
-| Worker | – | execution | SSH-managed sender process, one per VPS |
-| Web | 5173 | – | Vite dev server (frontend) |
+The split matters because workers are intended to scale horizontally across
+many cheap VPSes — each one is a sending identity, not a database client.
 
-## Quick Start (local dev / simulation)
+## Self-hosting
 
-There's a single `docker-compose.yml` at the repo root that runs everything for local development, including LocalStack for KMS/DynamoDB/S3, stripe-mock, mailpit, and the optional kafka-ui debugger.
+Warmbly is designed so a self-hoster never has to pay AWS / GCP / Cloudflare /
+Stripe for anything except the boxes they want to rent.
 
-The stack is split into **infra** (postgres, redis, kafka, etc.: stateful, slow to start, identical across branches) and **app** (the language services you actually iterate on). Every `make` target pins `-p warmbly` as the compose project, so multiple git worktrees share the same infra and only the app containers churn per branch.
+| Concern             | Self-host default        | Cloud option           |
+|---------------------|--------------------------|------------------------|
+| **Database**        | PostgreSQL 16            | RDS / Cloud SQL        |
+| **Cache**           | Redis (or Valkey)        | ElastiCache            |
+| **Event bus**       | NATS JetStream (1 binary) | Kafka, MSK             |
+| **Blob storage**    | Filesystem               | S3, MinIO, R2, B2      |
+| **KMS / root key**  | Local AES master key     | AWS KMS, Vault, GCP    |
+| **Encrypted DEKs**  | PostgreSQL table         | DynamoDB / Scylla      |
+| **Codec**           | JSON                     | Avro + Schema Registry |
+| **Captcha**         | Bypass token (trusted)   | Cloudflare Turnstile   |
+| **Payments**        | Off                      | Stripe                 |
 
-### Daily workflow
+Every adapter is selected via an env var. See [docs/VENDOR_LOCKIN.md](docs/VENDOR_LOCKIN.md)
+for the honest audit of every external dependency and what to do about it.
+
+### Minimum-viable env
 
 ```bash
-# 1. Once, from any worktree (usually root). Brings up postgres, redis,
-#    zookeeper, kafka, schema-registry, mailpit, localstack, stripe-mock,
-#    and cloud-tasks-emulator. Leave running.
-make infra
+# Self-hostable defaults
+KMS_PROVIDER=local
+KMS_LOCAL_MASTER_KEY=$(openssl rand -base64 32)
 
-# 2. In the worktree you're iterating on. Brings up backend, consumer,
-#    worker, tracking, realtime, web with hot reload (air / cargo-watch
-#    / Phoenix / Vite). Bind-mounted source means saves rebuild in place.
-make app
+ENCRYPTED_KEYS_PROVIDER=postgres   # on the backend
+INTERNAL_API_TOKEN=$(openssl rand -base64 32)
 
-# 3. Switching worktrees:
-cd /path/to/other-worktree
-make app          # recreates app containers against the new source;
-                  # infra is untouched, caches stay warm.
+BLOB_PROVIDER=filesystem
+BLOB_FS_ROOT=/var/lib/warmbly/blobs
+
+EVENTBUS_PROVIDER=nats
+NATS_URL=nats://localhost:4222
+
+CODEC_PROVIDER=json
 ```
 
-### Stopping and logs
+Workers get one extra:
 
 ```bash
-make app-logs     # stream logs from the hot-reload services
-make logs         # stream logs from everything (infra + app)
-make logs backend # one or more named services
-
-make app-down     # stop app services, keep infra running
-make infra-down   # stop infra too (volumes preserved)
-make stop         # full teardown (everything, all profiles)
-make reset        # nuke everything including volumes (start over)
+ENCRYPTED_KEYS_PROVIDER=http
+ENCRYPTED_KEYS_BACKEND_URL=https://api.yourdomain.com
+ENCRYPTED_KEYS_WORKER_TOKEN=<same as INTERNAL_API_TOKEN>
 ```
 
-### Other targets
+### Multi-IP worker installation
+
+One Hetzner CX32 with 16 attached Primary IPs becomes 16 sending identities
+with one command:
 
 ```bash
-make up           # production-style images (no hot reload); smoke test
-                  # "does the release binary boot?"
-make sim          # adds premium + dedicated workers (prod-image flow)
-make seed         # load rich fixtures (3 orgs, 6 mailboxes, a campaign,
-                  # suppressed contacts). Requires `make app` or `make up`.
-make tools        # debugging UIs (kafka-ui at :18090)
-make status       # docker compose ps
-make restart <svc>    # rebuild + restart one service (prod-image flow only;
-                      # under `make app` air handles this automatically)
-make restart-go       # rebuild + restart all Go services (prod-image flow)
-make restart-all      # rebuild + restart Go + Rust + Elixir (prod-image flow)
+sudo ./scripts/install-worker.sh \
+  --kafka kafka.yourdomain.com:9092 \
+  --redis redis://cache.yourdomain.com:6379 \
+  --ips 5.6.7.11,5.6.7.12,5.6.7.13,5.6.7.14,5.6.7.15,\
+5.6.7.16,5.6.7.17,5.6.7.18,5.6.7.19,5.6.7.20,5.6.7.21,\
+5.6.7.22,5.6.7.23,5.6.7.24,5.6.7.25,5.6.7.26
 ```
 
-Service URLs (all ports offset to avoid clashes with locally-installed daemons):
+Each IP gets its own systemd unit (`warmbly-worker@<dashed-ip>.service`) and
+a deterministic UUIDv5 identity — reputation persists across reinstalls.
+Full runbook in [docs/MULTI_IP_WORKERS.md](docs/MULTI_IP_WORKERS.md).
 
-- Backend API: http://localhost:8080
-- Tracking: http://localhost:3000
-- Realtime: http://localhost:4000
-- Web: http://localhost:5173
-- Mailpit: http://localhost:18025
-- Kafka: localhost:9092
-- Schema Registry: http://localhost:8081
-- Postgres: localhost:15432
-- Redis: localhost:16379
-- LocalStack: http://localhost:4566
-- stripe-mock: http://localhost:12111
+## Stack
 
-See [resources/local-development.md](resources/local-development.md) for the full setup.
+<table>
+<tr>
+<th>Layer</th><th>Tech</th><th>Why</th>
+</tr>
+<tr>
+<td>Backend API</td>
+<td>Go 1.25 + Gin</td>
+<td>Same binary on a Pi, an EC2 box, or a Hetzner dedicated</td>
+</tr>
+<tr>
+<td>Consumer</td>
+<td>Go (event-bus driven)</td>
+<td>Same</td>
+</tr>
+<tr>
+<td>Worker</td>
+<td>Go (Kafka/NATS subscriber)</td>
+<td>~50MB RAM per process; runs anywhere with port 25 open</td>
+</tr>
+<tr>
+<td>Tracking</td>
+<td>Rust + Axum</td>
+<td>Open/click pixel hot path; dedup in-memory + persistent</td>
+</tr>
+<tr>
+<td>Realtime</td>
+<td>Elixir + Phoenix Channels</td>
+<td>WebSocket fanout, naturally concurrent</td>
+</tr>
+<tr>
+<td>Dashboard</td>
+<td>React 19 + Vite + Tailwind v4 + shadcn</td>
+<td>Modern stack, no Next.js coupling</td>
+</tr>
+<tr>
+<td>Admin UI</td>
+<td>React 19 + Vite + Tailwind v4 + shadcn</td>
+<td>Same stack as dashboard; distinct visual identity</td>
+</tr>
+<tr>
+<td>Primary DB</td>
+<td>PostgreSQL 16</td>
+<td>Boring, durable, well-known</td>
+</tr>
+<tr>
+<td>Cache</td>
+<td>Redis 7 (or Valkey / KeyDB)</td>
+<td>Sliding-window rate limits + DEK cache</td>
+</tr>
+<tr>
+<td>Event bus</td>
+<td>NATS JetStream (default) or Kafka</td>
+<td>NATS = single binary; Kafka = the historical hosted path</td>
+</tr>
+</table>
 
-## Project Structure
-
-- **`cmd/`** — service entrypoints: `backend/`, `consumer/`, `worker/`, `seed/`
-- **`internal/`** — Go code:
-  - `api/` — HTTP handlers and routes
-  - `app/` — application services (auth, email, campaign, **worker_orchestrator**, **releases**, etc.)
-  - `config/` — env-first config with optional AWS Secrets Manager
-  - `events/` — Kafka schemas
-  - `infrastructure/` — database, cache, queue, KMS, S3, Dynamo clients + SQL migrations
-  - `models/` — domain types
-  - `repository/` — data access
-- **`tracking/`** — Rust tracking service
-- **`realtime/`** — Elixir WebSocket service
-- **`web/`** — React frontend (Vite + React Router + Tailwind)
-- **`scripts/`** — VPS install script + LocalStack bootstrap
-- **`deploy/docker/`** — Dockerfiles
-- **`resources/`** — technical documentation
-
-## Worker Deployment
-
-Workers run on real machines so cold-mail traffic spreads across many IPs. There are two ways to bring one up:
-
-**From the admin dashboard (recommended).** Admin opens `/app/admin/workers`, fills in the host + port + user, gets back an ed25519 public key. Admin pastes it into `~/.ssh/authorized_keys` on the VPS, clicks Test, then Install. The backend SSHes in, runs the installer, configures systemd, and starts the worker container. From then on, all lifecycle ops (restart, update, rotate keys, system updates, logs, reboot) happen from the dashboard.
-
-**From the VPS itself.** Same installer, run by hand:
-
-```bash
-curl -fsSL https://get.warmbly.com/worker | sudo bash -s -- \
-  --kafka kafka.example.com:9092 \
-  --schema-registry https://schema.example.com \
-  --redis redis://cache.example.com:6379 \
-  --aws-region us-east-1 --aws-key ... --aws-secret ...
-```
-
-Worker identity is derived deterministically from the VPS's public IPv4 (UUIDv5), so the same IP always resolves to the same worker. Reputation persists across reinstalls.
-
-See [resources/deployment-guide.md](resources/deployment-guide.md) for the full flow.
-
-## Credentials and Profiles
-
-Workers don't carry hardcoded credentials. Two reusable entities, both editable from the dashboard:
-
-- **AWS Credentials** — named keypair; secret encrypted via KMS-wrapped DEK.
-- **Worker Profile** — bundles Kafka + Schema Registry + Redis + image tag + AWS reference. One profile, many workers.
-
-Workers reference a profile. When you edit the profile, assigned workers show a "stale config" banner; one click rewrites `/etc/warmbly/worker.env` and restarts each one.
-
-## Auto-Update from GitHub Releases
-
-Each worker profile picks a release channel:
-
-- `pinned` — manual image tag
-- `stable` — latest non-prerelease GitHub Release
-- `dev` — latest release (including prereleases)
-
-When `auto_update` is on and a new release fires the webhook, the backend resolves the channel, updates each assigned worker over SSH (regenerates the systemd unit with the new image, pulls, restarts), and records the running version.
-
-Push-driven, not poll-driven: one check on backend boot, then the GitHub webhook (`POST /webhooks/github/releases`, HMAC-validated). Admin can also click "Check now."
-
-All configuration is env-driven so self-hosters can point at their own fork:
+## Project layout
 
 ```
-RELEASES_ENABLED=true
-RELEASES_GITHUB_REPO=youruser/yourfork
-RELEASES_WORKER_IMAGE_REPO=ghcr.io/youruser/yourfork/worker
-RELEASES_WEBHOOK_SECRET=<shared secret>
-RELEASES_GITHUB_TOKEN=<optional, raises API limits>
+warmbly/
+├── cmd/
+│   ├── backend/        # REST API + admin orchestration
+│   ├── consumer/       # event-bus consumer → Postgres
+│   ├── worker/         # distributed sender (one per IP)
+│   └── seed/           # local-dev fixtures
+├── internal/
+│   ├── api/            # HTTP handlers, routes, middleware
+│   ├── app/            # business services (auth, email, campaign, ...)
+│   ├── client/
+│   │   ├── netbind/    # per-egress bind-IP for SMTP/IMAP
+│   │   └── smtpimap/   # SMTP + IMAP client
+│   ├── events/         # publisher + event schemas
+│   ├── infrastructure/
+│   │   ├── codec/      # Avro + JSON (pluggable)
+│   │   ├── encryptedkeys/  # Postgres + DynamoDB + HTTP (pluggable)
+│   │   ├── eventbus/   # Kafka + NATS JetStream (pluggable)
+│   │   ├── kms/        # local + AWS (pluggable)
+│   │   └── storage/    # filesystem + S3-compatible (pluggable)
+│   ├── models/         # domain types
+│   └── repository/     # Postgres data access
+├── tracking/           # Rust open/click service
+├── realtime/           # Elixir WebSocket gateway
+├── web/                # User dashboard (Vite + React)
+├── web-admin/          # Admin UI (Vite + React)
+├── scripts/
+│   └── install-worker.sh   # single-IP + multi-IP installer
+├── docs/               # operator docs (auth, lock-in, multi-IP)
+└── resources/          # technical / architectural docs
 ```
-
-## System Updates
-
-The dashboard can also run OS package upgrades on each VPS (apt / dnf / pacman / apk), detect whether a reboot is needed, and reboot on demand. Reboots are never automatic.
 
 ## Building
 
@@ -189,36 +388,83 @@ go build -o bin/backend  ./cmd/backend
 go build -o bin/consumer ./cmd/consumer
 go build -o bin/worker   ./cmd/worker
 
-cd tracking && cargo build --release
-cd realtime && mix deps.get && mix release
-cd web      && pnpm install && pnpm build
+cd tracking    && cargo build --release
+cd realtime    && mix deps.get && mix release
+cd web         && pnpm install && pnpm build
+cd web-admin   && pnpm install && pnpm build
 ```
 
-## CI / Release Flow
+## Testing
 
-GitHub Actions builds + pushes images to GHCR:
+```bash
+go test ./...
+cd web         && pnpm typecheck && pnpm lint
+cd web-admin   && pnpm typecheck && pnpm lint
+cd tracking    && cargo test
+cd realtime    && mix test
+```
 
-| Workflow | Trigger | Result |
-|----------|---------|--------|
-| `ci.yml` | PR/push | Tests, linting, security scan |
-| `build-push.yml` | Push to `main` | `:{sha}` and `:dev` tags |
-| `release.yml` | Tag `vX.Y.Z` | `:vX.Y.Z`, `:vX.Y`, `:vX`, `:prod` tags + GitHub Release |
+Coverage highlights:
 
-The control plane (backend / consumer / tracking / realtime / web) auto-deploys via Railway. Workers update via the dashboard or auto-update flow described above — they're the only service that needs in-band update orchestration.
+- `internal/infrastructure/codec` — 11 tests (JSON round-trip + Avro interface conformance)
+- `internal/infrastructure/encryptedkeys` — 14 tests (HTTP round-trip, factory, conflict semantics)
+- `internal/infrastructure/eventbus` — 16 tests (Kafka + NATS round-trip + ack redelivery)
+- `internal/infrastructure/kms` — 11 tests (local AES round-trip + tamper detection + factory)
+- `internal/infrastructure/storage` — 14 tests (filesystem + traversal protection + factory)
+- `internal/client/netbind` — 4 tests (dialer + TLS dialer + env fallback)
+- `internal/api/middleware` — 5 internal-auth tests
+- `internal/api/handler` — 9 internal-DEK handler tests
+- `internal/app/settings` — 5 registrar tests
+- `cmd/worker` — 5 UUID-from-IP derivation tests
 
-See [resources/cicd.md](resources/cicd.md).
+Full suite runs in under 5 seconds.
 
 ## Documentation
 
-- [Local Development](resources/local-development.md) — Docker Compose, profiles, seeding
-- [Deployment Guide](resources/deployment-guide.md) — control plane + worker fleet
-- [Architecture](resources/architecture.md) — control vs execution plane, encryption model
-- [CI/CD](resources/cicd.md) — workflows, image tags, release channels
-- [Events](resources/Events.md) — Kafka event reference
-- [EMSG Format](resources/EMSG.md) — encrypted message blob format
-- [Gmail Integration](resources/gmail.md)
-- [IMAP Integration](resources/imap.md)
+| Doc | What it covers |
+|---|---|
+| [docs/VENDOR_LOCKIN.md](docs/VENDOR_LOCKIN.md) | Every external dependency and how to replace it |
+| [docs/INTERNAL_API_AUTH.md](docs/INTERNAL_API_AUTH.md) | How workers authenticate to the backend |
+| [docs/MULTI_IP_WORKERS.md](docs/MULTI_IP_WORKERS.md) | Hetzner CX32 + 16 Primary IPs deployment recipe |
+| [resources/architecture.md](resources/architecture.md) | Control-plane vs execution-plane split, encryption model |
+| [resources/local-development.md](resources/local-development.md) | Docker Compose, profiles, seeding |
+| [resources/deployment-guide.md](resources/deployment-guide.md) | Production control plane + worker fleet |
+| [resources/Events.md](resources/Events.md) | Event bus event reference |
+| [resources/EMSG.md](resources/EMSG.md) | Encrypted-message blob format |
+
+## Security
+
+If you find a vulnerability please email `security@warmbly.com` rather than
+opening a public issue. We prefer responsible disclosure and will credit you
+in the release notes.
+
+The encryption model is documented in
+[resources/architecture.md](resources/architecture.md). The internal-API auth
+model is in [docs/INTERNAL_API_AUTH.md](docs/INTERNAL_API_AUTH.md).
+
+## Contributing
+
+Bug reports and PRs are welcome. The codebase follows Go community conventions
+(`gofmt`, `go vet`), TypeScript with the `web/` config, and Rust with
+`cargo fmt`. Please run the full test suite before opening a PR.
+
+For larger changes, open an issue first to discuss the approach. The
+maintainers respond fastest to PRs that:
+
+- Stay scoped to one logical change
+- Keep the worker free of new direct-data-service dependencies (no Postgres
+  in workers; route through `/api/v1/internal/*` instead)
+- Add tests for new business logic
+- Don't break self-hostability (any new external dependency must have an
+  open-source path documented in `docs/VENDOR_LOCKIN.md`)
 
 ## License
 
-Licensed under the **Apache License 2.0**. Copyright 2026 Mindroot Ltd. See [LICENSE](./LICENSE).
+Licensed under the **Apache License 2.0**. Copyright 2026 Mindroot Ltd.
+See [LICENSE](./LICENSE) for the full text.
+
+<br />
+
+<p align="center">
+  <sub>Built with the boring tools that actually work in production.</sub>
+</p>
