@@ -30,43 +30,15 @@ const channels = [
     icon: 'mail',
     title: 'General',
     email: 'hello@warmbly.com',
-    topic: 'Anything that does not fit one of the inboxes below.',
+    topic: 'Anything that does not fit the sales inbox. Account questions, partnerships, feedback, or simply saying hello.',
     sla: 'within 1 business day',
   },
   {
     icon: 'send',
     title: 'Sales',
     email: 'sales@warmbly.com',
-    topic: 'Custom plans, dedicated workers, BYOK, SSO, volume pricing.',
+    topic: 'Custom plans, dedicated workers, BYOK, SSO, volume pricing, and procurement questions.',
     sla: 'within 4 business hours',
-  },
-  {
-    icon: 'shield',
-    title: 'Security',
-    email: 'security@warmbly.com',
-    topic: 'Vulnerability reports, coordinated disclosure, security pack.',
-    sla: 'within 24 hours',
-  },
-  {
-    icon: 'cog',
-    title: 'Support',
-    email: 'support@warmbly.com',
-    topic: 'Existing customers. Please email from your workspace owner address.',
-    sla: 'within 1 business day',
-  },
-  {
-    icon: 'webhook',
-    title: 'API',
-    email: 'api@warmbly.com',
-    topic: 'API quotas, integration partnerships, SDK contributions.',
-    sla: 'within 2 business days',
-  },
-  {
-    icon: 'star',
-    title: 'Press',
-    email: 'press@warmbly.com',
-    topic: 'Media inquiries, brand assets, founder availability.',
-    sla: 'within 2 business days',
   },
 ];
 
@@ -79,7 +51,7 @@ const steps = [
   {
     n: '02',
     title: 'We route',
-    body: 'The owning team picks it up. Security, sales, and support each have their own rotation.',
+    body: 'The owning team picks it up. General and sales each have their own rotation, so the right person reads it first.',
   },
   {
     n: '03',
@@ -98,14 +70,14 @@ const faqs = [
     a: 'Within four business hours, usually faster. Business hours are 09:00 to 18:00 US Eastern, Monday through Friday, excluding US federal holidays.',
   },
   {
-    q: 'Where do I report a security issue?',
-    a: 'Email security@warmbly.com. For sensitive reports include a PGP key request in your first message and we will send ours back. We acknowledge within 24 hours.',
+    q: 'Are you hiring?',
+    a: 'Sometimes. Open roles are listed on the careers page when they exist. If nothing is posted but you think you would be a strong fit, send a note to hello@warmbly.com with a short pitch and a link to your work.',
   },
 ];
 ---
 <Layout
   title="Contact · Warmbly"
-  description="Reach sales, support, security, or the team. One inbox per topic, with published response times."
+  description="Reach the team or sales directly. Two inboxes, one owner each, with published response times."
 >
   <!-- =====================================================
        HERO · Split postcard

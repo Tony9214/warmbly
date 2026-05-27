@@ -281,13 +281,20 @@ function active(match?: string) {
     // both the trigger and the panel. Avoids the fixed-positioning
     // mouseleave quirks that caused the panel to flicker shut as soon
     // as the cursor entered it.
-    var wrappers = document.querySelectorAll('[data-mega]');
+    var wrappers = Array.prototype.slice.call(document.querySelectorAll('[data-mega]'));
+    var bag = [];
     wrappers.forEach(function (wrapper) {
       var panel = wrapper.querySelector('.mega-panel');
       if (!panel) return;
-      var closeTimer = null;
-      var moveHandler = null;
-      var isOpen = false;
+
+      var entry = {
+        wrapper: wrapper,
+        panel: panel,
+        closeTimer: null,
+        moveHandler: null,
+        isOpen: false,
+        forceClose: null,
+      };
 
       function insideRect(x, y, el, padTop) {
         if (!el) return false;
@@ -301,10 +308,30 @@ function active(match?: string) {
         return el === panel ? insideRect(x, y, el, 40) : insideRect(x, y, el, 0);
       }
 
+      function detachMoveHandler() {
+        if (entry.moveHandler) {
+          document.removeEventListener('mousemove', entry.moveHandler);
+          entry.moveHandler = null;
+        }
+      }
+
+      function forceClose() {
+        if (entry.closeTimer) { clearTimeout(entry.closeTimer); entry.closeTimer = null; }
+        detachMoveHandler();
+        entry.isOpen = false;
+        wrapper.classList.remove('open');
+        panel.classList.remove('open');
+      }
+      entry.forceClose = forceClose;
+
       function open() {
-        if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-        if (isOpen) return;
-        isOpen = true;
+        // Synchronously close any other mega panel so only one is ever visible.
+        for (var i = 0; i < bag.length; i++) {
+          if (bag[i] !== entry) bag[i].forceClose();
+        }
+        if (entry.closeTimer) { clearTimeout(entry.closeTimer); entry.closeTimer = null; }
+        if (entry.isOpen) return;
+        entry.isOpen = true;
         wrapper.classList.add('open');
         panel.classList.add('open');
         // Stagger-animate cards on each open
@@ -320,30 +347,27 @@ function active(match?: string) {
           }, 40 + i * 32);
         });
         // Track cursor globally so we know when to close
-        if (!moveHandler) {
-          moveHandler = function (e) {
-            if (closeTimer) return; // already scheduled
+        if (!entry.moveHandler) {
+          entry.moveHandler = function (e) {
+            if (entry.closeTimer) return; // already scheduled
             if (!inside(e.clientX, e.clientY, wrapper) && !inside(e.clientX, e.clientY, panel)) {
               scheduleClose();
             }
           };
-          document.addEventListener('mousemove', moveHandler);
+          document.addEventListener('mousemove', entry.moveHandler);
         }
       }
       function scheduleClose() {
-        if (closeTimer) clearTimeout(closeTimer);
-        closeTimer = setTimeout(function () {
-          isOpen = false;
+        if (entry.closeTimer) clearTimeout(entry.closeTimer);
+        entry.closeTimer = setTimeout(function () {
+          entry.isOpen = false;
           wrapper.classList.remove('open');
           panel.classList.remove('open');
-          if (moveHandler) {
-            document.removeEventListener('mousemove', moveHandler);
-            moveHandler = null;
-          }
+          detachMoveHandler();
         }, 180);
       }
       function cancelClose() {
-        if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+        if (entry.closeTimer) { clearTimeout(entry.closeTimer); entry.closeTimer = null; }
       }
 
       wrapper.addEventListener('mouseenter', open);
@@ -354,16 +378,14 @@ function active(match?: string) {
       wrapper.addEventListener('focusout', function (e) {
         if (!wrapper.contains(e.relatedTarget)) scheduleClose();
       });
+
+      bag.push(entry);
     });
 
     // Close on Escape (global, all panels)
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
-      wrappers.forEach(function (w) {
-        w.classList.remove('open');
-        var p = w.querySelector('.mega-panel');
-        if (p) p.classList.remove('open');
-      });
+      bag.forEach(function (entry) { entry.forceClose(); });
     });
 
     // If the header is rendered "on sky", flip it to solid once the hero's
