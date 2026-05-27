@@ -112,119 +112,111 @@ const faq = [
   <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
     <div class="container-page">
       <div class="rounded-[16px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
-        <!-- Window chrome -->
-        <div class="px-5 py-3 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex items-center gap-3">
-          <div class="flex items-center gap-1.5">
-            <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
-          </div>
-          <div class="text-[11.5px] font-mono text-muted-foreground truncate">
-            app.warmbly.com / deals / stratech-fy26-q2
-          </div>
-        </div>
-
         <!-- Deal header -->
-        <div class="px-7 py-5 border-b border-[color:var(--border)] grid lg:grid-cols-[1fr_auto] gap-4 items-baseline">
+        <div class="px-8 py-6 border-b border-[color:var(--border)] grid lg:grid-cols-[1fr_auto] gap-6 items-center">
           <div>
-            <div class="flex items-baseline gap-3 flex-wrap">
-              <h3 class="text-[22px] md:text-[26px] font-semibold tracking-[-0.02em] text-heading">Stratech</h3>
+            <div class="flex items-center gap-3 flex-wrap">
+              <span class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Deal</span>
+              <span class="text-[10.5px] font-mono text-muted-foreground/70">DEAL-2026-0184</span>
+            </div>
+            <h3 class="mt-2 text-[24px] md:text-[28px] font-semibold tracking-[-0.025em] text-heading leading-[1.1]">
+              Stratech
+            </h3>
+            <div class="mt-2 flex items-center gap-2.5 flex-wrap">
               <span class="inline-flex items-center gap-1.5 h-6 px-2 rounded-full bg-amber-50 text-amber-700 text-[11px] font-medium font-mono uppercase tracking-[0.08em]">
                 <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
                 Negotiation
               </span>
-              <span class="text-[11.5px] font-mono text-muted-foreground">DEAL-2026-0184</span>
-            </div>
-            <div class="mt-1.5 text-[12.5px] text-foreground/60 font-mono">
-              Primary contact: Rowan Cole · rowan@stratech.io
+              <span class="text-[12.5px] text-foreground/60">Rowan Cole · VP Platform</span>
             </div>
           </div>
-          <div class="flex items-baseline gap-6">
+          <div class="grid grid-cols-3 gap-x-8 gap-y-1 text-right">
             <div>
-              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Value</div>
+              <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Value</div>
               <div class="mt-1 text-[24px] font-semibold tracking-[-0.02em] text-heading font-mono">$45k</div>
             </div>
             <div>
-              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Close</div>
-              <div class="mt-1 text-[14px] font-medium text-heading font-mono">Jun 30</div>
+              <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Close</div>
+              <div class="mt-1 text-[14px] font-medium text-heading font-mono pt-1.5">Jun 30</div>
             </div>
             <div>
-              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Weighted</div>
-              <div class="mt-1 text-[14px] font-medium text-heading font-mono">$27k · 60%</div>
+              <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Weighted</div>
+              <div class="mt-1 text-[14px] font-medium text-heading font-mono pt-1.5">$27k</div>
             </div>
           </div>
         </div>
 
         <!-- Body: 2-column (fields | activity) -->
-        <div class="grid lg:grid-cols-[280px_1fr]">
-          <!-- LEFT: deal fields + contact -->
-          <aside class="border-b lg:border-b-0 lg:border-r border-[color:var(--border)] p-7 bg-[color:var(--surface-1)]/30">
-            <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">Fields</div>
-            <div class="space-y-2.5">
-              {dealFields.map(([k, v]) => (
-                <div class="grid grid-cols-[100px_1fr] gap-3 items-baseline text-[12.5px]">
-                  <div class="text-foreground/55">{k}</div>
-                  <div class="text-foreground font-mono">{v}</div>
-                </div>
-              ))}
+        <div class="grid lg:grid-cols-[300px_1fr]">
+          <!-- LEFT: fields + contact -->
+          <aside class="border-b lg:border-b-0 lg:border-r border-[color:var(--border)] flex flex-col bg-[color:var(--surface-1)]/30">
+            <!-- Fields block -->
+            <div class="p-7">
+              <div class="text-[10px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-4">Fields</div>
+              <dl class="space-y-3 text-[12.5px]">
+                {dealFields.map(([k, v]) => (
+                  <div class="flex items-baseline justify-between gap-3">
+                    <dt class="text-foreground/55">{k}</dt>
+                    <dd class="text-foreground font-mono">{v}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
 
-            <div class="mt-7 pt-5 border-t border-[color:var(--border)]">
-              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">Contact</div>
+            <!-- Contact block -->
+            <div class="px-7 py-6 border-t border-[color:var(--border)]">
+              <div class="text-[10px] uppercase tracking-[0.22em] font-mono text-muted-foreground mb-4">Primary contact</div>
               <div class="flex items-center gap-3">
-                <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 inline-flex items-center justify-center text-[12px] font-semibold shrink-0">RC</div>
-                <div class="min-w-0">
-                  <div class="text-[13.5px] font-semibold text-heading truncate">Rowan Cole</div>
-                  <div class="text-[11.5px] font-mono text-foreground/60 truncate">VP Platform · Stratech</div>
+                <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 inline-flex items-center justify-center text-[13px] font-semibold shrink-0">RC</div>
+                <div class="min-w-0 flex-1">
+                  <div class="text-[14px] font-semibold text-heading truncate">Rowan Cole</div>
+                  <div class="text-[11.5px] text-foreground/55 truncate">VP Platform · Stratech</div>
                 </div>
               </div>
-              <div class="mt-3 text-[12px] font-mono text-foreground/65 break-all">rowan@stratech.io</div>
-              <div class="mt-1 text-[12px] font-mono text-foreground/65">+1 415 555 0162</div>
+              <div class="mt-4 space-y-1.5 text-[12px] font-mono text-foreground/65">
+                <div class="truncate">rowan@stratech.io</div>
+                <div>+1 415 555 0162</div>
+              </div>
               <div class="mt-3 flex flex-wrap gap-1.5">
-                {['enterprise', 'platform-engineer', 'q2-list'].map((tag) => (
-                  <span class="inline-flex items-center h-5 px-1.5 rounded text-[10.5px] font-mono bg-white ring-1 ring-[color:var(--border)] text-foreground/70">{tag}</span>
+                {['enterprise', 'platform', 'q2-list'].map((tag) => (
+                  <span class="inline-flex items-center h-5 px-1.5 rounded text-[10.5px] font-mono bg-white ring-1 ring-[color:var(--border)] text-foreground/65">{tag}</span>
                 ))}
               </div>
             </div>
 
-            <div class="mt-7 pt-5 border-t border-[color:var(--border)] flex items-center gap-2">
-              <button type="button" class="inline-flex h-8 px-3 rounded-[8px] bg-foreground text-background text-[12px] font-semibold hover:bg-[#1f2937] transition-colors">Log activity</button>
-              <button type="button" class="inline-flex h-8 px-3 rounded-[8px] ring-1 ring-[color:var(--border)] text-foreground text-[12px] hover:bg-white transition-colors">Add task</button>
+            <!-- Actions: full-width, clean -->
+            <div class="mt-auto p-7 border-t border-[color:var(--border)] grid grid-cols-2 gap-2">
+              <button type="button" class="inline-flex justify-center items-center h-9 px-3 rounded-[8px] bg-foreground text-background text-[12.5px] font-semibold hover:bg-[#1f2937] transition-colors">Log activity</button>
+              <button type="button" class="inline-flex justify-center items-center h-9 px-3 rounded-[8px] bg-white ring-1 ring-[color:var(--border)] text-foreground text-[12.5px] font-medium hover:bg-[color:var(--surface-2)] transition-colors">Add task</button>
             </div>
           </aside>
 
           <!-- RIGHT: activity timeline -->
-          <div class="p-7">
-            <div class="flex items-baseline justify-between mb-4">
-              <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Activity · last 14 days</div>
-              <div class="flex items-center gap-3 text-[10.5px] font-mono text-muted-foreground">
-                <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-emerald-500"></span>positive</span>
-                <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-violet-500"></span>meeting</span>
-                <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-sky-500"></span>stage</span>
-              </div>
+          <div class="p-7 md:p-8">
+            <div class="flex items-baseline justify-between mb-5">
+              <div class="text-[10px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Activity · last 14 days</div>
+              <div class="text-[11px] font-mono text-muted-foreground">{dealActivity.length} events</div>
             </div>
 
-            <!-- Timeline -->
             <ol class="relative">
-              <div class="absolute left-[15px] top-3 bottom-3 w-px bg-[color:var(--border)]"></div>
+              <div class="absolute left-[15px] top-2 bottom-2 w-px bg-[color:var(--border)]"></div>
               {dealActivity.map((a) => {
                 const k = activityKind(a.type);
                 return (
-                  <li class="relative grid grid-cols-[32px_1fr] gap-4 py-3.5">
-                    <span class={`relative z-10 w-8 h-8 rounded-full bg-white ring-1 ring-[color:var(--border)] inline-flex items-center justify-center text-foreground/75`}>
+                  <li class="relative grid grid-cols-[32px_1fr_auto] gap-4 py-3.5 items-baseline">
+                    <span class="relative z-10 w-8 h-8 rounded-full bg-white ring-1 ring-[color:var(--border)] inline-flex items-center justify-center text-foreground/65 self-start">
                       <Icon name={k.icon} size={13} />
                     </span>
                     <div>
                       <div class="flex items-baseline gap-2 flex-wrap">
                         <span class={`inline-flex items-center gap-1 h-4.5 px-1.5 rounded text-[10px] font-medium font-mono uppercase tracking-[0.08em] ${k.chip}`}>
-                          <span class={`w-1 h-1 rounded-full ${k.dot}`}></span>
                           {a.type}
                         </span>
                         <span class="text-[11px] font-mono text-foreground/55">{a.who}</span>
-                        <span class="text-[11px] font-mono text-muted-foreground/70 ml-auto">{a.t}</span>
                       </div>
-                      <p class="mt-1 text-[13.5px] text-foreground/80 leading-snug">{a.body}</p>
+                      <p class="mt-1.5 text-[13.5px] text-foreground/80 leading-snug">{a.body}</p>
                     </div>
+                    <span class="text-[10.5px] font-mono text-muted-foreground/70 whitespace-nowrap self-start pt-1">{a.t}</span>
                   </li>
                 );
               })}
@@ -232,9 +224,9 @@ const faq = [
           </div>
         </div>
 
-        <div class="px-5 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+        <div class="px-8 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
           <span>Two-way sync · HubSpot · Salesforce · Pipedrive</span>
-          <span>Webhook → CRM · 200 OK</span>
+          <span>Activity logged via webhook</span>
         </div>
       </div>
     </div>
