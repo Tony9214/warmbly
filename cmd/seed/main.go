@@ -118,11 +118,11 @@ func seedBaseline(ctx context.Context, pool *pgxpool.Pool) error {
 	// stack has no mailboxes to test campaigns or warmup against, which
 	// is what `make seed` users hit immediately after `make up`.
 	devAccounts := []struct {
-		id         uuid.UUID
-		email      string
-		name       string
-		warmupTag  string
-		poolType   string
+		id        uuid.UUID
+		email     string
+		name      string
+		warmupTag string
+		poolType  string
 	}{
 		{uuid.MustParse("33333333-0000-0000-0000-0000dddd0001"), "dev.send@warmbly.test", "Dev Sender", "dev-warmup-a", "premium"},
 		{uuid.MustParse("33333333-0000-0000-0000-0000dddd0002"), "dev.outbound@warmbly.test", "Dev Outbound", "dev-warmup-b", "premium"},

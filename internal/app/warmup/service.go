@@ -74,10 +74,10 @@ type Service interface {
 }
 
 type service struct {
-	repo            repository.WarmupRepository
-	emailRepo       repository.EmailRepository
-	webhooks        WebhookDispatcher
-	now             func() time.Time
+	repo      repository.WarmupRepository
+	emailRepo repository.EmailRepository
+	webhooks  WebhookDispatcher
+	now       func() time.Time
 }
 
 func NewService(repo repository.WarmupRepository) Service {

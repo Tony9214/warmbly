@@ -8,10 +8,10 @@ import (
 
 func TestAdjustmentFor(t *testing.T) {
 	tests := []struct {
-		name             string
-		state            models.WarmupHealthState
-		wantVolMult      float64
-		wantWaitMult     float64
+		name         string
+		state        models.WarmupHealthState
+		wantVolMult  float64
+		wantWaitMult float64
 	}{
 		{"healthy", models.WarmupHealthHealthy, 1.0, 1.0},
 		{"watch", models.WarmupHealthWatch, 0.7, 1.5},

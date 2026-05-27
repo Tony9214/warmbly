@@ -18,23 +18,23 @@ const (
 	WebhookEventEmailAccountRemoved   WebhookEventType = "email_account.removed"
 
 	// Campaign send pipeline
-	WebhookEventCampaignEmailSent     WebhookEventType = "campaign.email_sent"
+	WebhookEventCampaignEmailSent      WebhookEventType = "campaign.email_sent"
 	WebhookEventCampaignEmailDelivered WebhookEventType = "campaign.email_delivered"
-	WebhookEventCampaignEmailOpened   WebhookEventType = "campaign.email_opened"
-	WebhookEventCampaignEmailClicked  WebhookEventType = "campaign.email_clicked"
-	WebhookEventCampaignEmailBounced  WebhookEventType = "campaign.email_bounced"
-	WebhookEventCampaignReplyReceived WebhookEventType = "campaign.reply_received"
-	WebhookEventCampaignUnsubscribed  WebhookEventType = "campaign.unsubscribed"
-	WebhookEventCampaignStarted       WebhookEventType = "campaign.started"
-	WebhookEventCampaignPaused        WebhookEventType = "campaign.paused"
-	WebhookEventCampaignCompleted     WebhookEventType = "campaign.completed"
+	WebhookEventCampaignEmailOpened    WebhookEventType = "campaign.email_opened"
+	WebhookEventCampaignEmailClicked   WebhookEventType = "campaign.email_clicked"
+	WebhookEventCampaignEmailBounced   WebhookEventType = "campaign.email_bounced"
+	WebhookEventCampaignReplyReceived  WebhookEventType = "campaign.reply_received"
+	WebhookEventCampaignUnsubscribed   WebhookEventType = "campaign.unsubscribed"
+	WebhookEventCampaignStarted        WebhookEventType = "campaign.started"
+	WebhookEventCampaignPaused         WebhookEventType = "campaign.paused"
+	WebhookEventCampaignCompleted      WebhookEventType = "campaign.completed"
 
 	// Warmup
-	WebhookEventWarmupEmailSent        WebhookEventType = "warmup.email_sent"
-	WebhookEventWarmupHealthChanged    WebhookEventType = "warmup.health_changed"
-	WebhookEventWarmupPlacementInSpam  WebhookEventType = "warmup.placement_in_spam"
-	WebhookEventWarmupQuarantined      WebhookEventType = "warmup.quarantined"
-	WebhookEventWarmupBlocked          WebhookEventType = "warmup.blocked"
+	WebhookEventWarmupEmailSent       WebhookEventType = "warmup.email_sent"
+	WebhookEventWarmupHealthChanged   WebhookEventType = "warmup.health_changed"
+	WebhookEventWarmupPlacementInSpam WebhookEventType = "warmup.placement_in_spam"
+	WebhookEventWarmupQuarantined     WebhookEventType = "warmup.quarantined"
+	WebhookEventWarmupBlocked         WebhookEventType = "warmup.blocked"
 
 	// Deliverability
 	WebhookEventDeliverabilityBounce    WebhookEventType = "deliverability.bounce"

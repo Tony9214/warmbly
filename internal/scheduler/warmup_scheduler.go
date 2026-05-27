@@ -17,7 +17,7 @@ var poolTypesForHealthLookup = []string{"premium", "free"}
 // current state instead of carrying it on the task payload, so a state
 // change takes effect on the next reschedule without any plumbing.
 type healthAdjustment struct {
-	volumeMultiplier float64 // applied to target_volume
+	volumeMultiplier  float64 // applied to target_volume
 	minWaitMultiplier float64 // applied to MinWaitTime between sends
 }
 
