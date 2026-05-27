@@ -90,127 +90,179 @@ const faq = [
   </section>
 
   <!-- ============================================================
-       LIVE INBOX MOCK · floating product view (unique)
+       UNIBOX MOCK · mirrors the actual product (ConversationList +
+       ThreadView). No app shell, no URL chrome.
   ============================================================ -->
   <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
     <div class="container-page">
-      <div class="rounded-[16px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
-        <!-- Window chrome -->
-        <div class="px-5 py-3 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex items-center gap-3">
-          <div class="flex items-center gap-1.5">
-            <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
-          </div>
-          <div class="text-[11.5px] font-mono text-muted-foreground">app.warmbly.com / inbox</div>
-          <div class="ml-auto flex items-center gap-3 text-[11.5px] font-mono text-muted-foreground">
-            <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span>live · 8 mailboxes</span>
-          </div>
-        </div>
-
-        <!-- 3-pane layout: filters | thread list | preview -->
-        <div class="grid md:grid-cols-[180px_1fr] lg:grid-cols-[180px_1.4fr_1.2fr]">
-          <!-- LEFT: filters / classification chips -->
-          <aside class="border-b md:border-b-0 md:border-r border-[color:var(--border)] bg-[color:var(--surface-1)]/40 p-5">
-            <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">All mailboxes</div>
-            <ul class="space-y-1 text-[12.5px]">
-              <li class="flex items-center justify-between px-2 py-1.5 rounded bg-white ring-1 ring-[color:var(--sky-2)]">
-                <span class="font-medium text-[#0369a1]">Inbox</span>
-                <span class="font-mono text-[11px] text-[#0284c7]">412</span>
-              </li>
-              {[
-                ['Awaiting reply', 64],
-                ['Snoozed', 21],
-                ['Assigned to me', 18],
-                ['Suppressed', '—'],
-              ].map(([k, v]) => (
-                <li class="flex items-center justify-between px-2 py-1.5 rounded hover:bg-white text-foreground/75">
-                  <span>{k}</span>
-                  <span class="font-mono text-[11px] text-muted-foreground">{v}</span>
-                </li>
-              ))}
-            </ul>
-
-            <div class="mt-5 pt-5 border-t border-[color:var(--border)]">
-              <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">Classification</div>
-              <ul class="space-y-1 text-[12.5px]">
-                {classifications.map((c) => {
-                  const t = toneClass(c.tone);
-                  return (
-                    <li class="flex items-center justify-between px-2 py-1.5 rounded hover:bg-white">
-                      <span class="inline-flex items-center gap-1.5 text-foreground/75">
-                        <span class={`w-1.5 h-1.5 rounded-full ${t.dot}`}></span>
-                        {c.label}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
+      <div class="rounded-[14px] bg-white ring-1 ring-slate-200 overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)] h-[600px]">
+        <div class="grid grid-cols-[340px_minmax(0,1fr)] h-full">
+          <!-- ===== LEFT: ConversationList ===== -->
+          <div class="flex flex-col border-r border-slate-200 min-h-0">
+            <!-- SectionBar -->
+            <div class="h-9 px-3 border-b border-slate-200 flex items-center gap-2 shrink-0">
+              <span class="text-[11px] font-medium text-slate-700">Inbox</span>
+              <span class="font-mono text-[10px] tabular-nums text-sky-600">7</span>
+              <button type="button" class="ml-auto size-6 rounded text-slate-400 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center" aria-label="Advanced filters">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>
+              </button>
             </div>
-          </aside>
 
-          <!-- MIDDLE: thread list -->
-          <ul class="divide-y divide-[color:var(--border)] lg:border-r border-[color:var(--border)]">
-            {threads.map((t, i) => {
-              const c = classifications[t.cls];
-              const cs = toneClass(c.tone);
-              const isOpen = i === 0;
-              return (
-                <li class={`grid grid-cols-[36px_minmax(0,1fr)_auto] gap-3 px-4 py-3 cursor-pointer ${isOpen ? 'bg-[color:var(--sky-1)]/50' : 'hover:bg-[color:var(--surface-1)]'}`}>
-                  <div class={`w-8 h-8 rounded-full ${cs.bg} ${cs.text} inline-flex items-center justify-center text-[11.5px] font-semibold shrink-0 self-start`}>
-                    {t.from.split(' ').map((w) => w[0]).join('').slice(0, 2)}
-                  </div>
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <span class={`text-[13px] font-semibold truncate ${isOpen ? 'text-[#0369a1]' : 'text-heading'}`}>{t.from}</span>
-                      <span class={`inline-flex items-center gap-1 h-4 px-1 rounded text-[9.5px] font-medium ${cs.chip}`}>
-                        <span class={`w-1 h-1 rounded-full ${cs.dot}`}></span>
-                        {c.label}
-                      </span>
+            <!-- Search + quick filters -->
+            <div class="px-3 py-2 shrink-0 border-b border-slate-200 space-y-2">
+              <div class="h-7 px-2.5 rounded-md bg-slate-50 ring-1 ring-slate-200 flex items-center gap-2 text-[11.5px] text-slate-400">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <span>Search subject…</span>
+              </div>
+              <div class="flex items-center gap-0.5">
+                {[
+                  { id: 'all', label: 'All', active: true },
+                  { id: 'unread', label: 'Unread', active: false, count: 7 },
+                  { id: 'today', label: 'Today', active: false },
+                  { id: 'week', label: 'This week', active: false },
+                ].map((f) => (
+                  <button type="button" class={`shrink-0 h-6 px-2 rounded text-[11.5px] font-medium transition-colors inline-flex items-center gap-1 ${f.active ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}>
+                    {f.label}
+                    {f.count !== undefined && <span class={`font-mono tabular-nums text-[10px] ${f.active ? 'text-white/80' : 'text-sky-600'}`}>{f.count}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <!-- Conversation list -->
+            <div class="flex-1 overflow-y-auto divide-y divide-slate-200/60">
+              {threads.map((t, i) => {
+                const isSelected = i === 0;
+                const unread = i < 4;
+                const initials = t.from.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+                return (
+                  <button type="button" class={`group w-full text-left px-3 py-2.5 transition-colors flex items-start gap-2.5 relative ${isSelected ? 'bg-sky-50/80' : 'hover:bg-slate-50/80'}`}>
+                    {unread && <span aria-hidden class="absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-r bg-sky-500"></span>}
+                    <div class={`size-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-semibold ${isSelected ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {initials}
                     </div>
-                    <div class="text-[12.5px] text-foreground/85 truncate">{t.sub}</div>
-                    <div class="text-[11px] text-muted-foreground truncate font-mono">{t.mailbox}</div>
-                  </div>
-                  <div class="text-[10.5px] text-muted-foreground self-start pt-1 font-mono">{t.time}</div>
-                </li>
-              );
-            })}
-          </ul>
-
-          <!-- RIGHT: preview pane for the open thread (hidden < lg) -->
-          <div class="hidden lg:flex flex-col bg-[color:var(--surface-1)]/30">
-            <div class="px-5 py-4 border-b border-[color:var(--border)]">
-              <div class="flex items-center justify-between mb-2">
-                <span class="inline-flex items-center gap-1 h-5 px-1.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700">
-                  <span class="w-1 h-1 rounded-full bg-emerald-500"></span>
-                  Positive
-                </span>
-                <span class="text-[10.5px] font-mono text-muted-foreground">2m ago · ben@acme.com</span>
-              </div>
-              <div class="text-[14px] font-semibold text-heading leading-snug">Re: Saw your demo last week, quick question on pricing</div>
-              <div class="mt-1 text-[12.5px] text-foreground/70">From Maya Chen · maya@lumenrobotics.io</div>
-            </div>
-            <div class="p-5 text-[13px] text-foreground/80 leading-relaxed flex-1">
-              <p>Hi Ben,</p>
-              <p class="mt-3">This actually maps to what we were looking at. Could you send over a proposal for ~30 seats? Want to bring it to my CFO this week.</p>
-              <p class="mt-3">— Maya</p>
-              <div class="mt-5 pt-4 border-t border-[color:var(--border)] space-y-2 text-[11px] font-mono text-muted-foreground">
-                <div class="flex items-center gap-2"><Icon name="check" size={11} class="text-emerald-600"/>auto-paused sequence acme-fy26-q2 for this contact</div>
-                <div class="flex items-center gap-2"><Icon name="check" size={11} class="text-emerald-600"/>routed to assignee · @ben</div>
-                <div class="flex items-center gap-2"><Icon name="check" size={11} class="text-emerald-600"/>posted to #sales-positive in Slack</div>
-              </div>
-            </div>
-            <div class="px-5 py-3 border-t border-[color:var(--border)] flex items-center gap-2 text-[12px]">
-              <button type="button" class="inline-flex h-8 px-3 rounded-[8px] bg-foreground text-background font-medium hover:bg-[#1f2937] transition-colors">Reply</button>
-              <button type="button" class="inline-flex h-8 px-3 rounded-[8px] ring-1 ring-[color:var(--border)] text-foreground hover:bg-white transition-colors">Snooze</button>
-              <button type="button" class="inline-flex h-8 px-3 rounded-[8px] ring-1 ring-[color:var(--border)] text-foreground hover:bg-white transition-colors">Assign</button>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-baseline justify-between gap-2">
+                        <span class={`text-[12.5px] truncate ${unread ? 'text-slate-900 font-semibold' : 'text-slate-800 font-medium'}`}>{t.from}</span>
+                        <span class="font-mono text-[10px] text-slate-400 tabular-nums shrink-0">{t.time}</span>
+                      </div>
+                      <div class="text-[12px] text-slate-700 truncate mt-0.5">{t.sub}</div>
+                      <div class="text-[11px] text-slate-400 truncate mt-0.5">{t.preview}</div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
-        </div>
 
-        <div class="px-5 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
-          <span>Cross-mailbox · 8 connected</span>
-          <span>WebSocket push · 60s sync</span>
+          <!-- ===== RIGHT: ThreadView ===== -->
+          <div class="flex flex-col bg-white min-h-0">
+            <!-- Top header bar -->
+            <div class="h-12 px-5 border-b border-slate-200 flex items-center gap-3 shrink-0">
+              <span class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">Thread</span>
+              <div class="h-4 w-px bg-slate-200"></div>
+              <span class="text-[12.5px] text-slate-900 font-medium truncate">Re: Saw your demo last week, quick question on pricing</span>
+              <div class="ml-auto flex items-center gap-1 shrink-0">
+                <button type="button" aria-label="Mark unread" class="size-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/><path d="m16 19 2 2 4-4"/></svg>
+                </button>
+                <button type="button" aria-label="Archive" class="size-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+                </button>
+                <button type="button" aria-label="Delete" class="size-7 rounded-md text-slate-500 hover:text-red-600 hover:bg-red-50 inline-flex items-center justify-center transition-colors">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Sub-header: messages + participants -->
+            <div class="h-9 px-5 border-b border-slate-200 flex items-center gap-2 shrink-0 bg-slate-50/40">
+              <span class="text-[11px] font-medium text-slate-700">3 messages</span>
+              <span class="font-mono text-[10px] tabular-nums text-sky-600">2</span>
+              <span class="ml-auto inline-flex items-center gap-1.5 h-5 px-1.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 font-mono uppercase tracking-[0.08em]">
+                <span class="w-1 h-1 rounded-full bg-emerald-500"></span>
+                positive
+              </span>
+            </div>
+
+            <!-- Thread body -->
+            <div class="flex-1 overflow-y-auto divide-y divide-slate-200/60">
+              <!-- Message 1 -->
+              <article class="px-5 py-4">
+                <div class="flex items-baseline justify-between mb-2">
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-[12.5px] font-semibold text-slate-900">Maya Chen</span>
+                    <span class="text-[11px] text-slate-400 font-mono">maya@lumenrobotics.io</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 font-mono">2m ago</span>
+                </div>
+                <div class="text-[12.5px] text-slate-800 leading-[1.65] space-y-2.5">
+                  <p>Hi Ben,</p>
+                  <p>This actually maps to what we were looking at. Could you send over a proposal for ~30 seats? Want to bring it to my CFO this week.</p>
+                  <p>— Maya</p>
+                </div>
+              </article>
+
+              <!-- Auto-action strip -->
+              <div class="px-5 py-3 bg-slate-50/60 space-y-1.5">
+                <div class="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                  <Icon name="check" size={11} class="text-emerald-600 shrink-0"/>
+                  auto-paused sequence acme-fy26-q2 for this contact
+                </div>
+                <div class="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                  <Icon name="check" size={11} class="text-emerald-600 shrink-0"/>
+                  routed to assignee · @ben
+                </div>
+                <div class="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                  <Icon name="check" size={11} class="text-emerald-600 shrink-0"/>
+                  posted to #sales-positive in Slack
+                </div>
+              </div>
+
+              <!-- Message 2 (collapsed preview) -->
+              <article class="px-5 py-3.5">
+                <div class="flex items-baseline justify-between">
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-[12.5px] font-medium text-slate-700">Ben Cole</span>
+                    <span class="text-[11px] text-slate-400 truncate">sent step 02 · soft follow-up</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 font-mono shrink-0">3d ago</span>
+                </div>
+              </article>
+
+              <!-- Message 3 (collapsed preview) -->
+              <article class="px-5 py-3.5">
+                <div class="flex items-baseline justify-between">
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-[12.5px] font-medium text-slate-700">Ben Cole</span>
+                    <span class="text-[11px] text-slate-400 truncate">sent step 01 · initial outreach</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 font-mono shrink-0">7d ago</span>
+                </div>
+              </article>
+            </div>
+
+            <!-- ReplyComposer -->
+            <div class="border-t border-slate-200 shrink-0">
+              <div class="px-5 py-3">
+                <div class="rounded-md ring-1 ring-slate-200 bg-slate-50/40 px-3 py-2 text-[12px] text-slate-400">Reply to Maya Chen…</div>
+              </div>
+              <div class="px-5 pb-3 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1">
+                  <button type="button" class="size-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors" aria-label="Attach">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                  </button>
+                  <button type="button" class="size-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors" aria-label="Template">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9.93 13.5 14.07 13.5 12 8"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-3z"/></svg>
+                  </button>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button type="button" class="h-7 px-2.5 rounded-md text-[11.5px] font-medium text-slate-700 hover:bg-slate-100 transition-colors">Save draft</button>
+                  <button type="button" class="h-7 px-3 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[11.5px] font-semibold transition-colors">Send</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
