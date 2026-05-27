@@ -17,7 +17,7 @@ type MailManager struct {
 	Emails                    map[uuid.UUID]*wmail.WMail
 	OnEvent                   func(eventType models.JobEventType, key string, body any) error
 	cache                     *cache.Cache
-	storage                   *storage.Client
+	storage                   storage.Store
 	emailMessageMapRepository repository.EmailMessageMapRepository
 	cipherService             cipher.CipherService
 }
@@ -25,7 +25,7 @@ type MailManager struct {
 func NewMailManager(
 	onEvent func(eventType models.JobEventType, key string, body any) error,
 	cache *cache.Cache,
-	storage *storage.Client,
+	storage storage.Store,
 	emailMessageMapRepository repository.EmailMessageMapRepository,
 	cipherService cipher.CipherService,
 ) *MailManager {

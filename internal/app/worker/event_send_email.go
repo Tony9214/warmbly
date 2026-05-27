@@ -7,8 +7,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"github.com/warmbly/warmbly/internal/app/worker/wmail"
@@ -106,10 +104,7 @@ func (w *WorkerService) deleteTransportEmailBody(ctx context.Context, taskID uui
 		return
 	}
 
-	if _, err := w.Storage.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: aws.String(w.Storage.Bucket),
-		Key:    aws.String(s3Key),
-	}); err != nil {
+	if err := w.Storage.Delete(ctx, s3Key); err != nil {
 		log.Warn().
 			Err(err).
 			Str("task_id", taskID.String()).
@@ -124,18 +119,15 @@ func (w *WorkerService) fetchEmailBody(ctx context.Context, userID uuid.UUID, s3
 		return "", "", fmt.Errorf("storage client not configured")
 	}
 
-	// Get object from S3
-	result, err := w.Storage.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(w.Storage.Bucket),
-		Key:    aws.String(s3Key),
-	})
+	// Get object from storage
+	body, err := w.Storage.Get(ctx, s3Key)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get S3 object: %w", err)
 	}
-	defer result.Body.Close()
+	defer body.Close()
 
 	// Read the body
-	data, err := io.ReadAll(result.Body)
+	data, err := io.ReadAll(body)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read S3 object: %w", err)
 	}
