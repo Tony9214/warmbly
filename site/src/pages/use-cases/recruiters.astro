@@ -1,28 +1,411 @@
 ---
-import UseCasePage from '../../components/UseCasePage.astro';
+import Layout from '../../layouts/Layout.astro';
+import HeroAtmosphere from '../../components/HeroAtmosphere.astro';
+import Icon from '../../components/Icon.astro';
+import CTA from '../../components/CTA.astro';
+
+// Recruiter-specific 3-step candidate sequence preview.
+// Variables expanded for one real-looking candidate. Plain text, no HTML.
+const candidate = {
+  first_name: 'Priya',
+  current_company: 'Stripe',
+  current_role: 'Staff Platform Engineer',
+  why_now: 'the new payments orchestration team you joined last quarter',
+};
+
+const sequence = [
+  {
+    day: 'Day 0',
+    label: 'First touch',
+    subject: 'Priya — quick question about your platform work',
+    body:
+`Hi Priya,
+
+I came across your work at Stripe and the new payments orchestration team you joined last quarter. The way your team is rebuilding the platform layer is exactly the problem we are hiring for at a Series B fintech (mid-stage, profitable, ~80 eng).
+
+The role is Staff Platform Engineer reporting straight to the VP Eng. Compensation is in the top quartile for the Bay Area and they are remote-friendly across NA.
+
+Would you be open to a 20-minute intro call next week to hear the details? No pitch, just context.
+
+Ben`,
+  },
+  {
+    day: 'Day 5',
+    label: 'Soft follow-up',
+    subject: 're: Priya — quick question about your platform work',
+    body:
+`Hi Priya,
+
+Looping back on this one. I know inbox volume from recruiters is heavy, so I will keep it short:
+
+- Staff Platform Engineer, Series B fintech, ~80 eng
+- Cash + equity at the top quartile of the Bay Area band
+- Remote across NA, optional hub days in SF
+- The hiring manager wrote the original payments routing layer at a company you would recognise
+
+If the timing is off, totally fine. A quick "not now" works and I will not chase.
+
+Ben`,
+  },
+  {
+    day: 'Day 12',
+    label: 'Permission close',
+    subject: 're: Priya — quick question about your platform work',
+    body:
+`Hi Priya,
+
+Last note from me on this. If now is not the moment, I will close the loop and stop reaching out.
+
+If it is worth a 20-minute conversation later in the year, reply with a month that works and I will set a reminder.
+
+Either way, thanks for the read.
+
+Ben`,
+  },
+];
+
+// "Why recruiter outreach is different" pain cards
+const pains = [
+  {
+    title: 'Heavy HTML kills reply rate',
+    body: 'Image-rich job descriptions, logos, sidebar tables and tracking pixels make a candidate email look like a careers-page newsletter. Receivers route it to Promotions.',
+  },
+  {
+    title: 'Shared inbox dilutes signal',
+    body: 'careers@ or talent@ mailboxes have no reputation of their own. Senders pile on, complaint rate accumulates, every recruiter inherits the same poor sender history.',
+  },
+  {
+    title: 'Generic templates land in Promotions',
+    body: 'When the same opening sentence is sent thousands of times across recruiters, providers fingerprint the template and route the family of messages away from the primary inbox.',
+  },
+];
+
+// Personal mailbox policy. Numbers are explicit recommendations, not measured outcomes.
+const mailboxPolicy = [
+  {
+    k: 'One mailbox per recruiter',
+    v: '1 : 1',
+    why: 'Reputation is per-mailbox. A recruiter who replies to candidates from their face builds individual sender history that travels with them.',
+  },
+  {
+    k: 'Recommended daily cap',
+    v: '30 / day',
+    why: 'The platform default is 100 / day. We recommend recruiters stay below that. Candidate domains are very fragmented and the cost of one complaint is asymmetric for a recruiter brand.',
+  },
+  {
+    k: 'Send spacing',
+    v: '600s gap',
+    why: 'The default 600s minimum gap between sends is preserved. Bursty candidate sends from one mailbox look automated to provider heuristics.',
+  },
+  {
+    k: 'Reply detection',
+    v: 'Auto-suppress',
+    why: 'Replies that match STOP, REMOVE, NOT INTERESTED, or an OOO bounce auto-suppress the candidate across every sequence in the workspace.',
+  },
+];
+
+const faq: [string, string][] = [
+  ['Why recommend 30/day per recruiter when the platform allows 100?', 'The platform default cap of 100/day exists for high-throughput sales motions where the sender already has a strong sender reputation on a narrow set of recipient domains. Recruiter outreach hits a wide, fragmented set of personal and corporate inboxes where one complaint hurts much more than it would on a B2B account list. Starting low and earning the right to ramp is the safe default.'],
+  ['Should each recruiter on the team have their own warmup?', 'Yes. Each recruiter mailbox is warmed independently inside the premium pool. Warmup uses a +1/day ramp from 10/day up to a 40/day ceiling, which is separate from the cold candidate budget.'],
+  ['Why 3 steps and not 7?', 'Candidate outreach is permission-seeking, not pipeline-building. The first or second touch is where almost every reply lands. A long sequence keeps the same low-yield message in the mailbox longer, which gives the recipient more chances to mark it as promotional or report it as spam.'],
+];
+
+// Astro JSX caveat: hoist `<` and `<=` comparisons to the frontmatter where possible.
+const tipsForRecruiters = [
+  'No image-heavy job description — link to a hosted JD page instead.',
+  'No HTML signature with logo, social links, or banner — plain text only.',
+  'No tracking pixel on candidate outreach.',
+  'Use the recruiter\'s individual mailbox, not careers@ or talent@.',
+  'Keep the first message under 90 words.',
+];
 ---
-<UseCasePage
-  pageTitle="Recruiters — Warmbly"
-  description="Personalised outreach to candidates from multiple sender mailboxes."
-  title="Candidate outreach that doesn’t end up in Promotions."
-  intro="Talent outreach is high-personalisation, low-volume per recipient — but high aggregate volume per recruiter. The same mailbox-first discipline applies."
-  challenges={[
-    { title: 'Templated personalisation', body: 'Recruiters hit save-as-template on a single message and blast it. Reply rate craters within weeks.' },
-    { title: 'Promotions tab placement', body: 'Heavy HTML, image-heavy job descriptions, “unsubscribe” footers — they all push candidate mail into Promotions.' },
-    { title: 'Shared inboxes', body: 'When several recruiters share one mailbox, reputation depends on the noisiest sender.' },
-    { title: 'No way to track placement', body: 'Recruiters guess about deliverability. Real candidates ghost; recruiters blame the candidate.' },
-  ]}
-  recipe={[
-    { title: 'Personal mailbox per recruiter', body: 'Every recruiter has their own warmed mailbox. Cold candidate outreach goes from their face, not a shared mailbox.' },
-    { title: 'Plain text', body: 'No HTML job descriptions. Link to a hosted JD instead. Reply rate jumps.' },
-    { title: 'Variable-rich personalisation', body: 'Variables for first name, current company, current role, common connections, and a “why now” snippet.' },
-    { title: 'Short sequences', body: 'Three steps maximum. Candidates respond fastest to the first or second.' },
-    { title: 'Suppression hygiene', body: 'OOO and unsubscribe replies auto-suppress. Bounce-on-reply suppresses across the whole agency workspace.' },
-  ]}
-  caps={[
-    { value: '30 / day',     label: 'Recommended cold cap per recruiter' },
-    { value: '1 / recruiter',label: 'Personal mailbox model' },
-    { value: '3 steps',      label: 'Suggested sequence depth' },
-    { value: 'Plain text',   label: 'Default content format' },
-  ]}
-/>
+<Layout
+  title="For recruiters · Warmbly"
+  description="Personalised candidate outreach from each recruiter's own mailbox. Plain text, short sequences, suppression hygiene that protects the agency brand."
+>
+  <!-- ============================================================
+       HERO · HeroAtmosphere, same as product pages
+  ============================================================ -->
+  <section class="relative isolate overflow-hidden">
+    <HeroAtmosphere />
+
+    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+      <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
+        <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">
+          Recruiters
+        </span>
+        Candidate outreach from your face, not a shared mailbox
+      </div>
+
+      <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[72px] lg:text-[80px] font-semibold tracking-[-0.04em] leading-[0.98] text-white max-w-4xl mx-auto">
+        Candidates reply<br/>to people, not pipelines.
+      </h1>
+      <p class="mt-6 text-[17px] md:text-[19px] text-white/80 max-w-2xl mx-auto leading-relaxed">
+        Per-recruiter mailboxes. Plain-text personalised outreach. Three-step sequences that respect a candidate's time and your agency's deliverability.
+      </p>
+
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register" class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-semibold bg-white hover:bg-white hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.3)] transition-all duration-200 ease-out shadow-[0_4px_14px_-2px_rgba(0,0,0,0.18)]">
+          <span style="color:#075985;">Start free trial</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+          </svg>
+        </a>
+        <a href="/learn/cold-email-rules/" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
+          What candidate outreach should look like
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FLOATING CANDIDATE SEQUENCE PREVIEW · floats up into hero
+  ============================================================ -->
+  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
+    <div class="container-page">
+      <div class="rounded-[18px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
+
+        <!-- Header strip -->
+        <div class="px-7 py-4 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex flex-wrap items-baseline justify-between gap-3">
+          <div class="flex items-baseline gap-3">
+            <div class="text-[13px] font-semibold text-heading">staff-platform-fy26-q2</div>
+            <span class="inline-flex items-center gap-1.5 h-5 px-2 rounded-full bg-[color:var(--sky-1)] text-[#0369a1] text-[10.5px] font-medium font-mono uppercase tracking-[0.08em]">
+              <span class="w-1 h-1 rounded-full bg-[#0284c7]"></span>
+              Preview · {candidate.first_name}
+            </span>
+            <span class="text-[10.5px] font-mono uppercase tracking-[0.14em] text-muted-foreground">3 steps · plain text</span>
+          </div>
+          <div class="flex items-center gap-4 text-[10.5px] font-mono text-muted-foreground">
+            <span>from: ben@vector-talent.com</span>
+            <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
+            <span>to: priya@stripe.com</span>
+          </div>
+        </div>
+
+        <!-- 3 step preview cards laid out vertically with a connecting spine -->
+        <div class="px-5 sm:px-7 py-6 md:py-8">
+          <div class="relative">
+            <div class="absolute left-[18px] top-3 bottom-3 w-px bg-[color:var(--border)]"></div>
+            <ol class="space-y-5">
+              {sequence.map((s, i) => (
+                <li class="grid grid-cols-[40px_1fr] gap-4 items-start">
+                  <!-- Day chip on the spine -->
+                  <div class="relative">
+                    <div class="relative w-9 h-9 rounded-full bg-white ring-1 ring-[color:var(--sky-2)] text-[10.5px] font-mono font-semibold text-[#0369a1] inline-flex items-center justify-center">
+                      {`0${i + 1}`}
+                    </div>
+                  </div>
+                  <div class="rounded-[12px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+                    <div class="px-5 py-2.5 bg-[color:var(--surface-1)]/60 border-b border-[color:var(--border)] flex flex-wrap items-baseline justify-between gap-2">
+                      <div class="flex items-baseline gap-3">
+                        <span class="text-[10.5px] font-mono uppercase tracking-[0.18em] text-[#0369a1] font-semibold">{s.day}</span>
+                        <span class="text-[13px] font-medium text-heading">{s.label}</span>
+                      </div>
+                      <span class="text-[10.5px] font-mono text-muted-foreground">subject: <span class="text-foreground/85">{s.subject}</span></span>
+                    </div>
+                    <pre class="px-5 py-4 text-[13px] leading-[1.65] text-foreground/85 whitespace-pre-wrap font-sans">{s.body}</pre>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          <!-- Variables expansion footer -->
+          <div class="mt-7 pt-5 border-t border-[color:var(--border)] grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-[11.5px] font-mono">
+            <div><span class="text-muted-foreground">first_name</span> <span class="text-heading">→ {candidate.first_name}</span></div>
+            <div><span class="text-muted-foreground">current_company</span> <span class="text-heading">→ {candidate.current_company}</span></div>
+            <div><span class="text-muted-foreground">current_role</span> <span class="text-heading">→ {candidate.current_role}</span></div>
+            <div><span class="text-muted-foreground">why_now</span> <span class="text-heading truncate inline-block max-w-full align-bottom">→ {candidate.why_now}</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       WHY RECRUITER OUTREACH IS DIFFERENT · 3-card row
+  ============================================================ -->
+  <section class="border-b border-[color:var(--border)] py-20 md:py-24">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Why recruiter outreach is different</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          The mailbox patterns that ruin candidate outreach.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
+          Sales and recruiting share the cold-email surface area, but recruiter mail fails for its own reasons. Each of these is a default in most ATS and CRM tooling.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-px bg-[color:var(--border)] rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
+        {pains.map((p, i) => (
+          <div class="bg-white p-7">
+            <div class="flex items-baseline justify-between mb-4">
+              <span class="text-[10.5px] font-mono uppercase tracking-[0.18em] text-rose-600 font-semibold">Anti-pattern {String(i + 1).padStart(2, '0')}</span>
+              <span class="inline-flex items-center gap-1 text-[10.5px] font-mono text-rose-700">
+                <span class="w-1 h-1 rounded-full bg-rose-500"></span>
+                avoid
+              </span>
+            </div>
+            <div class="text-[16px] font-semibold text-heading">{p.title}</div>
+            <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed">{p.body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       PERSONAL MAILBOX PER RECRUITER · sticky split with policy table
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-1)]/40 border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page grid lg:grid-cols-[1fr_1.4fr] gap-12 lg:gap-20 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">Per-recruiter mailbox</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          One recruiter.<br/>One mailbox.<br/>One reputation.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+          Each recruiter sends from their own warmed mailbox. The agency does not share a single careers@ or talent@ inbox. Reputation travels with the recruiter, not with the team.
+        </p>
+        <ul class="mt-6 space-y-2.5 text-[14px] text-foreground/85">
+          {tipsForRecruiters.map((t) => (
+            <li class="flex items-start gap-2">
+              <Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0"/>
+              <span>{t}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div class="space-y-px">
+        {mailboxPolicy.map((d, i) => (
+          <div class="grid grid-cols-[1fr_auto] gap-6 py-5 border-b border-[color:var(--border)] items-baseline">
+            <div>
+              <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">
+                {String(i + 1).padStart(2, '0')} · {d.k}
+              </div>
+              <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed max-w-lg">{d.why}</p>
+            </div>
+            <div class="text-right">
+              <div class="text-[24px] md:text-[30px] font-semibold tracking-[-0.02em] text-heading font-mono whitespace-nowrap">{d.v}</div>
+            </div>
+          </div>
+        ))}
+
+        <div class="pt-5 text-[11.5px] font-mono text-muted-foreground italic max-w-lg">
+          The 30/day figure is a recommendation, not a measured outcome. The platform enforces 100/day per mailbox by default. Recruiters can raise toward that ceiling once a mailbox has a clean complaint and bounce history.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       VARIABLE-RICH PERSONALISATION · dark code block with fallbacks
+  ============================================================ -->
+  <section class="border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page grid lg:grid-cols-[1fr_1.3fr] gap-12 lg:gap-16 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Variable-rich personalisation</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          Personalisation with explicit fallbacks.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+          A missing field never embarrasses a recruiter. Every variable in a candidate template gets a pipe-chained fallback so the message reads naturally even when enrichment fails.
+        </p>
+        <ul class="mt-6 space-y-2.5 text-[14px] text-foreground/85">
+          <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0"/><span>Pipe syntax chains multiple fallbacks per token.</span></li>
+          <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0"/><span>Custom fields on the candidate record are first-class.</span></li>
+          <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0"/><span>Linter flags any unbound token before send.</span></li>
+        </ul>
+      </div>
+
+      <div class="rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
+        <div class="flex items-center gap-2 px-4 py-2.5 bg-[#0c1224] border-b border-white/10">
+          <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
+          <span class="ml-3 text-[11.5px] font-mono text-white/60">candidate-step-01.body.txt</span>
+        </div>
+        <pre class="bg-[#0c1224] text-white/85 p-5 text-[12.5px] leading-[1.65] font-mono overflow-x-auto"><code>Hi &#123;&#123; first_name | fallback: <span style="color:#fde68a">"there"</span> &#125;&#125;,
+
+I came across your work at &#123;&#123;
+  current_company | fallback: <span style="color:#fde68a">"your current team"</span>
+&#125;&#125; and &#123;&#123;
+  custom.why_now | fallback: <span style="color:#fde68a">"the work you have been shipping"</span>
+&#125;&#125;.
+
+We are hiring for a &#123;&#123;
+  open_role | fallback: <span style="color:#fde68a">"role on the platform side"</span>
+&#125;&#125; that mirrors what you are doing as &#123;&#123;
+  current_role | fallback: <span style="color:#fde68a">"an engineer"</span>
+&#125;&#125;, reporting to the &#123;&#123;
+  hiring_manager_title | fallback: <span style="color:#fde68a">"VP Engineering"</span>
+&#125;&#125;.
+
+&#123;<span style="color:#7dd3fc">% if custom.connection %</span>&#125;
+We were both at &#123;&#123; custom.connection &#125;&#125; <span style="color:#94a3b8"># shown only when set</span>
+&#123;<span style="color:#7dd3fc">% endif %</span>&#125;
+
+Open to a 20-minute call next week?
+
+— &#123;&#123; sender.first_name &#125;&#125;
+&#123;&#123; sender.title | fallback: <span style="color:#fde68a">"Recruiter"</span> &#125;&#125; · &#123;&#123; sender.agency &#125;&#125;</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FAQ · same animated pattern as product pages, 3 questions
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-1)]/40 border-b border-[color:var(--border)] py-20 md:py-24">
+    <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Recruiter FAQ</div>
+        <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+          Three questions recruiters ask first.
+        </h2>
+      </div>
+      <div class="divide-y divide-[color:var(--border)]" data-faq>
+        {faq.map(([q, a]) => (
+          <div class="faq-row py-2">
+            <button type="button" class="faq-trigger group w-full flex items-start justify-between gap-4 py-3 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-heading group-hover:text-[#0369a1] transition-colors">{q}</span>
+              <span class="faq-icon shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-white ring-1 ring-[color:var(--border)] text-foreground/60 transition-transform duration-300 ease-out">
+                <Icon name="plus" size={12} />
+              </span>
+            </button>
+            <div class="faq-panel grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 ease-out">
+              <div class="overflow-hidden">
+                <p class="pb-4 pr-12 text-[14px] text-foreground/75 leading-relaxed max-w-2xl">{a}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <script is:inline>
+        (function () {
+          const faq = document.querySelector('[data-faq]');
+          if (!faq) return;
+          faq.querySelectorAll('.faq-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              const row   = btn.closest('.faq-row');
+              const panel = row.querySelector('.faq-panel');
+              const icon  = btn.querySelector('.faq-icon');
+              const open  = btn.getAttribute('aria-expanded') === 'true';
+              btn.setAttribute('aria-expanded', String(!open));
+              panel.style.gridTemplateRows = open ? '0fr' : '1fr';
+              if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(45deg)';
+            });
+          });
+        })();
+      </script>
+    </div>
+  </section>
+
+  <CTA
+    title="Reach candidates from your face, not a shared mailbox."
+    primaryLabel="Start free trial"
+  />
+</Layout>
