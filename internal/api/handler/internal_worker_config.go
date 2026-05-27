@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 
@@ -9,15 +11,15 @@ import (
 )
 
 // Internal worker bootstrap + config endpoints. A worker process starts with
-// a tiny 5-var envelope (WARMBLY_CONTROL_PLANE, WARMBLY_WORKER_TOKEN,
-// WARMBLY_WORKER_TAG, optional WARMBLY_BIND_IPS, WARMBLY_LOG_LEVEL) and pulls
-// the rest from here on boot:
+// a tiny envelope on disk and pulls everything else from here on boot:
 //
 //	GET  /api/v1/worker/config       -> WorkerConfig JSON
-//	POST /api/v1/worker/heartbeat    -> 204, registers an egress heartbeat
+//	POST /api/v1/worker/heartbeat    -> 204, auto-registers a new worker on
+//	                                    first contact
 //
-// Auth: shared bearer token (INTERNAL_API_TOKEN), same as the DEK endpoint.
-// Future (Task #9 follow-up): per-worker JWTs minted at registration time.
+// Auth: shared bearer token (INTERNAL_API_TOKEN). Future upgrade is per-worker
+// JWTs minted at registration time so tier comes from token claims rather
+// than the heartbeat body.
 
 type WorkerEgressConfig struct {
 	ID       uuid.UUID `json:"id"`
@@ -53,15 +55,6 @@ type WorkerConfig struct {
 	BlobStore string               `json:"blob_store_provider"`
 }
 
-// InternalWorkerConfig returns the runtime configuration for the calling
-// worker. The worker passes its identity in query params:
-//
-//	?worker_id=<uuid>&bind_ip=<ip>&tag=<freeform>
-//
-// Today this returns a single-egress config built from the same env vars
-// the backend itself uses. Once #6 (multi-egress per process) is fully
-// wired the response will include all egresses assigned to this physical
-// box, including any IP rotation events scheduled by the control plane.
 func (h *Handler) InternalWorkerConfig(c *gin.Context) {
 	idParam := c.Query("worker_id")
 	id, err := uuid.Parse(idParam)
@@ -103,12 +96,45 @@ func (h *Handler) InternalWorkerConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, cfg)
 }
 
-// InternalWorkerHeartbeat records that a worker / egress is alive. Body is
-// optional; query params identify the egress.
+// HeartbeatPayload is what a worker sends on every heartbeat. The first
+// heartbeat from an unknown WorkerID triggers auto-registration in the
+// workers table; subsequent heartbeats just refresh last_seen.
+type HeartbeatPayload struct {
+	WorkerID   string `json:"worker_id"`
+	BindIP     string `json:"bind_ip"`
+	Tier       string `json:"tier,omitempty"`         // shared_free | shared_premium | dedicated
+	EgressKind string `json:"egress_kind,omitempty"`  // cold_smtp | oauth_api | warmup_only
+}
+
 func (h *Handler) InternalWorkerHeartbeat(c *gin.Context) {
-	// Heartbeat persistence happens through the existing worker repository.
-	// Stubbed here — wire to repository.WorkerRepository.UpdateHeartbeat once
-	// the egress data model lands fully (Task #6 follow-up).
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
+		return
+	}
+	var p HeartbeatPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "decode body"})
+		return
+	}
+	id, err := uuid.Parse(p.WorkerID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid worker_id required"})
+		return
+	}
+	if p.BindIP == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bind_ip required"})
+		return
+	}
+	if h.WorkerRepo == nil {
+		// Worker repository not wired (e.g. tests). Treat as 204 noop.
+		c.Status(http.StatusNoContent)
+		return
+	}
+	if err := h.WorkerRepo.UpsertOnHeartbeat(c.Request.Context(), id, p.BindIP, p.Tier, p.EgressKind); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.Status(http.StatusNoContent)
 }
 
