@@ -19,7 +19,10 @@ import (
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
+	"github.com/warmbly/warmbly/internal/infrastructure/codec"
 	"github.com/warmbly/warmbly/internal/infrastructure/dynamo"
+	"github.com/warmbly/warmbly/internal/infrastructure/encryptedkeys"
+	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
@@ -75,7 +78,7 @@ func main() {
 		masterKey += "-dev"
 	}
 
-	kmsClient, err := kms.New(ctx, awscfg, masterKey)
+	kmsClient, err := kms.FromEnv(ctx, awscfg, masterKey)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -85,8 +88,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	userEncryptedKeysRepo := repository.NewUserEncryptedKeysRepository(kmsClient, dynamoDB)
-	cipherService := cipher.NewService(kmsClient, redisCache, userEncryptedKeysRepo)
+	encryptedKeys, err := encryptedkeys.FromEnv(
+		encryptedkeys.Deps{DB: primaryDB, Dynamo: dynamoDB},
+		"postgres",
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	cipherService := cipher.NewService(kmsClient, redisCache, encryptedKeys)
 
 	// S3
 	s3Client, err := storage.NewClient(ctx, awscfg, "main")
@@ -188,8 +197,16 @@ func main() {
 		warmupService,
 	)
 
-	// Events publisher
-	eventsPublisher := events.NewPublisher(kafkaProducer, s3Client, avrov2Client, cipherService)
+	// Events publisher — wraps the existing Kafka producer in an EventBus,
+	// wraps Avrov2 in a Codec. Once EVENTBUS_PROVIDER=nats is exercised in
+	// prod, the kafkaProducer construction above can be deleted in favor of
+	// constructing the bus via eventbus.FromEnv.
+	consumerBus := eventbus.NewKafkaFromProducer(kafkaProducer, eventbus.KafkaConfig{
+		Bootstrap: kafkaBootstrapServers,
+		SASL:      kafkaSaslConfig,
+	})
+	consumerCodec := codec.NewAvroFromClient(avrov2Client)
+	eventsPublisher := events.NewPublisher(consumerBus, s3Client, consumerCodec, cipherService)
 
 	// JobsService
 	jobsService := &jobs.JobsService{

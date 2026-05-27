@@ -45,12 +45,16 @@ import (
 	"github.com/warmbly/warmbly/internal/app/user"
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/app/worker"
+	"github.com/warmbly/warmbly/internal/app/settings"
 	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
+	"github.com/warmbly/warmbly/internal/infrastructure/codec"
 	"github.com/warmbly/warmbly/internal/infrastructure/dynamo"
+	"github.com/warmbly/warmbly/internal/infrastructure/encryptedkeys"
+	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
@@ -88,6 +92,8 @@ func main() {
 	var socketService socket.SocketService
 	var uniboxService unibox.UniboxService
 	var cipherService cipher.CipherService
+	var encryptedKeys encryptedkeys.Store
+	var storageBackendRepo repository.StorageBackendRepository
 	var tasksService tasks.TasksService
 	var advancedService advanced.Service
 
@@ -186,7 +192,7 @@ func main() {
 			masterKey += "-dev"
 		}
 
-		kms, err := kms.New(ctx, awscfg, masterKey)
+		kms, err := kms.FromEnv(ctx, awscfg, masterKey)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -347,18 +353,36 @@ func main() {
 			log.Fatal(err)
 		}
 
+		// Codec wraps the same Avrov2 client so EventBus payloads decode the
+		// same way regardless of transport.
+		codecImpl := codec.NewAvroFromClient(avrov2Client)
+
+		// Legacy Kafka producer still used by email + tasks services that
+		// haven't been migrated to EventBus yet. Removing this is follow-up
+		// work after the EventBus wiring stabilizes.
 		kafkaProducerConfig := kafka.NewProducer(kafkaBootstrapServers)
 		if kafkaSaslConfig != nil {
 			kafkaProducerConfig.WithSASL(kafkaSaslConfig)
 		}
-
 		kafkaProducer, err := kafkaProducerConfig.Connect()
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
-
 		kafkaProducer.WithAvrov2(avrov2Client)
+
+		// Event bus. Today this is Kafka in production; flip to NATS by
+		// setting EVENTBUS_PROVIDER=nats and NATS_URL.
+		bus, err := eventbus.FromEnv(kafkaBootstrapServers, kafkaSaslConfig)
+		if err != nil {
+			sentry.CaptureException(err)
+			log.Fatal(err)
+		}
+
+		// Preserve Kafka wire format when both are Kafka-backed + Avro-coded.
+		if kbus, ok := bus.(*eventbus.KafkaBus); ok {
+			kbus.Producer().WithAvrov2(avrov2Client)
+		}
 
 		turnstileBypassToken := ""
 		if cfg.Env == "dev" {
@@ -382,7 +406,14 @@ func main() {
 		sequenceRepostory := repository.NewSequenceRepostory(primaryDB)
 		contactRepostory := repository.NewContactRepostory(primaryDB)
 		uniboxRepository := repository.NewUniboxRepository(primaryDB)
-		userEncryptedKeysRepository := repository.NewUserEncryptedKeysRepository(kms, dynamoDB)
+		encryptedKeys, err = encryptedkeys.FromEnv(
+			encryptedkeys.Deps{DB: primaryDB, Dynamo: dynamoDB},
+			"postgres",
+		)
+		if err != nil {
+			sentry.CaptureException(err)
+			log.Fatal(err)
+		}
 
 		folderRepostory := repository.NewGroupRepostory(primaryDB, models.Folders)
 		tagRepostory := repository.NewGroupRepostory(primaryDB, models.Tags)
@@ -438,7 +469,23 @@ func main() {
 			userRepostory,
 			userService,
 		)
-		cipherService = cipher.NewService(kms, cache, userEncryptedKeysRepository)
+		cipherService = cipher.NewService(kms, cache, encryptedKeys)
+
+		// Reflect the active infrastructure backends into storage_backends so
+		// the admin UI can display what's running. Read-only entries — they
+		// were chosen via env vars and changing them at runtime would orphan
+		// existing ciphertext / DEKs.
+		storageBackendRepo = repository.NewStorageBackendRepository(primaryDB)
+		settingsRegistrar := settings.NewRegistrar(storageBackendRepo)
+		if err := settingsRegistrar.RegisterAll(ctx, []settings.Backend{
+			{Kind: "kms", Provider: kms.Name(), Display: kms.Name(), ReadOnly: true},
+			{Kind: "encrypted_keys", Provider: encryptedKeys.Name(), Display: encryptedKeys.Name(), ReadOnly: true},
+			{Kind: "blob", Provider: s3.Name(), Display: s3.Name(), ReadOnly: true},
+			{Kind: "eventbus", Provider: "kafka", Display: "kafka", ReadOnly: true},
+		}); err != nil {
+			sentry.CaptureException(err)
+			log.Printf("storage_backends registrar: %v", err)
+		}
 
 		// Worker orchestrator. The env config below is the FALLBACK that gets
 		// written into /etc/warmbly/worker.env when a worker has no profile
@@ -483,7 +530,7 @@ func main() {
 		)
 		releasesService.RunBootCheck(ctx)
 
-		eventsPublisher := events.NewPublisher(kafkaProducer, s3, avrov2Client, cipherService)
+		eventsPublisher := events.NewPublisher(bus, s3, codecImpl, cipherService)
 
 		oauth2Cfg := config.LoadOauth2(apiCfg.Hostname)
 		emailService = email.NewServiceWithKafka(
@@ -649,9 +696,11 @@ func main() {
 
 		// Object storage + direct repository handles for handlers
 		// without a dedicated service layer (avatars, etc.).
-		Storage:  s3ForHandler,
-		UserRepo: userRepoForHandler,
-		OrgRepo:  organizationRepoForHandler,
+		Storage:            s3ForHandler,
+		EncryptedKeys:      encryptedKeys,
+		UserRepo:           userRepoForHandler,
+		OrgRepo:            organizationRepoForHandler,
+		StorageBackendRepo: storageBackendRepo,
 
 		// Danger zone
 		DangerZoneService: dangerZoneService,
