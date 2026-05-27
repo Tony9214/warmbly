@@ -5,11 +5,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-sasl"
 	"github.com/rs/zerolog/log"
+	"github.com/warmbly/warmbly/internal/client/netbind"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
@@ -25,6 +27,11 @@ type Client struct {
 	client *imapclient.Client
 
 	OnUpdate func(ctx context.Context, email *models.EmailMessageData) error
+
+	// BindIP optionally pins outbound TCP to a specific local source address.
+	// When nil, WORKER_BIND_IP is consulted; when still unset, the OS default
+	// route is used.
+	BindIP *net.TCPAddr
 }
 
 func (c *Client) Connect() *errx.MailError {
@@ -36,7 +43,8 @@ func (c *Client) Connect() *errx.MailError {
 		addr = fmt.Sprintf("%s:%d", c.Oauth2.Host, c.Oauth2.Port)
 	}
 
-	conn, err := tls.Dial("tcp", addr, nil)
+	dialer := netbind.TLSDialer(c.BindIP, &tls.Config{})
+	conn, err := dialer.DialContext(context.Background(), "tcp", addr)
 	if err != nil {
 		return errx.ErrMailServerUnreachable
 	}
