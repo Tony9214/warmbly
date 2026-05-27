@@ -1,145 +1,880 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import Cloud from '../components/Cloud.astro';
+import HeroAtmosphere from '../components/HeroAtmosphere.astro';
 import Icon from '../components/Icon.astro';
 import CTA from '../components/CTA.astro';
 
+// All numbers and policies on this page are drawn directly from the
+// Warmbly codebase and CLAUDE.md operational policy:
+//   internal/config/constants.go
+//   internal/scheduler/{campaign,email,warmup}_scheduler.go
+//   internal/repository/pg_warmup.go
+//   internal/repository/pg_email.go
+//   internal/app/worker/wmail/ratelimit.go
+//   internal/app/consumer/event_new_email.go
+//   internal/infrastructure/db/migrations/000010_warmup_pools.up.sql
+
+// =========================================================================
+// Mailbox roster shown in the floating dashboard mock under the hero.
+// Each row simulates a per-mailbox health snapshot. No fabricated reply
+// rates or open rates. Values reflect the band logic in CLAUDE.md.
+// =========================================================================
+const mailboxes = [
+  { address: 'ben@acme.com',     state: 'healthy',     spam: '2%',   complaint: '0.00%', bounce: '0.4%', cap: '50 / day', sent: 47, gap: '11m' },
+  { address: 'sara@acme.com',    state: 'healthy',     spam: '4%',   complaint: '0.01%', bounce: '0.6%', cap: '50 / day', sent: 42, gap: '10m' },
+  { address: 'devon@acme.com',   state: 'healthy',     spam: '7%',   complaint: '0.02%', bounce: '0.9%', cap: '50 / day', sent: 50, gap: '12m' },
+  { address: 'priya@acme.io',    state: 'watch',       spam: '12%',  complaint: '0.04%', bounce: '1.4%', cap: '30 / day', sent: 18, gap: '15m' },
+  { address: 'felix@acme.io',    state: 'throttled',   spam: '17%',  complaint: '0.07%', bounce: '2.1%', cap: '15 / day', sent: 9,  gap: '20m' },
+  { address: 'noah@acme.io',     state: 'quarantined', spam: '23%',  complaint: '0.12%', bounce: '5.6%', cap: 'paused',    sent: 0,  gap: 'paused' },
+  { address: 'old@legacy.dev',   state: 'blocked',     spam: '44%',  complaint: '0.34%', bounce: '11%',  cap: 'blocked',   sent: 0,  gap: 'blocked' },
+];
+
+const stateTone = (s: string) => {
+  if (s === 'healthy')     return { dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700', ring: 'ring-emerald-200' };
+  if (s === 'watch')       return { dot: 'bg-amber-500',   chip: 'bg-amber-50 text-amber-700',     ring: 'ring-amber-200' };
+  if (s === 'throttled')   return { dot: 'bg-amber-600',   chip: 'bg-amber-50 text-amber-800',     ring: 'ring-amber-200' };
+  if (s === 'quarantined') return { dot: 'bg-rose-500',    chip: 'bg-rose-50 text-rose-700',       ring: 'ring-rose-200' };
+  return { dot: 'bg-rose-700', chip: 'bg-rose-100 text-rose-800', ring: 'ring-rose-300' };
+};
+
+// =========================================================================
+// The product defaults table. Real numbers from internal/config/constants.go
+// =========================================================================
+const defaults = [
+  { k: 'Cold campaign cap',     v: '50 / day',  why: 'Per-mailbox ceiling enforced server-side. Validated up to 100 max for explicit overrides.' },
+  { k: 'Minimum send gap',      v: '600s',      why: 'Ten minutes between any two cold sends from the same mailbox. Bursts are flattened to this cadence regardless of queue depth.' },
+  { k: 'Warmup start',          v: '10 / day',  why: 'First warmup send volume. Low enough to read as normal individual activity on any provider.' },
+  { k: 'Warmup ceiling',        v: '40 / day',  why: 'Holds here once reached. Crowding the cold-campaign budget gains nothing reputationally.' },
+  { k: 'Warmup ramp',           v: '+1 / day',  why: 'One additional warmup message per business day. Aggressive ramps trip volume-anomaly heuristics on the receiver.' },
+  { k: 'Sync burst limit',      v: '100 / 5m',  why: 'Worker-side. If a mailbox tries to ingest more than 100 new emails in 5 minutes it is rate-limited automatically.' },
+  { k: 'Sync hourly limit',     v: '500 / hr',  why: 'Worker-side. The mailbox is paused upstream if this is breached, before provider-side throttling sets in.' },
+  { k: 'Invalid token block',   v: '3 / 24h',   why: 'Three or more malformed warmup tokens in a 24h window auto-block the mailbox from the pool.' },
+  { k: 'Pool spam-score block', v: 'score > 50', why: 'Cumulative pool spam score above 50 removes the mailbox before mailbox providers act.' },
+];
+
+// =========================================================================
+// Auto-quarantine bands. CLAUDE.md "Recommended internal policy for shared
+// paid pools". Sample floors written below the table.
+// =========================================================================
 const bands = [
-  { provider: 'Google · bulk sender',     us: '0.03%',  warn: '0.10%', kill: '0.30%' },
-  { provider: 'Amazon SES · complaints',  us: '0.03%',  warn: '0.10%', kill: '0.50%' },
-  { provider: 'Amazon SES · bounces',     us: '1.0%',   warn: '5.0%',  kill: '10%' },
-  { provider: 'Microsoft 365',            us: '0.03%',  warn: '0.10%', kill: 'Bulk use disallowed' },
+  {
+    name: 'Healthy',     tone: 'emerald',
+    spam: 'under 10%',   complaint: 'under 0.03%', bounce: 'under 1%',
+    action: 'Default state. Continue ramp. Eligible for pool selection.',
+  },
+  {
+    name: 'Watch',       tone: 'amber',
+    spam: 'at or above 10%', complaint: 'at or above 0.03%', bounce: 'not used',
+    action: 'Lower volume, increase spacing, increase monitoring. Still in the pool.',
+  },
+  {
+    name: 'Quarantined', tone: 'rose',
+    spam: 'at or above 20%', complaint: 'at or above 0.10%', bounce: 'at or above 5%',
+    action: 'Removed from the shared paid pool for 7 days. Moves to the recovery state.',
+  },
+  {
+    name: 'Blocked',     tone: 'rose-dark',
+    spam: 'at or above 40%', complaint: 'at or above 0.30%', bounce: 'at or above 10%',
+    action: '30-day block. Manual review required for re-entry. Cold sending paused.',
+  },
+  {
+    name: 'Catastrophic', tone: 'rose-dark',
+    spam: 'at or above 80%', complaint: 'severe', bounce: 'severe',
+    action: 'Long-duration block. Full reputation reset workflow. No automatic re-entry.',
+  },
 ];
 
+const toneClass = (t: string) => {
+  if (t === 'emerald')   return { dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700', bar: 'bg-emerald-500' };
+  if (t === 'amber')     return { dot: 'bg-amber-500',   chip: 'bg-amber-50 text-amber-700',     bar: 'bg-amber-500'   };
+  if (t === 'rose-dark') return { dot: 'bg-rose-700',    chip: 'bg-rose-100 text-rose-800',      bar: 'bg-rose-700'    };
+  return { dot: 'bg-rose-500', chip: 'bg-rose-50 text-rose-700', bar: 'bg-rose-500' };
+};
+
+// =========================================================================
+// Pool isolation surfaces. Free, premium, recovery, dedicated.
+// =========================================================================
+const pools = [
+  {
+    name: 'Free pool',     accent: '#94a3b8',
+    when: 'Free trial',
+    summary: 'Trial mailboxes only. Same auto-quarantine thresholds as premium.',
+    rules: [
+      'Recipients drawn exclusively from other free-plan mailboxes.',
+      'Cannot send to premium-pool mailboxes.',
+      'No participation in premium spam-score aggregation.',
+    ],
+  },
+  {
+    name: 'Premium pool', accent: '#0284c7', featured: true,
+    when: 'Starter, Grow, Business',
+    summary: 'Vetted paid mailboxes only. Stricter quarantine bands, lower tolerance for drift.',
+    rules: [
+      'Recipients drawn only from other healthy premium mailboxes.',
+      'Quarantined senders drop into the recovery pool, never silently back into premium.',
+      'Pool spam-score aggregated per-mailbox over rolling windows.',
+    ],
+  },
+  {
+    name: 'Recovery pool', accent: '#d97706',
+    when: 'Automatic on quarantine',
+    summary: 'Isolated cooldown for senders that breached a band. Not visible to healthy traffic.',
+    rules: [
+      '7-day cooldown after quarantine. 30-day cooldown after a hard block.',
+      '20-delivery probation required before re-entry to the premium pool.',
+      'Authentication and bounce checks must pass on re-entry.',
+    ],
+  },
+  {
+    name: 'Dedicated',    accent: '#0f172a',
+    when: 'Enterprise',
+    summary: 'Isolated worker and IP per organisation. Still participates in the premium pool.',
+    rules: [
+      'One worker process and IP allocated to one organisation.',
+      'Per-mailbox reputation, not an infrastructure shortcut.',
+      'Same band thresholds apply. Isolation is not immunity.',
+    ],
+  },
+];
+
+// =========================================================================
+// Authentication coverage. SPF, DKIM, DMARC, PTR. Mailbox-first checks.
+// =========================================================================
 const auth = [
-  { name: 'SPF',   body: 'We verify the sender domain SPF record authorises both the mailbox provider and any third-party services you use to send.' },
-  { name: 'DKIM',  body: 'We check that DKIM is published, the selector resolves, and the key length is at least 1024 bits.' },
-  { name: 'DMARC', body: 'We surface DMARC policy, alignment mode, and the rua reporting address. We warn loudly on p=none.' },
+  { name: 'SPF',   tag: 'TXT record',
+    body: 'We resolve the sending domain SPF record and verify both the mailbox provider and any third-party services you send through are authorised.',
+    fail: 'Missing or misconfigured SPF blocks the mailbox from leaving the connection wizard.' },
+  { name: 'DKIM',  tag: 'Selector + key',
+    body: 'We resolve the DKIM selector for the provider, verify the public key parses, and require a key length of 1024 bits or higher.',
+    fail: 'A missing selector surfaces the exact DNS record to publish, copy-pastable.' },
+  { name: 'DMARC', tag: 'Policy + alignment',
+    body: 'We read the DMARC record, surface the policy, alignment mode, and rua reporting address. p=none is flagged loudly.',
+    fail: 'Reporting addresses point at a Warmbly inbox so aggregate reports surface inside the dashboard.' },
+  { name: 'PTR',   tag: 'Reverse DNS',
+    body: 'For BYO SMTP we resolve the reverse DNS of the sending IP and verify it forward-resolves to the same hostname.',
+    fail: 'A mismatched PTR is the single fastest path to spam at any commercial receiver.' },
 ];
 
-const signals = [
-  ['Inbox vs spam placement', 'Per-mailbox placement tracked through warmup probes and recipient feedback.'],
-  ['Complaint rate',           'ARF complaints, Gmail FBLs, and "mark as spam" signals from connected mailboxes.'],
-  ['Bounce rate',              'Hard and soft bounces by mailbox and domain, with reason classification.'],
-  ['Warmup token health',      'Missing, malformed, or replayed verification tokens count as suspicion.'],
-  ['Reply detection',          'Recipients replying is the strongest positive deliverability signal we have.'],
-  ['OOO + auto-replies',       'Classified so they do not pollute reply rate or trigger sequence steps.'],
-  ['Provider throttling',      '4xx and rate-limit responses tracked per mailbox and exposed as health signals.'],
-  ['Connection abuse',         'Burst syncs (>100 in 5min) and hourly (>500) rate-limit the mailbox automatically.'],
+// =========================================================================
+// Suppression engine. Mailbox-first, not list-first. Real codepaths.
+// =========================================================================
+const suppression = [
+  { trigger: 'Hard bounce',           scope: 'workspace',  source: 'consumer.deliverability', note: 'The recipient is suppressed across every campaign in the workspace immediately. No future send attempts.' },
+  { trigger: 'Soft bounce ×3',        scope: 'domain',     source: 'consumer.deliverability', note: 'Three soft bounces to the same domain on a mailbox auto-suppress the recipient. Backs off pressure on the receiver.' },
+  { trigger: 'Complaint (FBL / ARF)', scope: 'workspace',  source: 'consumer.deliverability', note: 'Spam complaints from Gmail FBL or Microsoft SNDS suppress the recipient and increment the mailbox health score.' },
+  { trigger: 'One-click unsubscribe', scope: 'workspace',  source: 'tracking.unsubscribe',    note: 'RFC 8058 List-Unsubscribe-Post compliance. The recipient is suppressed before the dashboard even renders the confirmation.' },
+  { trigger: 'Reply: STOP / REMOVE',  scope: 'workspace',  source: 'consumer.reply.classifier', note: 'Common unsubscribe phrases in inbound replies are detected and auto-suppress without an operator in the loop.' },
+  { trigger: 'Manual suppression',    scope: 'workspace',  source: 'api / dashboard',         note: 'Operators can suppress by recipient, domain, or workspace import. CSV uploads are deduplicated against the existing list.' },
+];
+
+// =========================================================================
+// Recommended cold sending posture. From CLAUDE.md "Sending Safety Policy"
+// and "Recommended operational posture".
+// =========================================================================
+const posture = [
+  { stage: 'New mailbox',  range: '10 to 20 / day', note: 'Fresh or recently connected mailbox. Treat the first weeks as reputation building, not pipeline.' },
+  { stage: 'Ramping',      range: '+5 / week',      note: 'Increase weekly while complaint and bounce rates stay clean. Pull back on any negative signal.' },
+  { stage: 'Stable band',  range: '30 to 50 / day', note: 'Normal safe range for most cold outreach mailboxes. The repo default cap lives at the top of this band.' },
+  { stage: 'Above default', range: 'requires review', note: 'Anything above 50 / day per cold mailbox should require positive reputation signals, low complaint rate, and explicit review.' },
+];
+
+// =========================================================================
+// Critique stance. Real, opinionated, no fake competitor names.
+// =========================================================================
+const critique = [
+  { h: 'Worker-first throughput is the wrong unit.',
+    b: 'A sending platform that brags about millions per worker is solving the wrong problem. Reputation is per-mailbox, per-domain, per-IP. Cramming volume through a single sender runtime concentrates risk and shortens the life of every mailbox on it.' },
+  { h: 'Closed warmup pools without proof are noise.',
+    b: 'If warmup traffic cannot prove it is warmup traffic, a single bad actor can poison the pool by replying to themselves. The defence is a per-message signed token validated on classification, not a private mailbox list.' },
+  { h: 'Acting on provider enforcement is acting too late.',
+    b: 'When Google or SES throttles your domain, the damage has already shipped. The right thresholds for a shared pool sit weeks earlier, on rolling per-mailbox windows, not on lagging aggregate reports.' },
+  { h: 'Free pools and paid pools should never share air.',
+    b: 'If a trial account can land in the same warmup loop as a paying customer, the trial account is the customer\'s deliverability risk. Pool isolation is not a tier perk, it is a safety boundary.' },
+];
+
+// =========================================================================
+// FAQ. Real product behaviour, real thresholds.
+// =========================================================================
+const faq = [
+  ['Is deliverability per-mailbox or per-account?',
+   'Per-mailbox. Every mailbox has its own health score, its own send cap, its own pacing, and its own band membership. An account with five mailboxes can have five different health states at the same time.'],
+  ['What auto-quarantines a mailbox?',
+   'Three or more invalid warmup tokens in 24 hours, a pool spam score above 50, spam-folder placement at or above 20% with at least 20 warmup deliveries in 7 days, a complaint rate at or above 0.10%, or a bounce rate at or above 5%.'],
+  ['How is suppression applied across campaigns?',
+   'Hard bounces, complaints, and unsubscribes are workspace-scoped. Once a recipient is suppressed, every running campaign across every mailbox in the workspace skips them on the next dispatch tick. No future send attempts ever queue.'],
+  ['Why is the default cap only 50 / day?',
+   'Because the safest mailbox-first answer beats the most exciting throughput number. 50 / day with a 600 second gap fits well under provider scrutiny on every major receiver. Anything above that should be earned mailbox-by-mailbox.'],
+  ['What happens when a mailbox is blocked?',
+   'It is removed from the shared paid pool, cold sending is paused or throttled, and the mailbox enters the recovery pool. It must pass 20-delivery probation, authentication checks, and a clean spam-placement window before re-entering the premium pool.'],
+];
+
+// =========================================================================
+// Astro JSX parser hoists. Any `<` or `<=` inside `{}` will break parsing,
+// so we pre-compute everything as data here and iterate cleanly in JSX.
+// =========================================================================
+
+// Gauge tick marks below the band bar.
+const gaugeTicks = [
+  { pct: 0,   label: '0%' },
+  { pct: 10,  label: '10%' },
+  { pct: 20,  label: '20%' },
+  { pct: 40,  label: '40%' },
+  { pct: 80,  label: '80%' },
+  { pct: 100, label: '100%' },
+];
+
+// "By the numbers" strip. Real product defaults only.
+const numbers = [
+  { v: '50',    u: '/ day',  l: 'cold cap per mailbox',     src: 'internal/config/constants.go' },
+  { v: '600',   u: 's',      l: 'min gap between sends',    src: 'internal/scheduler/email_scheduler.go' },
+  { v: '10',    u: '/ day',  l: 'warmup start volume',      src: 'internal/scheduler/warmup_scheduler.go' },
+  { v: '40',    u: '/ day',  l: 'warmup ceiling',           src: 'internal/scheduler/warmup_scheduler.go' },
+  { v: '+1',    u: '/ day',  l: 'warmup ramp',              src: 'internal/scheduler/warmup_scheduler.go' },
+  { v: '500',   u: '/ hr',   l: 'worker sync hourly limit', src: 'internal/app/worker/wmail/ratelimit.go' },
 ];
 ---
 <Layout
   title="Deliverability · Warmbly"
-  description="A platform built around inbox placement: per-mailbox health, real-time complaint and bounce signals, automatic quarantine before providers act."
+  description="Mailbox-first deliverability. Per-mailbox caps, signed warmup tokens, pool isolation, and auto-quarantine bands that act weeks before providers do."
 >
-  <!-- HERO -->
-  <section class="relative isolate overflow-hidden text-white" style="background: radial-gradient(ellipse 130% 140% at 72% 28%, #0284c7 0%, #0369a1 25%, #075985 50%, #0c4a6e 80%, #0a3d5c 100%);">
-    <div class="absolute top-0 right-0 w-[420px] opacity-30 pointer-events-none cloud-drift cloud-1" style="mix-blend-mode: screen;">
-      <Cloud variant={5} opacity={1} />
-    </div>
+  <!-- ============================================================
+       HERO · HeroAtmosphere, matches sending / warmup / developers
+  ============================================================ -->
+  <section class="relative isolate overflow-hidden">
+    <HeroAtmosphere />
 
-    <div class="container-page relative pt-16 md:pt-20 pb-16 md:pb-20">
-      <div class="text-[11px] uppercase tracking-[0.18em] text-white/55 font-mono mb-4">Deliverability</div>
-      <h1 class="text-[36px] sm:text-[52px] md:text-[60px] font-semibold tracking-[-0.03em] leading-[1.02] text-white max-w-3xl">
-        Built so the inbox is the default outcome.
+    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+      <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
+        <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">
+          Deliverability
+        </span>
+        Mailbox-first, not worker-first
+      </div>
+
+      <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[72px] lg:text-[80px] font-semibold tracking-[-0.04em] leading-[0.98] text-white max-w-4xl mx-auto">
+        The inbox is<br/>the only outcome that counts.
       </h1>
-      <p class="mt-5 text-[15.5px] md:text-[17px] text-white/75 max-w-2xl leading-relaxed">
-        Inbox placement is not a setting you toggle on. It is the cumulative result of authentication, warmup, volume discipline, content quality and provider-side reputation. We instrument every one of them.
+      <p class="mt-6 text-[17px] md:text-[19px] text-white/80 max-w-2xl mx-auto leading-relaxed">
+        Reputation lives in each mailbox, each domain, each IP. We build it slowly, defend it per-mailbox, and pull a sender out of the shared pool weeks before any provider would.
       </p>
+
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register" class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-semibold bg-white hover:bg-white hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.3)] transition-all duration-200 ease-out shadow-[0_4px_14px_-2px_rgba(0,0,0,0.18)]">
+          <span style="color:#075985;">Audit a mailbox</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+          </svg>
+        </a>
+        <a href="#stance" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
+          Read the stance
+        </a>
+      </div>
     </div>
   </section>
 
-  <!-- AUTH STRIP -->
-  <section class="py-16 md:py-20">
+  <!-- ============================================================
+       FLOATING DASHBOARD · per-mailbox health roster
+  ============================================================ -->
+  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
     <div class="container-page">
-      <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Authentication</div>
-      <h2 class="text-[26px] md:text-[34px] font-semibold tracking-[-0.025em] text-heading max-w-2xl">SPF, DKIM, DMARC. Checked, not assumed.</h2>
+      <div class="rounded-[18px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
 
-      <div class="mt-10 grid md:grid-cols-3 gap-px bg-[color:var(--border)] rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]" style="box-shadow: var(--shadow-sm);">
+        <!-- Topbar -->
+        <div class="px-6 py-3 border-b border-[color:var(--border)] flex items-baseline justify-between gap-3">
+          <div class="flex items-baseline gap-3">
+            <div class="text-[10.5px] font-mono uppercase tracking-[0.18em] text-muted-foreground">Mailbox health</div>
+            <span class="text-[11.5px] text-foreground/55">Per-mailbox state, rolling 7-day window</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center h-6 px-2 rounded-md text-[10.5px] font-mono text-[#0369a1] bg-[color:var(--sky-1)]">live</span>
+          </div>
+        </div>
+
+        <!-- State legend strip -->
+        <div class="grid grid-cols-2 md:grid-cols-5 divide-x divide-[color:var(--border)] border-b border-[color:var(--border)]">
+          {[
+            { l: 'Healthy',     c: 'bg-emerald-500', n: '3' },
+            { l: 'Watch',       c: 'bg-amber-500',   n: '1' },
+            { l: 'Throttled',   c: 'bg-amber-600',   n: '1' },
+            { l: 'Quarantined', c: 'bg-rose-500',    n: '1' },
+            { l: 'Blocked',     c: 'bg-rose-700',    n: '1' },
+          ].map((s) => (
+            <div class="px-5 py-3.5 flex items-baseline justify-between">
+              <div class="flex items-center gap-2">
+                <span class={`w-2 h-2 rounded-full ${s.c}`}></span>
+                <span class="text-[11.5px] uppercase tracking-[0.14em] font-mono text-foreground/70">{s.l}</span>
+              </div>
+              <span class="text-[14.5px] font-mono font-semibold text-heading tabular-nums">{s.n}</span>
+            </div>
+          ))}
+        </div>
+
+        <!-- Table header -->
+        <div class="hidden md:grid grid-cols-[minmax(0,1.6fr)_90px_70px_70px_70px_90px_80px_70px] gap-3 px-6 py-2.5 bg-[color:var(--surface-1)]/60 border-b border-[color:var(--border)] text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">
+          <div>Mailbox</div>
+          <div>State</div>
+          <div class="text-right">Spam</div>
+          <div class="text-right">Complaint</div>
+          <div class="text-right">Bounce</div>
+          <div class="text-right">Cap</div>
+          <div class="text-right">Sent / d</div>
+          <div class="text-right">Gap</div>
+        </div>
+
+        <!-- Mailbox rows -->
+        <div class="divide-y divide-[color:var(--border)]">
+          {mailboxes.map((m) => {
+            const t = stateTone(m.state);
+            return (
+              <div class="grid grid-cols-[1fr_90px] md:grid-cols-[minmax(0,1.6fr)_90px_70px_70px_70px_90px_80px_70px] gap-3 items-center px-6 py-3 hover:bg-[color:var(--surface-1)]/60 transition-colors">
+                <div class="min-w-0 flex items-center gap-3">
+                  <Icon name="mail" size={13} class="text-foreground/45 shrink-0" />
+                  <div class="min-w-0">
+                    <div class="text-[12.5px] font-medium text-heading truncate">{m.address}</div>
+                    <div class="md:hidden mt-0.5 text-[10.5px] font-mono text-muted-foreground">spam {m.spam} · comp {m.complaint} · bounce {m.bounce}</div>
+                  </div>
+                </div>
+                <div>
+                  <span class={`inline-flex items-center gap-1 h-5 px-1.5 rounded text-[10px] uppercase tracking-[0.08em] font-medium ${t.chip}`}>
+                    <span class={`w-1 h-1 rounded-full ${t.dot}`}></span>
+                    {m.state}
+                  </span>
+                </div>
+                <div class="hidden md:block text-right font-mono text-[11.5px] text-foreground/70 tabular-nums">{m.spam}</div>
+                <div class="hidden md:block text-right font-mono text-[11.5px] text-foreground/70 tabular-nums">{m.complaint}</div>
+                <div class="hidden md:block text-right font-mono text-[11.5px] text-foreground/70 tabular-nums">{m.bounce}</div>
+                <div class="hidden md:block text-right font-mono text-[11px] text-foreground/65 tabular-nums">{m.cap}</div>
+                <div class="hidden md:block text-right font-mono text-[11.5px] text-heading tabular-nums">{m.sent}</div>
+                <div class="hidden md:block text-right font-mono text-[11px] text-muted-foreground tabular-nums">{m.gap}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        <!-- Footer note -->
+        <div class="px-6 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+          <span>7 mailboxes · 5 states</span>
+          <span class="inline-flex items-center gap-1.5 text-foreground/55">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            evaluated every event
+          </span>
+        </div>
+      </div>
+      <div class="mt-3 text-center text-[11.5px] font-mono text-muted-foreground">
+        app.warmbly.com/mailboxes
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       STANCE · the opinionated critique
+  ============================================================ -->
+  <section id="stance" class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28 scroll-mt-4">
+    <div class="container-page">
+      <div class="max-w-3xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Stance</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          Why most warmup tools harm you.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          Deliverability is the surface that decides whether everything else in this product matters. We hold strong opinions on what is broken about the rest of the category, because every one of them maps to a real codepath we built differently.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-4 lg:gap-5">
+        {critique.map((c, i) => (
+          <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-6 md:p-7">
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="font-mono text-[11px] text-[#0284c7] font-semibold tabular-nums">{String(i + 1).padStart(2, '0')}</span>
+              <div class="text-[16px] md:text-[17px] font-semibold tracking-[-0.015em] text-heading leading-snug">{c.h}</div>
+            </div>
+            <p class="text-[13.5px] text-foreground/70 leading-relaxed">{c.b}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       MAILBOX-FIRST MODEL · diagram + caption
+  ============================================================ -->
+  <section class="border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-3xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Mailbox-first model</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          Every limit lives on a mailbox.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          The platform never has one global send target. A worker is a runtime, not a sender. A mailbox is the sender. Caps, gaps, pacing, warmup, suppression, and band membership all attach to the mailbox first. Workers spread mailboxes across machines, IPs, and Kafka topics so reputation never concentrates.
+        </p>
+      </div>
+
+      <div class="rounded-[14px] bg-[#0c1224] ring-1 ring-white/10 overflow-hidden">
+        <div class="px-6 py-3 border-b border-white/10 flex items-center justify-between text-[10.5px] font-mono text-white/55">
+          <span>mailbox model · v2</span>
+          <span>mailbox is the unit of reputation, pacing, and policy</span>
+        </div>
+
+        <div class="p-6 md:p-10">
+          <svg viewBox="0 0 1000 380" class="w-full h-auto">
+            <defs>
+              <linearGradient id="mbxLine" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#7dd3fc" stop-opacity="0.7"/>
+                <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0.2"/>
+              </linearGradient>
+            </defs>
+
+            <!-- Lane labels -->
+            <text x="100" y="24" fill="#7dd3fc" font-size="10" font-family="ui-monospace,monospace" letter-spacing="2">PER-MAILBOX POLICY</text>
+            <text x="430" y="24" fill="#7dd3fc" font-size="10" font-family="ui-monospace,monospace" letter-spacing="2">MAILBOX</text>
+            <text x="700" y="24" fill="#7dd3fc" font-size="10" font-family="ui-monospace,monospace" letter-spacing="2">EXECUTION SURFACE</text>
+
+            <!-- LEFT column · policies -->
+            {[
+              { y: 50,  label: 'cold cap',        value: '50 / day' },
+              { y: 110, label: 'min gap',         value: '600s' },
+              { y: 170, label: 'warmup vol',      value: '10 to 40 / day' },
+              { y: 230, label: 'pool spam score', value: 'block > 50' },
+              { y: 290, label: 'band state',      value: 'healthy to blocked' },
+            ].map((p) => (
+              <g>
+                <rect x="40" y={p.y} width="240" height="44" rx="8" fill="rgba(255,255,255,0.05)" stroke="#7dd3fc" stroke-opacity="0.35"/>
+                <text x="55" y={p.y + 18} fill="white" font-size="11.5" font-weight="600" font-family="ui-monospace,monospace">{p.label}</text>
+                <text x="55" y={p.y + 33} fill="#cbd5e1" font-size="10" font-family="ui-monospace,monospace">{p.value}</text>
+              </g>
+            ))}
+
+            <!-- CENTER · mailbox node -->
+            <rect x="400" y="110" width="200" height="160" rx="14" fill="rgba(2,132,199,0.18)" stroke="#0ea5e9" stroke-opacity="0.75" stroke-width="1.5"/>
+            <circle cx="500" cy="155" r="22" fill="rgba(125,211,252,0.18)" stroke="#7dd3fc" stroke-opacity="0.85" stroke-width="1.2"/>
+            <text x="500" y="159" text-anchor="middle" fill="white" font-size="11" font-family="ui-monospace,monospace">mbx</text>
+            <text x="500" y="200" text-anchor="middle" fill="white" font-size="13" font-weight="600">ben@acme.com</text>
+            <text x="500" y="218" text-anchor="middle" fill="#7dd3fc" font-size="10" font-family="ui-monospace,monospace">healthy</text>
+            <text x="500" y="250" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="ui-monospace,monospace">47 / 50 sent · gap 11m</text>
+
+            <!-- RIGHT column · execution -->
+            {[
+              { y: 70,  label: 'worker',     value: 'w-01 · 192.0.2.14' },
+              { y: 130, label: 'IP / PTR',   value: 'smtp.warmbly.net' },
+              { y: 190, label: 'auth',       value: 'SPF · DKIM · DMARC' },
+              { y: 250, label: 'suppression', value: 'workspace scope' },
+            ].map((p) => (
+              <g>
+                <rect x="720" y={p.y} width="240" height="44" rx="8" fill="rgba(255,255,255,0.05)" stroke="#7dd3fc" stroke-opacity="0.35"/>
+                <text x="735" y={p.y + 18} fill="white" font-size="11.5" font-weight="600" font-family="ui-monospace,monospace">{p.label}</text>
+                <text x="735" y={p.y + 33} fill="#cbd5e1" font-size="10" font-family="ui-monospace,monospace">{p.value}</text>
+              </g>
+            ))}
+
+            <!-- Connecting lines · left to mailbox -->
+            {[72, 132, 192, 252, 312].map((y) => (
+              <line x1="280" y1={y} x2="400" y2="190" stroke="url(#mbxLine)" stroke-width="1.5"/>
+            ))}
+
+            <!-- Connecting lines · mailbox to right -->
+            {[92, 152, 212, 272].map((y) => (
+              <line x1="600" y1="190" x2="720" y2={y} stroke="url(#mbxLine)" stroke-width="1.5"/>
+            ))}
+
+            <!-- Animated send marker -->
+            <circle r="3" fill="#7dd3fc" opacity="0.95">
+              <animateMotion dur="3s" repeatCount="indefinite" path="M 600 190 L 720 130"/>
+            </circle>
+          </svg>
+        </div>
+      </div>
+
+      <div class="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-4 text-[12.5px]">
+        {[
+          { c: '#7dd3fc', t: 'Per-mailbox policy',  d: 'Every cap, gap, pool, and band attaches here. No worker-wide knobs.' },
+          { c: '#0ea5e9', t: 'The mailbox itself',  d: 'One unit of reputation. One unit of pacing. One unit of band membership.' },
+          { c: '#10b981', t: 'Execution surface',   d: 'Worker, IP, PTR, auth, suppression. Replaceable, not load-bearing.' },
+        ].map((l) => (
+          <div class="flex items-baseline gap-3">
+            <span class="w-2 h-2 rounded-full mt-1.5 shrink-0" style={`background: ${l.c}`}></span>
+            <div>
+              <div class="text-foreground font-semibold">{l.t}</div>
+              <div class="text-foreground/60">{l.d}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       DEFAULTS · spec sheet, real numbers
+  ============================================================ -->
+  <section class="bg-white py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Defaults</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          The numbers we ship with.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          Tuned for the median sender on the median provider. Override per mailbox if you have a real reason. The right column is the reasoning we will defend in an incident review.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-x-12 gap-y-px">
+        {defaults.map((d, i) => (
+          <div class="grid grid-cols-[1fr_auto] gap-6 py-6 border-b border-[color:var(--border)] items-baseline hover:bg-[color:var(--surface-1)]/40 -mx-3 px-3 rounded-[6px] transition-colors">
+            <div>
+              <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">
+                {String(i + 1).padStart(2, '0')} · {d.k}
+              </div>
+              <p class="mt-2 text-[13.5px] text-foreground/65 leading-relaxed max-w-md">{d.why}</p>
+            </div>
+            <div class="text-right">
+              <div class="text-[22px] md:text-[26px] font-semibold tracking-[-0.02em] text-heading font-mono whitespace-nowrap">{d.v}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div class="mt-8 text-[11.5px] font-mono text-muted-foreground">
+        Source: <span class="text-foreground/75">internal/config/constants.go</span> · <span class="text-foreground/75">internal/scheduler/email_scheduler.go</span> · <span class="text-foreground/75">internal/repository/pg_warmup.go</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       POOL ISOLATION · 4 surfaces
+  ============================================================ -->
+  <section class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Pool isolation</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          Four pools. Zero crossover.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
+          Mailboxes never silently move between pools. A trial mailbox stays in the free pool. A quarantined paid mailbox drops into recovery, not back to premium. Dedicated infrastructure runs alongside without sharing IPs.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-4 lg:gap-5">
+        {pools.map((p) => (
+          <div class={`relative rounded-[14px] bg-white overflow-hidden ${p.featured ? 'ring-2 ring-[#0284c7]/35 shadow-[0_20px_40px_-20px_rgba(2,132,199,0.3)]' : 'ring-1 ring-[color:var(--border)]'}`}>
+            <div class="h-1.5" style={`background:${p.accent}`}></div>
+            {p.featured && (
+              <div class="absolute top-1.5 right-4 inline-flex items-center h-5 px-2 rounded-b text-[10px] font-semibold uppercase tracking-[0.14em] font-mono bg-[#0284c7] text-white">
+                Most paid plans
+              </div>
+            )}
+            <div class="p-6">
+              <div class="flex items-baseline justify-between mb-1">
+                <div class={`text-[18px] font-semibold tracking-[-0.02em] ${p.featured ? 'text-[#0369a1]' : 'text-heading'}`}>{p.name}</div>
+                <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground">{p.when}</div>
+              </div>
+              <p class="mt-1 text-[13px] text-foreground/70 leading-snug">{p.summary}</p>
+              <ul class="mt-4 space-y-2 text-[13px] text-foreground/75">
+                {p.rules.map((r) => (
+                  <li class="flex items-start gap-2">
+                    <Icon name="check" size={12} class={p.featured ? 'text-[#0284c7] mt-1 shrink-0' : 'text-foreground/55 mt-1 shrink-0'} />
+                    <span>{r}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       HEALTH BANDS · auto-quarantine gauge + table
+  ============================================================ -->
+  <section class="py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Auto-quarantine bands</div>
+        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
+          Bands that act before providers do.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          Spam-folder placement on the X axis. Bands stack. Warmbly's thresholds sit well to the left of Google's and SES's published enforcement points, so we pull a mailbox out of the shared pool weeks before it would earn a public complaint.
+        </p>
+      </div>
+
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-7 md:p-10">
+        <div class="flex items-baseline justify-between mb-7">
+          <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Spam placement · 0 to 100%</div>
+          <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Per-mailbox rolling window</div>
+        </div>
+
+        <!-- The gauge bar with 4 visible bands plus catastrophic gradient -->
+        <div class="relative h-12 rounded-[6px] overflow-hidden flex">
+          <div class="flex-[10] bg-emerald-100 relative">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-emerald-700">HEALTHY · 0 to 10%</span>
+            </div>
+          </div>
+          <div class="flex-[10] bg-amber-100 relative">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-amber-700">WATCH · 10 to 20%</span>
+            </div>
+          </div>
+          <div class="flex-[20] bg-rose-100 relative">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-rose-700">QUARANTINED · 20 to 40%</span>
+            </div>
+          </div>
+          <div class="flex-[40] relative" style="background: linear-gradient(90deg, #fda4af 0%, #9f1239 100%);">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-white">BLOCKED · 40% to 80%</span>
+            </div>
+          </div>
+          <div class="flex-[20] relative" style="background: linear-gradient(90deg, #881337 0%, #450a0a 100%);">
+            <div class="absolute inset-0 flex items-center px-3">
+              <span class="text-[11px] font-mono font-semibold text-white">CATASTROPHIC</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tick marks below -->
+        <div class="relative mt-1.5 h-3">
+          {gaugeTicks.map((t) => (
+            <div class="absolute" style={`left: ${t.pct}%; transform: translateX(-50%);`}>
+              <div class="w-px h-2 bg-[color:var(--border)] mx-auto"></div>
+              <div class="text-[10px] font-mono text-muted-foreground mt-1 text-center">{t.label}</div>
+            </div>
+          ))}
+        </div>
+
+        <!-- Band detail rows -->
+        <div class="mt-10 grid md:grid-cols-2 lg:grid-cols-5 gap-px bg-[color:var(--border)] rounded-[10px] overflow-hidden ring-1 ring-[color:var(--border)]">
+          {bands.map((b) => {
+            const t = toneClass(b.tone);
+            return (
+              <div class="bg-white p-5">
+                <div class="flex items-center gap-2">
+                  <span class={`w-2 h-2 rounded-full ${t.dot}`}></span>
+                  <span class="text-[13px] font-semibold text-heading">{b.name}</span>
+                </div>
+                <div class="mt-4 space-y-1.5 text-[11.5px] font-mono">
+                  <div class="flex justify-between gap-2"><span class="text-muted-foreground">Spam</span><span class="text-heading font-semibold text-right">{b.spam}</span></div>
+                  <div class="flex justify-between gap-2"><span class="text-muted-foreground">Complaint</span><span class="text-heading font-semibold text-right">{b.complaint}</span></div>
+                  <div class="flex justify-between gap-2"><span class="text-muted-foreground">Bounce</span><span class="text-heading font-semibold text-right">{b.bounce}</span></div>
+                </div>
+                <p class="mt-4 pt-4 border-t border-[color:var(--border)] text-[12px] text-foreground/70 leading-snug">{b.action}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <p class="mt-5 text-[11.5px] text-muted-foreground italic max-w-3xl">
+          Sample floors: spam-placement band requires at least 20 warmup deliveries in the past 7 days, complaint band requires at least 100 delivered messages in the past 30 days. External anchors: Google bulk sender keep spam below 0.1% and avoid reaching 0.3%, SES holds complaint below 0.1% and bounce below 5%.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       AUTHENTICATION COVERAGE
+  ============================================================ -->
+  <section class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-3xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Authentication coverage</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          SPF, DKIM, DMARC, PTR. Checked, not assumed.
+        </h2>
+        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
+          A mailbox cannot leave the connection wizard with broken authentication. We resolve every record live, surface what is missing in copy-pastable form, and re-verify on a daily cadence after launch.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-px bg-[color:var(--border)] rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]" style="box-shadow: var(--shadow-sm);">
         {auth.map((a) => (
           <div class="bg-white p-6">
-            <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-[color:var(--sky-6)] mb-3">DNS check</div>
+            <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">{a.tag}</div>
             <div class="text-[18px] font-semibold text-heading">{a.name}</div>
-            <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed">{a.body}</p>
+            <p class="mt-2 text-[13px] text-foreground/70 leading-relaxed">{a.body}</p>
+            <p class="mt-3 pt-3 border-t border-[color:var(--border)] text-[12px] text-foreground/60 leading-snug">
+              <span class="font-mono uppercase tracking-[0.14em] text-[10px] text-muted-foreground block mb-1">on failure</span>
+              {a.fail}
+            </p>
           </div>
         ))}
       </div>
     </div>
   </section>
 
-  <!-- THRESHOLDS COMPARISON -->
-  <section class="bg-[color:var(--surface-1)] border-y border-[color:var(--border)] py-16 md:py-20">
+  <!-- ============================================================
+       SUPPRESSION ENGINE
+  ============================================================ -->
+  <section class="bg-white py-20 md:py-28">
     <div class="container-page">
-      <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Thresholds</div>
-      <h2 class="text-[26px] md:text-[34px] font-semibold tracking-[-0.025em] text-heading max-w-2xl">We act weeks before providers do.</h2>
-      <p class="mt-4 text-[15.5px] text-foreground/75 max-w-xl">
-        Public thresholds vs. the bands we trigger on internally.
-      </p>
-
-      <div class="mt-10 rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden" style="box-shadow: var(--shadow-sm);">
-        <div class="grid grid-cols-[1.5fr_1fr_1fr_1fr] px-5 py-3 bg-[color:var(--surface-1)] border-b border-[color:var(--border)] text-[10.5px] uppercase tracking-[0.16em] font-mono text-muted-foreground">
-          <div>Provider</div>
-          <div class="text-[color:var(--sky-7)]">We act at</div>
-          <div>Warning</div>
-          <div>Provider acts</div>
+      <div class="grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
+        <div class="lg:sticky lg:top-24" style="align-self: start;">
+          <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Suppression engine</div>
+          <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+            Suppression is containment, not paperwork.
+          </h2>
+          <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+            The fastest response to a negative signal is to stop sending. Hard bounces, complaints, unsubscribes, and inbound STOP replies suppress the recipient before the next dispatch tick. Containment beats recovery every time.
+          </p>
+          <ul class="mt-6 space-y-2 text-[13.5px] text-foreground/80">
+            <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0" /><span>Workspace-scoped suppression. Every campaign skips suppressed recipients on next tick.</span></li>
+            <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0" /><span>RFC 8058 one-click unsubscribe. List-Unsubscribe-Post handled before the receipt page renders.</span></li>
+            <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0" /><span>Inbound reply classifier auto-suppresses common opt-out phrasing.</span></li>
+          </ul>
         </div>
-        {bands.map((b) => (
-          <div class="grid grid-cols-[1.5fr_1fr_1fr_1fr] px-5 py-3.5 border-b border-[color:var(--border)] last:border-b-0 text-[13.5px] items-baseline">
-            <div class="font-medium text-heading">{b.provider}</div>
-            <div><span class="inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[12px] bg-emerald-50 text-emerald-700">{b.us}</span></div>
-            <div><span class="inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[12px] bg-amber-50 text-amber-700">{b.warn}</span></div>
-            <div><span class="inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[12px] bg-rose-50 text-rose-700">{b.kill}</span></div>
+
+        <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+          <div class="grid grid-cols-[minmax(0,1.4fr)_90px_minmax(0,1.8fr)_minmax(0,2.5fr)] px-5 py-3 bg-[color:var(--surface-1)] border-b border-[color:var(--border)] text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">
+            <div>Trigger</div>
+            <div>Scope</div>
+            <div>Source</div>
+            <div>Behaviour</div>
           </div>
-        ))}
+          {suppression.map((s) => (
+            <div class="grid grid-cols-[minmax(0,1.4fr)_90px_minmax(0,1.8fr)_minmax(0,2.5fr)] px-5 py-3.5 border-b border-[color:var(--border)] last:border-b-0 items-baseline gap-3">
+              <div class="text-[13px] font-medium text-heading">{s.trigger}</div>
+              <div>
+                <span class="inline-flex items-center h-5 px-1.5 rounded text-[10px] font-mono uppercase tracking-[0.08em] bg-[color:var(--sky-1)] text-[#0369a1]">{s.scope}</span>
+              </div>
+              <div class="font-mono text-[11.5px] text-foreground/65 truncate">{s.source}</div>
+              <div class="text-[12.5px] text-foreground/70 leading-snug">{s.note}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- SIGNALS GRID -->
-  <section class="py-16 md:py-20">
+  <!-- ============================================================
+       RECOMMENDED POSTURE FOR COLD SENDING
+  ============================================================ -->
+  <section class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28">
     <div class="container-page">
-      <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Signals</div>
-      <h2 class="text-[26px] md:text-[34px] font-semibold tracking-[-0.025em] text-heading max-w-2xl">What we watch, in real time.</h2>
+      <div class="grid lg:grid-cols-[1fr_1.4fr] gap-12 lg:gap-20 items-start">
+        <div class="lg:sticky lg:top-24" style="align-self: start;">
+          <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Cold sending posture</div>
+          <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+            Start small. Ramp boring.<br/>Stay under the cap.
+          </h2>
+          <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+            These are operational heuristics, not protocol guarantees. They reflect what we observe on the platform and what every major receiver rewards. Treat the per-mailbox default cap as a ceiling, not a target.
+          </p>
+        </div>
 
-      <div class="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-px bg-[color:var(--border)] rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]" style="box-shadow: var(--shadow-sm);">
-        {signals.map(([t, b]) => (
-          <div class="bg-white p-5">
-            <div class="text-[14.5px] font-semibold text-heading">{t}</div>
-            <p class="mt-1.5 text-[12.5px] text-foreground/70 leading-relaxed">{b}</p>
+        <div class="space-y-px">
+          {posture.map((r, i) => (
+            <div class="grid grid-cols-[140px_auto_1fr] gap-6 items-baseline py-5 border-b border-[color:var(--border)] last:border-b-0">
+              <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-muted-foreground">{r.stage}</div>
+              <div class="flex items-baseline gap-1.5">
+                <span class={`text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-none font-mono ${i === 2 ? 'text-[#0369a1]' : 'text-heading'}`}>{r.range}</span>
+              </div>
+              <p class="text-[13.5px] text-foreground/65 leading-relaxed">{r.note}</p>
+            </div>
+          ))}
+
+          <div class="pt-6 flex flex-wrap items-center gap-x-6 gap-y-1 text-[11.5px] font-mono text-muted-foreground">
+            <span>600s minimum gap, always</span>
+            <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
+            <span>Business hours by recipient TZ</span>
+            <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
+            <span>Warmup runs in parallel with cold</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       BY THE NUMBERS · real product defaults
+  ============================================================ -->
+  <section class="bg-white py-16 md:py-20">
+    <div class="container-page">
+      <div class="max-w-2xl mb-10">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">By the numbers</div>
+        <h2 class="text-[26px] md:text-[34px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          The shape of the safety policy, in one strip.
+        </h2>
+        <p class="mt-3 text-[14px] text-foreground/65 leading-relaxed">
+          Every number here is a real product default in the codebase, not a marketing rounding.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-[color:var(--border)] rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
+        {numbers.map((n) => (
+          <div class="bg-white p-5 md:p-6">
+            <div class="flex items-baseline gap-1">
+              <span class="text-[28px] md:text-[34px] font-semibold tracking-[-0.025em] font-mono text-heading">{n.v}</span>
+              <span class="text-[12px] text-muted-foreground">{n.u}</span>
+            </div>
+            <div class="mt-2 text-[11.5px] uppercase tracking-[0.14em] font-mono text-foreground/70">{n.l}</div>
+            <div class="mt-3 pt-3 border-t border-[color:var(--border)] text-[10.5px] font-mono text-muted-foreground truncate">{n.src}</div>
           </div>
         ))}
       </div>
     </div>
   </section>
 
-  <!-- LEARN POINTERS -->
-  <section class="bg-[color:var(--surface-1)] border-y border-[color:var(--border)] py-14 md:py-16">
-    <div class="container-page grid lg:grid-cols-[1fr_2fr] gap-10">
-      <div>
-        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Go deeper</div>
-        <h2 class="text-[24px] md:text-[30px] font-semibold tracking-[-0.025em] text-heading leading-[1.1]">Full deliverability handbook.</h2>
+  <!-- ============================================================
+       FAQ · sticky title + accordion
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-1)]/40 border-y border-[color:var(--border)] py-20 md:py-24">
+    <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Deliverability FAQ</div>
+        <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+          Five questions we get most.
+        </h2>
+        <p class="mt-4 text-[14.5px] text-foreground/70 leading-relaxed">
+          More depth in the <a class="text-[#0369a1] hover:text-[#075985] font-medium" href="/learn/deliverability/">deliverability handbook</a>.
+        </p>
       </div>
-      <div class="grid sm:grid-cols-2 gap-3">
-        {[
-          { l: 'Email warmup explained', h: '/learn/email-warmup/' },
-          { l: 'Deliverability handbook', h: '/learn/deliverability/' },
-          { l: 'SPF, DKIM, DMARC', h: '/learn/spf-dkim-dmarc/' },
-          { l: 'Inbox placement', h: '/learn/inbox-placement/' },
-          { l: 'Cold email rules', h: '/learn/cold-email-rules/' },
-          { l: 'Reputation recovery', h: '/learn/reputation-recovery/' },
-        ].map((p) => (
-          <a href={p.h} class="group flex items-center justify-between p-4 rounded-[10px] bg-white ring-1 ring-[color:var(--border)] hover:ring-[color:var(--sky-6)]/40 transition-colors">
-            <span class="text-[14px] font-medium text-foreground">{p.l}</span>
-            <Icon name="arrowRight" size={13} class="text-muted-foreground group-hover:text-[color:var(--brand)] group-hover:translate-x-0.5 transition-all" />
-          </a>
+
+      <div class="divide-y divide-[color:var(--border)]" data-faq>
+        {faq.map(([q, a]) => (
+          <div class="faq-row py-2">
+            <button type="button" class="faq-trigger group w-full flex items-start justify-between gap-4 py-3 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-heading group-hover:text-[#0369a1] transition-colors">{q}</span>
+              <span class="faq-icon shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-white ring-1 ring-[color:var(--border)] text-foreground/60 transition-transform duration-300 ease-out">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              </span>
+            </button>
+            <div class="faq-panel grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 ease-out">
+              <div class="overflow-hidden">
+                <p class="pb-4 pr-12 text-[14px] text-foreground/75 leading-relaxed max-w-2xl">{a}</p>
+              </div>
+            </div>
+          </div>
         ))}
       </div>
+
+      <script is:inline>
+        (function () {
+          const faq = document.querySelector('[data-faq]');
+          if (!faq) return;
+          faq.querySelectorAll('.faq-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              const row   = btn.closest('.faq-row');
+              const panel = row.querySelector('.faq-panel');
+              const icon  = btn.querySelector('.faq-icon');
+              const open  = btn.getAttribute('aria-expanded') === 'true';
+              btn.setAttribute('aria-expanded', String(!open));
+              panel.style.gridTemplateRows = open ? '0fr' : '1fr';
+              if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(45deg)';
+            });
+          });
+        })();
+      </script>
     </div>
   </section>
 
   <CTA
-    title="Audit your sending health today."
-    description="Connect a mailbox and get a full SPF / DKIM / DMARC / placement report in under five minutes."
+    title="Audit a mailbox. See where it really stands."
+    description="Connect a mailbox and get a full SPF, DKIM, DMARC, PTR, and placement report in under five minutes."
     primaryLabel="Run a free audit"
+    primaryHref="https://app.warmbly.com/register"
+    secondaryLabel="Read the handbook"
+    secondaryHref="/learn/deliverability/"
   />
 </Layout>
