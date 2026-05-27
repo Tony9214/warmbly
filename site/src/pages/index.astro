@@ -742,90 +742,41 @@ const plans = [
     <!-- ============================================================
          PRICING — annual default, premium segmented toggle
     ============================================================ -->
-    <section class="relative overflow-hidden border-y border-[color:var(--border)]" style="background: linear-gradient(180deg, var(--surface-2) 0%, #ffffff 100%);">
-      <div class="container-page py-20 md:py-24 relative">
-        <!-- Clean useful header: a bundled-features panel that shows
-             exactly what every paid plan includes. The grid IS the
-             value proposition. Toggle floats top-right. -->
-        <div class="max-w-5xl mx-auto">
-
-          <div class="flex items-center justify-between gap-4 flex-wrap mb-8">
-            <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-[#0284c7]">
-              Pricing
-            </div>
-            <div class="inline-flex items-center gap-3" id="billing-toggle">
-              <div class="relative inline-flex items-center p-1 rounded-full bg-white ring-1 ring-[color:var(--border)] text-[13px] font-medium" style="box-shadow: var(--shadow-sm);">
-                <span id="toggle-thumb" class="absolute top-1 bottom-1 rounded-full bg-[color:var(--brand)] transition-all duration-[350ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="left: 116px; width: 112px; box-shadow: 0 6px 18px -4px rgba(2,132,199,0.5);"></span>
-                <button data-billing="monthly" class="relative h-9 px-5 rounded-full text-foreground/70 transition-colors min-w-[112px]">Monthly</button>
-                <button data-billing="annual"  class="relative h-9 px-5 rounded-full text-white transition-colors min-w-[112px]">
-                  <span class="inline-flex items-center gap-1.5">Annual</span>
-                </button>
-              </div>
-              <span class="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Save 20%
-              </span>
-            </div>
-          </div>
-
-          <div class="rounded-[14px] ring-1 ring-[color:var(--border)] bg-white overflow-hidden" style="box-shadow: var(--shadow-sm);">
-            <div class="px-5 py-3 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-baseline justify-between gap-3 flex-wrap">
-              <div class="text-[11px] font-mono uppercase tracking-[0.18em] text-foreground/70 font-semibold">
-                Bundled on every paid plan
-              </div>
-              <div class="text-[11px] font-mono text-muted-foreground">
-                same product · different sizes
-              </div>
-            </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x divide-[color:var(--border)]">
-              <a href="/warmup/" class="group flex flex-col items-start gap-2 px-5 py-5 hover:bg-[color:var(--surface-1)]/60 transition-colors">
-                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[color:var(--sky-1)] text-[#0284c7]">
-                  <Icon name="flame" size={16} />
-                </span>
-                <span class="text-[13px] font-semibold text-heading">Warmup</span>
-                <span class="text-[11px] text-muted-foreground leading-snug">Pool-isolated, gradual ramp.</span>
-              </a>
-              <a href="/sending/" class="group flex flex-col items-start gap-2 px-5 py-5 hover:bg-[color:var(--surface-1)]/60 transition-colors">
-                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[color:var(--sky-1)] text-[#0284c7]">
-                  <Icon name="send" size={16} />
-                </span>
-                <span class="text-[13px] font-semibold text-heading">Sending</span>
-                <span class="text-[11px] text-muted-foreground leading-snug">Per-mailbox safety caps.</span>
-              </a>
-              <a href="/inbox/" class="group flex flex-col items-start gap-2 px-5 py-5 hover:bg-[color:var(--surface-1)]/60 transition-colors">
-                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[color:var(--sky-1)] text-[#0284c7]">
-                  <Icon name="inbox" size={16} />
-                </span>
-                <span class="text-[13px] font-semibold text-heading">Unified inbox</span>
-                <span class="text-[11px] text-muted-foreground leading-snug">All replies, one view.</span>
-              </a>
-              <a href="/analytics/" class="group flex flex-col items-start gap-2 px-5 py-5 hover:bg-[color:var(--surface-1)]/60 transition-colors">
-                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[color:var(--sky-1)] text-[#0284c7]">
-                  <Icon name="chart" size={16} />
-                </span>
-                <span class="text-[13px] font-semibold text-heading">Analytics</span>
-                <span class="text-[11px] text-muted-foreground leading-snug">Per-mailbox health.</span>
-              </a>
-              <a href="/crm/" class="group flex flex-col items-start gap-2 px-5 py-5 hover:bg-[color:var(--surface-1)]/60 transition-colors">
-                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[color:var(--sky-1)] text-[#0284c7]">
-                  <Icon name="contact" size={16} />
-                </span>
-                <span class="text-[13px] font-semibold text-heading">CRM</span>
-                <span class="text-[11px] text-muted-foreground leading-snug">Contacts, deals, pipelines.</span>
-              </a>
-              <a href="/developers/" class="group flex flex-col items-start gap-2 px-5 py-5 hover:bg-[color:var(--surface-1)]/60 transition-colors">
-                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[color:var(--sky-1)] text-[#0284c7]">
-                  <Icon name="code" size={16} />
-                </span>
-                <span class="text-[13px] font-semibold text-heading">API & webhooks</span>
-                <span class="text-[11px] text-muted-foreground leading-snug">HMAC-signed, idempotent.</span>
-              </a>
-            </div>
-          </div>
-
-          <p class="mt-6 text-center text-[13.5px] text-foreground/65 max-w-xl mx-auto">
-            What you pay reflects daily send volume. Everything above is on every plan.
-          </p>
+    <!-- Sky hero matching the rest of the site's product pages. The
+         cards below float over the sky-to-white boundary via -mt-32 / -mt-40
+         the same way /pricing handles it. -->
+    <section class="relative isolate overflow-hidden">
+      <HeroAtmosphere />
+      <div class="container-page relative pt-16 md:pt-20 pb-44 md:pb-52 text-center">
+        <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-white/75">
+          Pricing
         </div>
+        <h2 class="mt-4 text-[44px] sm:text-[56px] md:text-[68px] font-semibold tracking-[-0.035em] leading-[1.02] text-white max-w-3xl mx-auto">
+          Pay for what you send.
+        </h2>
+        <p class="mt-5 text-[16.5px] md:text-[17px] text-white/80 leading-relaxed max-w-xl mx-auto">
+          The number on each card is daily send volume. Warmup, the unified inbox, analytics, CRM and the API are in every paid plan.
+        </p>
+
+        <!-- Translucent toggle that reads as a control panel sitting on the sky. -->
+        <div class="mt-9 inline-flex items-center gap-3" id="billing-toggle">
+          <div class="relative inline-flex items-center p-1 rounded-full bg-white/10 backdrop-blur ring-1 ring-white/25 text-[13px] font-medium shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
+            <span id="toggle-thumb" class="absolute top-1 bottom-1 rounded-full bg-white transition-all duration-[350ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="left: 116px; width: 112px; box-shadow: 0 6px 18px -4px rgba(0,0,0,0.25);"></span>
+            <button data-billing="monthly" class="relative h-9 px-5 rounded-full text-white/70 transition-colors min-w-[112px]">Monthly</button>
+            <button data-billing="annual"  class="relative h-9 px-5 rounded-full text-[color:var(--sky-7)] transition-colors min-w-[112px]">
+              <span class="inline-flex items-center gap-1.5">Annual</span>
+            </button>
+          </div>
+          <span class="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11.5px] font-semibold bg-white/10 backdrop-blur text-white border border-white/30">
+            Save 20%
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- White section pulled up under the hero. Cards float over the boundary. -->
+    <section class="relative -mt-32 md:-mt-40 pb-16 md:pb-20 z-10">
+      <div class="container-page">
 
         <!-- Edge-to-edge grid: cards share borders via gap-px, no per-card ring.
              The whole grid sits inside a single rounded ring. -->
@@ -1152,13 +1103,15 @@ const plans = [
           thumb.style.left = `${left}px`;
           thumb.style.width = `${width}px`;
         }
+        // Active button reads as sky-dark on the white pill thumb;
+        // inactive reads as soft white on the translucent track.
         btns.forEach((b) => {
           if (b.getAttribute('data-billing') === mode) {
-            b.classList.remove('text-foreground/70');
-            b.classList.add('text-white');
+            b.classList.remove('text-white/70');
+            b.classList.add('text-[color:var(--sky-7)]');
           } else {
-            b.classList.add('text-foreground/70');
-            b.classList.remove('text-white');
+            b.classList.add('text-white/70');
+            b.classList.remove('text-[color:var(--sky-7)]');
           }
         });
         document.querySelectorAll('.plan-price').forEach((el) => {
