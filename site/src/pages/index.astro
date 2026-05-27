@@ -744,15 +744,17 @@ const plans = [
     ============================================================ -->
     <section class="relative overflow-hidden border-y border-[color:var(--border)]" style="background: linear-gradient(180deg, var(--surface-2) 0%, #ffffff 100%);">
       <div class="container-page py-24 md:py-32 relative">
-        <div class="text-center max-w-2xl mx-auto">
-          <div class="inline-flex items-center gap-2 h-7 px-3 rounded-full bg-[color:var(--brand-soft)] ring-1 ring-[color:var(--brand)]/15 mb-4">
-            <span class="text-[11px] uppercase tracking-[0.16em] text-[color:var(--brand)] font-semibold">Pricing</span>
+        <div class="text-center max-w-3xl mx-auto">
+          <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-[#0284c7]">
+            Plans · billed per mailbox
           </div>
-          <h2 class="text-[36px] md:text-[58px] font-semibold tracking-[-0.035em] leading-[1.02] text-heading">
-            Per mailbox. <span class="italic font-medium" style="color: var(--brand)">Predictable.</span>
+
+          <h2 class="mt-4 text-[40px] sm:text-[52px] md:text-[64px] font-semibold tracking-[-0.035em] leading-[1.02] text-heading">
+            Pick a volume.<br class="hidden sm:inline" /> Get every feature.
           </h2>
-          <p class="mt-5 text-[16.5px] text-foreground/75 leading-relaxed">
-            Warmup, sending, the inbox, analytics and CRM aren't separate line items. You pay for the mailboxes you connect.
+
+          <p class="mt-6 text-[16.5px] md:text-[17.5px] text-foreground/75 leading-relaxed max-w-xl mx-auto">
+            Warmup, sending, the unified inbox, analytics, CRM and the API are in every paid plan. What you pay reflects daily send volume only.
           </p>
 
           <!-- Premium segmented billing toggle — annual is the default -->
@@ -766,6 +768,29 @@ const plans = [
             </div>
             <span class="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
               Save 20%
+            </span>
+          </div>
+
+          <!-- Trust strip under the toggle: reassurance without theater. -->
+          <div class="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12.5px] text-foreground/70">
+            <span class="inline-flex items-center gap-1.5">
+              <Icon name="check" size={12} class="text-[color:var(--brand)]" />
+              14-day trial
+            </span>
+            <span class="text-foreground/30">·</span>
+            <span class="inline-flex items-center gap-1.5">
+              <Icon name="check" size={12} class="text-[color:var(--brand)]" />
+              One mailbox to start
+            </span>
+            <span class="text-foreground/30">·</span>
+            <span class="inline-flex items-center gap-1.5">
+              <Icon name="check" size={12} class="text-[color:var(--brand)]" />
+              No credit card
+            </span>
+            <span class="text-foreground/30">·</span>
+            <span class="inline-flex items-center gap-1.5">
+              <Icon name="check" size={12} class="text-[color:var(--brand)]" />
+              Cancel any time
             </span>
           </div>
         </div>
