@@ -13,7 +13,7 @@ const path = Astro.url.pathname;
 // Product mega-menu items (6 meaningful products)
 const products = [
   { icon: 'flame',    href: '/warmup/',    title: 'Warmup',         desc: 'Reputation-safe pools and gradual ramps that earn placement, not just inflate it.', tag: 'Deliverability' },
-  { icon: 'send',     href: '/sending/',   title: 'Sending engine', desc: 'Distributed send plane across many mailboxes, many workers and many IPs.',          tag: 'Infrastructure' },
+  { icon: 'webhook',  href: '/developers/', title: 'API & webhooks', desc: 'REST + HMAC-signed webhooks. Idempotency keys. Per-key scopes.',                     tag: 'Developers' },
   { icon: 'inbox',    href: '/inbox/',     title: 'Unified inbox',  desc: 'Every reply, bounce, OOO and click across every connected mailbox, classified.',     tag: 'Triage' },
   { icon: 'workflow', href: '/campaigns/', title: 'Campaigns',      desc: 'Multi-step sequences with branching, A/B variants and business-hour scheduling.',    tag: 'Outreach' },
   { icon: 'chart',    href: '/analytics/', title: 'Analytics',      desc: 'Placement, complaints, bounces and warmup health, by mailbox and by worker.',        tag: 'Reporting' },
@@ -21,7 +21,7 @@ const products = [
 ];
 
 const nav: { label: string; href: string; match?: string; mega?: boolean }[] = [
-  { label: 'Product',       href: '/warmup/',        match: '/warmup|/sending|/inbox|/campaigns|/analytics|/crm', mega: true },
+  { label: 'Product',       href: '/warmup/',        match: '/warmup|/developers|/inbox|/campaigns|/analytics|/crm', mega: true },
   { label: 'Deliverability',href: '/deliverability/',match: '/deliverability' },
   { label: 'Pricing',       href: '/pricing/',       match: '/pricing' },
   { label: 'Learn',         href: '/learn/',         match: '/learn' },
