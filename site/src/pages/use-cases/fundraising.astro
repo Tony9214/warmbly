@@ -1,28 +1,453 @@
 ---
-import UseCasePage from '../../components/UseCasePage.astro';
+import Layout from '../../layouts/Layout.astro';
+import HeroAtmosphere from '../../components/HeroAtmosphere.astro';
+import Icon from '../../components/Icon.astro';
+import CTA from '../../components/CTA.astro';
+
+// All numbers reflect platform defaults from CLAUDE.md:
+// warmup ramp 10 → 40 / day, cold cap 100 / day, 600s gap, +1 / day ramp.
+
+// Six-week raise timeline: warmup ramp through week -1, then a short send window.
+// Astro JSX caveat: pre-compute < / <= comparisons in frontmatter, not in templates.
+const RAMP_START = 10;
+const RAMP_PER_DAY = 1;
+const RAMP_CEILING = 40;
+const COLD_DAILY_CAP = 100;
+const SEND_GAP_SECONDS = 600;
+
+const timeline = [
+  { week: 'Week -6', phase: 'warmup',  volume: 10, label: 'Mailbox connected. Warmup begins.', detail: 'First warmup send. Reads as normal individual activity to any provider.' },
+  { week: 'Week -5', phase: 'warmup',  volume: 15, label: 'Ramp · +1 per business day',         detail: 'No deck talk, no sending. Build behaviour history while the deck is still in revision.' },
+  { week: 'Week -4', phase: 'warmup',  volume: 22, label: 'Mid-ramp',                            detail: 'Verification tokens land at vetted partners. Positive placement signal accrues.' },
+  { week: 'Week -3', phase: 'warmup',  volume: 30, label: 'Ramp continues',                      detail: 'Recipient pool is rotated. Recent partners excluded for 7 days.' },
+  { week: 'Week -2', phase: 'warmup',  volume: 38, label: 'Approaching ceiling',                 detail: 'Health band confirmed Healthy. Mailbox eligible to send cold next week.' },
+  { week: 'Week -1', phase: 'warmup',  volume: 40, label: 'Ceiling. Holds at 40 / day.',         detail: 'Warmup continues in parallel. Cold sending starts only once this floor is stable.' },
+  { week: 'Week 0',  phase: 'send',    volume: 40, label: 'Day 0 · first touch',                 detail: 'Plain text, 3 to 4 sentences. Spread across recipient business hours.' },
+  { week: 'Week +1', phase: 'send',    volume: 40, label: 'Day 5 · second touch',                detail: 'Single follow-up only on no-reply. Sequence pauses on any reply.' },
+];
+
+// Three real traps for VC outreach + the corresponding platform defence.
+const traps = [
+  {
+    n: '01',
+    trap: 'Mailbox set up the same week as the raise',
+    detail: 'A fresh mailbox sending cold to a partner list looks like the worst-case sender. Providers default to suspicion. First catastrophic event can hit within days.',
+    defence: 'Warmup',
+    fix: 'Connect and start warmup 4 to 6 weeks before the raise. Ramp from 10 to 40 per day so the mailbox has behaviour history before the first cold send.',
+    link: '/warmup/',
+    linkLabel: 'See warmup ramp',
+  },
+  {
+    n: '02',
+    trap: 'CC the co-founders on every send',
+    detail: 'CC chains on cold sends normalise a behaviour Gmail treats as bulk. The partner sees an internal cast list before they see your one-line ask.',
+    defence: 'Sender pool',
+    fix: 'Each cold message goes from one sender to one recipient. If a co-founder needs to be in the loop, route through the inbox once a reply lands. Keep the cold surface clean.',
+    link: '/inbox/',
+    linkLabel: 'How inbox routing works',
+  },
+  {
+    n: '03',
+    trap: 'Blast 80 partners at 9am Tuesday',
+    detail: 'Sending to a partner list in the same minute is the loudest possible spam signal. It bursts the same mailbox past safe spacing and trips volume anomaly heuristics.',
+    defence: 'Business-hour scheduling · 600s gap',
+    fix: 'Distribute sends across each recipient business window in their own time zone. Default 600 second gap keeps the send pattern natural and within the per-mailbox cap.',
+    link: '/campaigns/',
+    linkLabel: 'Scheduling rules',
+  },
+];
+
+// The two-step sequence, deliberately minimal.
+const sequence = [
+  {
+    idx: 1, kind: 'send', delay: 'D0', label: 'First touch · plain text',
+    note: '3 to 4 sentences. No deck attached. One sentence on traction, one on the ask.',
+    body: 'Hi {{ first_name }},\n\n{{ company.name }} backs early-stage {{ thesis }}. We are {{ traction_one_line }} and raising a {{ round }}.\n\nDeck on reply if it is interesting?\n\n— {{ sender.first_name }}',
+  },
+  {
+    idx: 2, kind: 'wait', delay: '+5 business days', label: 'Wait · 5 business days',
+    note: 'Pause on any reply, bounce, suppression, or auto-classified OOO.',
+    body: null,
+  },
+  {
+    idx: 3, kind: 'send', delay: 'D5', label: 'Second touch · breakup',
+    note: 'One short follow-up. After this, the sequence ends. No third send.',
+    body: 'Hi {{ first_name }},\n\nQuick bump on the {{ round }} note above. Closing the round in {{ weeks_remaining }} weeks. Worth a 10 minute call?\n\nDeck attached on reply.\n\n— {{ sender.first_name }}',
+  },
+];
+
+// Reputation bands lifted from CLAUDE.md "Recommended internal policy for shared paid pools".
+const bands = [
+  { name: 'Healthy',     tone: 'emerald', spam: '< 10%', complaint: '< 0.03%', action: 'Default state. Continue sending.' },
+  { name: 'Watch',       tone: 'amber',   spam: '≥ 10%', complaint: '≥ 0.03%', action: 'Lower volume, increase spacing. Notify operator.' },
+  { name: 'Quarantined', tone: 'rose',    spam: '≥ 20%', complaint: '≥ 0.10%', action: 'Removed from shared paid pool for 7 days. Cold sequence pauses.' },
+];
+
+const toneClass = (t: string) => {
+  if (t === 'emerald') return { dot: 'bg-emerald-500', text: 'text-emerald-700', soft: 'bg-emerald-50' };
+  if (t === 'amber')   return { dot: 'bg-amber-500',   text: 'text-amber-700',   soft: 'bg-amber-50' };
+  return                       { dot: 'bg-rose-500',    text: 'text-rose-700',    soft: 'bg-rose-50' };
+};
+
+// Single-row visual scale of timeline weeks (warmup vs send), pre-computed so JSX stays simple.
+const maxVolume = RAMP_CEILING;
+const timelineRows = timeline.map((t) => {
+  const widthPct = Math.round((t.volume / maxVolume) * 100);
+  const isSend = t.phase === 'send';
+  return { ...t, widthPct, isSend };
+});
+
+const faq = [
+  ['How long before the raise should I connect the mailbox?', 'Four to six weeks. The ramp from 10 to 40 per day takes about 30 business days, and warmup needs at least 20 deliveries in the pool before the mailbox is rated Healthy.'],
+  ['Why only two steps?', 'Investor inboxes are saturated. A short two-step sequence respects that. Longer sequences push the same mailbox past safe spacing and read as automation. Two steps is a recommendation, not a measured outcome.'],
+  ['Should I attach the deck on the first send?', 'No. Cold attachments hurt deliverability and remove the reason to reply. Send the deck on reply, not before. The first touch is three sentences and an ask.'],
+];
 ---
-<UseCasePage
-  pageTitle="Fundraising — Warmbly"
-  description="Plan a focused VC sequence that lands in the inbox, not promotions."
-  title="A fundraising sequence that lands in the inbox."
-  intro="Cold mail to investors is small-volume, high-stakes. The mailbox you send from should be warmed weeks before, not the night before."
-  challenges={[
-    { title: 'Wrong mailbox at the wrong time', body: 'Founders send to investors from a fresh mailbox set up the same week. It lands in spam; they assume the partner ghosted.' },
-    { title: 'CC-the-team patterns', body: 'CC’ing co-founders on every send normalises a behaviour Gmail treats as bulk.' },
-    { title: 'Reusing the deck-share mailbox', body: 'Using the same address that hosts the data room means transactional and cold sending mingle.' },
-    { title: 'Send-all-Tuesday-9am bursts', body: 'Sending to 80 partners in the same minute is the loudest possible spam signal.' },
-  ]}
-  recipe={[
-    { title: 'Warm one or two mailboxes weeks ahead', body: 'Start warmup 4–6 weeks before the raise. Aim for the 40/day warmup ceiling on each mailbox.' },
-    { title: 'Plain text, three sentences', body: 'Subject + three sentences + a sentence about traction. No deck attached. Deck link only after reply.' },
-    { title: 'Stagger the sequence', body: 'Spread sends across business hours by recipient TZ. Default 10-min gap keeps the send pattern natural.' },
-    { title: 'Step 2 only after no-reply + 6 business days', body: 'A single follow-up doubles reply rate; more risks looking pushy and trips reputation heuristics.' },
-    { title: 'Forward warm intros separately', body: 'Warm intros and cold sequences live in different sequences with different sender mailboxes.' },
-  ]}
-  caps={[
-    { value: '4-6 weeks',  label: 'Recommended warmup lead time' },
-    { value: '40 / day',   label: 'Warmup ceiling target' },
-    { value: '2 steps',    label: 'Suggested sequence depth' },
-    { value: '10 min gap', label: 'Default send spacing' },
-  ]}
-/>
+<Layout
+  title="Fundraising · Warmbly"
+  description="Plan a focused cold investor sequence that lands in the inbox. Warm the mailbox 4 to 6 weeks ahead, send a clean two-step sequence, then watch reputation as the raise runs."
+>
+  <!-- ============================================================
+       HERO · HeroAtmosphere, shared with home / pricing / warmup
+  ============================================================ -->
+  <section class="relative isolate overflow-hidden">
+    <HeroAtmosphere />
+
+    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+      <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
+        <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">
+          Fundraising
+        </span>
+        Warm the mailbox before the deck is finished
+      </div>
+
+      <h1 class="mt-8 md:mt-10 text-[44px] sm:text-6xl md:text-[72px] lg:text-[80px] font-semibold tracking-[-0.04em] leading-[0.98] text-white max-w-4xl mx-auto">
+        Land in the partner inbox,<br/>not the founder graveyard.
+      </h1>
+      <p class="mt-6 text-[17px] md:text-[19px] text-white/80 max-w-2xl mx-auto leading-relaxed">
+        Cold mail to VCs is small-volume, high-stakes. The mailbox should be warmed weeks before the raise, the sequence should be two steps, and the send pattern should look like a founder typing, not a tool blasting.
+      </p>
+
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="https://app.warmbly.com/register" class="inline-flex h-11 px-5 items-center gap-2 rounded-[10px] text-[14.5px] font-semibold bg-white hover:bg-white hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.3)] transition-all duration-200 ease-out shadow-[0_4px_14px_-2px_rgba(0,0,0,0.18)]">
+          <span style="color:#075985;">Start free trial</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+          </svg>
+        </a>
+        <a href="/learn/email-warmup/" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
+          How warmup works
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       RAISE TIMELINE · floating into the hero
+  ============================================================ -->
+  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
+    <div class="container-page">
+      <div class="rounded-[18px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
+        <!-- Header strip -->
+        <div class="px-7 py-4 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex flex-wrap items-baseline justify-between gap-3">
+          <div class="flex items-baseline gap-3">
+            <div class="text-[13px] font-semibold text-heading">raise-timeline.fy26</div>
+            <span class="inline-flex items-center gap-1.5 h-5 px-2 rounded-full bg-[color:var(--sky-1)] text-[#0369a1] text-[10.5px] font-medium font-mono uppercase tracking-[0.08em]">
+              <span class="w-1 h-1 rounded-full bg-[#0284c7]"></span>
+              6 weeks · 1 mailbox
+            </span>
+          </div>
+          <div class="flex items-center gap-4 text-[10.5px] font-mono text-muted-foreground">
+            <span>Warmup ramp: {RAMP_START} → {RAMP_CEILING} / day</span>
+            <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
+            <span>Cold cap: {COLD_DAILY_CAP} / day</span>
+            <span class="w-1 h-1 rounded-full bg-[color:var(--border)]"></span>
+            <span>{SEND_GAP_SECONDS}s spacing</span>
+          </div>
+        </div>
+
+        <!-- Phase legend -->
+        <div class="px-7 pt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] font-mono text-muted-foreground">
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded-sm bg-[#7dd3fc]"></span>
+            Warmup phase
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded-sm bg-[#075985]"></span>
+            Cold send phase
+          </span>
+          <span class="ml-auto inline-flex items-center gap-1.5 text-[#0369a1]">
+            <Icon name="check" size={10} />
+            Warmup continues in parallel during send weeks
+          </span>
+        </div>
+
+        <!-- Horizontal timeline rows -->
+        <div class="px-7 pt-4 pb-7">
+          <div class="space-y-1.5">
+            {timelineRows.map((t) => (
+              <div class="grid grid-cols-[88px_60px_1fr_220px] gap-4 items-center py-2">
+                <div class="text-[11px] font-mono text-muted-foreground uppercase tracking-[0.14em]">{t.week}</div>
+                <div class="text-right">
+                  <span class="font-mono text-[13px] font-semibold text-heading">{t.volume}</span>
+                  <span class="font-mono text-[10.5px] text-muted-foreground"> /day</span>
+                </div>
+                <div class="relative h-6 rounded-[4px] bg-[color:var(--surface-1)] overflow-hidden">
+                  <div
+                    class="absolute left-0 top-0 bottom-0 rounded-[4px]"
+                    style={`width: ${t.widthPct}%; background: ${t.isSend ? 'linear-gradient(90deg, #0284c7 0%, #075985 100%)' : 'linear-gradient(90deg, #bae6fd 0%, #7dd3fc 100%)'};`}
+                  ></div>
+                  <div class="absolute inset-0 flex items-center px-3">
+                    <span class={`text-[11px] font-medium ${t.isSend ? 'text-white' : 'text-[#0c4a6e]'}`}>{t.label}</span>
+                  </div>
+                </div>
+                <div class="text-[12px] text-foreground/65 leading-snug">{t.detail}</div>
+              </div>
+            ))}
+          </div>
+
+          <div class="mt-6 pt-4 border-t border-[color:var(--border)] flex flex-wrap items-center justify-between gap-3 text-[11.5px] font-mono text-muted-foreground">
+            <span>Plan numbers come from platform defaults, not a guarantee of outcomes.</span>
+            <a href="/warmup/" class="inline-flex items-center gap-1 text-[#0369a1] hover:text-[#075985]">
+              See the full warmup ramp <Icon name="arrowRight" size={11} />
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       THREE TRAPS · what kills VC reply rate
+  ============================================================ -->
+  <section class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-3xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Three traps</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          The three patterns that kill an investor sequence.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
+          The mistakes are not creative. They are the same three founders make every raise. Each has a specific platform defence so the mailbox stays out of promotions and the sequence keeps moving.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-4 lg:gap-5">
+        {traps.map((t) => (
+          <div class="relative rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden flex flex-col">
+            <div class="h-1.5 bg-rose-400"></div>
+            <div class="p-6 flex-1 flex flex-col">
+              <div class="flex items-baseline justify-between mb-3">
+                <span class="text-[10.5px] font-mono uppercase tracking-[0.18em] text-rose-700 font-semibold">Trap {t.n}</span>
+                <span class="inline-flex items-center gap-1 text-[10.5px] font-mono text-rose-600">
+                  <span class="w-1 h-1 rounded-full bg-rose-500"></span>
+                  kills reply rate
+                </span>
+              </div>
+              <div class="text-[16px] font-semibold text-heading leading-snug">{t.trap}</div>
+              <p class="mt-2 text-[13px] text-foreground/65 leading-relaxed">{t.detail}</p>
+
+              <div class="mt-5 pt-5 border-t border-[color:var(--border)]">
+                <div class="text-[10.5px] font-mono uppercase tracking-[0.18em] text-[#0369a1] font-semibold mb-2">Defence · {t.defence}</div>
+                <p class="text-[13px] text-foreground/80 leading-relaxed">{t.fix}</p>
+                <a href={t.link} class="mt-4 inline-flex items-center gap-1 text-[12.5px] font-medium text-[#0369a1] hover:text-[#075985]">
+                  {t.linkLabel} <Icon name="arrowRight" size={11} />
+                </a>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       THE TWO-STEP SEQUENCE · the actual structure
+  ============================================================ -->
+  <section class="border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page grid lg:grid-cols-[1fr_1.6fr] gap-12 lg:gap-16 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">The sequence</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          Two steps. Plain text. Deck on reply.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+          Investor inboxes are saturated. A short sequence respects that. Day 0 is three to four sentences and one ask. Day 5 is a one-paragraph breakup. After that, the sequence ends.
+        </p>
+        <ul class="mt-6 space-y-2.5 text-[14px] text-foreground/85">
+          <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0"/><span>Pauses on any reply, bounce, or suppression.</span></li>
+          <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0"/><span>No deck attached. Deck link sent on reply only.</span></li>
+          <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0"/><span>Sends spread across recipient business hours, never the same minute.</span></li>
+        </ul>
+        <p class="mt-6 text-[12px] text-muted-foreground italic">
+          Two steps is a recommendation, not a measured outcome. Override in settings if you have data that says otherwise.
+        </p>
+      </div>
+
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+        <!-- Header strip -->
+        <div class="px-6 py-3.5 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex flex-wrap items-baseline justify-between gap-3">
+          <div class="flex items-baseline gap-3">
+            <div class="text-[13px] font-semibold text-heading">vc-seed-fy26</div>
+            <span class="inline-flex items-center gap-1.5 h-5 px-2 rounded-full bg-[color:var(--sky-1)] text-[#0369a1] text-[10.5px] font-medium font-mono uppercase tracking-[0.08em]">
+              <span class="w-1 h-1 rounded-full bg-[#0284c7]"></span>
+              2 steps · 1 sender
+            </span>
+          </div>
+          <span class="text-[10.5px] font-mono uppercase tracking-[0.14em] text-muted-foreground">plain text · no attachments</span>
+        </div>
+
+        <!-- Steps -->
+        <div class="divide-y divide-[color:var(--border)]">
+          {sequence.map((s, i) => {
+            const isSend = s.kind === 'send';
+            const isWait = s.kind === 'wait';
+            return (
+              <div class="p-6">
+                <div class="grid grid-cols-[36px_1fr_auto] gap-4 items-center">
+                  <div class={`w-8 h-8 rounded-full inline-flex items-center justify-center text-[11px] font-mono font-semibold ${isSend ? 'bg-[#0284c7] text-white' : 'bg-slate-200 text-slate-600'}`}>
+                    {s.idx}
+                  </div>
+                  <div>
+                    <div class="text-[15px] font-semibold text-heading">{s.label}</div>
+                    <div class="mt-0.5 text-[12px] text-foreground/55">{s.note}</div>
+                  </div>
+                  <div class="text-right">
+                    <span class={`inline-flex items-center h-5 px-2 rounded text-[10px] font-mono font-semibold tracking-[0.08em] ${isSend ? 'bg-[color:var(--sky-1)] text-[#0369a1]' : 'bg-slate-100 text-slate-700'}`}>
+                      {s.delay}
+                    </span>
+                  </div>
+                </div>
+
+                {s.body && (
+                  <div class="mt-4 ml-12 rounded-[10px] bg-[color:var(--surface-1)]/60 ring-1 ring-[color:var(--border)] p-4 font-mono text-[12.5px] text-foreground/85 whitespace-pre-wrap leading-[1.65]">{s.body}</div>
+                )}
+
+                {isWait && (
+                  <div class="mt-3 ml-12 text-[11.5px] font-mono text-muted-foreground">
+                    On reply · pause · auto-route to <a href="/inbox/" class="text-[#0369a1] hover:text-[#075985]">inbox</a>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div class="px-6 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex flex-wrap items-center justify-between gap-2 text-[11.5px] font-mono text-muted-foreground">
+          <span>After step 2 · sequence ends · no third send</span>
+          <span class="text-[#0369a1]">Reply pauses for that contact only</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       REPUTATION WATCH · warmup keeps running during the raise
+  ============================================================ -->
+  <section class="border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-24">
+    <div class="container-page">
+      <div class="grid lg:grid-cols-[1fr_1.4fr] gap-12 lg:gap-16 items-start">
+        <div class="lg:sticky lg:top-24" style="align-self: start;">
+          <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Reputation watch</div>
+          <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+            Warmup keeps running during the raise.
+          </h2>
+          <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+            A mailbox can drift in the middle of a raise. Warmup runs in parallel so any spam-folder placement is caught at the partner pool before a partner hits the report button.
+          </p>
+          <a href="/learn/email-warmup/" class="mt-6 inline-flex items-center gap-1.5 text-[13.5px] font-medium text-[#0369a1] hover:text-[#075985]">
+            Read the warmup guide
+            <Icon name="arrowRight" size={12} />
+          </a>
+        </div>
+
+        <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+          <div class="px-6 py-3.5 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex items-baseline justify-between">
+            <div class="text-[13px] font-semibold text-heading">Per-mailbox health bands</div>
+            <span class="text-[10.5px] font-mono uppercase tracking-[0.14em] text-muted-foreground">rolling window</span>
+          </div>
+
+          <div class="divide-y divide-[color:var(--border)]">
+            {bands.map((b) => {
+              const t = toneClass(b.tone);
+              return (
+                <div class="grid grid-cols-[110px_1fr_auto] gap-4 px-6 py-5 items-center">
+                  <div class="flex items-center gap-2">
+                    <span class={`w-2 h-2 rounded-full ${t.dot}`}></span>
+                    <span class={`text-[13px] font-semibold ${t.text}`}>{b.name}</span>
+                  </div>
+                  <div class="text-[13.5px] text-foreground/75 leading-snug">{b.action}</div>
+                  <div class="text-right font-mono text-[11.5px] text-muted-foreground">
+                    <div>spam {b.spam}</div>
+                    <div>complaint {b.complaint}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div class="px-6 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 text-[11.5px] font-mono text-muted-foreground">
+            Bands require at least 20 warmup deliveries in 7 days before action. Cold sending pauses automatically when a mailbox enters Quarantined.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FAQ · animated grid-rows accordion (shared pattern)
+  ============================================================ -->
+  <section class="py-20 md:py-24">
+    <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
+      <div class="lg:sticky lg:top-24" style="align-self: start;">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Fundraising FAQ</div>
+        <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
+          Three questions founders ask before a raise.
+        </h2>
+        <p class="mt-4 text-[14.5px] text-foreground/70 leading-relaxed">
+          More context? Read the <a class="text-[#0369a1] hover:text-[#075985] font-medium" href="/learn/email-warmup/">warmup guide</a>.
+        </p>
+      </div>
+      <div class="divide-y divide-[color:var(--border)]" data-faq>
+        {faq.map(([q, a]) => (
+          <div class="faq-row py-2">
+            <button type="button" class="faq-trigger group w-full flex items-start justify-between gap-4 py-3 text-left" aria-expanded="false">
+              <span class="text-[15.5px] font-medium text-heading group-hover:text-[#0369a1] transition-colors">{q}</span>
+              <span class="faq-icon shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-white ring-1 ring-[color:var(--border)] text-foreground/60 transition-transform duration-300 ease-out">
+                <Icon name="plus" size={12} />
+              </span>
+            </button>
+            <div class="faq-panel grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 ease-out">
+              <div class="overflow-hidden">
+                <p class="pb-4 pr-12 text-[14px] text-foreground/75 leading-relaxed max-w-2xl">{a}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <script is:inline>
+        (function () {
+          const faq = document.querySelector('[data-faq]');
+          if (!faq) return;
+          faq.querySelectorAll('.faq-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              const row   = btn.closest('.faq-row');
+              const panel = row.querySelector('.faq-panel');
+              const icon  = btn.querySelector('.faq-icon');
+              const open  = btn.getAttribute('aria-expanded') === 'true';
+              btn.setAttribute('aria-expanded', String(!open));
+              panel.style.gridTemplateRows = open ? '0fr' : '1fr';
+              if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(45deg)';
+            });
+          });
+        })();
+      </script>
+    </div>
+  </section>
+
+  <CTA
+    title="Warm now, send when the deck is ready."
+    primaryLabel="Start free trial"
+  />
+</Layout>
