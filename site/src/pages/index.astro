@@ -743,9 +743,6 @@ const plans = [
          PRICING — annual default, premium segmented toggle
     ============================================================ -->
     <section class="relative overflow-hidden border-y border-[color:var(--border)]" style="background: linear-gradient(180deg, var(--surface-2) 0%, #ffffff 100%);">
-      <!-- decorative clouds in the panel -->
-      <img src="/backdrops/cloud-5.webp" alt="" aria-hidden="true" class="absolute -top-16 -left-20 w-[640px] opacity-40 pointer-events-none select-none cloud-drift cloud-1" loading="lazy" decoding="async"/>
-
       <div class="container-page py-16 md:py-20 relative">
         <div class="text-center max-w-2xl mx-auto">
           <h2 class="text-[36px] md:text-[56px] font-semibold tracking-[-0.035em] leading-[1.04] text-heading">
@@ -755,22 +752,31 @@ const plans = [
             Trials run 14 days with one mailbox. After that, pick the plan that fits the volume you actually send. No credit card to start.
           </p>
 
-          <!-- Segmented billing toggle, annual default.
-               Thumb has an inline width/left so it stays visible even
-               if motion.dev hasn't booted yet; JS upgrades to animated. -->
-          <div class="mt-9 inline-flex items-center gap-3" id="billing-toggle">
-            <div class="relative inline-flex items-center p-1 rounded-full bg-white ring-1 ring-[color:var(--border)] text-[13px] font-medium" style="box-shadow: var(--shadow-sm);">
-              <span
-                id="toggle-thumb"
-                class="absolute top-1 bottom-1 rounded-full bg-[color:var(--brand)] transition-all duration-[350ms] ease-[cubic-bezier(0.22,1,0.36,1)]"
-                style="left: 116px; width: 112px; box-shadow: 0 6px 18px -4px rgba(2,132,199,0.5);"
-              ></span>
-              <button data-billing="monthly" class="relative h-9 px-5 rounded-full text-foreground/70 transition-colors min-w-[112px]">Monthly</button>
-              <button data-billing="annual"  class="relative h-9 px-5 rounded-full text-white transition-colors min-w-[112px]">Annual</button>
-            </div>
-            <span class="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Save 20%
-            </span>
+          <!-- Same sliding-indicator switcher as /pricing.
+               No motion.dev dependency, getBoundingClientRect drives it. -->
+          <div
+            class="mt-9 relative inline-flex items-center p-1 rounded-full bg-[color:var(--surface-2)] ring-1 ring-[color:var(--border)] shadow-[0_4px_14px_-4px_rgba(15,23,42,0.08)]"
+            data-billing-toggle
+          >
+            <span
+              class="billing-indicator absolute top-1 bottom-1 rounded-full bg-white shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)] ring-1 ring-[color:var(--border)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)] pointer-events-none"
+              style="width: 0; opacity: 0;"
+            ></span>
+            <button
+              type="button"
+              data-billing="monthly"
+              class="billing-btn relative z-10 h-9 px-5 rounded-full text-[13px] font-medium transition-colors duration-200 text-foreground/60 hover:text-heading"
+            >
+              Monthly
+            </button>
+            <button
+              type="button"
+              data-billing="annual"
+              class="billing-btn relative z-10 h-9 px-5 rounded-full text-[13px] font-medium transition-colors duration-200 text-[color:var(--sky-7)]"
+              aria-pressed="true"
+            >
+              Annual <span class="ml-1 text-[10.5px] font-semibold opacity-85">−20%</span>
+            </button>
           </div>
         </div>
 
@@ -782,11 +788,7 @@ const plans = [
             }`} style={p.highlight ? 'box-shadow: var(--shadow-xl);' : 'box-shadow: var(--shadow-sm);'} data-card-idx={idx}>
 
               {p.highlight && (
-                <div class="absolute inset-0 pointer-events-none rounded-[18px] overflow-hidden" aria-hidden="true">
-                  <div class="absolute -top-20 -right-16 w-[260px] h-[260px] rounded-full" style="background: radial-gradient(circle, rgba(125,211,252,0.55) 0%, transparent 70%); filter: blur(34px);"></div>
-                  <img src="/backdrops/cloud-4.webp" alt="" class="absolute -top-6 -right-6 w-[180px] opacity-55 pointer-events-none select-none" loading="lazy" decoding="async" />
-                  <div class="pricing-sweep absolute inset-0 rounded-[18px]"></div>
-                </div>
+                <div class="pricing-sweep absolute inset-0 pointer-events-none rounded-[18px] overflow-hidden" aria-hidden="true"></div>
               )}
 
               <div class="relative flex flex-col h-full">
@@ -799,10 +801,14 @@ const plans = [
                 <p class="mt-1.5 text-[12.5px] text-muted-foreground leading-snug min-h-[40px]">{p.summary}</p>
 
                 <div class="mt-6 flex items-baseline gap-1.5">
-                  <span class="text-[48px] font-semibold tracking-[-0.04em] text-heading leading-none price-amount" data-monthly={p.price} data-annual={p.annual}>{p.annual}</span>
+                  <span class="text-[48px] font-semibold tracking-[-0.04em] text-heading leading-none flex items-baseline">
+                    <span class="plan-price relative inline-block overflow-hidden h-[48px] align-baseline" data-monthly={p.price} data-annual={p.annual}>
+                      <span class="plan-price-inner block leading-[48px]" style="transform: translateY(0)">{p.annual}</span>
+                    </span>
+                  </span>
                 </div>
                 <p class="mt-2 text-[11.5px] text-muted-foreground">
-                  <span class="cadence" data-monthly="/ month · billed monthly" data-annual="/ month · billed yearly">/ month · billed yearly</span>
+                  <span class="plan-note" data-monthly-note="/ month · billed monthly" data-annual-note="/ month · billed yearly">/ month · billed yearly</span>
                 </p>
 
                 <div class="mt-4 inline-flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground self-start">
@@ -1064,47 +1070,87 @@ const plans = [
       }, { amount: 0.4 });
     });
 
-    // ── Pricing billing toggle (Monthly ↔ Annual, annual default) ───
-    const toggle = document.getElementById('billing-toggle');
-    const thumb  = document.getElementById('toggle-thumb');
-    if (toggle && thumb) {
-      const btns = toggle.querySelectorAll('button[data-billing]');
-      const apply = (mode, animated = true) => {
-        const btn = toggle.querySelector(`button[data-billing="${mode}"]`);
-        if (!btn) return;
-        const left  = btn.offsetLeft;
-        const width = btn.offsetWidth;
-        if (animated) {
-          animate(thumb, { left: `${left}px`, width: `${width}px` }, { duration: 0.35, ease: [0.22, 1, 0.36, 1] });
-        } else {
-          thumb.style.left = `${left}px`;
-          thumb.style.width = `${width}px`;
+    // ── Pricing billing toggle (sliding indicator + slide-up price swap).
+    //    Same implementation as /pricing so behavior matches everywhere.
+    (function () {
+      const toggle = document.querySelector('[data-billing-toggle]');
+      if (!toggle) return;
+      const buttons   = toggle.querySelectorAll('.billing-btn');
+      const indicator = toggle.querySelector('.billing-indicator');
+      const prices    = document.querySelectorAll('.plan-price');
+      let current = 'annual';
+
+      function moveIndicator(mode, withAnim = true) {
+        const btn = toggle.querySelector(`[data-billing="${mode}"]`);
+        if (!btn || !indicator) return;
+        if (!withAnim) indicator.style.transition = 'none';
+        const rect = btn.getBoundingClientRect();
+        const parentRect = toggle.getBoundingClientRect();
+        indicator.style.width   = rect.width + 'px';
+        indicator.style.left    = (rect.left - parentRect.left) + 'px';
+        indicator.style.opacity = '1';
+        if (!withAnim) {
+          requestAnimationFrame(() => { indicator.style.transition = ''; });
         }
-        btns.forEach((b) => {
-          if (b.getAttribute('data-billing') === mode) {
-            b.classList.remove('text-foreground/70');
-            b.classList.add('text-white');
+      }
+
+      function animatePrice(el, newValue) {
+        const inner = el.querySelector('.plan-price-inner');
+        if (!inner) return;
+        if (inner.textContent === newValue) return;
+        // Phase 1: slide current value up and out, fade
+        inner.style.transition = 'transform 220ms cubic-bezier(0.4,0,0.2,1), opacity 220ms cubic-bezier(0.4,0,0.2,1)';
+        inner.style.transform  = 'translateY(-100%)';
+        inner.style.opacity    = '0';
+        setTimeout(() => {
+          // Swap text and drop the new value in from below
+          inner.style.transition = 'none';
+          inner.style.transform  = 'translateY(100%)';
+          inner.textContent      = newValue;
+          inner.offsetHeight; // reflow
+          inner.style.transition = 'transform 320ms cubic-bezier(0.34,1.56,0.64,1), opacity 220ms ease-out';
+          inner.style.transform  = 'translateY(0)';
+          inner.style.opacity    = '1';
+        }, 220);
+      }
+
+      function apply(mode) {
+        if (mode === current) return;
+        current = mode;
+        buttons.forEach((b) => {
+          const active = b.getAttribute('data-billing') === mode;
+          if (active) {
+            b.classList.add('text-[color:var(--sky-7)]');
+            b.classList.remove('text-foreground/60', 'hover:text-heading');
+            b.setAttribute('aria-pressed', 'true');
           } else {
-            b.classList.add('text-foreground/70');
-            b.classList.remove('text-white');
+            b.classList.remove('text-[color:var(--sky-7)]');
+            b.classList.add('text-foreground/60', 'hover:text-heading');
+            b.removeAttribute('aria-pressed');
           }
         });
-        document.querySelectorAll('.price-amount').forEach((el) => {
-          const next = el.getAttribute(`data-${mode}`) || '';
-          if (!next) return;
-          if (!animated) { el.textContent = next; return; }
-          animate(el, { opacity: [1, 0] }, { duration: 0.12 }).then(() => {
-            el.textContent = next;
-            animate(el, { opacity: [0, 1] }, { duration: 0.18 });
-          });
+        moveIndicator(mode);
+        prices.forEach((p) => {
+          const m = p.getAttribute('data-monthly');
+          const a = p.getAttribute('data-annual');
+          animatePrice(p, mode === 'annual' ? a : m);
         });
-        document.querySelectorAll('.cadence').forEach((el) => {
-          el.textContent = el.getAttribute(`data-${mode}`) || '';
+        document.querySelectorAll('.plan-note').forEach((n) => {
+          const m = n.getAttribute('data-monthly-note');
+          const a = n.getAttribute('data-annual-note');
+          if (!m || !a) return;
+          n.style.transition = 'opacity 180ms ease-out';
+          n.style.opacity    = '0';
+          setTimeout(() => {
+            n.textContent  = mode === 'annual' ? a : m;
+            n.style.opacity = '1';
+          }, 180);
         });
-      };
-      btns.forEach((b) => b.addEventListener('click', () => apply(b.getAttribute('data-billing'))));
-      // Default selection — annual, no animation on initial paint
-      requestAnimationFrame(() => apply('annual', false));
-    }
+      }
+
+      buttons.forEach((b) => b.addEventListener('click', () => apply(b.getAttribute('data-billing'))));
+      requestAnimationFrame(() => moveIndicator('annual', false));
+      window.addEventListener('resize', () => moveIndicator(current, false));
+    })();
   </script>
 </Layout>
