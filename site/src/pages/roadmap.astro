@@ -97,7 +97,7 @@ const columns = [
   <section class="relative isolate overflow-hidden">
     <HeroAtmosphere />
 
-    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+    <div class="container-page relative pt-16 md:pt-24 pb-20 md:pb-28 text-center">
       <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
         <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">Roadmap</span>
         Public on purpose
@@ -125,58 +125,55 @@ const columns = [
   </section>
 
   <!-- ============================================================
-       FLOATING ROADMAP BOARD · lifts up over the hero
+       LIVE BOARD · three editorial divide-y lists, no card chrome
   ============================================================ -->
-  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
+  <section class="pt-20 md:pt-24 pb-16 md:pb-24">
     <div class="container-page">
-      <div class="rounded-[14px] bg-white ring-1 ring-slate-200 p-5 md:p-7 shadow-[0_30px_60px_-30px_rgba(8,47,73,0.45)]">
-        <div class="flex items-baseline justify-between mb-5 md:mb-7">
-          <div>
-            <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">Live board</div>
-            <h2 class="mt-1 text-[20px] md:text-[24px] font-semibold tracking-[-0.02em] text-heading">Three columns. Updated monthly.</h2>
-          </div>
-          <a href="/changelog/" class="hidden sm:inline-flex items-center gap-1.5 text-[12.5px] font-medium text-[#0369a1] hover:text-[#075985]">
-            Changelog
-            <Icon name="arrowRight" size={12} />
-          </a>
-        </div>
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Live board</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          Three columns. Updated monthly.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
+          Everything we are working on, grouped by where it sits in the pipeline. Items move left as they ship, and the changelog gets the same wording.
+        </p>
+      </div>
 
-        <div class="grid lg:grid-cols-3 gap-4 md:gap-5">
-          {columns.map((c) => (
-            <div class="rounded-[12px] bg-[color:var(--surface-1)]/50 ring-1 ring-[color:var(--border)] p-4 md:p-5">
-              <div class="flex items-start justify-between mb-1">
-                <div class="flex items-center gap-2">
-                  <span class={`w-2 h-2 rounded-full ${c.dot}`}></span>
-                  <div class="text-[14.5px] font-semibold text-heading">{c.title}</div>
-                </div>
+      <div class="grid lg:grid-cols-3 gap-x-12 gap-y-12">
+        {columns.map((c) => (
+          <div>
+            <div class="flex items-baseline justify-between pb-3 border-b border-[color:var(--border)]">
+              <div class="flex items-center gap-2">
+                <span class={`w-2 h-2 rounded-full ${c.dot}`}></span>
+                <div class="text-[14.5px] font-semibold text-heading">{c.title}</div>
                 <span class={`inline-flex items-center h-5 px-1.5 rounded text-[10.5px] font-medium font-mono uppercase tracking-[0.08em] ${c.chipTone}`}>{c.items.length}</span>
               </div>
-              <div class="text-[11.5px] font-mono text-muted-foreground mb-4">{c.sub}</div>
-
-              <ul class="space-y-2.5">
-                {c.items.map((it: any) => (
-                  <li class="group rounded-[8px] bg-white ring-1 ring-[color:var(--border)] px-3.5 py-3 hover:ring-[#bae6fd] transition-colors">
-                    <div class="flex items-center justify-between gap-2 mb-1.5">
-                      <span class={catChip(it.cat)}>{it.cat}</span>
-                      {it.link ? (
-                        <a href={it.link} class="text-[11px] font-mono text-muted-foreground hover:text-[#0369a1] inline-flex items-center gap-1">
-                          log
-                          <Icon name="arrowUpRight" size={10} />
-                        </a>
-                      ) : (
-                        <span class="text-[11px] font-mono text-muted-foreground/60">queued</span>
-                      )}
-                    </div>
-                    <div class="text-[13.5px] font-medium text-heading leading-snug">{it.title}</div>
-                    {it.note ? (
-                      <p class="mt-1 text-[12.5px] text-foreground/65 leading-snug">{it.note}</p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <span class="text-[11px] font-mono uppercase tracking-[0.14em] text-muted-foreground">{c.sub}</span>
             </div>
-          ))}
-        </div>
+
+            <ul class="divide-y divide-[color:var(--border)]">
+              {c.items.map((it: any) => (
+                <li class="py-4">
+                  <div class="flex items-center justify-between gap-2 mb-1.5">
+                    <span class={catChip(it.cat)}>{it.cat}</span>
+                    {it.link ? (
+                      <a href={it.link} class="text-[11px] font-mono text-muted-foreground hover:text-[#0369a1] inline-flex items-center gap-1">
+                        log
+                        <Icon name="arrowUpRight" size={10} />
+                      </a>
+                    ) : (
+                      <span class="text-[11px] font-mono text-muted-foreground/60">queued</span>
+                    )}
+                  </div>
+                  <div class="text-[14px] font-medium text-heading leading-snug">{it.title}</div>
+                  {it.note ? (
+                    <p class="mt-1 text-[13px] text-muted-foreground leading-snug">{it.note}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </div>
     </div>
   </section>

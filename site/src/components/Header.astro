@@ -20,8 +20,45 @@ const products = [
   { icon: 'contact',  href: '/crm/',       title: 'CRM',            desc: 'Pipelines, deals, tasks and a contacts table built around cold-outbound workflow.',  tag: 'Workflow' },
 ];
 
-const nav: { label: string; href: string; match?: string; mega?: boolean }[] = [
-  { label: 'Product',       href: '/warmup/',        match: '/warmup|/developers|/inbox|/campaigns|/analytics|/crm', mega: true },
+// Use cases mega-menu items
+const useCases = [
+  { icon: 'rocket',  href: '/use-cases/founders/',    title: 'Founders',    desc: 'Run intro sequences without burning founder@.',     tag: 'Solo + early' },
+  { icon: 'users',   href: '/use-cases/agencies/',    title: 'Agencies',    desc: 'Outbound for many clients on many domains.',       tag: 'Multi-tenant' },
+  { icon: 'chart',   href: '/use-cases/sales/',       title: 'Sales teams', desc: 'Distribute sends across reps, surface positives.', tag: 'Growth' },
+  { icon: 'contact', href: '/use-cases/recruiters/',  title: 'Recruiters',  desc: 'Candidate outreach from personal mailboxes.',      tag: 'Talent' },
+  { icon: 'star',    href: '/use-cases/fundraising/', title: 'Fundraising', desc: 'A focused VC sequence that lands in the inbox.',   tag: 'Founders' },
+];
+
+type MegaItem = { icon: string; href: string; title: string; desc: string; tag: string };
+type NavItem = {
+  label: string;
+  href: string;
+  match?: string;
+  mega?: boolean;
+  megaTitle?: string;
+  megaTagline?: string;
+  megaItems?: MegaItem[];
+};
+
+const nav: NavItem[] = [
+  {
+    label: 'Product',
+    href: '/warmup/',
+    match: '/warmup|/developers|/inbox|/campaigns|/analytics|/crm',
+    mega: true,
+    megaTitle: 'The cold-email platform.',
+    megaTagline: 'Six systems designed to work together. Warmup that earns reputation, sending that respects it.',
+    megaItems: products,
+  },
+  {
+    label: 'Use cases',
+    href: '/use-cases/founders/',
+    match: '/use-cases',
+    mega: true,
+    megaTitle: 'Built for five seats.',
+    megaTagline: 'One platform, five concrete playbooks. Founders, agencies, sales teams, recruiters, fundraising.',
+    megaItems: useCases,
+  },
   { label: 'Deliverability',href: '/deliverability/',match: '/deliverability' },
   { label: 'Pricing',       href: '/pricing/',       match: '/pricing' },
   { label: 'Learn',         href: '/learn/',         match: '/learn' },
@@ -73,12 +110,12 @@ function active(match?: string) {
                   <div class="grid lg:grid-cols-[300px_1fr]">
                     <!-- LEFT: clean white intro block -->
                     <div class="py-10 pr-10 border-b lg:border-b-0 lg:border-r border-[color:var(--border)]">
-                      <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-foreground/55">The platform</div>
+                      <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-foreground/55">{n.label}</div>
                       <h3 class="mt-4 text-[32px] md:text-[40px] font-semibold tracking-[-0.03em] leading-[1.02] text-heading">
-                        Six systems.<br/>One platform.
+                        {n.megaTitle}
                       </h3>
                       <p class="mt-4 text-[14px] text-foreground/65 leading-relaxed max-w-xs">
-                        Warmup that earns reputation. Sending that respects it. Inbox that triages every reply.
+                        {n.megaTagline}
                       </p>
                       <a href="/learn/deliverability/" class="mt-6 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-[#0369a1] hover:text-[#075985]">
                         Read the handbook
@@ -86,9 +123,9 @@ function active(match?: string) {
                       </a>
                     </div>
 
-                    <!-- RIGHT: 3x2 product grid -->
+                    <!-- RIGHT: 3-column product grid -->
                     <div class="grid grid-cols-2 lg:grid-cols-3">
-                      {products.map((it, i) => {
+                      {(n.megaItems ?? []).map((it, i) => {
                         const isCurrent = path === it.href || path.startsWith(it.href);
                         const colBreak = (i + 1) % 3 !== 0;
                         const rowBreak = i < 3;
