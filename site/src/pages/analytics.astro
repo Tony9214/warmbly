@@ -6,16 +6,6 @@ import CTA from '../components/CTA.astro';
 
 // Source: CLAUDE.md analytics + admin sections, internal/repository/*
 
-// Six drill-down layers (real product taxonomy)
-const layers = [
-  { tier: 'Workspace', icon: 'chart',    body: 'Big-picture complaint rate, bounce rate, placement by sender pool, suppression-list growth.' },
-  { tier: 'Pool',      icon: 'flame',    body: 'Warmup pool health, member count, quarantine queue, per-pool spam-score histogram.' },
-  { tier: 'Worker',    icon: 'cpu',      body: 'Per-worker outbound volume, mailbox concentration, IP reputation signals, throttle events.' },
-  { tier: 'Mailbox',   icon: 'inbox',    body: 'Inbox vs spam placement, daily send + warmup volume, complaint and bounce rates per mailbox.' },
-  { tier: 'Sequence',  icon: 'workflow', body: 'Step-by-step open / reply / positive-reply rates, A/B variant performance, drop-off curves.' },
-  { tier: 'Contact',   icon: 'contact',  body: 'Per-recipient timeline of every send, open, click, reply, bounce, classification, suppression event.' },
-];
-
 // What we lead with vs what we treat as noise
 const signal = [
   { k: 'Inbox placement rate',  why: 'Probed via warmup pool partners. The only number that tells you mail is actually being read.' },
@@ -88,42 +78,128 @@ const faq = [
   </section>
 
   <!-- ============================================================
-       DRILL-DOWN LADDER · unique to analytics
-       Six nested layers cascading horizontally, each labelled.
+       DASHBOARD MOCK · floats below the hero, mirrors the real
+       product page (web/src/app/app/analytics/page.tsx).
   ============================================================ -->
   <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
     <div class="container-page">
-      <div class="rounded-[18px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
-        <div class="px-7 py-4 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/70 flex flex-wrap items-baseline justify-between gap-3">
-          <div class="flex items-baseline gap-3">
-            <div class="text-[13px] font-semibold text-heading">Six layers of drill-down</div>
-          </div>
-          <div class="text-[10.5px] font-mono uppercase tracking-[0.16em] text-muted-foreground">
-            workspace → contact
-          </div>
-        </div>
+      <div class="rounded-[14px] bg-white ring-1 ring-slate-200 overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)] flex flex-col">
 
-        <!-- Layer ladder · each tier nests inside the previous -->
-        <div class="p-7 md:p-10 overflow-x-auto">
-          <div class="min-w-[820px] space-y-1.5">
-            {layers.map((l, i) => (
-              <div class="grid grid-cols-[80px_180px_1fr] gap-4 items-center" style={`padding-left: ${i * 24}px`}>
-                <div class="font-mono text-[11px] text-muted-foreground">L{i + 1}</div>
-                <div class="flex items-center gap-2.5">
-                  <div class={`w-7 h-7 rounded-[6px] inline-flex items-center justify-center ${i === 0 ? 'bg-[#0c4a6e] text-white' : i === 1 ? 'bg-[#075985] text-white' : i === 2 ? 'bg-[#0369a1] text-white' : i === 3 ? 'bg-[#0284c7] text-white' : i === 4 ? 'bg-[#38bdf8] text-white' : 'bg-[#7dd3fc] text-[#0c4a6e]'}`}>
-                    <Icon name={l.icon} size={14} />
-                  </div>
-                  <div class="text-[14px] font-semibold text-heading">{l.tier}</div>
-                </div>
-                <div class="text-[13px] text-foreground/70 leading-relaxed">{l.body}</div>
-              </div>
+        <!-- PageTopbar -->
+        <div class="h-14 px-5 border-b border-slate-200 flex items-center gap-3 shrink-0 bg-white">
+          <div>
+            <div class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">Analytics</div>
+            <div class="mt-0.5 text-[13px] text-slate-900 font-medium">Deliverability across the workspace</div>
+          </div>
+          <div class="ml-auto inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+            {['7d', '30d', '90d'].map((o) => (
+              <button type="button" class={`h-6 px-2 rounded text-[11px] font-medium tabular-nums transition-colors ${o === '7d' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-900'}`}>
+                {o}
+              </button>
             ))}
           </div>
         </div>
 
-        <div class="px-7 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex flex-wrap items-center justify-between gap-2 text-[11.5px] font-mono text-muted-foreground">
-          <span>Click any KPI to descend a layer · breadcrumb in the URL</span>
-          <span>Schema versioned in every event payload</span>
+        <!-- StatStrip · 4 cols -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 border-b border-slate-200">
+          {[
+            { label: 'Total sent',  value: '12,847', sub: 'last 7 days' },
+            { label: 'Open rate',   value: '34.2%',  sub: 'after delivery' },
+            { label: 'Reply rate',  value: '6.1%',   sub: 'incl. positive' },
+            { label: 'Bounce rate', value: '1.8%',   sub: 'hard + soft' },
+          ].map((s, i) => (
+            <div class={`p-5 ${i < 3 ? 'lg:border-r border-slate-200' : ''} ${i < 2 ? 'border-b lg:border-b-0 border-slate-200' : ''}`}>
+              <div class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">{s.label}</div>
+              <div class="mt-1.5 text-[24px] font-semibold tracking-[-0.02em] text-slate-900 leading-none font-mono tabular-nums">{s.value}</div>
+              <div class="mt-1.5 text-[11px] text-slate-400 font-mono">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        <!-- Body: chart + breakdown -->
+        <div class="grid lg:grid-cols-[1fr_320px] min-h-0">
+          <section class="flex flex-col min-h-0 lg:border-r border-slate-200">
+            <div class="h-9 px-4 border-b border-slate-200 flex items-center gap-2 shrink-0">
+              <span class="text-[11px] font-medium text-slate-700">Email performance</span>
+            </div>
+            <div class="flex-1 flex flex-col px-5 py-4">
+              <div class="h-52 flex items-end gap-0.5">
+                {Array.from({ length: 28 }).map((_, i) => {
+                  const v = 22 + Math.sin(i * 0.5) * 18 + ((i * 13) % 17);
+                  return (
+                    <div class="flex-1 flex items-end">
+                      <div class="w-full rounded-sm bg-sky-100" style={`height: ${v}%`}></div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div class="flex justify-between mt-2 font-mono text-[10px] text-slate-400">
+                <span>7d ago</span>
+                <span>today</span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="flex flex-col min-h-0 bg-slate-50/40">
+            <div class="h-9 px-4 border-b border-slate-200 flex items-center gap-2 shrink-0">
+              <span class="text-[11px] font-medium text-slate-700">Breakdown</span>
+            </div>
+            <div class="divide-y divide-slate-200/60">
+              {[
+                { label: 'Delivered', dot: 'bg-emerald-500', v: '12,847' },
+                { label: 'Opened',    dot: 'bg-sky-500',     v: '4,394' },
+                { label: 'Replied',   dot: 'bg-violet-500',  v: '783' },
+                { label: 'Bounced',   dot: 'bg-amber-500',   v: '231' },
+                { label: 'Spam',      dot: 'bg-red-500',     v: '5' },
+              ].map((q) => (
+                <div class="h-9 px-4 flex items-center gap-2">
+                  <span class={`w-1.5 h-1.5 rounded-full ${q.dot}`}></span>
+                  <span class="text-[12px] text-slate-700">{q.label}</span>
+                  <span class="ml-auto font-mono text-[11px] text-slate-500 tabular-nums">{q.v}</span>
+                </div>
+              ))}
+            </div>
+          </aside>
+        </div>
+
+        <!-- Warmup section bar + mailbox strip -->
+        <div class="h-9 px-4 border-t border-b border-slate-200 flex items-center gap-2 shrink-0">
+          <span class="text-[11px] font-medium text-slate-700">Warmup</span>
+          <a href="#" class="ml-auto inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900 transition-colors">
+            All accounts
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+          </a>
+        </div>
+        <div class="px-5 py-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { mb: 'ben@acme.com',  day: 22, today: 32, cap: 40, state: 'healthy' },
+            { mb: 'sara@acme.com', day: 14, today: 24, cap: 40, state: 'healthy' },
+            { mb: 'mark@acme.com', day: 31, today: 40, cap: 40, state: 'watch'   },
+            { mb: 'kai@acme.com',  day:  9, today: 19, cap: 40, state: 'healthy' },
+          ].map((m) => {
+            const pct = Math.round((m.today / m.cap) * 100);
+            const chip = m.state === 'watch' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700';
+            const dot  = m.state === 'watch' ? 'bg-amber-500' : 'bg-emerald-500';
+            const bar  = m.state === 'watch' ? 'bg-amber-500' : 'bg-sky-500';
+            return (
+              <div class="rounded-md ring-1 ring-slate-200 bg-white p-3">
+                <div class="flex items-baseline justify-between gap-2">
+                  <span class="font-mono text-[11px] text-slate-700 truncate">{m.mb}</span>
+                  <span class={`inline-flex items-center gap-1 h-4 px-1 rounded text-[9.5px] font-medium ${chip}`}>
+                    <span class={`w-1 h-1 rounded-full ${dot}`}></span>
+                    {m.state}
+                  </span>
+                </div>
+                <div class="mt-2 flex items-baseline gap-1 font-mono">
+                  <span class="text-[18px] font-semibold text-slate-900 tabular-nums">{m.today}</span>
+                  <span class="text-[10px] text-slate-400">/ {m.cap} today · D{m.day}</span>
+                </div>
+                <div class="mt-2 h-1 rounded-full bg-slate-100 overflow-hidden">
+                  <div class={`h-full ${bar}`} style={`width: ${pct}%`}></div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -186,149 +262,6 @@ const faq = [
     </div>
   </section>
 
-  <!-- ============================================================
-       SAMPLE DASHBOARD · mirrors the real product analytics page
-  ============================================================ -->
-  <section class="border-b border-[color:var(--border)] py-20 md:py-28">
-    <div class="container-page">
-      <div class="max-w-2xl mb-12">
-        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-[#0284c7] mb-3">Sample dashboard</div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
-          The workspace view, exactly as it ships.
-        </h2>
-        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
-          The panel below is the actual analytics page from the product. Illustrative numbers for a demo workspace. Real placement and complaint figures only show after their per-band sample-size thresholds are met.
-        </p>
-      </div>
-
-      <div class="rounded-[14px] bg-white ring-1 ring-slate-200 overflow-hidden shadow-[0_24px_48px_-20px_rgba(15,23,42,0.18),0_4px_12px_-6px_rgba(15,23,42,0.05)] flex flex-col">
-
-        <!-- PageTopbar -->
-        <div class="h-14 px-5 border-b border-slate-200 flex items-center gap-3 shrink-0 bg-white">
-          <div>
-            <div class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">Analytics</div>
-            <div class="mt-0.5 text-[13px] text-slate-900 font-medium">Deliverability across the workspace</div>
-          </div>
-          <div class="ml-auto inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
-            {['7d', '30d', '90d'].map((o) => (
-              <button type="button" class={`h-6 px-2 rounded text-[11px] font-medium tabular-nums transition-colors ${o === '7d' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-900'}`}>
-                {o}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <!-- StatStrip · 4 cols, matches Stat component layout -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 border-b border-slate-200">
-          {[
-            { label: 'Total sent',    value: '12,847', sub: 'last 7 days' },
-            { label: 'Open rate',     value: '34.2%',  sub: 'after delivery' },
-            { label: 'Reply rate',    value: '6.1%',   sub: 'incl. positive' },
-            { label: 'Bounce rate',   value: '1.8%',   sub: 'hard + soft' },
-          ].map((s, i) => (
-            <div class={`p-5 ${i < 3 ? 'lg:border-r border-slate-200' : ''} ${i < 2 ? 'border-b lg:border-b-0 border-slate-200' : ''}`}>
-              <div class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">{s.label}</div>
-              <div class="mt-1.5 text-[24px] font-semibold tracking-[-0.02em] text-slate-900 leading-none font-mono tabular-nums">{s.value}</div>
-              <div class="mt-1.5 text-[11px] text-slate-400 font-mono">{s.sub}</div>
-            </div>
-          ))}
-        </div>
-
-        <!-- Body: chart + breakdown (matches the real product 1fr | 320px grid) -->
-        <div class="grid lg:grid-cols-[1fr_320px] min-h-0">
-          <!-- Email performance chart -->
-          <section class="flex flex-col min-h-0 lg:border-r border-slate-200">
-            <div class="h-9 px-4 border-b border-slate-200 flex items-center gap-2 shrink-0">
-              <span class="text-[11px] font-medium text-slate-700">Email performance</span>
-            </div>
-            <div class="flex-1 flex flex-col px-5 py-4">
-              <div class="h-52 flex items-end gap-0.5">
-                {Array.from({ length: 28 }).map((_, i) => {
-                  // Deterministic illustrative pattern, looks alive
-                  const v = 22 + Math.sin(i * 0.5) * 18 + ((i * 13) % 17);
-                  return (
-                    <div class="flex-1 flex items-end">
-                      <div class="w-full rounded-sm bg-sky-100" style={`height: ${v}%`}></div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div class="flex justify-between mt-2 font-mono text-[10px] text-slate-400">
-                <span>7d ago</span>
-                <span>today</span>
-              </div>
-            </div>
-          </section>
-
-          <!-- Breakdown column -->
-          <aside class="flex flex-col min-h-0 bg-slate-50/40">
-            <div class="h-9 px-4 border-b border-slate-200 flex items-center gap-2 shrink-0">
-              <span class="text-[11px] font-medium text-slate-700">Breakdown</span>
-            </div>
-            <div class="divide-y divide-slate-200/60">
-              {[
-                { label: 'Delivered', dot: 'bg-emerald-500', v: '12,847' },
-                { label: 'Opened',    dot: 'bg-sky-500',     v: '4,394' },
-                { label: 'Replied',   dot: 'bg-violet-500',  v: '783' },
-                { label: 'Bounced',   dot: 'bg-amber-500',   v: '231' },
-                { label: 'Spam',      dot: 'bg-red-500',     v: '5' },
-              ].map((q) => (
-                <div class="h-9 px-4 flex items-center gap-2">
-                  <span class={`w-1.5 h-1.5 rounded-full ${q.dot}`}></span>
-                  <span class="text-[12px] text-slate-700">{q.label}</span>
-                  <span class="ml-auto font-mono text-[11px] text-slate-500 tabular-nums">{q.v}</span>
-                </div>
-              ))}
-            </div>
-          </aside>
-        </div>
-
-        <!-- Warmup section bar + chart-style strip -->
-        <div class="h-9 px-4 border-t border-b border-slate-200 flex items-center gap-2 shrink-0">
-          <span class="text-[11px] font-medium text-slate-700">Warmup</span>
-          <a href="#" class="ml-auto inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900 transition-colors">
-            All accounts
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
-          </a>
-        </div>
-        <div class="px-5 py-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {[
-            { mb: 'ben@acme.com',  day: 22, today: 32, cap: 40, state: 'healthy' },
-            { mb: 'sara@acme.com', day: 14, today: 24, cap: 40, state: 'healthy' },
-            { mb: 'mark@acme.com', day: 31, today: 40, cap: 40, state: 'watch'   },
-            { mb: 'kai@acme.com',  day:  9, today: 19, cap: 40, state: 'healthy' },
-          ].map((m) => {
-            const pct = Math.round((m.today / m.cap) * 100);
-            const chip = m.state === 'watch' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700';
-            const dot  = m.state === 'watch' ? 'bg-amber-500' : 'bg-emerald-500';
-            const bar  = m.state === 'watch' ? 'bg-amber-500' : 'bg-sky-500';
-            return (
-              <div class="rounded-md ring-1 ring-slate-200 bg-white p-3">
-                <div class="flex items-baseline justify-between gap-2">
-                  <span class="font-mono text-[11px] text-slate-700 truncate">{m.mb}</span>
-                  <span class={`inline-flex items-center gap-1 h-4 px-1 rounded text-[9.5px] font-medium ${chip}`}>
-                    <span class={`w-1 h-1 rounded-full ${dot}`}></span>
-                    {m.state}
-                  </span>
-                </div>
-                <div class="mt-2 flex items-baseline gap-1 font-mono">
-                  <span class="text-[18px] font-semibold text-slate-900 tabular-nums">{m.today}</span>
-                  <span class="text-[10px] text-slate-400">/ {m.cap} today · D{m.day}</span>
-                </div>
-                <div class="mt-2 h-1 rounded-full bg-slate-100 overflow-hidden">
-                  <div class={`h-full ${bar}`} style={`width: ${pct}%`}></div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <p class="mt-4 text-[12px] text-muted-foreground italic">
-        Numbers are illustrative for the structural mock. Pulled from a demo workspace.
-      </p>
-    </div>
-  </section>
 
   <!-- ============================================================
        EXPORTS · 2-col spec sheet (warmup defaults pattern)
