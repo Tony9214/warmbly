@@ -743,28 +743,75 @@ const plans = [
          PRICING — annual default, premium segmented toggle
     ============================================================ -->
     <section class="relative overflow-hidden border-y border-[color:var(--border)]" style="background: linear-gradient(180deg, var(--surface-2) 0%, #ffffff 100%);">
-      <div class="container-page py-24 md:py-32 relative">
-        <!-- Minimal centered header: small eyebrow, one big line, toggle.
-             Nothing else. The cards below carry the rest. -->
-        <div class="text-center max-w-2xl mx-auto">
-          <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-[#0284c7]">
-            Pricing
-          </div>
-          <h2 class="mt-4 text-[44px] sm:text-[56px] md:text-[64px] font-semibold tracking-[-0.035em] leading-[1.02] text-heading">
-            Same product. Four sizes.
-          </h2>
-
-          <div class="mt-9 inline-flex items-center gap-3" id="billing-toggle">
-            <div class="relative inline-flex items-center p-1 rounded-full bg-white ring-1 ring-[color:var(--border)] text-[13px] font-medium" style="box-shadow: var(--shadow-sm);">
-              <span id="toggle-thumb" class="absolute top-1 bottom-1 rounded-full bg-[color:var(--brand)] transition-all duration-[350ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="left: 116px; width: 112px; box-shadow: 0 6px 18px -4px rgba(2,132,199,0.5);"></span>
-              <button data-billing="monthly" class="relative h-9 px-5 rounded-full text-foreground/70 transition-colors min-w-[112px]">Monthly</button>
-              <button data-billing="annual"  class="relative h-9 px-5 rounded-full text-white transition-colors min-w-[112px]">
-                <span class="inline-flex items-center gap-1.5">Annual</span>
-              </button>
+      <div class="container-page py-20 md:py-28 relative">
+        <!-- Creative header: the section *is* a volume axis.
+             Plan names sit above the sends/day tick they unlock. -->
+        <div class="max-w-5xl mx-auto">
+          <div class="flex items-baseline justify-between gap-4 flex-wrap mb-10 md:mb-14">
+            <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-[#0284c7]">
+              Pricing · sends per day
             </div>
-            <span class="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Save 20%
-            </span>
+            <div class="inline-flex items-center gap-3" id="billing-toggle">
+              <div class="relative inline-flex items-center p-1 rounded-full bg-white ring-1 ring-[color:var(--border)] text-[13px] font-medium" style="box-shadow: var(--shadow-sm);">
+                <span id="toggle-thumb" class="absolute top-1 bottom-1 rounded-full bg-[color:var(--brand)] transition-all duration-[350ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="left: 116px; width: 112px; box-shadow: 0 6px 18px -4px rgba(2,132,199,0.5);"></span>
+                <button data-billing="monthly" class="relative h-9 px-5 rounded-full text-foreground/70 transition-colors min-w-[112px]">Monthly</button>
+                <button data-billing="annual"  class="relative h-9 px-5 rounded-full text-white transition-colors min-w-[112px]">
+                  <span class="inline-flex items-center gap-1.5">Annual</span>
+                </button>
+              </div>
+              <span class="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                Save 20%
+              </span>
+            </div>
+          </div>
+
+          <!-- Volume axis: the four plans live on a single horizontal scale
+               by their sends/day. The chart is decorative and informational
+               at the same time. -->
+          <div class="relative pt-12 pb-6">
+            <!-- Axis line -->
+            <div class="absolute left-0 right-0 top-[68px] h-px bg-[color:var(--border)]"></div>
+            <!-- Gradient overlay across the axis to imply ascending scale -->
+            <div class="absolute left-0 right-0 top-[68px] h-px" style="background: linear-gradient(90deg, transparent 0%, rgba(2,132,199,0.35) 30%, rgba(2,132,199,0.85) 80%, rgba(7,89,133,0.95) 100%);"></div>
+
+            <!-- Tick stack: name above, dot on axis, volume below -->
+            <div class="grid grid-cols-4 gap-0">
+              <!-- Starter -->
+              <div class="text-center">
+                <div class="text-[12.5px] font-mono uppercase tracking-[0.12em] text-foreground/65 mb-3">Starter</div>
+                <div class="mx-auto w-3 h-3 rounded-full bg-white ring-2 ring-[#7dd3fc] relative z-10"></div>
+                <div class="mt-3 text-[20px] md:text-[24px] font-semibold tracking-[-0.02em] text-heading tabular-nums">150</div>
+                <div class="text-[10.5px] font-mono text-muted-foreground uppercase tracking-[0.14em]">per day</div>
+              </div>
+              <!-- Grow -->
+              <div class="text-center">
+                <div class="text-[12.5px] font-mono uppercase tracking-[0.12em] text-foreground/65 mb-3">Grow</div>
+                <div class="mx-auto w-3 h-3 rounded-full bg-white ring-2 ring-[#38bdf8] relative z-10"></div>
+                <div class="mt-3 text-[20px] md:text-[24px] font-semibold tracking-[-0.02em] text-heading tabular-nums">3,000</div>
+                <div class="text-[10.5px] font-mono text-muted-foreground uppercase tracking-[0.14em]">per day</div>
+              </div>
+              <!-- Business · highlighted -->
+              <div class="text-center">
+                <div class="inline-flex items-center gap-1.5 mb-3">
+                  <span class="text-[12.5px] font-mono uppercase tracking-[0.12em] font-semibold text-[#0369a1]">Business</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#0284c7]"></span>
+                </div>
+                <div class="mx-auto w-4 h-4 rounded-full bg-[#0284c7] ring-4 ring-[#bae6fd] relative z-10 shadow-[0_0_0_8px_rgba(2,132,199,0.08)]"></div>
+                <div class="mt-3 text-[22px] md:text-[28px] font-semibold tracking-[-0.02em] text-[#0c4a6e] tabular-nums">15,000</div>
+                <div class="text-[10.5px] font-mono text-muted-foreground uppercase tracking-[0.14em]">per day</div>
+              </div>
+              <!-- Enterprise -->
+              <div class="text-center">
+                <div class="text-[12.5px] font-mono uppercase tracking-[0.12em] text-foreground/65 mb-3">Enterprise</div>
+                <div class="mx-auto w-3 h-3 rounded-full bg-white ring-2 ring-[#075985] relative z-10"></div>
+                <div class="mt-3 text-[20px] md:text-[24px] font-semibold tracking-[-0.02em] text-heading">∞</div>
+                <div class="text-[10.5px] font-mono text-muted-foreground uppercase tracking-[0.14em]">custom</div>
+              </div>
+            </div>
+
+            <p class="mt-10 text-center text-[13.5px] text-foreground/70 max-w-xl mx-auto">
+              The number that changes between plans is sends per day. Warmup, the unified inbox, analytics, CRM and the API ship on every paid plan.
+            </p>
           </div>
         </div>
 
