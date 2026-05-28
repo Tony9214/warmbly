@@ -5,23 +5,22 @@ import Icon from '../components/Icon.astro';
 import CTA from '../components/CTA.astro';
 
 // Provider list mirrors internal/app/integration/catalog.go.
-// Categories follow the model.IntegrationCategory enum.
 
-// Floating dashboard mock for the hero. Numbers reflect the same five
-// connection states the real dashboard renders.
+// Floating dashboard mock for the hero.
 const mockConnections = [
-  { name: 'Cloudflare',        cat: 'dns',            state: 'connected', detail: 'acme.com',                     age: '2m ago' },
-  { name: 'Google Postmaster', cat: 'deliverability', state: 'connected', detail: 'acme.com',                     age: '4h ago' },
-  { name: 'Calendly',          cat: 'meetings',       state: 'connected', detail: '3 bookings attributed',        age: '12m ago' },
-  { name: 'DMARC reports',     cat: 'deliverability', state: 'connected', detail: 'RUA forwarder live',           age: '1h ago' },
-  { name: 'Microsoft SNDS',    cat: 'deliverability', state: 'connected', detail: '198.51.100.4',                 age: '6h ago' },
-  { name: 'Google Sheets',     cat: 'data',           state: 'pending',   detail: 'Q2 outbound list',             age: 'awaiting OAuth' },
+  { name: 'HubSpot',       cat: 'crm',           state: 'connected', detail: 'Acme workspace',     age: '2m ago' },
+  { name: 'Salesforce',    cat: 'crm',           state: 'connected', detail: 'Acme Sales Cloud',   age: '4h ago' },
+  { name: 'Calendly',      cat: 'meetings',      state: 'connected', detail: '3 bookings tracked', age: '12m ago' },
+  { name: 'Slack',         cat: 'notifications', state: 'connected', detail: '#sales',             age: '1h ago' },
+  { name: 'Zapier',        cat: 'automation',    state: 'connected', detail: 'API token live',     age: '6h ago' },
+  { name: 'Google Sheets', cat: 'data',          state: 'pending',   detail: 'Q2 outbound list',   age: 'awaiting OAuth' },
 ];
 
 const catTone = (c: string) => {
-  if (c === 'deliverability') return { dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700' };
-  if (c === 'dns')            return { dot: 'bg-sky-500',     chip: 'bg-sky-50 text-sky-700' };
-  if (c === 'meetings')       return { dot: 'bg-rose-400',    chip: 'bg-rose-50 text-rose-700' };
+  if (c === 'crm')           return { dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700' };
+  if (c === 'automation')    return { dot: 'bg-sky-500',     chip: 'bg-sky-50 text-sky-700' };
+  if (c === 'notifications') return { dot: 'bg-violet-500',  chip: 'bg-violet-50 text-violet-700' };
+  if (c === 'meetings')      return { dot: 'bg-rose-400',    chip: 'bg-rose-50 text-rose-700' };
   return { dot: 'bg-amber-500', chip: 'bg-amber-50 text-amber-700' };
 };
 
@@ -34,68 +33,97 @@ const stateTone = (s: string) => {
 
 const categories = [
   {
-    id: 'deliverability',
-    eyebrow: 'Deliverability',
-    headline: 'Reputation signals from the providers themselves.',
-    body: 'Pull complaint rate, domain reputation, and authentication results directly from the sources that produce them. The data joins each mailbox health state so a drop in reputation flows through to the dashboard automatically.',
+    id: 'crm',
+    eyebrow: 'CRM',
+    headline: 'Sync contacts and activity to your system of record.',
+    body: 'Connect the CRM your team already runs the pipeline in. Replies, bounces, and meeting bookings flow back as timeline events without manual logging.',
     items: [
       {
-        name: 'Google Postmaster',
-        tagline: 'Domain reputation, spam-rate, and authentication ratios from Gmail Postmaster Tools.',
-        body: 'OAuth into Google Postmaster. We pull one snapshot per day covering domain reputation, IP reputation, SPF, DKIM, and DMARC success ratios, plus user-reported spam rate. Snapshots are stored per domain and per day so the trend line is queryable from the dashboard.',
+        name: 'HubSpot',
+        tagline: 'Two-way sync for contacts and activities.',
+        body: 'OAuth into HubSpot. Contacts can be pulled into campaigns and outbound activity is written back as engagement events on the contact record.',
         auth: 'OAuth',
         beta: false,
       },
       {
-        name: 'Microsoft SNDS',
-        tagline: 'IP reputation and complaint-rate data for Outlook and Hotmail.',
-        body: 'Paste the SNDS data-access key. The CSV is polled daily, the filter-result and complaint-rate buckets are parsed, and the values are normalized to the same reputation tiers (high, medium, low) that the Postmaster integration uses.',
-        auth: 'API key',
+        name: 'Salesforce',
+        tagline: 'Leads, contacts, and email activity.',
+        body: 'OAuth with the standard Salesforce API. Outbound mail is logged on the lead or contact, and replies fire as task events for the assigned owner.',
+        auth: 'OAuth',
         beta: false,
       },
       {
-        name: 'DMARC reports',
-        tagline: 'Aggregate (RUA) XML ingestion with per-source-IP breakdown.',
-        body: 'Forward your RUA reports to the URL minted for your organization. Each report is parsed, deduplicated, and split by source IP. The dashboard surfaces which senders are failing SPF or DKIM alignment, with hostnames where available.',
+        name: 'Pipedrive',
+        tagline: 'Persons, deals, and activity timeline.',
+        body: 'Use a Pipedrive API token. Recipients are mapped to persons, replies create activities, and deals can be advanced based on reply intent.',
+        auth: 'API token',
+        beta: false,
+      },
+      {
+        name: 'Close',
+        tagline: 'Leads, contacts, and inbox activity.',
+        body: 'Close API key. Replies and bounces sync as inbox activity, and contacts can be created or updated as campaigns send.',
+        auth: 'API key',
+        beta: false,
+      },
+    ],
+  },
+  {
+    id: 'automation',
+    eyebrow: 'Automation',
+    headline: 'Route Warmbly events through your existing automation stack.',
+    body: 'Generate a Warmbly API token, paste it into your automation platform of choice, and trigger off any event Warmbly emits.',
+    items: [
+      {
+        name: 'Zapier',
+        tagline: 'Triggers and actions across 8,000+ apps.',
+        body: 'A Warmbly API token authenticates the Zapier app. Triggers are available for every event Warmbly emits, and actions cover campaign management, contact updates, and suppression.',
+        auth: 'API token',
+        beta: false,
+      },
+      {
+        name: 'Make',
+        tagline: 'Visual automation scenarios.',
+        body: 'Same Warmbly API token, used inside Make scenarios. Useful for branching logic that goes beyond what a flat trigger or action provides.',
+        auth: 'API token',
+        beta: false,
+      },
+      {
+        name: 'n8n',
+        tagline: 'Self-hosted automation workflows.',
+        body: 'For customers who run n8n on their own infrastructure. The same API token authenticates against Warmbly endpoints.',
+        auth: 'API token',
+        beta: false,
+      },
+    ],
+  },
+  {
+    id: 'notifications',
+    eyebrow: 'Notifications',
+    headline: 'Pipe replies and bounces into your team chat.',
+    body: 'Positive replies, bounces, complaints, and meeting bookings can fan out to a Slack or Discord channel so the right person sees them without checking the dashboard.',
+    items: [
+      {
+        name: 'Slack',
+        tagline: 'Channels for positive replies, bounces, and meeting bookings.',
+        body: 'Connect Slack with OAuth or paste an incoming-webhook URL. Choose which events post to which channel, with separate channels for replies versus deliverability alerts if needed.',
+        auth: 'OAuth',
+        beta: false,
+      },
+      {
+        name: 'Discord',
+        tagline: 'Webhook-based notifications to a server channel.',
+        body: 'Paste a Discord channel webhook URL. The same event filters that apply to Slack apply here, so the two can run in parallel if a team uses both.',
         auth: 'Webhook URL',
         beta: false,
       },
     ],
   },
   {
-    id: 'dns',
-    eyebrow: 'DNS providers',
-    headline: 'Publish SPF, DKIM, and DMARC records from the dashboard.',
-    body: 'Connect a DNS provider once. Records can be published, updated, and verified without leaving Warmbly.',
-    items: [
-      {
-        name: 'Cloudflare',
-        tagline: 'Zone-scoped API token. Verified on save.',
-        body: 'Provide a token scoped to Zone:DNS:Edit. The token is verified against Cloudflare before it is persisted, then the zone ID is resolved and the recommended records are published. Existing records are detected and surfaced before any overwrite.',
-        auth: 'API token',
-        beta: false,
-      },
-      {
-        name: 'GoDaddy',
-        tagline: 'API key and secret from the GoDaddy developer portal.',
-        body: 'GoDaddy issues a key and secret pair. Both are stored encrypted and used to publish the recommended records on save. Reads are batched so a partial rate-limited response cannot leave the record set inconsistent.',
-        auth: 'API key',
-        beta: true,
-      },
-      {
-        name: 'Namecheap',
-        tagline: 'Namecheap API access.',
-        body: 'Namecheap requires an IP allowlist on the API endpoint. The connect drawer displays the egress IP that must be added to the allowlist. Once configured, record writes complete in seconds.',
-        auth: 'API token',
-        beta: true,
-      },
-    ],
-  },
-  {
     id: 'meetings',
-    eyebrow: 'Meeting bookings',
+    eyebrow: 'Meetings',
     headline: 'Attribute booked meetings to the campaign that surfaced the lead.',
-    body: 'Both Calendly and Cal.com post a webhook when a recipient books. The booking is recorded, joined to the originating contact and campaign, and surfaced in campaign reporting alongside replies.',
+    body: 'Calendly and Cal.com post a webhook when a recipient books. The booking is recorded, joined to the originating contact and campaign, and surfaced in reporting alongside replies.',
     items: [
       {
         name: 'Calendly',
@@ -152,46 +180,42 @@ const webhookEvents = [
   { name: 'email_account.removed',       desc: 'A mailbox was removed from the workspace.' },
 ];
 
-// Connect steps shown in the dark panel.
 const steps = [
   { n: '01', t: 'Authenticate', d: 'OAuth, an API token, or a webhook URL minted for your organization. The connect drawer surfaces the right method per provider.' },
   { n: '02', t: 'Route',        d: 'The connection is recorded against your organization. Inbound traffic is routed by the secret in the URL path. Outbound traffic uses the encrypted token.' },
   { n: '03', t: 'Live',         d: 'Status moves to connected. The dashboard shows the last sync time, the last error if any, and a one-click secret rotation. Disconnect cascades to dependent data.' },
 ];
 
-// Numbers used in the strip near the bottom.
 const numbers = [
-  { v: '9',          u: 'providers',     l: 'Calendly, Cal.com, Sheets, Postmaster, SNDS, DMARC, Cloudflare, GoDaddy, Namecheap', src: 'integration/catalog.go' },
-  { v: '18',         u: 'webhook events', l: 'campaign, warmup, deliverability, account lifecycle',                              src: 'models/webhook.go' },
-  { v: 'HMAC-SHA256', u: '',             l: 'every outbound webhook is signed',                                                  src: 'app/webhook/service.go' },
-  { v: '8',          u: 'max attempts',  l: 'capped exponential backoff up to one hour',                                          src: 'app/webhook/service.go' },
+  { v: '12',          u: 'providers',      l: 'CRM, automation, notifications, meetings, data',     src: 'integration/catalog.go' },
+  { v: '18',          u: 'webhook events', l: 'campaign, warmup, deliverability, account lifecycle', src: 'models/webhook.go' },
+  { v: 'HMAC-SHA256', u: '',               l: 'every outbound webhook is signed',                    src: 'app/webhook/service.go' },
+  { v: '8',           u: 'max attempts',   l: 'capped exponential backoff up to one hour',           src: 'app/webhook/service.go' },
 ];
 
-// Security strip.
 const security = [
-  { t: 'OAuth tokens encrypted at rest',     d: 'AES-256-GCM with per-user data encryption keys wrapped by AWS KMS. The encrypted blob is stored in DynamoDB. Plaintext is only held in a TTL-bounded cache during active use.' },
-  { t: 'API tokens stored as opaque blobs',  d: 'Cloudflare, GoDaddy, Namecheap, and SNDS keys are never serialized back to the API consumer. The dashboard sees only the public display fields (zone name, domain, IP).' },
-  { t: 'Inbound URLs are per-organization',  d: 'A leaked URL only affects one organization. Rotating the secret invalidates the old one immediately.' },
-  { t: 'Outbound delivery audit trail',      d: 'Every webhook dispatch attempt is recorded with response status and body excerpt. Replays are supported. SKIP LOCKED prevents duplicate fanout across replicas.' },
+  { t: 'OAuth tokens encrypted at rest',    d: 'AES-256-GCM with per-user data encryption keys wrapped by AWS KMS. The encrypted blob is stored in DynamoDB. Plaintext is only held in a TTL-bounded cache during active use.' },
+  { t: 'API tokens stored as opaque blobs', d: 'CRM, automation, and notification keys are never serialized back to the API consumer. The dashboard sees only the public display fields (workspace, channel, account email).' },
+  { t: 'Inbound URLs are per-organization', d: 'A leaked URL only affects one organization. Rotating the secret invalidates the old one immediately.' },
+  { t: 'Outbound delivery audit trail',     d: 'Every webhook dispatch attempt is recorded with response status and body excerpt. Replays are supported. SKIP LOCKED prevents duplicate fanout across replicas.' },
 ];
 
-// FAQ.
 const faq = [
   ['Do you support OAuth for every provider?',
-   'No. OAuth is used where the provider exposes a per-user identity, such as Google Sheets or Google Postmaster. For account-scoped credentials such as a Cloudflare API token or an SNDS data-access key, a static token is simpler and more appropriate. The connect drawer uses the right method per provider.'],
+   'No. OAuth is used where the provider exposes a per-user identity, such as HubSpot, Salesforce, Google Sheets, and Slack. For account-scoped credentials such as Pipedrive or Close API tokens, a static token is simpler and more appropriate. The connect drawer uses the right method per provider.'],
   ['What happens when a token expires or is revoked?',
    'The connection status moves to degraded and the dashboard shows the provider error. Degraded connections stop attempting new fanout until the credentials are rotated or re-authenticated.'],
   ['Can I have more than one of the same provider?',
-   'Yes. A connection is unique per (organization, provider, label). One organization can hold a Cloudflare connection per zone, for example, instead of putting multiple zones behind one token.'],
+   'Yes. A connection is unique per (organization, provider, label). One organization can hold a HubSpot connection per workspace, or a Slack connection per channel.'],
   ['How fast is the inbound webhook path?',
-   'Calendly, Cal.com, and DMARC POSTs are accepted, persisted, and acknowledged inside the same request. Fanout to outbound subscribers runs on the internal event queue, with a default tick of two seconds.'],
+   'Calendly and Cal.com POSTs are accepted, persisted, and acknowledged inside the same request. Fanout to outbound subscribers runs on the internal event queue, with a default tick of two seconds.'],
   ['What if you do not list a provider I need?',
-   'Subscribe to the webhook stream and build the integration directly. The eighteen event types cover every state transition that is emitted internally. The catalog is a curated convenience layer on top of the same surface.'],
+   'Subscribe to the webhook stream and build the integration directly, or run it through Zapier, Make, or n8n. The eighteen event types cover every state transition that is emitted internally.'],
 ];
 ---
 <Layout
   title="Integrations · Warmbly"
-  description="Deliverability, DNS, meeting booking, and data integrations for Warmbly. Plus a signed webhook stream and developer API."
+  description="CRM, automation, notifications, meetings, and data integrations for Warmbly. Plus a signed webhook stream and developer API."
 >
   <!-- HERO -->
   <section class="relative isolate overflow-hidden">
@@ -209,7 +233,7 @@ const faq = [
         Integrations.
       </h1>
       <p class="mt-6 text-[17px] md:text-[19px] text-white/80 max-w-2xl mx-auto leading-relaxed">
-        Deliverability signals from Google Postmaster, Microsoft SNDS, and DMARC. One-click DNS through Cloudflare, GoDaddy, and Namecheap. Meeting attribution from Calendly and Cal.com. Two-way Google Sheets. Plus a signed webhook stream for everything else.
+        HubSpot, Salesforce, Pipedrive, and Close for CRM. Zapier, Make, and n8n for automation. Slack and Discord for team notifications. Calendly and Cal.com for meeting attribution. Google Sheets for two-way lead lists. Plus a signed webhook stream for everything else.
       </p>
 
       <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -219,14 +243,14 @@ const faq = [
             <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
           </svg>
         </a>
-        <a href="#deliverability" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
+        <a href="#crm" class="inline-flex h-11 px-5 items-center rounded-[10px] text-[14.5px] font-medium bg-white/10 backdrop-blur ring-1 ring-white/40 text-white hover:bg-white/20 hover:-translate-y-0.5 transition-all duration-200 ease-out">
           Browse integrations
         </a>
       </div>
     </div>
   </section>
 
-  <!-- FLOATING DASHBOARD · connection state mock -->
+  <!-- FLOATING DASHBOARD -->
   <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
     <div class="container-page">
       <div class="rounded-[18px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
@@ -241,12 +265,13 @@ const faq = [
           </div>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 divide-x divide-[color:var(--border)] border-b border-[color:var(--border)]">
+        <div class="grid grid-cols-2 md:grid-cols-5 divide-x divide-[color:var(--border)] border-b border-[color:var(--border)]">
           {[
-            { l: 'Deliverability', n: '3', c: 'bg-emerald-500' },
-            { l: 'DNS',            n: '1', c: 'bg-sky-500' },
-            { l: 'Meetings',       n: '1', c: 'bg-rose-400' },
-            { l: 'Data',           n: '1', c: 'bg-amber-500' },
+            { l: 'CRM',           n: '2', c: 'bg-emerald-500' },
+            { l: 'Automation',    n: '1', c: 'bg-sky-500' },
+            { l: 'Notifications', n: '1', c: 'bg-violet-500' },
+            { l: 'Meetings',      n: '1', c: 'bg-rose-400' },
+            { l: 'Data',          n: '1', c: 'bg-amber-500' },
           ].map((s) => (
             <div class="px-5 py-3.5 flex items-baseline justify-between">
               <div class="flex items-center gap-2">
@@ -291,7 +316,7 @@ const faq = [
         </div>
 
         <div class="px-6 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
-          <span>9 providers, 18 webhook event types</span>
+          <span>12 providers, 18 webhook event types</span>
           <span class="inline-flex items-center gap-1.5 text-foreground/55">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
             evaluated every event
@@ -304,7 +329,7 @@ const faq = [
     </div>
   </section>
 
-  <!-- HOW IT CONNECTS · 3-step diagram -->
+  <!-- HOW IT WORKS -->
   <section class="border-y border-[color:var(--border)] py-20 md:py-28">
     <div class="container-page">
       <div class="max-w-3xl mb-12">
@@ -396,7 +421,6 @@ const faq = [
         </div>
 
         <div class="space-y-5">
-          <!-- Code block -->
           <div class="rounded-[14px] bg-[#0c1224] ring-1 ring-white/10 overflow-hidden">
             <div class="px-5 py-2.5 border-b border-white/10 flex items-center justify-between text-[10.5px] font-mono text-white/55">
               <span>POST your webhook endpoint</span>
@@ -419,7 +443,6 @@ const faq = [
 }`}</code></pre>
           </div>
 
-          <!-- Event list -->
           <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
             <div class="px-5 py-3 bg-[color:var(--surface-1)] border-b border-[color:var(--border)] flex items-baseline justify-between gap-2">
               <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Event types</div>
@@ -464,7 +487,7 @@ const faq = [
     </div>
   </section>
 
-  <!-- BY THE NUMBERS -->
+  <!-- AT A GLANCE -->
   <section class="bg-white py-16 md:py-20">
     <div class="container-page">
       <div class="max-w-2xl mb-10">
