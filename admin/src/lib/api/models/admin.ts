@@ -323,6 +323,37 @@ export interface ProvisioningJobCreate {
     };
 }
 
+// /admin/outreach — platform-mailer composer (send from noreply@warmbly.com
+// with configurable Reply-To, every send audit-logged).
+
+export type AdminOutreachStatus = "queued" | "sent" | "failed";
+
+export interface AdminOutreachMessage {
+    id: string;
+    sent_by: string;
+    to_user_id?: string | null;
+    to_org_id?: string | null;
+    to_email: string;
+    reply_to?: string | null;
+    subject: string;
+    body: string;
+    status: AdminOutreachStatus;
+    error?: string | null;
+    sent_at?: string | null;
+    created_at: string;
+    sent_by_user?: AdminUserSummary;
+    to_user?: AdminUserSummary;
+}
+
+export interface SendAdminOutreachRequest {
+    to_user_id?: string;
+    to_org_id?: string;
+    to_email?: string;
+    reply_to?: string;
+    subject: string;
+    body: string;
+}
+
 // /admin/limit-requests — limit-increase request queue.
 
 export type LimitRequestStatus =

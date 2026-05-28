@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/warmbly/warmbly/internal/app/admin"
+	"github.com/warmbly/warmbly/internal/app/adminoutreach"
 	"github.com/warmbly/warmbly/internal/app/advanced"
 	"github.com/warmbly/warmbly/internal/app/analytics"
 	"github.com/warmbly/warmbly/internal/app/apikey"
@@ -83,7 +84,8 @@ type Handler struct {
 	EmailSendService emailsend.EmailSendService
 
 	// Admin
-	AdminService admin.AdminService
+	AdminService         admin.AdminService
+	AdminOutreachService adminoutreach.Service
 
 	// Worker orchestration (SSH-driven lifecycle for admin-managed workers)
 	WorkerOrchestrator *worker_orchestrator.Orchestrator

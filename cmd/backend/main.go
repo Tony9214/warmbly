@@ -18,6 +18,7 @@ import (
 	"github.com/warmbly/warmbly/internal/api/handler"
 	"github.com/warmbly/warmbly/internal/api/middleware"
 	"github.com/warmbly/warmbly/internal/app/admin"
+	"github.com/warmbly/warmbly/internal/app/adminoutreach"
 	"github.com/warmbly/warmbly/internal/app/advanced"
 	"github.com/warmbly/warmbly/internal/app/apikey"
 	"github.com/warmbly/warmbly/internal/app/audit"
@@ -123,6 +124,7 @@ func main() {
 
 	// Admin
 	var adminService admin.AdminService
+	var adminOutreachService adminoutreach.Service
 
 	// Worker orchestrator (SSH-driven admin worker lifecycle)
 	var workerOrchestrator *worker_orchestrator.Orchestrator
@@ -673,6 +675,16 @@ func main() {
 		adminRepository := repository.NewAdminRepository(primaryDB.Pool)
 		adminService = admin.NewService(adminRepository)
 
+		// Admin outreach composer — sends from the platform mailer
+		// (SES/SMTP) with a configurable Reply-To, audits every send.
+		adminOutreachRepo := repository.NewAdminOutreachRepository(primaryDB.Pool)
+		adminOutreachService = adminoutreach.NewService(
+			adminOutreachRepo,
+			userRepostory,
+			organizationRepository,
+			emailNotificationService,
+		)
+
 		folderService = group.NewService(folderRepostory)
 		tagService = group.NewService(tagRepostory)
 		categoryService = group.NewService(categoryRepostory)
@@ -742,7 +754,8 @@ func main() {
 		EmailSendService: emailSendService,
 
 		// Admin
-		AdminService: adminService,
+		AdminService:         adminService,
+		AdminOutreachService: adminOutreachService,
 
 		// SSH-managed worker lifecycle
 		WorkerOrchestrator: workerOrchestrator,

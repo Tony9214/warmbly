@@ -42,6 +42,7 @@ import CampaignsPage from "@/app/dashboard/CampaignsPage";
 import EnterprisePage from "@/app/dashboard/EnterprisePage";
 import PlansPage from "@/app/dashboard/PlansPage";
 import LimitRequestsPage from "@/app/dashboard/LimitRequestsPage";
+import OutreachPage from "@/app/dashboard/OutreachPage";
 import {
     AnalyticsPage,
     MailboxesPage,
@@ -95,6 +96,7 @@ const router = createBrowserRouter([
                     { path: "campaigns", element: <CampaignsPage /> },
                     { path: "enterprise", element: <EnterprisePage /> },
                     { path: "limit-requests", element: <LimitRequestsPage /> },
+                    { path: "outreach", element: <OutreachPage /> },
                     { path: "analytics", element: <AnalyticsPage /> },
                     { path: "audit", element: <AuditPage /> },
                     {

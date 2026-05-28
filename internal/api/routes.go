@@ -521,6 +521,14 @@ func Run(
 		adminRoutes.POST("/limit-requests/:id/approve", middleware.RequireAdminPermission(models.AdminPermManageOrganizations), h.AdminApproveLimitRequest)
 		adminRoutes.POST("/limit-requests/:id/reject", middleware.RequireAdminPermission(models.AdminPermManageOrganizations), h.AdminRejectLimitRequest)
 
+		// Admin outreach composer. Reuses ManageOrganizations (the
+		// audit story is the same as direct overrides — admin sends
+		// a thing on behalf of the platform); a dedicated
+		// SendOutreach bit can be carved out later if outreach review
+		// becomes its own surface.
+		adminRoutes.POST("/outreach", middleware.RequireAdminPermission(models.AdminPermManageOrganizations), h.AdminSendOutreach)
+		adminRoutes.GET("/outreach", middleware.RequireAdminPermission(models.AdminPermViewOrganizations), h.AdminListOutreach)
+
 		// Worker Management
 		adminRoutes.GET("/workers", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminListWorkers)
 		adminRoutes.GET("/workers/:id", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminGetWorker)

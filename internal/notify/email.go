@@ -12,6 +12,11 @@ import (
 
 type EmailNotificationService interface {
 	Send(ctx context.Context, to, cc, bcc []string, subject, message string) error
+	// SendOutreach is the same as Send but lets the caller override
+	// the Reply-To header. Used by the admin outreach composer so a
+	// noreply From: address can still funnel replies into a real
+	// support inbox. Empty replyTo falls back to the From address.
+	SendOutreach(ctx context.Context, to []string, replyTo, subject, message string) error
 }
 
 type emailNotificationService struct {
@@ -67,4 +72,36 @@ func (s *emailNotificationService) Send(ctx context.Context, to, cc, bcc []strin
 	}
 
 	return err
+}
+
+// SendOutreach is Send with an explicit Reply-To. SES exposes
+// ReplyToAddresses on the SendEmailInput so we don't have to forge MIME
+// headers ourselves.
+func (s *emailNotificationService) SendOutreach(ctx context.Context, to []string, replyTo, subject, message string) error {
+	from := fmt.Sprintf("%s <%s>", s.Name, s.Address)
+
+	input := &sesv2.SendEmailInput{
+		Destination: &types.Destination{
+			ToAddresses: to,
+		},
+		Content: &types.EmailContent{
+			Simple: &types.Message{
+				Body: &types.Body{
+					Html: &types.Content{Data: &message},
+				},
+				Subject: &types.Content{Data: &subject},
+			},
+		},
+		FromEmailAddress: &from,
+	}
+	if replyTo != "" {
+		input.ReplyToAddresses = []string{replyTo}
+	}
+
+	_, err := s.Client.SendEmail(ctx, input)
+	if err != nil {
+		sentry.CaptureException(err)
+		return err
+	}
+	return nil
 }

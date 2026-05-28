@@ -70,6 +70,7 @@ const GROUPS: NavGroup[] = [
             { to: "/limit-requests", label: "Limit requests", icon: Gauge },
             { to: "/plans", label: "Plans & Billing", icon: CreditCard },
             { to: "/enterprise", label: "Enterprise", icon: Briefcase },
+            { to: "/outreach", label: "Outreach", icon: Send },
         ],
     },
     {
