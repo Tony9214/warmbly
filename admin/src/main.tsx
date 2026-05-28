@@ -38,9 +38,9 @@ import OrganizationDetailPage from "@/app/dashboard/OrganizationDetailPage";
 import UsersPage from "@/app/dashboard/UsersPage";
 import UserDetailPage from "@/app/dashboard/UserDetailPage";
 import WarmupPage from "@/app/dashboard/WarmupPage";
+import CampaignsPage from "@/app/dashboard/CampaignsPage";
 import {
     AnalyticsPage,
-    CampaignsPage,
     MailboxesPage,
     NotFoundPage,
     PlansPage,

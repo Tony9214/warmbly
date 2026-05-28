@@ -39,16 +39,6 @@ export function PlansPage() {
     );
 }
 
-export function CampaignsPage() {
-    return (
-        <Stub
-            title="Campaigns"
-            description="Cross-organization campaign view. Inspect, pause, or stop any running campaign."
-            coming="Backed by /admin/campaigns — coming in the next iteration."
-        />
-    );
-}
-
 export function AnalyticsPage() {
     return (
         <Stub

@@ -323,6 +323,52 @@ export interface ProvisioningJobCreate {
     };
 }
 
+// /admin/campaigns/* — platform-wide campaign admin (force-stop runaway
+// campaigns, inspect engagement counters per campaign).
+
+export interface AdminCampaignDetail {
+    id: string;
+    name: string;
+    user_id: string;
+    organization_id: string;
+    status: string;
+    created_at: string;
+    started_at?: string | null;
+    stopped_at?: string | null;
+    total_contacts: number;
+    emails_sent: number;
+    emails_opened: number;
+    emails_clicked: number;
+    emails_replied: number;
+    emails_bounced: number;
+    user?: AdminUserSummary;
+    organization?: {
+        id: string;
+        name: string;
+        slug?: string | null;
+    };
+}
+
+export interface AdminCampaignsResult {
+    data: AdminCampaignDetail[];
+    pagination: {
+        total?: number | null;
+        next_cursor?: string | null;
+        has_more: boolean;
+    };
+}
+
+export interface AdminCampaignSearch {
+    q?: string;
+    user_id?: string;
+    org_id?: string;
+    status?: string;
+    cursor?: string;
+    limit?: number;
+    sort_by?: string;
+    sort_desc?: boolean;
+}
+
 // /admin/warmup/* — warmup pool admin (the platform's most critical
 // safety surface — keeps shared paid pools clean by quarantining
 // risky mailboxes early).
