@@ -36,6 +36,7 @@ import ProvisioningJobsPage from "@/app/dashboard/ProvisioningJobsPage";
 import OrganizationsPage from "@/app/dashboard/OrganizationsPage";
 import OrganizationDetailPage from "@/app/dashboard/OrganizationDetailPage";
 import UsersPage from "@/app/dashboard/UsersPage";
+import UserDetailPage from "@/app/dashboard/UserDetailPage";
 import {
     AnalyticsPage,
     CampaignsPage,
@@ -84,6 +85,7 @@ const router = createBrowserRouter([
                     { path: "egresses", element: <EgressesPage /> },
                     { path: "mailboxes", element: <MailboxesPage /> },
                     { path: "users", element: <UsersPage /> },
+                    { path: "users/:id", element: <UserDetailPage /> },
                     { path: "organizations", element: <OrganizationsPage /> },
                     { path: "organizations/:id", element: <OrganizationDetailPage /> },
                     { path: "plans", element: <PlansPage /> },
