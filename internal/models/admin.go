@@ -514,3 +514,74 @@ type EmailDistribution struct {
 	EmailCount int64     `json:"email_count"`
 	Percentage float64   `json:"percentage"`
 }
+
+// AdminOrgSearch are the query params for the admin organization listing.
+type AdminOrgSearch struct {
+	Query    string     `form:"q"`
+	Status   string     `form:"status"` // active, pending_deletion, all
+	Cursor   *uuid.UUID `form:"cursor"`
+	Limit    int        `form:"limit"`
+	SortBy   string     `form:"sort_by"` // created_at, name
+	SortDesc bool       `form:"sort_desc"`
+}
+
+// AdminOrgListItem is one row in the admin org list. It carries enough
+// summary state for the table (owner, counts, deletion status) without
+// joining to plans or subscriptions — those land on the detail endpoint.
+type AdminOrgListItem struct {
+	ID                   uuid.UUID  `json:"id"`
+	Name                 string     `json:"name"`
+	Slug                 *string    `json:"slug,omitempty"`
+	OwnerUserID          uuid.UUID  `json:"owner_user_id"`
+	OwnerEmail           string     `json:"owner_email"`
+	OwnerFirstName       string     `json:"owner_first_name"`
+	OwnerLastName        string     `json:"owner_last_name"`
+	OwnerBannedAt        *time.Time `json:"owner_banned_at,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
+	DeletionScheduledFor *time.Time `json:"deletion_scheduled_for,omitempty"`
+
+	// Resource counts. Cheap enough to inline on the list query so the
+	// table can show usage at a glance without an extra round-trip.
+	MemberCount       int `json:"member_count"`
+	EmailAccountCount int `json:"email_account_count"`
+	CampaignCount     int `json:"campaign_count"`
+	ActiveCampaigns   int `json:"active_campaigns"`
+}
+
+// AdminOrgsResult is the paginated response for the admin org listing.
+type AdminOrgsResult struct {
+	Data       []AdminOrgListItem `json:"data"`
+	Pagination Pagination         `json:"pagination"`
+}
+
+// AdminOrgDetail is the full payload for the org detail page. Wraps the
+// list summary with plan/subscription state and the full limits + counts
+// snapshot. When per-org overrides land they will surface in a separate
+// `overrides` block so the source of each limit value is explicit.
+type AdminOrgDetail struct {
+	AdminOrgListItem
+
+	UpdatedAt           time.Time           `json:"updated_at"`
+	DeletionScheduledAt *time.Time          `json:"deletion_scheduled_at,omitempty"`
+	Limits              *OrganizationLimits `json:"limits,omitempty"`
+	Counts              *OrganizationCounts `json:"counts,omitempty"`
+
+	// Plan / subscription context. Either may be nil (org with no active
+	// subscription — e.g. trial or freshly created).
+	PlanName           *string    `json:"plan_name,omitempty"`
+	SubscriptionStatus *string    `json:"subscription_status,omitempty"`
+	IsEnterprise       bool       `json:"is_enterprise"`
+	CurrentPeriodEnd   *time.Time `json:"current_period_end,omitempty"`
+	TrialEnd           *time.Time `json:"trial_end,omitempty"`
+}
+
+// AdminOrgMember is a member row enriched with the joined user.
+type AdminOrgMember struct {
+	OrganizationMember
+	User *AdminUserSummary `json:"user,omitempty"`
+}
+
+// AdminOrgMembersResult is the response for /admin/organizations/:id/members.
+type AdminOrgMembersResult struct {
+	Data []AdminOrgMember `json:"data"`
+}

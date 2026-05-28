@@ -63,6 +63,11 @@ type OrganizationRepository interface {
 
 	// Admin permissions
 	GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error)
+
+	// Admin: org-wide search/listing for the admin panel
+	SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, error)
+	GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, error)
+	GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, error)
 }
 
 type organizationRepository struct {
@@ -621,4 +626,184 @@ func (r *organizationRepository) GetUserAdminPermissions(ctx context.Context, us
 		return 0, nil
 	}
 	return perms, err
+}
+
+// adminOrgListColumns is the projection used by both the list and detail
+// queries so the AdminOrgListItem scan stays identical across both.
+const adminOrgListColumns = `
+	o.id, o.name, o.slug, o.owner_user_id,
+	u.email, u.first_name, u.last_name, u.banned_at,
+	o.created_at, o.deletion_scheduled_for,
+	(SELECT COUNT(*) FROM organization_members om WHERE om.organization_id = o.id) AS member_count,
+	(SELECT COUNT(*) FROM email_accounts ea WHERE ea.organization_id = o.id::text) AS email_account_count,
+	(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id) AS campaign_count,
+	(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id AND c.status = 'active') AS active_campaigns`
+
+func scanAdminOrgListItem(row pgx.Row, item *models.AdminOrgListItem) error {
+	return row.Scan(
+		&item.ID, &item.Name, &item.Slug, &item.OwnerUserID,
+		&item.OwnerEmail, &item.OwnerFirstName, &item.OwnerLastName, &item.OwnerBannedAt,
+		&item.CreatedAt, &item.DeletionScheduledFor,
+		&item.MemberCount, &item.EmailAccountCount, &item.CampaignCount, &item.ActiveCampaigns,
+	)
+}
+
+// SearchOrganizationsForAdmin lists orgs for the admin panel with cursor
+// pagination. The cursor is the last seen org id; rows are returned in
+// descending created_at order by default. Counts are computed inline so
+// the table can render usage without an extra fetch per row.
+func (r *organizationRepository) SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, error) {
+	limit := search.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	args := []interface{}{}
+	argNum := 1
+	where := "WHERE 1=1"
+
+	if search.Query != "" {
+		where += ` AND (o.name ILIKE $` + itoa(argNum) +
+			` OR o.slug ILIKE $` + itoa(argNum) +
+			` OR u.email ILIKE $` + itoa(argNum) + `)`
+		args = append(args, "%"+search.Query+"%")
+		argNum++
+	}
+
+	switch search.Status {
+	case "pending_deletion":
+		where += ` AND o.deletion_scheduled_for IS NOT NULL`
+	case "active":
+		where += ` AND o.deletion_scheduled_for IS NULL`
+	}
+
+	if search.Cursor != nil {
+		where += ` AND o.id < $` + itoa(argNum)
+		args = append(args, *search.Cursor)
+		argNum++
+	}
+
+	orderBy := "ORDER BY o.created_at DESC"
+	if search.SortBy == "name" {
+		orderBy = "ORDER BY o.name"
+		if search.SortDesc {
+			orderBy += " DESC"
+		}
+	}
+
+	args = append(args, limit+1)
+
+	query := `
+		SELECT ` + adminOrgListColumns + `
+		FROM organizations o
+		JOIN users u ON u.id = o.owner_user_id
+		` + where + `
+		` + orderBy + `
+		LIMIT $` + itoa(argNum)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []models.AdminOrgListItem{}
+	for rows.Next() {
+		var item models.AdminOrgListItem
+		if err := scanAdminOrgListItem(rows, &item); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	result := &models.AdminOrgsResult{
+		Data:       items,
+		Pagination: models.Pagination{HasMore: len(items) > limit},
+	}
+	if len(items) > limit {
+		result.Data = items[:limit]
+		last := items[limit-1].ID
+		result.Pagination.NextCursor = &last
+	}
+
+	// Total count for the same filter — drop the trailing LIMIT arg.
+	countQuery := `SELECT COUNT(*) FROM organizations o JOIN users u ON u.id = o.owner_user_id ` + where
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
+	}
+
+	return result, nil
+}
+
+// GetOrganizationAdminDetail returns the per-org detail payload. Plan
+// and subscription fields are LEFT JOINed so an org without an active
+// subscription still resolves.
+func (r *organizationRepository) GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, error) {
+	query := `
+		SELECT ` + adminOrgListColumns + `,
+			o.updated_at, o.deletion_scheduled_at,
+			p.name, s.status::text, s.is_enterprise, s.current_period_end, s.trial_end
+		FROM organizations o
+		JOIN users u ON u.id = o.owner_user_id
+		LEFT JOIN subscriptions s ON s.organization_id = o.id
+		LEFT JOIN plans p ON p.id = s.plan_id
+		WHERE o.id = $1`
+
+	var detail models.AdminOrgDetail
+	var isEnterprise *bool
+	err := r.db.QueryRow(ctx, query, orgID).Scan(
+		&detail.ID, &detail.Name, &detail.Slug, &detail.OwnerUserID,
+		&detail.OwnerEmail, &detail.OwnerFirstName, &detail.OwnerLastName, &detail.OwnerBannedAt,
+		&detail.CreatedAt, &detail.DeletionScheduledFor,
+		&detail.MemberCount, &detail.EmailAccountCount, &detail.CampaignCount, &detail.ActiveCampaigns,
+		&detail.UpdatedAt, &detail.DeletionScheduledAt,
+		&detail.PlanName, &detail.SubscriptionStatus, &isEnterprise, &detail.CurrentPeriodEnd, &detail.TrialEnd,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if isEnterprise != nil {
+		detail.IsEnterprise = *isEnterprise
+	}
+	return &detail, nil
+}
+
+// GetOrganizationMembersForAdmin returns the members of an org with their
+// joined user info, for admin consumption.
+func (r *organizationRepository) GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, error) {
+	query := `
+		SELECT
+			om.id, om.organization_id, om.user_id, om.role, om.permissions,
+			om.invited_by, om.invited_at, om.accepted_at,
+			u.id, u.first_name, u.last_name, u.email
+		FROM organization_members om
+		JOIN users u ON u.id = om.user_id
+		WHERE om.organization_id = $1
+		ORDER BY om.invited_at ASC`
+
+	rows, err := r.db.Query(ctx, query, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := []models.AdminOrgMember{}
+	for rows.Next() {
+		var m models.AdminOrgMember
+		var summary models.AdminUserSummary
+		if err := rows.Scan(
+			&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.Permissions,
+			&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt,
+			&summary.ID, &summary.FirstName, &summary.LastName, &summary.Email,
+		); err != nil {
+			return nil, err
+		}
+		m.User = &summary
+		members = append(members, m)
+	}
+	return members, nil
 }

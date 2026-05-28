@@ -68,6 +68,13 @@ type OrganizationService interface {
 
 	// Admin permissions (for admin middleware)
 	GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error)
+
+	// Admin: read-only org listing for the admin panel. Detail composes
+	// the list-shape row with counts and plan/subscription state. Write
+	// paths (overrides, ban-scope, etc.) live in slice 2.
+	SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, *errx.Error)
+	GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, *errx.Error)
+	GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, *errx.Error)
 }
 
 type organizationService struct {
@@ -686,4 +693,49 @@ func generateInvitationToken() (string, error) {
 // GetUserAdminPermissions retrieves the admin permissions for a user
 func (s *organizationService) GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error) {
 	return s.orgRepo.GetUserAdminPermissions(ctx, userID)
+}
+
+// SearchOrganizationsForAdmin returns the paginated admin org listing.
+func (s *organizationService) SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, *errx.Error) {
+	result, err := s.orgRepo.SearchOrganizationsForAdmin(ctx, search)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to search organizations")
+	}
+	return result, nil
+}
+
+// GetOrganizationAdminDetail returns the per-org admin payload — the
+// list-shape row plus a counts snapshot and plan/subscription state.
+// Limits come from the org's plan via GetOrganizationLimits so admin
+// callers see the same numbers the in-app limit checks enforce.
+func (s *organizationService) GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, *errx.Error) {
+	detail, err := s.orgRepo.GetOrganizationAdminDetail(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load organization")
+	}
+	if detail == nil {
+		return nil, errx.New(errx.NotFound, "organization not found")
+	}
+
+	if limits, xerr := s.GetOrganizationLimits(ctx, orgID); xerr == nil {
+		detail.Limits = limits
+	}
+	if counts, xerr := s.GetOrganizationCounts(ctx, orgID); xerr == nil {
+		detail.Counts = counts
+	}
+
+	return detail, nil
+}
+
+// GetOrganizationMembersForAdmin returns the members of an org with
+// joined user info for the admin panel.
+func (s *organizationService) GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, *errx.Error) {
+	members, err := s.orgRepo.GetOrganizationMembersForAdmin(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load members")
+	}
+	return members, nil
 }
