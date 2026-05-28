@@ -1,25 +1,29 @@
 // Mirror of the backend's models/integration.go shapes. Only the fields
-// the dashboard renders are typed — opaque blobs like display_fields stay
+// the dashboard renders are typed; opaque blobs like display_fields stay
 // generic so the UI can dig in without round-trips to the type system.
 
 export type IntegrationProvider =
+    | "hubspot"
+    | "salesforce"
+    | "pipedrive"
+    | "close"
+    | "zapier"
+    | "make"
+    | "n8n"
+    | "slack"
+    | "discord"
     | "calendly"
     | "cal_com"
-    | "google_sheets"
-    | "google_postmaster"
-    | "microsoft_snds"
-    | "dmarc"
-    | "cloudflare"
-    | "godaddy"
-    | "namecheap";
+    | "google_sheets";
 
 export type IntegrationStatus = "pending" | "connected" | "degraded" | "disconnected";
 
 export type IntegrationCategory =
+    | "crm"
+    | "automation"
+    | "notifications"
     | "meetings"
-    | "data"
-    | "deliverability"
-    | "dns";
+    | "data";
 
 export interface IntegrationCatalogEntry {
     provider: IntegrationProvider;
@@ -48,58 +52,6 @@ export interface IntegrationConnection {
 
     /** Returned once at create time for inbound-webhook providers. */
     inbound_webhook_url?: string;
-}
-
-export interface DMARCReport {
-    id: string;
-    organization_id: string;
-    domain: string;
-    reporter_org: string;
-    report_id: string;
-    range_start: string;
-    range_end: string;
-    total_messages: number;
-    pass_messages: number;
-    fail_messages: number;
-    created_at: string;
-}
-
-export interface PostmasterSnapshot {
-    id: number;
-    organization_id: string;
-    source: "google_postmaster" | "microsoft_snds";
-    target: string;
-    snapshot_date: string;
-    spam_rate_pct?: number;
-    inbox_placement_pct?: number;
-    domain_reputation?: string;
-    ip_reputation?: string;
-    dkim_success_pct?: number;
-    spf_success_pct?: number;
-    dmarc_success_pct?: number;
-    created_at: string;
-}
-
-export interface DNSVerification {
-    id: string;
-    organization_id: string;
-    domain: string;
-
-    spf_record?: string;
-    spf_ok: boolean;
-
-    dkim_selector?: string;
-    dkim_record?: string;
-    dkim_ok: boolean;
-
-    dmarc_record?: string;
-    dmarc_ok: boolean;
-
-    tracking_cname?: string;
-    tracking_ok: boolean;
-
-    notes: Record<string, string>;
-    checked_at: string;
 }
 
 export interface MeetingBooking {

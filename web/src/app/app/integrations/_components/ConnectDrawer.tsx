@@ -1,15 +1,10 @@
 // Drawer that handles per-provider connect inputs. Each provider has a
 // slightly different set of required fields:
-//   - webhook providers (Calendly, Cal.com, DMARC): just a label
-//   - oauth providers (Google Sheets, Postmaster): launch OAuth — for
-//     now we accept a manual token paste, OAuth wiring lands in the
-//     mailbox onboarding sweep
-//   - api-key providers (Cloudflare, SNDS, GoDaddy, Namecheap): paste
-//     the token + zone/domain
-//
-// The drawer is a single component (not one per provider) because the
-// shape variation is small and keeping it one file makes it easier to
-// add new providers later.
+//   - webhook providers (Calendly, Cal.com): no fields, just a label
+//   - oauth providers (HubSpot, Salesforce, Pipedrive, Google Sheets,
+//     Slack): launch OAuth (we accept a pasted token until OAuth lands)
+//   - api-key providers (Close, Zapier, Make, n8n): paste a token
+//   - webhook-url providers (Discord): paste the channel webhook URL
 
 "use client";
 
@@ -36,37 +31,59 @@ interface FieldDef {
 const FIELDS_BY_PROVIDER: Record<string, FieldDef[]> = {
     calendly: [],
     cal_com: [],
-    dmarc: [],
+
+    hubspot: [
+        { key: "workspace", label: "Workspace name", placeholder: "Acme" },
+        { key: "access_token", label: "OAuth access token", type: "password", required: true,
+          helper: "Paste a token with crm.objects.contacts read/write scope." },
+    ],
+    salesforce: [
+        { key: "workspace", label: "Org name", placeholder: "Acme Salesforce" },
+        { key: "access_token", label: "OAuth access token", type: "password", required: true,
+          helper: "Paste a Salesforce session ID or OAuth bearer." },
+    ],
+    pipedrive: [
+        { key: "workspace", label: "Company name", placeholder: "Acme" },
+        { key: "api_token", label: "API token", type: "password", required: true,
+          helper: "Settings → Personal → API in your Pipedrive account." },
+    ],
+    close: [
+        { key: "workspace", label: "Organization", placeholder: "Acme" },
+        { key: "api_token", label: "API key", type: "password", required: true,
+          helper: "Settings → Developer in Close." },
+    ],
+
+    zapier: [
+        { key: "api_token", label: "Warmbly API token", type: "password", required: true,
+          helper: "Generate this in API Keys, then paste it into Zapier when prompted." },
+    ],
+    make: [
+        { key: "api_token", label: "Warmbly API token", type: "password", required: true,
+          helper: "Generate this in API Keys, then paste it into Make when prompted." },
+    ],
+    n8n: [
+        { key: "api_token", label: "Warmbly API token", type: "password", required: true,
+          helper: "Generate this in API Keys, then paste it into n8n when prompted." },
+    ],
+
+    slack: [
+        { key: "workspace", label: "Workspace name", placeholder: "Acme Slack" },
+        { key: "channel", label: "Channel", placeholder: "#sales" },
+        { key: "webhook_url", label: "Incoming-webhook URL", type: "password", required: true,
+          helper: "Create an incoming webhook in your Slack admin and paste it here." },
+    ],
+    discord: [
+        { key: "server", label: "Server name", placeholder: "Acme" },
+        { key: "webhook_url", label: "Channel webhook URL", type: "password", required: true,
+          helper: "Edit Channel → Integrations → Webhooks → New Webhook → Copy URL." },
+    ],
+
     google_sheets: [
         { key: "sheet_id", label: "Sheet ID", placeholder: "1AbC...XyZ", required: true,
           helper: "The long ID in the sheet's URL between /d/ and /edit." },
         { key: "sheet_title", label: "Display label", placeholder: "Q2 outbound list" },
         { key: "access_token", label: "OAuth access token", type: "password",
           helper: "Paste a token with Sheets scope. OAuth wiring lands in onboarding." },
-    ],
-    google_postmaster: [
-        { key: "domain", label: "Domain", placeholder: "yourdomain.com", required: true },
-        { key: "access_token", label: "OAuth access token", type: "password", required: true,
-          helper: "Token with the gmail.postmaster.readonly scope." },
-    ],
-    microsoft_snds: [
-        { key: "ip", label: "IP address or range", placeholder: "1.2.3.4", required: true,
-          helper: "The IP you registered with SNDS." },
-        { key: "api_token", label: "SNDS data-access key", type: "password", required: true },
-    ],
-    cloudflare: [
-        { key: "zone_name", label: "Zone name", placeholder: "yourdomain.com", required: true },
-        { key: "api_token", label: "API token", type: "password", required: true,
-          helper: "Needs Zone:DNS:Edit on the listed zone. We verify before saving." },
-    ],
-    godaddy: [
-        { key: "domain", label: "Domain", placeholder: "yourdomain.com", required: true },
-        { key: "api_token", label: "API key:secret", type: "password", required: true,
-          helper: "Format: <key>:<secret> from GoDaddy developer portal." },
-    ],
-    namecheap: [
-        { key: "domain", label: "Domain", placeholder: "yourdomain.com", required: true },
-        { key: "api_token", label: "API token", type: "password", required: true },
     ],
 };
 
@@ -182,7 +199,7 @@ export default function ConnectDrawer({
                         {fields.length === 0 && (
                             <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2.5">
                                 <p className="text-[12px] text-slate-600 leading-relaxed">
-                                    {entry.webhook_hint ?? "We'll mint a URL for you on the next screen. Paste it into the provider's webhook configuration."}
+                                    {entry.webhook_hint ?? "We will mint a URL for you on the next screen. Paste it into the provider's webhook configuration."}
                                 </p>
                             </div>
                         )}

@@ -14,13 +14,11 @@ import type { IntegrationProvider } from "@/lib/api/models/app/integrations/Inte
 const PROVIDER_NAMES: Partial<Record<IntegrationProvider, string>> = {
     calendly: "Calendly",
     cal_com: "Cal.com",
-    dmarc: "DMARC reports",
 };
 
 const HINTS: Partial<Record<IntegrationProvider, string>> = {
-    calendly: "Paste this in Calendly → Account → Integrations → Webhooks → Create Webhook. Subscribe to invitee.created.",
-    cal_com: "Paste this in Cal.com → Settings → Developer → Webhooks. Subscribe to BOOKING_CREATED.",
-    dmarc: "Forward your DMARC aggregate (rua=) reports to this URL — either directly via curl or via a mail-to-HTTP relay.",
+    calendly: "Paste this in Calendly under Account, Integrations, Webhooks, Create Webhook. Subscribe to invitee.created.",
+    cal_com: "Paste this in Cal.com under Settings, Developer, Webhooks. Subscribe to BOOKING_CREATED.",
 };
 
 export default function InboundUrlDialog({

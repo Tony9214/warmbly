@@ -1,15 +1,14 @@
 // Integrations dashboard.
 //
-// One page covers the full integration surface: catalog of available
-// providers (Calendly, Cal.com, Google Sheets, Google Postmaster,
-// Microsoft SNDS, DMARC, Cloudflare, GoDaddy, Namecheap), per-org
-// connection state, inbound webhook URLs, DMARC reports, Postmaster /
-// SNDS snapshots, and a DNS verifier widget.
+// One page covers the integration surface: catalog of available providers
+// (HubSpot, Salesforce, Pipedrive, Close, Zapier, Make, n8n, Slack,
+// Discord, Calendly, Cal.com, Google Sheets), per-org connection state,
+// inbound webhook URLs, and meeting bookings.
 //
-// Layout follows the Page primitives — stat strip across the top,
-// section bars between zones, no max-width chrome. Connect / disconnect
-// happens in inline drawers (ConnectDrawer) rather than separate routes
-// so the page stays a single navigation target from the sidebar.
+// Layout follows the Page primitives: stat strip across the top, section
+// bars between zones, no max-width chrome. Connect / disconnect happens
+// in an inline drawer so the page stays a single navigation target from
+// the sidebar.
 
 "use client";
 
@@ -18,10 +17,8 @@ import {
     CableIcon,
     CalendarCheckIcon,
     CheckIcon,
-    GlobeIcon,
     PlusIcon,
     RefreshCwIcon,
-    ShieldCheckIcon,
     XIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -34,14 +31,11 @@ import {
     SectionBar,
     Stat,
     StatStrip,
-    TopbarAction,
 } from "@/components/layout/Page";
 import useIntegrationCatalog from "@/lib/api/hooks/app/integrations/useIntegrationCatalog";
 import useIntegrationConnections from "@/lib/api/hooks/app/integrations/useIntegrationConnections";
 import useDisconnectIntegration from "@/lib/api/hooks/app/integrations/useDisconnectIntegration";
-import useDMARCReports from "@/lib/api/hooks/app/integrations/useDMARCReports";
 import useMeetingBookings from "@/lib/api/hooks/app/integrations/useMeetingBookings";
-import useDNSVerifications from "@/lib/api/hooks/app/integrations/useDNSVerifications";
 import type {
     IntegrationCatalogEntry,
     IntegrationCategory,
@@ -52,23 +46,21 @@ import { cn } from "@/lib/utils";
 
 import ConnectDrawer from "./_components/ConnectDrawer";
 import InboundUrlDialog from "./_components/InboundUrlDialog";
-import DNSVerifierPanel from "./_components/DNSVerifierPanel";
 
 const CATEGORY_LABELS: Record<IntegrationCategory, string> = {
+    crm: "CRM",
+    automation: "Automation",
+    notifications: "Notifications",
     meetings: "Meetings",
     data: "Data",
-    deliverability: "Deliverability",
-    dns: "DNS",
 };
 
-const CATEGORY_ORDER: IntegrationCategory[] = ["deliverability", "dns", "meetings", "data"];
+const CATEGORY_ORDER: IntegrationCategory[] = ["crm", "automation", "notifications", "meetings", "data"];
 
 export default function IntegrationsPage() {
     const catalogQuery = useIntegrationCatalog();
     const connectionsQuery = useIntegrationConnections();
     const bookingsQuery = useMeetingBookings();
-    const dmarcQuery = useDMARCReports();
-    const dnsQuery = useDNSVerifications();
 
     const disconnect = useDisconnectIntegration();
 
@@ -78,11 +70,7 @@ export default function IntegrationsPage() {
     const catalog = catalogQuery.data?.catalog ?? [];
     const connections = connectionsQuery.data?.connections ?? [];
     const bookings = bookingsQuery.data?.bookings ?? [];
-    const dmarcReports = dmarcQuery.data?.reports ?? [];
-    const dnsVerifications = dnsQuery.data?.verifications ?? [];
 
-    // Index connections by provider so the catalog grid can paint each
-    // provider's status without a per-card query.
     const byProvider = React.useMemo(() => {
         const m: Record<string, IntegrationConnection[]> = {};
         for (const c of connections) {
@@ -106,8 +94,6 @@ export default function IntegrationsPage() {
         catalogQuery.refetch();
         connectionsQuery.refetch();
         bookingsQuery.refetch();
-        dmarcQuery.refetch();
-        dnsQuery.refetch();
     }
 
     async function handleDisconnect(connection: IntegrationConnection) {
@@ -121,7 +107,7 @@ export default function IntegrationsPage() {
 
     return (
         <Page>
-            <PageTopbar eyebrow="Integrations" subtitle="Calendly, Cal.com, Google Sheets, Postmaster, SNDS, DMARC, Cloudflare, and more">
+            <PageTopbar eyebrow="Integrations" subtitle="CRMs, automation, notifications, meetings, and data">
                 <button
                     type="button"
                     onClick={refreshAll}
@@ -150,7 +136,7 @@ export default function IntegrationsPage() {
                     sub={degradedCount > 0 ? "needs attention" : "all healthy"}
                 />
                 <Stat
-                    label="Meetings · 30d"
+                    label="Meetings"
                     value={bookings.length}
                     sub="from Calendly + Cal.com"
                     last
@@ -158,7 +144,6 @@ export default function IntegrationsPage() {
             </StatStrip>
 
             <PageBody>
-                {/* Catalog grid grouped by category. */}
                 {CATEGORY_ORDER.map((category) => {
                     const entries = grouped[category] ?? [];
                     if (entries.length === 0) return null;
@@ -181,45 +166,6 @@ export default function IntegrationsPage() {
                     );
                 })}
 
-                {/* DNS verifier widget — independent of any connection. */}
-                <SectionBar label="DNS verifier">
-                    <span className="text-[10.5px] text-slate-400">SPF · DKIM · DMARC</span>
-                </SectionBar>
-                <div className="px-5 py-4 border-b border-slate-200/60">
-                    <DNSVerifierPanel verifications={dnsVerifications} />
-                </div>
-
-                {/* DMARC reports — most recent first. */}
-                <SectionBar label="DMARC reports" count={dmarcReports.length}>
-                    <ShieldCheckIcon className="w-3 h-3 text-slate-400" />
-                </SectionBar>
-                {dmarcReports.length === 0 ? (
-                    <EmptyBlock
-                        title="No DMARC reports yet"
-                        body="Connect DMARC, then forward your rua= reports to the URL we mint for you."
-                    />
-                ) : (
-                    <div className="divide-y divide-slate-200/60 border-b border-slate-200/60">
-                        {dmarcReports.slice(0, 10).map((r) => (
-                            <div key={r.id} className="px-5 h-12 flex items-center gap-3 text-[12.5px]">
-                                <GlobeIcon className="w-3.5 h-3.5 text-slate-400" />
-                                <span className="font-medium text-slate-900 w-48 truncate">{r.domain}</span>
-                                <span className="text-slate-500 w-40 truncate">{r.reporter_org}</span>
-                                <span className="ml-auto font-mono text-[11px] tabular-nums text-slate-500">
-                                    {r.pass_messages.toLocaleString()} pass
-                                </span>
-                                <span className="font-mono text-[11px] tabular-nums text-rose-600">
-                                    {r.fail_messages.toLocaleString()} fail
-                                </span>
-                                <span className="font-mono text-[10.5px] text-slate-400 tabular-nums w-32 text-right">
-                                    {new Date(r.range_end).toLocaleDateString()}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Meeting bookings — Calendly/Cal.com conversions. */}
                 <SectionBar label="Meeting bookings" count={bookings.length}>
                     <CalendarCheckIcon className="w-3 h-3 text-slate-400" />
                 </SectionBar>
@@ -328,9 +274,11 @@ function CatalogCard({
                             </button>
                             {connections[0].display_fields && Object.keys(connections[0].display_fields).length > 0 && (
                                 <span className="font-mono text-[10px] text-slate-400 truncate max-w-[120px]">
-                                    {(connections[0].display_fields as Record<string, string>)["domain"] ??
+                                    {(connections[0].display_fields as Record<string, string>)["workspace"] ??
                                         (connections[0].display_fields as Record<string, string>)["sheet_title"] ??
-                                        (connections[0].display_fields as Record<string, string>)["zone_name"] ?? ""}
+                                        (connections[0].display_fields as Record<string, string>)["account_email"] ??
+                                        (connections[0].display_fields as Record<string, string>)["channel"] ??
+                                        ""}
                                 </span>
                             )}
                         </>
@@ -351,10 +299,6 @@ function CatalogCard({
                 <button
                     type="button"
                     onClick={() => {
-                        // Re-emit the inbound URL dialog so the user can re-copy
-                        // it later. The connect mutation only returns the URL
-                        // at create time, so we synthesize it from the
-                        // connection ID — backend won't replay the secret.
                         onShowInbound("/api/v1/integrations/inbound/" + entry.provider.replace("_", "-") + "/<your-secret>");
                     }}
                     className="mt-2 text-[10.5px] text-sky-700 hover:underline self-start inline-flex items-center gap-1"
@@ -403,6 +347,5 @@ function SourceDot({ source }: { source: string }) {
     );
 }
 
-// Lint shim — keep icons that may only render in branches.
 void CheckIcon;
 void XIcon;
