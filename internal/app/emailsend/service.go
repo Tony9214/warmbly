@@ -8,6 +8,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
+	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
 	"github.com/warmbly/warmbly/internal/scheduler"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
@@ -38,6 +39,7 @@ type EmailSendService interface {
 type emailSendService struct {
 	taskRepo    repository.TaskRepository
 	emailRepo   repository.EmailRepository
+	userRepo    repository.UserRepository
 	scheduler   scheduler.SchedulerService
 	tasksClient *gtasks.Client
 	featureGate feature.FeatureGateService
@@ -46,6 +48,7 @@ type emailSendService struct {
 func NewService(
 	taskRepo repository.TaskRepository,
 	emailRepo repository.EmailRepository,
+	userRepo repository.UserRepository,
 	scheduler scheduler.SchedulerService,
 	tasksClient *gtasks.Client,
 	featureGate feature.FeatureGateService,
@@ -53,6 +56,7 @@ func NewService(
 	return &emailSendService{
 		taskRepo:    taskRepo,
 		emailRepo:   emailRepo,
+		userRepo:    userRepo,
 		scheduler:   scheduler,
 		tasksClient: tasksClient,
 		featureGate: featureGate,
@@ -60,6 +64,17 @@ func NewService(
 }
 
 func (s *emailSendService) SendEmail(ctx context.Context, userID, orgID, accountID uuid.UUID, req *SendEmailRequest) (*SendEmailResponse, *errx.Error) {
+	// Ban-scope enforcement (migration 000045). Block outbound send
+	// when the admin set BanScopeSend, even if the user can otherwise
+	// log in and inspect their account.
+	if s.userRepo != nil {
+		if scope, scopeErr := s.userRepo.GetBanState(ctx, userID); scopeErr == nil {
+			if models.BanScope(scope).Has(models.BanScopeSend) {
+				return nil, errx.New(errx.Forbidden, "this account cannot send email")
+			}
+		}
+	}
+
 	// Validate email account exists and belongs to user/org
 	_, xerr := s.emailRepo.GetByID(ctx, accountID)
 	if xerr != nil {

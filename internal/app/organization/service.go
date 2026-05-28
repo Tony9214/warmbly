@@ -122,6 +122,15 @@ func NewService(
 
 // Create creates a new organization and adds the user as owner
 func (s *organizationService) Create(ctx context.Context, userID uuid.UUID, name string) (*models.Organization, *errx.Error) {
+	// Ban-scope enforcement (migration 000045). Block new workspace
+	// creation when the admin's set the BanScopeOrgCreate bit, even
+	// if the user can otherwise log in.
+	if scope, scopeErr := s.userRepo.GetBanState(ctx, userID); scopeErr == nil {
+		if models.BanScope(scope).Has(models.BanScopeOrgCreate) {
+			return nil, errx.New(errx.Forbidden, "this account cannot create new workspaces")
+		}
+	}
+
 	// Check organization limit
 	user, userErr := s.userRepo.GetUser(ctx, userID)
 	if userErr != nil {

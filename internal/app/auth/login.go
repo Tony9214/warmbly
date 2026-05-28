@@ -114,6 +114,16 @@ func (s *authService) LoginConfirm(ctx context.Context, data *ConfirmData, sessi
 		return nil, errx.ErrCode
 	}
 
+	// Ban-scope enforcement (migration 000045). The runtime treats
+	// BanScopeLogin as "this account cannot authenticate" — the row's
+	// banned_at is set in tandem so legacy callers still see the user
+	// as banned, but the bit makes the rule auditable.
+	if scope, scopeErr := s.userRepository.GetBanState(ctx, atoken.UserID); scopeErr == nil {
+		if models.BanScope(scope).Has(models.BanScopeLogin) {
+			return nil, errx.New(errx.Forbidden, "this account has been suspended")
+		}
+	}
+
 	newToken, err := s.tokenService.GenerateSession(ctx, atoken.UserID, "", ipaddr, userAgent, token.AuthProviderEmail)
 	if err != nil {
 		return nil, err
