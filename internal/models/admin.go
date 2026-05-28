@@ -68,9 +68,32 @@ type AdminUserSummary struct {
 	Email     string    `json:"email"`
 }
 
+// BanScope is a bitmask describing which actions are blocked while a
+// user is banned. The existing banned_at column still marks "banned",
+// but the scope decides what concretely stops working. Kept in sync
+// with the values in 000045_ban_scope.up.sql.
+type BanScope uint32
+
+const (
+	BanScopeLogin     BanScope = 1 << iota // 1 — block authentication
+	BanScopeOrgCreate                      // 2 — refuse new workspace creation
+	BanScopeSend                           // 4 — block outbound campaign sends
+)
+
+// BanScopeAll is the legacy "everything" mask applied at migration to
+// preserve the pre-bitmask "fully banned" semantics. New bans should
+// pick a more specific scope where possible.
+const BanScopeAll = BanScopeLogin | BanScopeOrgCreate | BanScopeSend
+
+func (s BanScope) Has(flag BanScope) bool { return s&flag == flag }
+
 // BanUserRequest represents the request to ban a user
 type BanUserRequest struct {
 	Reason string `json:"reason" binding:"required"`
+	// Scope is a BanScope bitmask. Zero / missing falls back to
+	// BanScopeLogin so the historic "you can't log in" behaviour
+	// stays the default for ambiguous calls.
+	Scope BanScope `json:"scope,omitempty"`
 }
 
 // UnbanUserRequest represents the request to unban a user

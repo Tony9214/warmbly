@@ -599,6 +599,10 @@ export interface UpdateUserRateLimitsRequest {
 
 export interface BanUserRequest {
     reason: string;
+    // Bitmask of ban-scope flags. 1 = login, 2 = org-create, 4 = send.
+    // 0 falls back to "login only" server-side. See
+    // internal/models/admin.go BanScope.
+    scope?: number;
 }
 
 export interface UnbanUserRequest {

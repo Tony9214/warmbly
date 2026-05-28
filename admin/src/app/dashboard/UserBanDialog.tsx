@@ -18,6 +18,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { banUser, unbanUser } from "@/lib/api/client/admin/users";
 
+// Mirror of internal/models/admin.go BanScope constants — keep in sync
+// with the Go enum and the 000045_ban_scope migration.
+const BAN_SCOPE_LOGIN = 1;
+const BAN_SCOPE_ORG_CREATE = 2;
+const BAN_SCOPE_SEND = 4;
+
 export function UserBanDialog({
     userId,
     userEmail,
@@ -33,12 +39,21 @@ export function UserBanDialog({
 }) {
     const qc = useQueryClient();
     const [reason, setReason] = useState("");
+    const [scopeLogin, setScopeLogin] = useState(true);
+    const [scopeOrgCreate, setScopeOrgCreate] = useState(false);
+    const [scopeSend, setScopeSend] = useState(false);
 
     const mutation = useMutation({
-        mutationFn: () =>
-            mode === "ban"
-                ? banUser(userId, { reason })
-                : unbanUser(userId, { reason }),
+        mutationFn: () => {
+            if (mode === "ban") {
+                const scope =
+                    (scopeLogin ? BAN_SCOPE_LOGIN : 0) +
+                    (scopeOrgCreate ? BAN_SCOPE_ORG_CREATE : 0) +
+                    (scopeSend ? BAN_SCOPE_SEND : 0);
+                return banUser(userId, { reason, scope });
+            }
+            return unbanUser(userId, { reason });
+        },
         onSuccess: () => {
             toast.success(mode === "ban" ? "User banned" : "User unbanned");
             qc.invalidateQueries({ queryKey: ["admin", "users"] });
@@ -83,6 +98,36 @@ export function UserBanDialog({
                     />
                 </div>
 
+                {mode === "ban" && (
+                    <div>
+                        <Label className="text-xs font-medium">Scope</Label>
+                        <p className="text-[10px] text-muted-foreground mb-2">
+                            Which actions stop working while this ban is active.
+                            At least one is required.
+                        </p>
+                        <div className="space-y-1.5">
+                            <ScopeOption
+                                label="Block login"
+                                hint="user cannot authenticate"
+                                checked={scopeLogin}
+                                onChange={setScopeLogin}
+                            />
+                            <ScopeOption
+                                label="Block workspace creation"
+                                hint="user can stay logged in but cannot spin up a new org"
+                                checked={scopeOrgCreate}
+                                onChange={setScopeOrgCreate}
+                            />
+                            <ScopeOption
+                                label="Block outbound send"
+                                hint="campaign sending is paused while the ban is active"
+                                checked={scopeSend}
+                                onChange={setScopeSend}
+                            />
+                        </div>
+                    </div>
+                )}
+
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)}>
                         Cancel
@@ -91,6 +136,15 @@ export function UserBanDialog({
                         onClick={() => {
                             if (reason.trim() === "") {
                                 toast.error("Reason is required");
+                                return;
+                            }
+                            if (
+                                mode === "ban" &&
+                                !scopeLogin &&
+                                !scopeOrgCreate &&
+                                !scopeSend
+                            ) {
+                                toast.error("Pick at least one scope");
                                 return;
                             }
                             mutation.mutate();
@@ -111,5 +165,32 @@ export function UserBanDialog({
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+    );
+}
+
+function ScopeOption({
+    label,
+    hint,
+    checked,
+    onChange,
+}: {
+    label: string;
+    hint: string;
+    checked: boolean;
+    onChange: (v: boolean) => void;
+}) {
+    return (
+        <label className="flex items-start gap-2 cursor-pointer">
+            <input
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => onChange(e.target.checked)}
+                className="mt-0.5 accent-red-600"
+            />
+            <span className="text-xs">
+                <span className="font-medium">{label}</span>
+                <span className="block text-[10px] text-muted-foreground">{hint}</span>
+            </span>
+        </label>
     );
 }

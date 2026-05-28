@@ -20,7 +20,7 @@ type AdminRepository interface {
 	GetUserDetail(ctx context.Context, userID uuid.UUID) (*models.AdminUserDetail, error)
 	GetUserPreview(ctx context.Context, userID uuid.UUID) (*models.AdminUserPreview, error)
 	UpdateUserAdminPermissions(ctx context.Context, userID uuid.UUID, permissions uint32, grantedBy uuid.UUID) error
-	BanUser(ctx context.Context, userID, bannedBy uuid.UUID, reason string) error
+	BanUser(ctx context.Context, userID, bannedBy uuid.UUID, reason string, scope uint32) error
 	UnbanUser(ctx context.Context, userID, unbannedBy uuid.UUID, reason string) error
 	GetUserBans(ctx context.Context, userID uuid.UUID) ([]models.UserBan, error)
 	GetUserEmails(ctx context.Context, userID uuid.UUID, cursor *uuid.UUID, limit int) ([]models.AdminWorkerEmail, *models.Pagination, error)
@@ -343,16 +343,20 @@ func (r *adminRepository) UpdateUserAdminPermissions(ctx context.Context, userID
 	return err
 }
 
-// BanUser bans a user
-func (r *adminRepository) BanUser(ctx context.Context, userID, bannedBy uuid.UUID, reason string) error {
+// BanUser bans a user. Scope is the BanScope bitmask describing which
+// actions are blocked while banned. Callers should pass a non-zero
+// scope; the handler defaults to BanScopeLogin if missing.
+func (r *adminRepository) BanUser(ctx context.Context, userID, bannedBy uuid.UUID, reason string, scope uint32) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	// Update user
-	_, err = tx.Exec(ctx, `UPDATE users SET banned_at = NOW(), updated_at = NOW() WHERE id = $1`, userID)
+	// Update user — stamp banned_at and the scope together so any
+	// caller that only checks banned_at sees the existing "fully banned"
+	// behavior unless they explicitly read ban_scope.
+	_, err = tx.Exec(ctx, `UPDATE users SET banned_at = NOW(), ban_scope = $2, updated_at = NOW() WHERE id = $1`, userID, scope)
 	if err != nil {
 		return err
 	}
@@ -377,8 +381,9 @@ func (r *adminRepository) UnbanUser(ctx context.Context, userID, unbannedBy uuid
 	}
 	defer tx.Rollback(ctx)
 
-	// Update user
-	_, err = tx.Exec(ctx, `UPDATE users SET banned_at = NULL, updated_at = NOW() WHERE id = $1`, userID)
+	// Update user — clear both banned_at and ban_scope so subsequent
+	// auth + send checks see a clean account.
+	_, err = tx.Exec(ctx, `UPDATE users SET banned_at = NULL, ban_scope = 0, updated_at = NOW() WHERE id = $1`, userID)
 	if err != nil {
 		return err
 	}
