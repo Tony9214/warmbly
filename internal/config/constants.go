@@ -54,7 +54,17 @@ const (
 	HardCapContacts           = 1_000_000 // contacts per org
 	HardCapDailyCampaignSends = 1000      // campaign emails per org per day
 
-	// TODO(slice 3): daily creation throttles ("no 1000 new campaigns
-	// in one day even on an unlimited plan"). Needs a counter mechanism
-	// keyed on (org, resource, day), separate from these absolute caps.
+	// Daily creation throttles. The total caps above stop "you have
+	// 5000 campaigns on this org" — the throttles below stop "you
+	// created 1000 campaigns today on a fresh unlimited account."
+	// Different shape: a per-(org, resource, day) Redis counter that
+	// resets at UTC midnight, decoupled from any plan tier.
+	//
+	// These are creation-rate ceilings, not total caps; raising them
+	// per-org is intentionally not exposed in the override editor
+	// because the per-day shape protects abuse posture rather than
+	// product utility.
+	DailyThrottleNewCampaigns = 20 // new campaigns per org per day
+	DailyThrottleNewMailboxes = 5  // newly connected mailboxes per org per day
+	DailyThrottleNewOrgs      = 3  // new workspaces per owner per day
 )

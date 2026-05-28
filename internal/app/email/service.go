@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/app/cipher"
+	"github.com/warmbly/warmbly/internal/app/dailythrottle"
 	"github.com/warmbly/warmbly/internal/app/feature"
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/app/webhook"
@@ -33,6 +34,7 @@ type EmailService interface {
 	// Optional: wire in the webhook dispatcher after construction. Once
 	// set, account-lifecycle events fan out to customer webhook endpoints.
 	WireWebhooks(w webhook.Service)
+	WireThrottle(t dailythrottle.Service)
 }
 
 type emailService struct {
@@ -45,10 +47,18 @@ type emailService struct {
 	r                *cache.Cache
 	oauthInbox       *config.Oauth2Inbox
 	workerAssignment worker.WorkerAssignmentService
+	throttle         dailythrottle.Service
 	// webhookService is optional. When non-nil, account lifecycle events
 	// (email_account.connected, email_account.removed) are dispatched to
 	// subscribed customer webhooks.
 	webhookService webhook.Service
+}
+
+// WireThrottle attaches the daily-creation throttle after construction
+// so callers without a Redis cache (jobs, tests) need not provide one.
+// When unset, guardMailboxThrottle is a no-op.
+func (s *emailService) WireThrottle(t dailythrottle.Service) {
+	s.throttle = t
 }
 
 // WireWebhooks attaches the webhook dispatcher after construction. Done

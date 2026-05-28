@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/app/dailythrottle"
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
@@ -19,6 +21,16 @@ func (s *campaignService) Create(ctx context.Context, userID string, orgID *uuid
 	}
 	if err := validate.CampaignDescription(data.Description); err != nil {
 		return nil, err
+	}
+
+	// Daily creation throttle (config.DailyThrottleNewCampaigns). Caps
+	// per-day new-campaign rate per org so an unlimited plan can't be
+	// abused to ramp instantly. Scoped on org when present; otherwise
+	// best-effort skipped (the older campaign API allows orgless rows).
+	if orgID != nil && s.throttle != nil {
+		if xerr := s.throttle.CheckAndIncrement(ctx, *orgID, dailythrottle.ResourceCampaign, config.DailyThrottleNewCampaigns); xerr != nil {
+			return nil, xerr
+		}
 	}
 
 	resp, xerr := s.campaignRepository.Create(ctx, userID, orgID, data)

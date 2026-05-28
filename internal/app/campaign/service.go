@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/app/dailythrottle"
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
@@ -34,6 +35,7 @@ type campaignService struct {
 	emailRepo          repository.EmailRepository
 	campaignLogRepo    repository.CampaignLogRepository
 	featureGate        feature.FeatureGateService
+	throttle           dailythrottle.Service
 	streamingPublisher *pubsub.StreamingPublisher
 }
 
@@ -43,6 +45,7 @@ func NewService(
 	emailRepo repository.EmailRepository,
 	campaignLogRepo repository.CampaignLogRepository,
 	featureGate feature.FeatureGateService,
+	throttle dailythrottle.Service,
 	streamingPublisher *pubsub.StreamingPublisher,
 ) CampaignService {
 	return &campaignService{
@@ -51,6 +54,7 @@ func NewService(
 		emailRepo:          emailRepo,
 		campaignLogRepo:    campaignLogRepo,
 		featureGate:        featureGate,
+		throttle:           throttle,
 		streamingPublisher: streamingPublisher,
 	}
 }

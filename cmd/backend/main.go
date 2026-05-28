@@ -19,6 +19,7 @@ import (
 	"github.com/warmbly/warmbly/internal/api/middleware"
 	"github.com/warmbly/warmbly/internal/app/admin"
 	"github.com/warmbly/warmbly/internal/app/adminoutreach"
+	"github.com/warmbly/warmbly/internal/app/dailythrottle"
 	"github.com/warmbly/warmbly/internal/app/advanced"
 	"github.com/warmbly/warmbly/internal/app/apikey"
 	"github.com/warmbly/warmbly/internal/app/audit"
@@ -125,6 +126,7 @@ func main() {
 	// Admin
 	var adminService admin.AdminService
 	var adminOutreachService adminoutreach.Service
+	var dailyThrottleService dailythrottle.Service
 
 	// Worker orchestrator (SSH-driven admin worker lifecycle)
 	var workerOrchestrator *worker_orchestrator.Orchestrator
@@ -464,7 +466,12 @@ func main() {
 		featureGateService = feature.NewService(subscriptionRepository, planRepository)
 		workerAssignmentService = worker.NewAssignmentService(workerRepository, subscriptionRepository, planRepository)
 		subscriptionService = subscription.NewService(subscriptionRepository, planRepository)
-		organizationService = organization.NewService(organizationRepository, subscriptionRepository, userRepostory)
+		// dailyThrottleService needs the cache that's constructed
+		// earlier in main; instantiate up here so org create can use it.
+		if dailyThrottleService == nil {
+			dailyThrottleService = dailythrottle.NewService(cache)
+		}
+		organizationService = organization.NewService(organizationRepository, subscriptionRepository, userRepostory, dailyThrottleService)
 
 		// Load Stripe config and initialize service
 		stripeCfg, err := cfg.LoadStripeConfig(ctx)
@@ -612,7 +619,11 @@ func main() {
 		)
 		// Fan out email-account lifecycle events to customer webhooks.
 		emailService.WireWebhooks(webhookService)
-		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, streamingPublisher)
+		// Same wire-after-construct pattern for the daily throttle —
+		// only the prod backend has a real cache; jobs / tests build
+		// emailService without one.
+		emailService.WireThrottle(dailyThrottleService)
+		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, dailyThrottleService, streamingPublisher)
 		sequenceService = sequence.NewService(sequenceRepostory)
 		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository)
 		apiKeyService = apikey.NewService(cache, apiKeyRepository)

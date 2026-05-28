@@ -9,6 +9,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/app/dailythrottle"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
@@ -105,6 +106,7 @@ type organizationService struct {
 	orgRepo  repository.OrganizationRepository
 	subRepo  repository.SubscriptionRepository
 	userRepo repository.UserRepository
+	throttle dailythrottle.Service
 }
 
 // NewService creates a new organization service
@@ -112,11 +114,13 @@ func NewService(
 	orgRepo repository.OrganizationRepository,
 	subRepo repository.SubscriptionRepository,
 	userRepo repository.UserRepository,
+	throttle dailythrottle.Service,
 ) OrganizationService {
 	return &organizationService{
 		orgRepo:  orgRepo,
 		subRepo:  subRepo,
 		userRepo: userRepo,
+		throttle: throttle,
 	}
 }
 
@@ -128,6 +132,15 @@ func (s *organizationService) Create(ctx context.Context, userID uuid.UUID, name
 	if scope, scopeErr := s.userRepo.GetBanState(ctx, userID); scopeErr == nil {
 		if models.BanScope(scope).Has(models.BanScopeOrgCreate) {
 			return nil, errx.New(errx.Forbidden, "this account cannot create new workspaces")
+		}
+	}
+
+	// Daily creation throttle — caps "new workspaces per owner per
+	// day" so a script can't spawn 100 orgs from one user account.
+	// Scope is the owner uuid (not the org, which doesn't exist yet).
+	if s.throttle != nil {
+		if xerr := s.throttle.CheckAndIncrement(ctx, userID, dailythrottle.ResourceOrg, config.DailyThrottleNewOrgs); xerr != nil {
+			return nil, xerr
 		}
 	}
 
