@@ -43,8 +43,8 @@ import EnterprisePage from "@/app/dashboard/EnterprisePage";
 import PlansPage from "@/app/dashboard/PlansPage";
 import LimitRequestsPage from "@/app/dashboard/LimitRequestsPage";
 import OutreachPage from "@/app/dashboard/OutreachPage";
+import AnalyticsPage from "@/app/dashboard/AnalyticsPage";
 import {
-    AnalyticsPage,
     MailboxesPage,
     NotFoundPage,
 } from "@/app/dashboard/StubPages";

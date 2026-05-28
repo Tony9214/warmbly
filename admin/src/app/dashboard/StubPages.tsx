@@ -29,16 +29,6 @@ export function MailboxesPage() {
     );
 }
 
-export function AnalyticsPage() {
-    return (
-        <Stub
-            title="Analytics"
-            description="Time-series view of platform-wide send, bounce, complaint, and worker-load metrics."
-            coming="Charts backed by /admin/analytics/* (overview already feeds the Overview page) — full chart pack coming in the next iteration."
-        />
-    );
-}
-
 export function NotFoundPage() {
     return (
         <div>

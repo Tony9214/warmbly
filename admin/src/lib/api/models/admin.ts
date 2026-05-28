@@ -323,6 +323,46 @@ export interface ProvisioningJobCreate {
     };
 }
 
+// /admin/analytics — time-series counters for the platform.
+
+export interface DailyEmailStat {
+    date: string;
+    total_sent: number;
+    total_delivered: number;
+    total_bounced: number;
+    total_opened: number;
+    total_clicked: number;
+    total_replied: number;
+}
+
+export interface HourlyEmailStat {
+    hour: number;
+    total_sent: number;
+}
+
+export interface WorkerLoadStat {
+    worker_id: string;
+    worker_name: string;
+    emails_sent_today: number;
+    queued_emails: number;
+    connected_emails: number;
+    cpu_usage?: number;
+    memory_usage?: number;
+}
+
+export interface UserGrowthStat {
+    date: string;
+    new_users: number;
+    total_users: number;
+}
+
+export interface AnalyticsTrends {
+    users_growth_percent: number;
+    emails_growth_percent: number;
+    campaigns_growth_percent: number;
+    revenue_growth_percent: number;
+}
+
 // /admin/outreach — platform-mailer composer (send from noreply@warmbly.com
 // with configurable Reply-To, every send audit-logged).
 
