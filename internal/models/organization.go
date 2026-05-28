@@ -165,3 +165,35 @@ type OrganizationWithLimits struct {
 	Limits *OrganizationLimits `json:"limits,omitempty"`
 	Counts *OrganizationCounts `json:"counts,omitempty"`
 }
+
+// OrganizationLimitOverrides is the per-org override row. Each numeric
+// field uses 0 as the "no override, inherit from plan" sentinel —
+// resolution happens in GetEffectiveLimits, not here. The row is upsert-
+// only; reverting an override is a write of 0 so the granted_by audit
+// trail survives across revisions.
+type OrganizationLimitOverrides struct {
+	OrganizationID     uuid.UUID  `json:"organization_id"`
+	MaxCampaigns       int        `json:"max_campaigns"`
+	MaxActiveCampaigns int        `json:"max_active_campaigns"`
+	MaxTeamMembers     int        `json:"max_team_members"`
+	MaxEmailAccounts   int        `json:"max_email_accounts"`
+	MaxContacts        int        `json:"max_contacts"`
+	DailyCampaignLimit int        `json:"daily_campaign_limit"`
+	GrantedBy          *uuid.UUID `json:"granted_by,omitempty"`
+	GrantedAt          time.Time  `json:"granted_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	Notes              string     `json:"notes"`
+}
+
+// UpdateOrgOverridesRequest is the payload for PUT /admin/organizations/:id/overrides.
+// Pointer fields so the caller can leave any column untouched; setting
+// a value to 0 explicitly removes that column's override.
+type UpdateOrgOverridesRequest struct {
+	MaxCampaigns       *int    `json:"max_campaigns,omitempty"`
+	MaxActiveCampaigns *int    `json:"max_active_campaigns,omitempty"`
+	MaxTeamMembers     *int    `json:"max_team_members,omitempty"`
+	MaxEmailAccounts   *int    `json:"max_email_accounts,omitempty"`
+	MaxContacts        *int    `json:"max_contacts,omitempty"`
+	DailyCampaignLimit *int    `json:"daily_campaign_limit,omitempty"`
+	Notes              *string `json:"notes,omitempty"`
+}

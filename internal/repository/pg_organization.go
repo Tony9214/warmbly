@@ -68,6 +68,12 @@ type OrganizationRepository interface {
 	SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, error)
 	GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, error)
 	GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, error)
+
+	// Admin: per-org limit overrides. Read returns nil when no row
+	// exists (org has never been touched). Upsert always returns the
+	// post-write row so callers get the authoritative timestamps back.
+	GetOrganizationLimitOverrides(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimitOverrides, error)
+	UpsertOrganizationLimitOverrides(ctx context.Context, orgID uuid.UUID, req *models.UpdateOrgOverridesRequest, grantedBy uuid.UUID) (*models.OrganizationLimitOverrides, error)
 }
 
 type organizationRepository struct {
@@ -806,4 +812,97 @@ func (r *organizationRepository) GetOrganizationMembersForAdmin(ctx context.Cont
 		members = append(members, m)
 	}
 	return members, nil
+}
+
+// GetOrganizationLimitOverrides reads the override row for an org.
+// Returns (nil, nil) when no row exists — callers should treat that as
+// "no overrides set, inherit everything from plan."
+func (r *organizationRepository) GetOrganizationLimitOverrides(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimitOverrides, error) {
+	query := `
+		SELECT organization_id, max_campaigns, max_active_campaigns, max_team_members,
+			max_email_accounts, max_contacts, daily_campaign_limit,
+			granted_by, granted_at, updated_at, notes
+		FROM organization_limit_overrides
+		WHERE organization_id = $1`
+
+	var o models.OrganizationLimitOverrides
+	err := r.db.QueryRow(ctx, query, orgID).Scan(
+		&o.OrganizationID, &o.MaxCampaigns, &o.MaxActiveCampaigns, &o.MaxTeamMembers,
+		&o.MaxEmailAccounts, &o.MaxContacts, &o.DailyCampaignLimit,
+		&o.GrantedBy, &o.GrantedAt, &o.UpdatedAt, &o.Notes,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+// UpsertOrganizationLimitOverrides applies a partial update. Nil fields
+// in the request are left untouched on existing rows; on first-insert
+// they default to 0 (= no override) via the table defaults.
+//
+// granted_by / granted_at are stamped on every write so the audit trail
+// reflects the most recent admin who touched any field. updated_at is
+// always advanced.
+func (r *organizationRepository) UpsertOrganizationLimitOverrides(ctx context.Context, orgID uuid.UUID, req *models.UpdateOrgOverridesRequest, grantedBy uuid.UUID) (*models.OrganizationLimitOverrides, error) {
+	maxCampaigns := nullableInt(req.MaxCampaigns)
+	maxActive := nullableInt(req.MaxActiveCampaigns)
+	maxMembers := nullableInt(req.MaxTeamMembers)
+	maxEmails := nullableInt(req.MaxEmailAccounts)
+	maxContacts := nullableInt(req.MaxContacts)
+	dailyLimit := nullableInt(req.DailyCampaignLimit)
+	notes := req.Notes
+
+	query := `
+		INSERT INTO organization_limit_overrides (
+			organization_id,
+			max_campaigns, max_active_campaigns, max_team_members,
+			max_email_accounts, max_contacts, daily_campaign_limit,
+			granted_by, granted_at, updated_at, notes
+		) VALUES (
+			$1,
+			COALESCE($2, 0), COALESCE($3, 0), COALESCE($4, 0),
+			COALESCE($5, 0), COALESCE($6, 0), COALESCE($7, 0),
+			$8, NOW(), NOW(), COALESCE($9, '')
+		)
+		ON CONFLICT (organization_id) DO UPDATE SET
+			max_campaigns        = COALESCE($2, organization_limit_overrides.max_campaigns),
+			max_active_campaigns = COALESCE($3, organization_limit_overrides.max_active_campaigns),
+			max_team_members     = COALESCE($4, organization_limit_overrides.max_team_members),
+			max_email_accounts   = COALESCE($5, organization_limit_overrides.max_email_accounts),
+			max_contacts         = COALESCE($6, organization_limit_overrides.max_contacts),
+			daily_campaign_limit = COALESCE($7, organization_limit_overrides.daily_campaign_limit),
+			granted_by = $8,
+			granted_at = NOW(),
+			updated_at = NOW(),
+			notes      = COALESCE($9, organization_limit_overrides.notes)
+		RETURNING organization_id, max_campaigns, max_active_campaigns, max_team_members,
+			max_email_accounts, max_contacts, daily_campaign_limit,
+			granted_by, granted_at, updated_at, notes`
+
+	var o models.OrganizationLimitOverrides
+	err := r.db.QueryRow(ctx, query,
+		orgID,
+		maxCampaigns, maxActive, maxMembers,
+		maxEmails, maxContacts, dailyLimit,
+		grantedBy, notes,
+	).Scan(
+		&o.OrganizationID, &o.MaxCampaigns, &o.MaxActiveCampaigns, &o.MaxTeamMembers,
+		&o.MaxEmailAccounts, &o.MaxContacts, &o.DailyCampaignLimit,
+		&o.GrantedBy, &o.GrantedAt, &o.UpdatedAt, &o.Notes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+func nullableInt(p *int) interface{} {
+	if p == nil {
+		return nil
+	}
+	return *p
 }

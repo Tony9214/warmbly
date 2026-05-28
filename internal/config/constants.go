@@ -31,4 +31,30 @@ const (
 	// generic (not "X-Warmbly-*") so anti-spam vendors cannot trivially
 	// cluster on the header name to fingerprint warmup traffic.
 	WarmupVerifyHeader = "X-Mailtrace-Verify"
+
+	// Product-level hard caps. These are the backstop for plans that
+	// advertise "unlimited" — marketing can keep saying unlimited, but
+	// the runtime never grants truly unbounded usage. Each cap is the
+	// floor that GetEffectiveLimits falls back to when both the
+	// per-org override and the plan column are unset.
+	//
+	// Admins can grant strictly larger caps per-org through the
+	// override flow when there is a legitimate business reason. Growth
+	// above these defaults goes through the limit-increase request
+	// workflow so the decision is audited and the org has a paper trail
+	// acknowledging the new ceiling.
+	//
+	// These numbers are deliberately generous enough that ordinary use
+	// never trips them, and conservative enough that "I want to spin up
+	// 5,000 mailboxes overnight" can't happen without explicit approval.
+	HardCapMailboxes          = 200       // total connected mailboxes per org
+	HardCapCampaignsTotal     = 500       // total campaigns ever created
+	HardCapCampaignsActive    = 100       // simultaneously active campaigns
+	HardCapTeamMembers        = 100       // seats per org
+	HardCapContacts           = 1_000_000 // contacts per org
+	HardCapDailyCampaignSends = 1000      // campaign emails per org per day
+
+	// TODO(slice 3): daily creation throttles ("no 1000 new campaigns
+	// in one day even on an unlimited plan"). Needs a counter mechanism
+	// keyed on (org, resource, day), separate from these absolute caps.
 )

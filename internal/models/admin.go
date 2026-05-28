@@ -554,17 +554,22 @@ type AdminOrgsResult struct {
 	Pagination Pagination         `json:"pagination"`
 }
 
-// AdminOrgDetail is the full payload for the org detail page. Wraps the
-// list summary with plan/subscription state and the full limits + counts
-// snapshot. When per-org overrides land they will surface in a separate
-// `overrides` block so the source of each limit value is explicit.
+// AdminOrgDetail is the full payload for the org detail page. Carries
+// three limit blocks side-by-side so the UI can explain *why* each
+// effective number is what it is:
+//
+//   - Limits          — plan defaults (nil = unlimited)
+//   - Overrides       — raw override row (0 per field = inherit)
+//   - EffectiveLimits — what the runtime actually enforces
 type AdminOrgDetail struct {
 	AdminOrgListItem
 
-	UpdatedAt           time.Time           `json:"updated_at"`
-	DeletionScheduledAt *time.Time          `json:"deletion_scheduled_at,omitempty"`
-	Limits              *OrganizationLimits `json:"limits,omitempty"`
-	Counts              *OrganizationCounts `json:"counts,omitempty"`
+	UpdatedAt           time.Time                   `json:"updated_at"`
+	DeletionScheduledAt *time.Time                  `json:"deletion_scheduled_at,omitempty"`
+	Limits              *OrganizationLimits         `json:"limits,omitempty"`
+	Overrides           *OrganizationLimitOverrides `json:"overrides,omitempty"`
+	EffectiveLimits     *OrganizationLimits         `json:"effective_limits,omitempty"`
+	Counts              *OrganizationCounts         `json:"counts,omitempty"`
 
 	// Plan / subscription context. Either may be nil (org with no active
 	// subscription — e.g. trial or freshly created).

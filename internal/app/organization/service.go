@@ -9,6 +9,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -70,11 +71,22 @@ type OrganizationService interface {
 	GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error)
 
 	// Admin: read-only org listing for the admin panel. Detail composes
-	// the list-shape row with counts and plan/subscription state. Write
-	// paths (overrides, ban-scope, etc.) live in slice 2.
+	// the list-shape row with counts, plan defaults, the override row,
+	// and the effective limits the runtime actually enforces.
 	SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, *errx.Error)
 	GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, *errx.Error)
 	GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, *errx.Error)
+
+	// Admin: per-org limit overrides. Read returns nil if the org has
+	// never been touched. Set is an upsert that stamps granted_by /
+	// granted_at on every write.
+	GetLimitOverrides(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimitOverrides, *errx.Error)
+	SetLimitOverrides(ctx context.Context, orgID uuid.UUID, req *models.UpdateOrgOverridesRequest, grantedBy uuid.UUID) (*models.OrganizationLimitOverrides, *errx.Error)
+
+	// Effective limits: plan defaults overlaid with overrides. This is
+	// what the in-app limit checks (CanAddMember / Campaign / EmailAccount)
+	// compare counts against.
+	GetEffectiveLimits(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimits, *errx.Error)
 }
 
 type organizationService struct {
@@ -516,7 +528,7 @@ func (s *organizationService) RequirePermission(ctx context.Context, orgID, user
 
 // CanAddMember checks if the organization can add more members based on plan limits
 func (s *organizationService) CanAddMember(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
-	limits, err := s.GetOrganizationLimits(ctx, orgID)
+	limits, err := s.GetEffectiveLimits(ctx, orgID)
 	if err != nil {
 		return false, err
 	}
@@ -537,7 +549,7 @@ func (s *organizationService) CanAddMember(ctx context.Context, orgID uuid.UUID)
 
 // CanAddCampaign checks if the organization can add more campaigns based on plan limits
 func (s *organizationService) CanAddCampaign(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
-	limits, err := s.GetOrganizationLimits(ctx, orgID)
+	limits, err := s.GetEffectiveLimits(ctx, orgID)
 	if err != nil {
 		return false, err
 	}
@@ -562,7 +574,7 @@ func (s *organizationService) CanAddCampaign(ctx context.Context, orgID uuid.UUI
 
 // CanAddEmailAccount checks if the organization can add more email accounts based on plan limits
 func (s *organizationService) CanAddEmailAccount(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
-	limits, err := s.GetOrganizationLimits(ctx, orgID)
+	limits, err := s.GetEffectiveLimits(ctx, orgID)
 	if err != nil {
 		return false, err
 	}
@@ -722,6 +734,12 @@ func (s *organizationService) GetOrganizationAdminDetail(ctx context.Context, or
 	if limits, xerr := s.GetOrganizationLimits(ctx, orgID); xerr == nil {
 		detail.Limits = limits
 	}
+	if overrides, xerr := s.GetLimitOverrides(ctx, orgID); xerr == nil {
+		detail.Overrides = overrides
+	}
+	if effective, xerr := s.GetEffectiveLimits(ctx, orgID); xerr == nil {
+		detail.EffectiveLimits = effective
+	}
 	if counts, xerr := s.GetOrganizationCounts(ctx, orgID); xerr == nil {
 		detail.Counts = counts
 	}
@@ -738,4 +756,85 @@ func (s *organizationService) GetOrganizationMembersForAdmin(ctx context.Context
 		return nil, errx.New(errx.Internal, "failed to load members")
 	}
 	return members, nil
+}
+
+// GetLimitOverrides returns the override row for an org, or nil if no
+// admin has touched it yet.
+func (s *organizationService) GetLimitOverrides(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimitOverrides, *errx.Error) {
+	o, err := s.orgRepo.GetOrganizationLimitOverrides(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load limit overrides")
+	}
+	return o, nil
+}
+
+// SetLimitOverrides applies a partial update to the override row. The
+// caller is responsible for the audit log write — the service stays
+// audit-agnostic so it can be reused outside admin handlers later
+// (e.g. limit-request approval in slice 3).
+func (s *organizationService) SetLimitOverrides(ctx context.Context, orgID uuid.UUID, req *models.UpdateOrgOverridesRequest, grantedBy uuid.UUID) (*models.OrganizationLimitOverrides, *errx.Error) {
+	o, err := s.orgRepo.UpsertOrganizationLimitOverrides(ctx, orgID, req, grantedBy)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to write limit overrides")
+	}
+	return o, nil
+}
+
+// GetEffectiveLimits returns the limits the runtime actually enforces.
+// Resolution per field:
+//
+//  1. override > 0  → use override
+//  2. plan != nil   → use plan column
+//  3. otherwise     → fall back to the product-level hard cap
+//
+// Never returns nil values: even an "unlimited" plan is bounded by the
+// product hard caps in config/constants.go. Admins can raise individual
+// caps per-org by writing an override.
+func (s *organizationService) GetEffectiveLimits(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimits, *errx.Error) {
+	plan, err := s.GetOrganizationLimits(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	override, err := s.GetLimitOverrides(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	resolve := func(overrideVal int, planVal *int, hardCap int) *int {
+		if overrideVal > 0 {
+			v := overrideVal
+			return &v
+		}
+		if planVal != nil {
+			return planVal
+		}
+		v := hardCap
+		return &v
+	}
+
+	var ovMaxCampaigns, ovMaxActive, ovMaxMembers, ovMaxEmails, ovMaxContacts, ovDaily int
+	if override != nil {
+		ovMaxCampaigns = override.MaxCampaigns
+		ovMaxActive = override.MaxActiveCampaigns
+		ovMaxMembers = override.MaxTeamMembers
+		ovMaxEmails = override.MaxEmailAccounts
+		ovMaxContacts = override.MaxContacts
+		ovDaily = override.DailyCampaignLimit
+	}
+
+	var planLimits models.OrganizationLimits
+	if plan != nil {
+		planLimits = *plan
+	}
+
+	return &models.OrganizationLimits{
+		MaxCampaigns:       resolve(ovMaxCampaigns, planLimits.MaxCampaigns, config.HardCapCampaignsTotal),
+		MaxActiveCampaigns: resolve(ovMaxActive, planLimits.MaxActiveCampaigns, config.HardCapCampaignsActive),
+		MaxTeamMembers:     resolve(ovMaxMembers, planLimits.MaxTeamMembers, config.HardCapTeamMembers),
+		MaxEmailAccounts:   resolve(ovMaxEmails, planLimits.MaxEmailAccounts, config.HardCapMailboxes),
+		MaxContacts:        resolve(ovMaxContacts, planLimits.MaxContacts, config.HardCapContacts),
+		DailyCampaignLimit: resolve(ovDaily, planLimits.DailyCampaignLimit, config.HardCapDailyCampaignSends),
+	}, nil
 }
