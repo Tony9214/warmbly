@@ -22,8 +22,11 @@ interface Slide {
 }
 
 function Panel({ children }: { children: React.ReactNode }) {
+    // Solid white (no backdrop-blur): a backdrop-filter inside the transform-
+    // animating track renders blank mid-slide in Chrome/Safari, which made the
+    // incoming card look invisible until the slide finished.
     return (
-        <div className="w-full rounded-2xl border border-white/60 bg-white/95 px-5 py-4 shadow-[0_30px_60px_-30px_rgba(2,8,23,0.55)] backdrop-blur-sm">
+        <div className="w-full rounded-2xl border border-white/70 bg-white px-5 py-4 shadow-[0_30px_60px_-30px_rgba(2,8,23,0.55)]">
             {children}
         </div>
     );
@@ -169,6 +172,7 @@ export default function AuthShowcase() {
     const reduce = useReducedMotion();
     const [idx, setIdx] = React.useState(0); // 0..N, where N renders the clone
     const [withAnim, setWithAnim] = React.useState(true);
+    const [tick, setTick] = React.useState(0); // bumps on every advance → restarts the bar fill
     const idxRef = React.useRef(idx);
     idxRef.current = idx;
 
@@ -178,7 +182,11 @@ export default function AuthShowcase() {
     React.useEffect(() => {
         let id: ReturnType<typeof setInterval> | undefined;
         const start = () => {
-            if (id === undefined) id = setInterval(() => setIdx((p) => p + 1), SLIDE_MS);
+            if (id === undefined)
+                id = setInterval(() => {
+                    setIdx((p) => p + 1);
+                    setTick((t) => t + 1);
+                }, SLIDE_MS);
         };
         const stop = () => {
             if (id !== undefined) {
@@ -219,6 +227,7 @@ export default function AuthShowcase() {
     const goTo = (k: number) => {
         setWithAnim(true);
         setIdx(k);
+        setTick((t) => t + 1);
     };
 
     return (
@@ -259,12 +268,22 @@ export default function AuthShowcase() {
                         aria-label={`Show ${s.title}`}
                         className="h-1 flex-1 overflow-hidden rounded-full bg-white/25 cursor-pointer"
                     >
-                        <motion.span
-                            className="block h-full rounded-full bg-white"
-                            initial={false}
-                            animate={{ width: k === real ? "100%" : "0%" }}
-                            transition={{ duration: 0.4, ease: "easeOut" }}
-                        />
+                        {k < real ? (
+                            // already seen — full
+                            <span className="block h-full w-full rounded-full bg-white" />
+                        ) : k === real ? (
+                            // current — fills over the dwell time to telegraph the next switch
+                            <motion.span
+                                key={tick}
+                                className="block h-full rounded-full bg-white"
+                                initial={{ width: "0%" }}
+                                animate={{ width: "100%" }}
+                                transition={{ duration: reduce ? 0.3 : SLIDE_MS / 1000, ease: "linear" }}
+                            />
+                        ) : (
+                            // upcoming — empty
+                            <span className="block h-full w-0 rounded-full bg-white" />
+                        )}
                     </button>
                 ))}
             </div>
