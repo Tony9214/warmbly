@@ -3,12 +3,12 @@ import { motion, useReducedMotion } from "motion/react";
 import { Flame, Inbox, BarChart3, Send, CheckCircle2 } from "lucide-react";
 
 /* ═══════════════════════════════════════════
-   Auth showcase — auto-rotating feature demos on an airy sky.
+   Auth showcase — a horizontal slide carousel on an airy sky.
 
-   A single setInterval drives a continuous loop (…3 → 0 → 1 → …) that
-   never stalls. Every slide stays mounted and only animates opacity + a
-   small rise, so transitions can't get "stuck" and never read as a muddy
-   double-exposure. Sky = CSS gradient + WebP clouds (no SVG filters).
+   Slides translate left like a reel. A cloned first slide at the end lets
+   it loop forward seamlessly (animate to the clone, then snap back with no
+   transition), so it never rewinds and never stalls on the last slide.
+   Sky = CSS gradient + WebP clouds (no SVG filters).
    ═══════════════════════════════════════════ */
 
 const SLIDE_MS = 4600;
@@ -143,93 +143,129 @@ const slides: Slide[] = [
     },
 ];
 
+const N = slides.length;
+const track = [...slides, slides[0]]; // clone first slide for a seamless forward loop
+
+function SlideView({ slide }: { slide: Slide }) {
+    const Icon = slide.icon;
+    return (
+        <div className="flex h-full w-full shrink-0 flex-col p-9 xl:p-10">
+            <div className="flex flex-1 items-center justify-center">
+                <div className="w-full max-w-[268px]">{slide.mock}</div>
+            </div>
+            <div className="pt-6">
+                <div className="mb-1 flex items-center gap-2">
+                    <Icon className="size-4 text-sky-200" />
+                    <h3 className="text-[15px] font-bold tracking-tight text-white">{slide.title}</h3>
+                </div>
+                <p className="text-[12.5px] leading-relaxed text-white/65 max-w-[260px]">{slide.desc}</p>
+            </div>
+        </div>
+    );
+}
+
 export default function AuthShowcase() {
     const reduce = useReducedMotion();
-    const [i, setI] = React.useState(0);
+    const [idx, setIdx] = React.useState(0); // 0..N, where N renders the clone
+    const [withAnim, setWithAnim] = React.useState(true);
+    const idxRef = React.useRef(idx);
+    idxRef.current = idx;
 
-    // One interval, continuous loop. Never stalls on the last slide.
+    // Auto-advance. Paused while the tab is hidden — otherwise the interval
+    // keeps firing while animations/rAF are frozen, the index runs past the
+    // track, and the pane shows blank space when you switch back.
     React.useEffect(() => {
-        const id = setInterval(() => setI((p) => (p + 1) % slides.length), SLIDE_MS);
-        return () => clearInterval(id);
+        let id: ReturnType<typeof setInterval> | undefined;
+        const start = () => {
+            if (id === undefined) id = setInterval(() => setIdx((p) => p + 1), SLIDE_MS);
+        };
+        const stop = () => {
+            if (id !== undefined) {
+                clearInterval(id);
+                id = undefined;
+            }
+        };
+        const onVisibility = () => {
+            if (document.hidden) {
+                stop();
+                return;
+            }
+            // Back on the tab: if we were parked on the clone, snap to the real
+            // first slide instantly so nothing is left off-screen, then resume.
+            if (idxRef.current >= N) {
+                setWithAnim(false);
+                setIdx(0);
+            }
+            start();
+        };
+        if (!document.hidden) start();
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => {
+            stop();
+            document.removeEventListener("visibilitychange", onVisibility);
+        };
     }, []);
 
-    const trans = { duration: reduce ? 0.25 : 0.55, ease: [0.16, 1, 0.3, 1] as const };
+    // After the snap (no-transition reset), re-enable animation next frame.
+    React.useEffect(() => {
+        if (withAnim) return;
+        const r = requestAnimationFrame(() => setWithAnim(true));
+        return () => cancelAnimationFrame(r);
+    }, [withAnim]);
+
+    const real = idx % N;
+
+    const goTo = (k: number) => {
+        setWithAnim(true);
+        setIdx(k);
+    };
 
     return (
-        <div className="relative flex h-full flex-col justify-between overflow-hidden p-9 xl:p-10">
+        <div className="relative flex h-full flex-col overflow-hidden">
             {/* Airy sky — same palette as the marketing-site hero */}
             <div className="sky-base" aria-hidden="true" />
             <div className="sky-breathe" aria-hidden="true" />
             <div className="sun-glow" aria-hidden="true" />
             <img src="/backdrops/cloud-3.webp" alt="" aria-hidden="true" decoding="async" className="cloud-drift cloud-1 absolute select-none" style={{ top: "-6%", left: "-14%", width: 260, opacity: 0.6, height: "auto" }} />
-            <img src="/backdrops/cloud-4.webp" alt="" aria-hidden="true" decoding="async" className="cloud-drift cloud-2 absolute select-none" style={{ bottom: "10%", right: "-12%", width: 220, opacity: 0.45, height: "auto" }} />
+            <img src="/backdrops/cloud-4.webp" alt="" aria-hidden="true" decoding="async" className="cloud-drift cloud-2 absolute select-none" style={{ bottom: "12%", right: "-12%", width: 220, opacity: 0.45, height: "auto" }} />
 
-            {/* Mock — all slides stacked; only the active one is visible */}
-            <div className="relative z-10 flex flex-1 items-center justify-center">
-                <div className="relative h-[150px] w-full max-w-[268px]">
-                    {slides.map((s, idx) => (
-                        <motion.div
-                            key={s.key}
-                            className="absolute inset-0 flex items-center"
-                            initial={false}
-                            animate={{ opacity: idx === i ? 1 : 0, y: idx === i ? 0 : 10 }}
-                            transition={trans}
-                            style={{ pointerEvents: idx === i ? "auto" : "none" }}
-                        >
-                            {s.mock}
-                        </motion.div>
+            {/* Carousel viewport */}
+            <div className="relative z-10 flex-1 overflow-hidden">
+                <motion.div
+                    className="flex h-full"
+                    animate={{ x: `-${idx * 100}%` }}
+                    transition={withAnim && !reduce ? { duration: 0.6, ease: [0.16, 1, 0.3, 1] } : { duration: 0 }}
+                    onAnimationComplete={() => {
+                        if (idx === N) {
+                            setWithAnim(false);
+                            setIdx(0);
+                        }
+                    }}
+                >
+                    {track.map((s, k) => (
+                        <SlideView key={k} slide={s} />
                     ))}
-                </div>
+                </motion.div>
             </div>
 
-            {/* Caption — stacked the same way */}
-            <div className="relative z-10">
-                <div className="relative h-[58px]">
-                    {slides.map((s, idx) => {
-                        const Icon = s.icon;
-                        return (
-                            <motion.div
-                                key={s.key}
-                                className="absolute inset-0"
-                                initial={false}
-                                animate={{ opacity: idx === i ? 1 : 0, y: idx === i ? 0 : 8 }}
-                                transition={trans}
-                                style={{ pointerEvents: idx === i ? "auto" : "none" }}
-                            >
-                                <div className="mb-1 flex items-center gap-2">
-                                    <Icon className="size-4 text-sky-200" />
-                                    <h3 className="text-[15px] font-bold tracking-tight text-white">{s.title}</h3>
-                                </div>
-                                <p className="text-[12.5px] leading-relaxed text-white/65 max-w-[260px]">{s.desc}</p>
-                            </motion.div>
-                        );
-                    })}
-                </div>
-
-                {/* Progress bars (fill in sync with the loop) */}
-                <div className="mt-5 flex items-center gap-1.5">
-                    {slides.map((s, idx) => (
-                        <button
-                            key={s.key}
-                            type="button"
-                            onClick={() => setI(idx)}
-                            aria-label={`Show ${s.title}`}
-                            className="h-1 flex-1 overflow-hidden rounded-full bg-white/25 cursor-pointer"
-                        >
-                            {idx === i ? (
-                                <motion.span
-                                    key={`fill-${i}`}
-                                    className="block h-full rounded-full bg-white"
-                                    initial={{ width: "0%" }}
-                                    animate={{ width: "100%" }}
-                                    transition={{ duration: reduce ? 0.4 : SLIDE_MS / 1000, ease: "linear" }}
-                                />
-                            ) : (
-                                <span className="block h-full rounded-full bg-white" style={{ width: idx < i ? "100%" : "0%" }} />
-                            )}
-                        </button>
-                    ))}
-                </div>
+            {/* Progress bars */}
+            <div className="relative z-10 flex items-center gap-1.5 px-9 pb-9 xl:px-10">
+                {slides.map((s, k) => (
+                    <button
+                        key={s.key}
+                        type="button"
+                        onClick={() => goTo(k)}
+                        aria-label={`Show ${s.title}`}
+                        className="h-1 flex-1 overflow-hidden rounded-full bg-white/25 cursor-pointer"
+                    >
+                        <motion.span
+                            className="block h-full rounded-full bg-white"
+                            initial={false}
+                            animate={{ width: k === real ? "100%" : "0%" }}
+                            transition={{ duration: 0.4, ease: "easeOut" }}
+                        />
+                    </button>
+                ))}
             </div>
         </div>
     );
