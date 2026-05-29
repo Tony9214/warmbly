@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import toast from "react-hot-toast";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Pencil } from "lucide-react";
 import { usePasswordStrength } from "@/hooks/usePasswordStrength";
 
 import Turnstile, { type BoundTurnstileObject } from "react-turnstile";
@@ -54,7 +54,7 @@ const slideVariants = {
 };
 
 const slideTrans = {
-    y: { type: "tween" as const, duration: 0.25, ease: "easeOut" },
+    y: { type: "tween" as const, duration: 0.25, ease: "easeOut" as const },
     opacity: { duration: 0.18 },
 };
 
@@ -410,6 +410,20 @@ function BackButton({ onClick }: { onClick: () => void }) {
     );
 }
 
+/* Editable email chip — shows the address entered in step 1 and goes back. */
+function EmailPill({ email, onEdit }: { email: string; onEdit: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onEdit}
+            className="mx-auto mb-4 flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[13px] text-slate-600 hover:border-slate-300 hover:bg-slate-100 transition-colors cursor-pointer"
+        >
+            <span className="truncate">{email}</span>
+            <Pencil className="w-3 h-3 shrink-0 text-slate-400" />
+        </button>
+    );
+}
+
 /* ═══════════════════════════════════════════
    Step components
    ═══════════════════════════════════════════ */
@@ -539,12 +553,10 @@ function SignInStep({
 
     return (
         <div>
-            <BackButton onClick={onBack} />
             <div className="text-center mb-6">
-                <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-tight">Sign in</h1>
-                <p className="text-sm text-slate-400 mt-1.5">
-                    Welcome back, <span className="text-slate-600 font-medium">{email}</span>
-                </p>
+                <EmailPill email={email} onEdit={onBack} />
+                <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-tight">Welcome back</h1>
+                <p className="text-sm text-slate-400 mt-1.5">Enter your password to continue</p>
             </div>
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -615,12 +627,10 @@ function SignUpStep({
 
     return (
         <div>
-            <BackButton onClick={onBack} />
             <div className="text-center mb-6">
-                <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-tight">Create account</h1>
-                <p className="text-sm text-slate-400 mt-1.5">
-                    Setting up <span className="text-slate-600 font-medium">{email}</span>
-                </p>
+                <EmailPill email={email} onEdit={onBack} />
+                <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-tight">Create your account</h1>
+                <p className="text-sm text-slate-400 mt-1.5">Choose a password to finish up</p>
             </div>
 
             <form onSubmit={onFormSubmit} className="space-y-4">

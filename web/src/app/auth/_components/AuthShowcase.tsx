@@ -152,12 +152,12 @@ const track = [...slides, slides[0]]; // clone first slide for a seamless forwar
 function SlideView({ slide }: { slide: Slide }) {
     const Icon = slide.icon;
     return (
-        <div className="flex h-full w-full shrink-0 flex-col px-7 pb-9 pt-9 xl:px-8">
+        <div className="flex h-full w-full shrink-0 flex-col px-6 pb-6 pt-16 lg:px-8 lg:pb-9 lg:pt-9">
             <div className="flex flex-1 items-center">
                 {/* Full-width card so a feature is always on screen as it slides in */}
                 <div className="w-full">{slide.mock}</div>
             </div>
-            <div className="pt-6">
+            <div className="pt-4 lg:pt-6">
                 <div className="mb-1 flex items-center gap-2">
                     <Icon className="size-4 text-sky-200" />
                     <h3 className="text-[15px] font-bold tracking-tight text-white">{slide.title}</h3>
@@ -259,7 +259,7 @@ export default function AuthShowcase() {
             </div>
 
             {/* Progress bars */}
-            <div className="relative z-10 flex items-center gap-1.5 px-9 pb-9 xl:px-10">
+            <div className="relative z-10 flex items-center gap-1.5 px-6 pb-6 lg:px-9 lg:pb-9">
                 {slides.map((s, k) => (
                     <button
                         key={s.key}
