@@ -156,6 +156,7 @@ export default function MembersSettingsPage() {
                 ) : memberList.length === 0 ? (
                     <p className="text-[11.5px] text-slate-400 py-2">No members yet.</p>
                 ) : (
+                    <div className="overflow-x-auto">
                     <TableSurface>
                         <table className="w-full text-left">
                             <thead>
@@ -237,6 +238,7 @@ export default function MembersSettingsPage() {
                             </tbody>
                         </table>
                     </TableSurface>
+                    </div>
                 )}
             </Section>
 
@@ -249,6 +251,7 @@ export default function MembersSettingsPage() {
                 ) : inviteList.length === 0 ? (
                     <p className="text-[11.5px] text-slate-400 py-2">Nothing pending. Invite somebody above.</p>
                 ) : (
+                    <div className="overflow-x-auto">
                     <TableSurface>
                         <table className="w-full text-left">
                             <thead>
@@ -308,6 +311,7 @@ export default function MembersSettingsPage() {
                             </tbody>
                         </table>
                     </TableSurface>
+                    </div>
                 )}
             </Section>
         </SectionShell>
@@ -377,7 +381,7 @@ function InlineRolePicker({
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -4 }}
                         transition={{ duration: 0.12 }}
-                        className="absolute top-full left-0 mt-1 z-20 w-72 rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] py-1"
+                        className="absolute top-full left-0 mt-1 z-20 w-72 max-w-[calc(100vw-2rem)] rounded-md border border-slate-200 bg-white shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] py-1"
                     >
                         {assignable.map((r) => {
                             const selected = r.id === value;

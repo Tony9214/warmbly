@@ -296,7 +296,7 @@ function SearchPill({ value, onChange }: { value: string; onChange: (v: string) 
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 placeholder="Search…"
-                className="w-[140px] h-5 bg-transparent text-[12px] text-slate-900 placeholder:text-slate-400 outline-none"
+                className="w-full sm:w-[140px] h-5 bg-transparent text-[12px] text-slate-900 placeholder:text-slate-400 outline-none"
             />
             {value && (
                 <button

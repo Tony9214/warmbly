@@ -67,7 +67,7 @@ export default function WorkspaceSettingsPage() {
                     />
                 </Row>
                 <Row label="Workspace name" description="Shown in the sidebar and invitation emails.">
-                    <TextInput value={name} onChange={setName} className="w-[280px]" />
+                    <TextInput value={name} onChange={setName} className="w-full max-w-[280px]" />
                 </Row>
                 <Row
                     label="Workspace ID"
@@ -78,7 +78,7 @@ export default function WorkspaceSettingsPage() {
                         type="text"
                         value={currentOrg?.id ?? ""}
                         disabled
-                        className="w-[300px] h-7 px-2.5 rounded-md border border-slate-200 bg-slate-50 text-[12px] text-slate-500 font-mono"
+                        className="w-full max-w-[300px] h-7 px-2.5 rounded-md border border-slate-200 bg-slate-50 text-[12px] text-slate-500 font-mono"
                     />
                 </Row>
             </Section>
@@ -92,7 +92,7 @@ export default function WorkspaceSettingsPage() {
                         value={domain}
                         onChange={setDomain}
                         placeholder="company.com"
-                        className="w-[280px]"
+                        className="w-full max-w-[280px]"
                     />
                 </Row>
                 <Row
@@ -103,7 +103,7 @@ export default function WorkspaceSettingsPage() {
                         value="50"
                         onChange={() => undefined}
                         type="number"
-                        className="w-[120px]"
+                        className="w-full max-w-[120px]"
                     />
                 </Row>
             </Section>
@@ -132,7 +132,7 @@ export default function WorkspaceSettingsPage() {
                 eyebrow="Workspace stats"
                 description="Snapshot of how this workspace is being used."
             >
-                <div className="grid grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     <Stat label="Members" value={1} />
                     <Stat label="Mailboxes" value={0} />
                     <Stat label="Campaigns" value={0} />

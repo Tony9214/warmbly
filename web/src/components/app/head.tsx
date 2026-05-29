@@ -1,15 +1,13 @@
-"use client";
+import { Link } from "react-router-dom";
 
-import Link from "next/link";
-
-
-export function Head({children}: {children: React.ReactNode}) {
-    return <div className="flex gap-5 border-b border-gray-300">
-        {children}
+export function Head({ children, icon }: { children: React.ReactNode, icon?: React.ReactNode }) {
+    return <div className="flex items-center gap-2 text-slate-800 font-semibold mb-2">
+        {icon && <span className="text-slate-500 shrink-0">{icon}</span>}
+        <span className="flex items-center gap-2">{children}</span>
     </div>
 }
-export function HeadLink({children, href}: {children: React.ReactNode, href: string}){
-    return <Link href={href}>
+export function HeadLink({ children, href }: { children: React.ReactNode, href: string }) {
+    return <Link to={href}>
         {children}
     </Link>
 }

@@ -79,6 +79,7 @@ function AWSCredsTab() {
 
             {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
 
+            <div className="overflow-x-auto">
             <table className="w-full text-sm border rounded overflow-hidden">
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                     <tr>
@@ -123,6 +124,7 @@ function AWSCredsTab() {
                     )}
                 </tbody>
             </table>
+            </div>
 
             {(creating || editing) && (
                 <AWSCredsForm

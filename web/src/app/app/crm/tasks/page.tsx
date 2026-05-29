@@ -276,7 +276,7 @@ function TaskRow({ task, onOpen }: { task: CRMTask; onOpen: (t: CRMTask) => void
                 <span className={`size-1.5 rounded-full ${priority.dot}`} />
                 {priority.label}
             </span>
-            <span className="inline-flex items-center gap-1 font-mono text-[10.5px] text-slate-400 tabular-nums shrink-0 w-20 justify-end">
+            <span className="inline-flex items-center gap-1 font-mono text-[10.5px] text-slate-400 tabular-nums shrink-0 w-16 justify-end">
                 {task.due_date && (
                     <>
                         <CalendarClockIcon className="w-2.5 h-2.5" />
@@ -296,7 +296,7 @@ function SearchPill({ value, onChange }: { value: string; onChange: (v: string) 
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 placeholder="Search tasks…"
-                className="w-[160px] h-5 bg-transparent text-[12px] text-slate-900 placeholder:text-slate-400 outline-none"
+                className="w-full sm:w-[160px] h-5 bg-transparent text-[12px] text-slate-900 placeholder:text-slate-400 outline-none"
             />
             {value && (
                 <button type="button" onClick={() => onChange("")} aria-label="Clear" className="text-slate-400 hover:text-slate-700">

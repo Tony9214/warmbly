@@ -15,7 +15,8 @@
 // where it meets the chrome's inner corner. Reads as one continuous
 // frame around a clean work surface.
 
-import { Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import { SkyChrome } from "./SkyChrome";
 import { AppHeader } from "./AppHeader";
 import { AppNav } from "./AppNav";
@@ -28,6 +29,13 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 export function AppShell() {
     useKeyboardShortcuts();
 
+    // Mobile nav drawer. On >=md the sidebar is a static column and this is
+    // ignored; below md it's an off-canvas drawer toggled from the header.
+    const [navOpen, setNavOpen] = useState(false);
+    const { pathname } = useLocation();
+    // Close the drawer whenever the route changes (tapping a nav link).
+    useEffect(() => setNavOpen(false), [pathname]);
+
     return (
         <div className="fixed inset-0 flex flex-col">
             <SkyChrome />
@@ -38,18 +46,16 @@ export function AppShell() {
                     own account is scheduled for deletion. */}
                 <PendingDeletionBar />
 
-                <AppHeader />
+                <AppHeader onMenu={() => setNavOpen(true)} />
 
                 <div className="flex-1 flex min-h-0">
-                    <AppNav />
+                    <AppNav open={navOpen} onClose={() => setNavOpen(false)} />
 
-                    {/* Content panel — pure white work surface that meets
-                        the bottom and right edges of the viewport. Only the
-                        inner corner is softened (rounded-tl-2xl), since
-                        that's the only seam where chrome meets content.
-                        A single hairline border on the top + left edges
-                        defines the panel without a heavy shadow. */}
-                    <main className="flex-1 min-w-0 rounded-tl-2xl bg-white overflow-hidden border-t border-l border-slate-200/70">
+                    {/* Content panel — pure white work surface. The inner
+                        corner is softened (rounded-tl-2xl) only on >=md, where
+                        the sidebar sits beside it; on mobile the panel is
+                        full-bleed with just a top hairline. */}
+                    <main className="flex-1 min-w-0 bg-white overflow-hidden border-t border-slate-200/70 md:rounded-tl-2xl md:border-l">
                         <div className="h-full overflow-auto">
                             <RouteBoundary>
                                 <Outlet />

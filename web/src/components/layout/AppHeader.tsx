@@ -12,7 +12,7 @@
 // AppShell, not here.
 
 import { Link, useLocation } from "react-router-dom";
-import { ChevronRight, Search } from "lucide-react";
+import { ChevronRight, Menu, Search } from "lucide-react";
 import { Logo } from "@/components/svg";
 import { useAppStore } from "@/stores";
 import { ConnectionIndicator } from "@/components/shared/ConnectionIndicator";
@@ -51,7 +51,7 @@ function pretty(segment: string): string {
     return labelMap[segment] ?? segment.charAt(0).toUpperCase() + segment.slice(1);
 }
 
-export function AppHeader() {
+export function AppHeader({ onMenu }: { onMenu?: () => void }) {
     const { pathname } = useLocation();
     const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
 
@@ -68,10 +68,19 @@ export function AppHeader() {
 
     return (
         <div className="h-14 flex items-center shrink-0">
-            {/* Sidebar-width logo zone — Warmbly wordmark. */}
+            {/* Logo zone — sidebar-width on >=md, compact with a menu button
+                on mobile (the sidebar collapses into a drawer below md). */}
+            <button
+                type="button"
+                onClick={onMenu}
+                aria-label="Open menu"
+                className="md:hidden ml-1.5 w-9 h-9 rounded-md flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 transition-colors shrink-0"
+            >
+                <Menu className="w-5 h-5" />
+            </button>
             <Link
                 to="/app/emails"
-                className="w-64 px-5 h-full flex items-center gap-2.5 shrink-0 group"
+                className="h-full flex items-center gap-2.5 shrink-0 group pl-2 pr-3 md:w-64 md:px-5"
             >
                 {/* Cool blue-leaning gray at rest; deeper blue-gray on hover.
                     Light enough to read as neutral chrome, but with a clear
@@ -82,21 +91,25 @@ export function AppHeader() {
                     was too pale and competed with the chrome rather
                     than anchoring it. */}
                 <Logo className="w-7 text-slate-900 group-hover:text-slate-700 transition-colors duration-150" />
+                {/* Wordmark hides on mobile — the mark + the drawer's own brand
+                    header carry it there, leaving room for the workspace pill. */}
                 <span
                     style={{ fontFamily: "var(--font-display)" }}
-                    className="font-extrabold text-[15.5px] tracking-tight text-slate-900"
+                    className="hidden md:inline font-extrabold text-[15.5px] tracking-tight text-slate-900"
                 >
                     Warmbly
                 </span>
             </Link>
 
-            {/* Breadcrumb: org > section > subpages. */}
-            <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-4">
+            {/* Breadcrumb: org switcher (always) > section > subpages. The
+                section crumbs are redundant with each page's own title on a
+                phone, so they only show on >=md. */}
+            <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-2 md:pr-4">
                 <Crumb>
                     <OrgSwitcher />
                 </Crumb>
                 {crumbs.map((seg, i) => (
-                    <Crumb key={i}>
+                    <div key={i} className="hidden md:flex items-center gap-2 min-w-0">
                         <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
                         <span
                             className={
@@ -107,13 +120,15 @@ export function AppHeader() {
                         >
                             {pretty(seg)}
                         </span>
-                    </Crumb>
+                    </div>
                 ))}
             </div>
 
-            <div className="flex items-center gap-2 px-4 shrink-0">
-                <PlanPill />
-                <div className="h-4 w-px bg-slate-200/80" />
+            <div className="flex items-center gap-2 px-2 sm:px-4 shrink-0">
+                <div className="hidden sm:flex items-center gap-2">
+                    <PlanPill />
+                    <div className="h-4 w-px bg-slate-200/80" />
+                </div>
                 <ConnectionIndicator />
                 <button
                     onClick={() => setCommandPaletteOpen(true)}

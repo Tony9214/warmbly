@@ -365,7 +365,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 	query := `
 		SELECT
 		 ea.id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
-	 	 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
+	 	 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days,
 		 ea.created_at, ea.updated_at,
@@ -476,7 +476,7 @@ func (r *emailRepository) Get(ctx context.Context, userID, emailAccountID string
 	query := `
 		SELECT
 		ea.id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
-		 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
+		 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days,
 		 ea.created_at, ea.updated_at,
@@ -673,7 +673,7 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		SET %s
 		WHERE user_id = $1 AND id = $2
 		RETURNING id, organization_id, email, name, signature_plain, signature_html, signature_sync, signature_code, provider, status,
-		          last_synced_at, last_id, campaign_limit, min_wait_time, reply_to, tracking_domain,
+		          COALESCE(last_synced_at, created_at) AS last_synced_at, last_id, campaign_limit, min_wait_time, reply_to, tracking_domain,
 		          warmup, warmup_base, warmup_max, warmup_increase, warmup_reply_rate, warmup_tag, warmup_pool_type,
 		          warmup_start_time, warmup_end_time, warmup_days, created_at, updated_at
 	`, strings.Join(setClauses, ", "))
@@ -769,7 +769,7 @@ func (r *emailRepository) GetByID(ctx context.Context, emailAccountID uuid.UUID)
 	query := `
 		SELECT
 		 ea.id, ea.user_id, ea.organization_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
-		 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
+		 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag, ea.warmup_pool_type,
 		 ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days, ea.timezone,
@@ -810,7 +810,7 @@ func (r *emailRepository) GetByTags(ctx context.Context, userID string, tags []s
 	query := `
 		SELECT DISTINCT ON (ea.id)
 		 ea.id, ea.user_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
-		 ea.provider, ea.status, ea.last_synced_at, ea.last_id, ea.campaign_limit,
+		 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.warmup, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag,
 		 ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days, ea.timezone,

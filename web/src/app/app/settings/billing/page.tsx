@@ -262,7 +262,7 @@ export default function BillingSettingsPage() {
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") applyCode();
                                 }}
-                                className="w-[180px] font-mono uppercase"
+                                className="w-full sm:w-[180px] font-mono uppercase"
                             />
                             {applied ? (
                                 <button

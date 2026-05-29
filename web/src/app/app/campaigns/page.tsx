@@ -172,7 +172,7 @@ export default function CampaignsPage() {
                     value={query}
                     onChange={setQuery}
                     placeholder="Search campaigns…"
-                    className="w-56"
+                    className="w-full sm:w-56"
                 />
 
                 <PopoverMenu align="end">

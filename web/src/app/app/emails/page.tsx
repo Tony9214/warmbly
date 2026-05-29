@@ -98,7 +98,7 @@ export default function AddressesPage() {
                     value={query}
                     onChange={setQuery}
                     placeholder="Search by email…"
-                    className="w-56"
+                    className="w-full sm:w-56"
                 />
                 <PopoverMenu align="end">
                     <PopoverMenuTrigger asChild>
@@ -243,7 +243,7 @@ export default function AddressesPage() {
                                             </span>
                                         </td>
                                         <td className="px-3">
-                                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                                 <button
                                                     type="button"
                                                     onClick={() => setView(box.id)}

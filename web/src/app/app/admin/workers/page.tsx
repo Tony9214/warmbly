@@ -226,6 +226,7 @@ export default function AdminWorkersPage() {
             )}
 
             <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
                         <tr>
@@ -302,6 +303,7 @@ export default function AdminWorkersPage() {
                         )}
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
     );

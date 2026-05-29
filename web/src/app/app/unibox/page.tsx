@@ -6,12 +6,14 @@
 import { ConversationList } from "@/components/app/unibox/ConversationList";
 import { ThreadView } from "@/components/app/unibox/ThreadView";
 import { useAppStore } from "@/stores";
-import { InboxIcon } from "lucide-react";
+import { ChevronLeftIcon, InboxIcon } from "lucide-react";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
 import { LockedSurface } from "@/components/layout/LockedSurface";
+import { cn } from "@/lib/utils";
 
 export default function UniboxPage() {
     const selectedThreadId = useAppStore((s) => s.selectedThreadId);
+    const setSelectedThreadId = useAppStore((s) => s.setSelectedThreadId);
     const access = useFeatureAccess();
 
     return (
@@ -28,12 +30,40 @@ export default function UniboxPage() {
             ]}
         >
             <div className="flex h-full bg-white">
-                <div className="w-[340px] shrink-0 border-r border-slate-200 overflow-hidden flex flex-col">
+                {/* Conversation list — full-width on mobile (the only pane shown
+                    when nothing is selected); a fixed sidebar on >=md. Hidden on
+                    mobile once a thread is open so the reader gets the screen. */}
+                <div
+                    className={cn(
+                        "w-full md:w-[340px] shrink-0 border-r border-slate-200 overflow-hidden flex-col",
+                        selectedThreadId ? "hidden md:flex" : "flex",
+                    )}
+                >
                     <ConversationList />
                 </div>
-                <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+
+                {/* Reader — hidden on mobile until a thread is picked, then
+                    full-screen with a back bar; always visible on >=md. */}
+                <div
+                    className={cn(
+                        "flex-1 min-w-0 overflow-hidden flex-col",
+                        selectedThreadId ? "flex" : "hidden md:flex",
+                    )}
+                >
                     {selectedThreadId ? (
-                        <ThreadView threadId={selectedThreadId} />
+                        <>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedThreadId(null)}
+                                className="md:hidden flex items-center gap-1 px-3 h-10 shrink-0 border-b border-slate-200 text-[13px] font-medium text-slate-600 hover:text-slate-900 active:bg-slate-50"
+                            >
+                                <ChevronLeftIcon className="w-4 h-4" />
+                                Inbox
+                            </button>
+                            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                                <ThreadView threadId={selectedThreadId} />
+                            </div>
+                        </>
                     ) : (
                         <div className="flex-1 flex items-center justify-center">
                             <div className="text-center px-5">

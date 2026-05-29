@@ -179,7 +179,7 @@ export default function IntegrationsPage() {
                         {bookings.slice(0, 10).map((b) => (
                             <div key={b.id} className="px-5 h-12 flex items-center gap-3 text-[12.5px]">
                                 <SourceDot source={b.source} />
-                                <span className="font-medium text-slate-900 truncate w-60">{b.invitee_email}</span>
+                                <span className="font-medium text-slate-900 truncate w-32 sm:w-60">{b.invitee_email}</span>
                                 <span className="text-slate-500 truncate flex-1">{b.event_name}</span>
                                 <span className="font-mono text-[10.5px] text-slate-400 tabular-nums">
                                     {b.scheduled_for ? new Date(b.scheduled_for).toLocaleString() : "tbd"}

@@ -270,7 +270,7 @@ export default function AdminAddWorkerWizard() {
                         We'll check reachability before creating any database rows, so a typo here
                         won't leave an orphan worker behind.
                     </p>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="col-span-2">
                             <label className={lbl}>Host or IP</label>
                             <input
@@ -423,7 +423,7 @@ export default function AdminAddWorkerWizard() {
                         <>
                             <div className="border rounded p-3 bg-slate-50 mb-3 text-sm">
                                 <div className="font-medium text-slate-700 mb-1">Summary</div>
-                                <dl className="grid grid-cols-[120px_1fr] gap-y-0.5 text-slate-600">
+                                <dl className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-y-0.5 text-slate-600">
                                     <dt className="text-slate-500">Purpose</dt><dd>{state.purpose}</dd>
                                     <dt className="text-slate-500">Host</dt><dd className="font-mono text-xs">{state.ssh_user}@{state.ssh_host}:{state.ssh_port}</dd>
                                     <dt className="text-slate-500">Name</dt><dd>{state.name}</dd>

@@ -330,7 +330,7 @@ export default function ContactsTable({
                     value={searchProps.query}
                     onChange={(v) => setSearchProps((s) => ({ ...s, query: v }))}
                     placeholder="Search by name, email, company…"
-                    className="w-72"
+                    className="w-full sm:w-72"
                 />
                 <PopoverMenu align="end">
                     <PopoverMenuTrigger asChild>

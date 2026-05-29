@@ -239,7 +239,9 @@ export function SectionBar({
     return (
         <div
             className={cn(
-                "h-9 px-5 border-b border-slate-200/60 flex items-center gap-2.5 shrink-0",
+                // Single 36px row on >=md; on mobile it wraps so a full-width
+                // search + filters stack instead of crowding off the edge.
+                "min-h-9 md:h-9 px-5 py-1.5 md:py-0 border-b border-slate-200/60 flex flex-wrap md:flex-nowrap items-center gap-x-2.5 gap-y-1.5 shrink-0",
                 className,
             )}
         >
@@ -251,7 +253,11 @@ export function SectionBar({
                     {count}
                 </span>
             )}
-            {children && <div className="ml-auto flex items-center gap-1.5">{children}</div>}
+            {children && (
+                <div className="ml-auto flex items-center gap-1.5 flex-wrap justify-end min-w-0">
+                    {children}
+                </div>
+            )}
         </div>
     );
 }
