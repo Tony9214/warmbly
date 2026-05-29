@@ -50,3 +50,27 @@ func (s *smtpEmailNotificationService) Send(ctx context.Context, to, cc, bcc []s
 
 	return nil
 }
+
+// SendOutreach is Send with an explicit Reply-To. The SMTP transport
+// doesn't have a structured envelope for this so we forge the header
+// directly into the message.
+func (s *smtpEmailNotificationService) SendOutreach(ctx context.Context, to []string, replyTo, subject, message string) error {
+	from := fmt.Sprintf("%s <%s>", s.Name, s.Address)
+	addr := net.JoinHostPort(s.Host, s.Port)
+
+	headers := "From: " + from + "\r\n" +
+		"To: " + strings.Join(to, ", ") + "\r\n" +
+		"Subject: " + subject + "\r\n"
+	if replyTo != "" {
+		headers += "Reply-To: " + replyTo + "\r\n"
+	}
+	headers += "MIME-Version: 1.0\r\n" +
+		"Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n"
+
+	msg := []byte(headers + message)
+	if err := smtp.SendMail(addr, nil, s.Address, to, msg); err != nil {
+		sentry.CaptureException(err)
+		return err
+	}
+	return nil
+}

@@ -68,9 +68,32 @@ type AdminUserSummary struct {
 	Email     string    `json:"email"`
 }
 
+// BanScope is a bitmask describing which actions are blocked while a
+// user is banned. The existing banned_at column still marks "banned",
+// but the scope decides what concretely stops working. Kept in sync
+// with the values in 000045_ban_scope.up.sql.
+type BanScope uint32
+
+const (
+	BanScopeLogin     BanScope = 1 << iota // 1 — block authentication
+	BanScopeOrgCreate                      // 2 — refuse new workspace creation
+	BanScopeSend                           // 4 — block outbound campaign sends
+)
+
+// BanScopeAll is the legacy "everything" mask applied at migration to
+// preserve the pre-bitmask "fully banned" semantics. New bans should
+// pick a more specific scope where possible.
+const BanScopeAll = BanScopeLogin | BanScopeOrgCreate | BanScopeSend
+
+func (s BanScope) Has(flag BanScope) bool { return s&flag == flag }
+
 // BanUserRequest represents the request to ban a user
 type BanUserRequest struct {
 	Reason string `json:"reason" binding:"required"`
+	// Scope is a BanScope bitmask. Zero / missing falls back to
+	// BanScopeLogin so the historic "you can't log in" behaviour
+	// stays the default for ambiguous calls.
+	Scope BanScope `json:"scope,omitempty"`
 }
 
 // UnbanUserRequest represents the request to unban a user
@@ -295,6 +318,43 @@ type PlatformOverview struct {
 	TrialingUsers       int64 `json:"trialing_users"`
 }
 
+// AdminMailboxRow is one row in the platform-wide mailbox admin list.
+// Joins the connected mailbox with owner + workspace so the table can
+// answer "whose mailbox is this and where does it live" without
+// fan-out fetches.
+type AdminMailboxRow struct {
+	ID             uuid.UUID  `json:"id"`
+	Email          string     `json:"email"`
+	Provider       string     `json:"provider"`
+	Status         string     `json:"status"`
+	UserID         uuid.UUID  `json:"user_id"`
+	OwnerEmail     string     `json:"owner_email"`
+	OrganizationID *uuid.UUID `json:"organization_id,omitempty"`
+	OrgName        *string    `json:"org_name,omitempty"`
+	WorkerID       *uuid.UUID `json:"worker_id,omitempty"`
+	WarmupEnabled  bool       `json:"warmup_enabled"`
+	CampaignLimit  int        `json:"campaign_limit"`
+	LastSyncedAt   *time.Time `json:"last_synced_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+// AdminMailboxesResult is the paginated wrapper.
+type AdminMailboxesResult struct {
+	Data       []AdminMailboxRow `json:"data"`
+	Pagination Pagination        `json:"pagination"`
+}
+
+// AdminMailboxSearch covers the query knobs the admin table needs.
+// All fields optional; empty status = active, "all" returns every
+// status. provider lets ops filter to "all gmail mailboxes" quickly.
+type AdminMailboxSearch struct {
+	Query    string     `form:"q"`
+	Status   string     `form:"status"`
+	Provider string     `form:"provider"`
+	Cursor   *uuid.UUID `form:"cursor"`
+	Limit    int        `form:"limit"`
+}
+
 // DailyEmailStats represents daily email statistics for graphs
 type DailyEmailStats struct {
 	Date           time.Time `json:"date"`
@@ -513,4 +573,80 @@ type EmailDistribution struct {
 	WorkerName string    `json:"worker_name"`
 	EmailCount int64     `json:"email_count"`
 	Percentage float64   `json:"percentage"`
+}
+
+// AdminOrgSearch are the query params for the admin organization listing.
+type AdminOrgSearch struct {
+	Query    string     `form:"q"`
+	Status   string     `form:"status"` // active, pending_deletion, all
+	Cursor   *uuid.UUID `form:"cursor"`
+	Limit    int        `form:"limit"`
+	SortBy   string     `form:"sort_by"` // created_at, name
+	SortDesc bool       `form:"sort_desc"`
+}
+
+// AdminOrgListItem is one row in the admin org list. It carries enough
+// summary state for the table (owner, counts, deletion status) without
+// joining to plans or subscriptions — those land on the detail endpoint.
+type AdminOrgListItem struct {
+	ID                   uuid.UUID  `json:"id"`
+	Name                 string     `json:"name"`
+	Slug                 *string    `json:"slug,omitempty"`
+	OwnerUserID          uuid.UUID  `json:"owner_user_id"`
+	OwnerEmail           string     `json:"owner_email"`
+	OwnerFirstName       string     `json:"owner_first_name"`
+	OwnerLastName        string     `json:"owner_last_name"`
+	OwnerBannedAt        *time.Time `json:"owner_banned_at,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
+	DeletionScheduledFor *time.Time `json:"deletion_scheduled_for,omitempty"`
+
+	// Resource counts. Cheap enough to inline on the list query so the
+	// table can show usage at a glance without an extra round-trip.
+	MemberCount       int `json:"member_count"`
+	EmailAccountCount int `json:"email_account_count"`
+	CampaignCount     int `json:"campaign_count"`
+	ActiveCampaigns   int `json:"active_campaigns"`
+}
+
+// AdminOrgsResult is the paginated response for the admin org listing.
+type AdminOrgsResult struct {
+	Data       []AdminOrgListItem `json:"data"`
+	Pagination Pagination         `json:"pagination"`
+}
+
+// AdminOrgDetail is the full payload for the org detail page. Carries
+// three limit blocks side-by-side so the UI can explain *why* each
+// effective number is what it is:
+//
+//   - Limits          — plan defaults (nil = unlimited)
+//   - Overrides       — raw override row (0 per field = inherit)
+//   - EffectiveLimits — what the runtime actually enforces
+type AdminOrgDetail struct {
+	AdminOrgListItem
+
+	UpdatedAt           time.Time                   `json:"updated_at"`
+	DeletionScheduledAt *time.Time                  `json:"deletion_scheduled_at,omitempty"`
+	Limits              *OrganizationLimits         `json:"limits,omitempty"`
+	Overrides           *OrganizationLimitOverrides `json:"overrides,omitempty"`
+	EffectiveLimits     *OrganizationLimits         `json:"effective_limits,omitempty"`
+	Counts              *OrganizationCounts         `json:"counts,omitempty"`
+
+	// Plan / subscription context. Either may be nil (org with no active
+	// subscription — e.g. trial or freshly created).
+	PlanName           *string    `json:"plan_name,omitempty"`
+	SubscriptionStatus *string    `json:"subscription_status,omitempty"`
+	IsEnterprise       bool       `json:"is_enterprise"`
+	CurrentPeriodEnd   *time.Time `json:"current_period_end,omitempty"`
+	TrialEnd           *time.Time `json:"trial_end,omitempty"`
+}
+
+// AdminOrgMember is a member row enriched with the joined user.
+type AdminOrgMember struct {
+	OrganizationMember
+	User *AdminUserSummary `json:"user,omitempty"`
+}
+
+// AdminOrgMembersResult is the response for /admin/organizations/:id/members.
+type AdminOrgMembersResult struct {
+	Data []AdminOrgMember `json:"data"`
 }

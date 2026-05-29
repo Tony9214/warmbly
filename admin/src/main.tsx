@@ -33,16 +33,19 @@ import TransportsPage from "@/app/settings/TransportsPage";
 import CloudProvidersPage from "@/app/settings/CloudProvidersPage";
 import ProvisioningTemplatesPage from "@/app/settings/ProvisioningTemplatesPage";
 import ProvisioningJobsPage from "@/app/dashboard/ProvisioningJobsPage";
-import {
-    AnalyticsPage,
-    CampaignsPage,
-    MailboxesPage,
-    NotFoundPage,
-    OrganizationsPage,
-    PlansPage,
-    UsersPage,
-    WarmupPage,
-} from "@/app/dashboard/StubPages";
+import OrganizationsPage from "@/app/dashboard/OrganizationsPage";
+import OrganizationDetailPage from "@/app/dashboard/OrganizationDetailPage";
+import UsersPage from "@/app/dashboard/UsersPage";
+import UserDetailPage from "@/app/dashboard/UserDetailPage";
+import WarmupPage from "@/app/dashboard/WarmupPage";
+import CampaignsPage from "@/app/dashboard/CampaignsPage";
+import EnterprisePage from "@/app/dashboard/EnterprisePage";
+import PlansPage from "@/app/dashboard/PlansPage";
+import LimitRequestsPage from "@/app/dashboard/LimitRequestsPage";
+import OutreachPage from "@/app/dashboard/OutreachPage";
+import AnalyticsPage from "@/app/dashboard/AnalyticsPage";
+import MailboxesPage from "@/app/dashboard/MailboxesPage";
+import { NotFoundPage } from "@/app/dashboard/StubPages";
 
 // Mirror of web/src/main.tsx's tuned defaults. The admin app sees less
 // traffic than the dashboard, so the staleness window is a touch wider:
@@ -83,10 +86,15 @@ const router = createBrowserRouter([
                     { path: "egresses", element: <EgressesPage /> },
                     { path: "mailboxes", element: <MailboxesPage /> },
                     { path: "users", element: <UsersPage /> },
+                    { path: "users/:id", element: <UserDetailPage /> },
                     { path: "organizations", element: <OrganizationsPage /> },
+                    { path: "organizations/:id", element: <OrganizationDetailPage /> },
                     { path: "plans", element: <PlansPage /> },
                     { path: "warmup", element: <WarmupPage /> },
                     { path: "campaigns", element: <CampaignsPage /> },
+                    { path: "enterprise", element: <EnterprisePage /> },
+                    { path: "limit-requests", element: <LimitRequestsPage /> },
+                    { path: "outreach", element: <OutreachPage /> },
                     { path: "analytics", element: <AnalyticsPage /> },
                     { path: "audit", element: <AuditPage /> },
                     {

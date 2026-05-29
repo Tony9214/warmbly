@@ -63,6 +63,27 @@ type OrganizationRepository interface {
 
 	// Admin permissions
 	GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error)
+
+	// Admin: org-wide search/listing for the admin panel
+	SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, error)
+	GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, error)
+	GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, error)
+
+	// Admin: per-org limit overrides. Read returns nil when no row
+	// exists (org has never been touched). Upsert always returns the
+	// post-write row so callers get the authoritative timestamps back.
+	GetOrganizationLimitOverrides(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimitOverrides, error)
+	UpsertOrganizationLimitOverrides(ctx context.Context, orgID uuid.UUID, req *models.UpdateOrgOverridesRequest, grantedBy uuid.UUID) (*models.OrganizationLimitOverrides, error)
+
+	// Limit-increase requests. CreateLimitRequest enforces the partial
+	// unique index (one open request per (org, field)) by surfacing the
+	// pgx unique-violation error code. UpdateLimitRequestStatus stamps
+	// reviewer + timestamp atomically.
+	CreateLimitRequest(ctx context.Context, req *models.LimitIncreaseRequest) error
+	GetLimitRequest(ctx context.Context, id uuid.UUID) (*models.LimitIncreaseRequest, error)
+	ListLimitRequestsForOrg(ctx context.Context, orgID uuid.UUID) ([]models.LimitIncreaseRequest, error)
+	ListLimitRequestsForAdmin(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, error)
+	UpdateLimitRequestStatus(ctx context.Context, id uuid.UUID, status models.LimitRequestStatus, reviewedBy uuid.UUID, notes string) error
 }
 
 type organizationRepository struct {
@@ -621,4 +642,406 @@ func (r *organizationRepository) GetUserAdminPermissions(ctx context.Context, us
 		return 0, nil
 	}
 	return perms, err
+}
+
+// adminOrgListColumns is the projection used by both the list and detail
+// queries so the AdminOrgListItem scan stays identical across both.
+const adminOrgListColumns = `
+	o.id, o.name, o.slug, o.owner_user_id,
+	u.email, u.first_name, u.last_name, u.banned_at,
+	o.created_at, o.deletion_scheduled_for,
+	(SELECT COUNT(*) FROM organization_members om WHERE om.organization_id = o.id) AS member_count,
+	(SELECT COUNT(*) FROM email_accounts ea WHERE ea.organization_id = o.id::text) AS email_account_count,
+	(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id) AS campaign_count,
+	(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id AND c.status = 'active') AS active_campaigns`
+
+func scanAdminOrgListItem(row pgx.Row, item *models.AdminOrgListItem) error {
+	return row.Scan(
+		&item.ID, &item.Name, &item.Slug, &item.OwnerUserID,
+		&item.OwnerEmail, &item.OwnerFirstName, &item.OwnerLastName, &item.OwnerBannedAt,
+		&item.CreatedAt, &item.DeletionScheduledFor,
+		&item.MemberCount, &item.EmailAccountCount, &item.CampaignCount, &item.ActiveCampaigns,
+	)
+}
+
+// SearchOrganizationsForAdmin lists orgs for the admin panel with cursor
+// pagination. The cursor is the last seen org id; rows are returned in
+// descending created_at order by default. Counts are computed inline so
+// the table can render usage without an extra fetch per row.
+func (r *organizationRepository) SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, error) {
+	limit := search.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	args := []interface{}{}
+	argNum := 1
+	where := "WHERE 1=1"
+
+	if search.Query != "" {
+		where += ` AND (o.name ILIKE $` + itoa(argNum) +
+			` OR o.slug ILIKE $` + itoa(argNum) +
+			` OR u.email ILIKE $` + itoa(argNum) + `)`
+		args = append(args, "%"+search.Query+"%")
+		argNum++
+	}
+
+	switch search.Status {
+	case "pending_deletion":
+		where += ` AND o.deletion_scheduled_for IS NOT NULL`
+	case "active":
+		where += ` AND o.deletion_scheduled_for IS NULL`
+	}
+
+	if search.Cursor != nil {
+		where += ` AND o.id < $` + itoa(argNum)
+		args = append(args, *search.Cursor)
+		argNum++
+	}
+
+	orderBy := "ORDER BY o.created_at DESC"
+	if search.SortBy == "name" {
+		orderBy = "ORDER BY o.name"
+		if search.SortDesc {
+			orderBy += " DESC"
+		}
+	}
+
+	args = append(args, limit+1)
+
+	query := `
+		SELECT ` + adminOrgListColumns + `
+		FROM organizations o
+		JOIN users u ON u.id = o.owner_user_id
+		` + where + `
+		` + orderBy + `
+		LIMIT $` + itoa(argNum)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []models.AdminOrgListItem{}
+	for rows.Next() {
+		var item models.AdminOrgListItem
+		if err := scanAdminOrgListItem(rows, &item); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	result := &models.AdminOrgsResult{
+		Data:       items,
+		Pagination: models.Pagination{HasMore: len(items) > limit},
+	}
+	if len(items) > limit {
+		result.Data = items[:limit]
+		last := items[limit-1].ID
+		result.Pagination.NextCursor = &last
+	}
+
+	// Total count for the same filter — drop the trailing LIMIT arg.
+	countQuery := `SELECT COUNT(*) FROM organizations o JOIN users u ON u.id = o.owner_user_id ` + where
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
+	}
+
+	return result, nil
+}
+
+// GetOrganizationAdminDetail returns the per-org detail payload. Plan
+// and subscription fields are LEFT JOINed so an org without an active
+// subscription still resolves.
+func (r *organizationRepository) GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, error) {
+	query := `
+		SELECT ` + adminOrgListColumns + `,
+			o.updated_at, o.deletion_scheduled_at,
+			p.name, s.status::text, s.is_enterprise, s.current_period_end, s.trial_end
+		FROM organizations o
+		JOIN users u ON u.id = o.owner_user_id
+		LEFT JOIN subscriptions s ON s.organization_id = o.id
+		LEFT JOIN plans p ON p.id = s.plan_id
+		WHERE o.id = $1`
+
+	var detail models.AdminOrgDetail
+	var isEnterprise *bool
+	err := r.db.QueryRow(ctx, query, orgID).Scan(
+		&detail.ID, &detail.Name, &detail.Slug, &detail.OwnerUserID,
+		&detail.OwnerEmail, &detail.OwnerFirstName, &detail.OwnerLastName, &detail.OwnerBannedAt,
+		&detail.CreatedAt, &detail.DeletionScheduledFor,
+		&detail.MemberCount, &detail.EmailAccountCount, &detail.CampaignCount, &detail.ActiveCampaigns,
+		&detail.UpdatedAt, &detail.DeletionScheduledAt,
+		&detail.PlanName, &detail.SubscriptionStatus, &isEnterprise, &detail.CurrentPeriodEnd, &detail.TrialEnd,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if isEnterprise != nil {
+		detail.IsEnterprise = *isEnterprise
+	}
+	return &detail, nil
+}
+
+// GetOrganizationMembersForAdmin returns the members of an org with their
+// joined user info, for admin consumption.
+func (r *organizationRepository) GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, error) {
+	query := `
+		SELECT
+			om.id, om.organization_id, om.user_id, om.role, om.permissions,
+			om.invited_by, om.invited_at, om.accepted_at,
+			u.id, u.first_name, u.last_name, u.email
+		FROM organization_members om
+		JOIN users u ON u.id = om.user_id
+		WHERE om.organization_id = $1
+		ORDER BY om.invited_at ASC`
+
+	rows, err := r.db.Query(ctx, query, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := []models.AdminOrgMember{}
+	for rows.Next() {
+		var m models.AdminOrgMember
+		var summary models.AdminUserSummary
+		if err := rows.Scan(
+			&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.Permissions,
+			&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt,
+			&summary.ID, &summary.FirstName, &summary.LastName, &summary.Email,
+		); err != nil {
+			return nil, err
+		}
+		m.User = &summary
+		members = append(members, m)
+	}
+	return members, nil
+}
+
+// GetOrganizationLimitOverrides reads the override row for an org.
+// Returns (nil, nil) when no row exists — callers should treat that as
+// "no overrides set, inherit everything from plan."
+func (r *organizationRepository) GetOrganizationLimitOverrides(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimitOverrides, error) {
+	query := `
+		SELECT organization_id, max_campaigns, max_active_campaigns, max_team_members,
+			max_email_accounts, max_contacts, daily_campaign_limit,
+			granted_by, granted_at, updated_at, notes
+		FROM organization_limit_overrides
+		WHERE organization_id = $1`
+
+	var o models.OrganizationLimitOverrides
+	err := r.db.QueryRow(ctx, query, orgID).Scan(
+		&o.OrganizationID, &o.MaxCampaigns, &o.MaxActiveCampaigns, &o.MaxTeamMembers,
+		&o.MaxEmailAccounts, &o.MaxContacts, &o.DailyCampaignLimit,
+		&o.GrantedBy, &o.GrantedAt, &o.UpdatedAt, &o.Notes,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+// UpsertOrganizationLimitOverrides applies a partial update. Nil fields
+// in the request are left untouched on existing rows; on first-insert
+// they default to 0 (= no override) via the table defaults.
+//
+// granted_by / granted_at are stamped on every write so the audit trail
+// reflects the most recent admin who touched any field. updated_at is
+// always advanced.
+func (r *organizationRepository) UpsertOrganizationLimitOverrides(ctx context.Context, orgID uuid.UUID, req *models.UpdateOrgOverridesRequest, grantedBy uuid.UUID) (*models.OrganizationLimitOverrides, error) {
+	maxCampaigns := nullableInt(req.MaxCampaigns)
+	maxActive := nullableInt(req.MaxActiveCampaigns)
+	maxMembers := nullableInt(req.MaxTeamMembers)
+	maxEmails := nullableInt(req.MaxEmailAccounts)
+	maxContacts := nullableInt(req.MaxContacts)
+	dailyLimit := nullableInt(req.DailyCampaignLimit)
+	notes := req.Notes
+
+	query := `
+		INSERT INTO organization_limit_overrides (
+			organization_id,
+			max_campaigns, max_active_campaigns, max_team_members,
+			max_email_accounts, max_contacts, daily_campaign_limit,
+			granted_by, granted_at, updated_at, notes
+		) VALUES (
+			$1,
+			COALESCE($2, 0), COALESCE($3, 0), COALESCE($4, 0),
+			COALESCE($5, 0), COALESCE($6, 0), COALESCE($7, 0),
+			$8, NOW(), NOW(), COALESCE($9, '')
+		)
+		ON CONFLICT (organization_id) DO UPDATE SET
+			max_campaigns        = COALESCE($2, organization_limit_overrides.max_campaigns),
+			max_active_campaigns = COALESCE($3, organization_limit_overrides.max_active_campaigns),
+			max_team_members     = COALESCE($4, organization_limit_overrides.max_team_members),
+			max_email_accounts   = COALESCE($5, organization_limit_overrides.max_email_accounts),
+			max_contacts         = COALESCE($6, organization_limit_overrides.max_contacts),
+			daily_campaign_limit = COALESCE($7, organization_limit_overrides.daily_campaign_limit),
+			granted_by = $8,
+			granted_at = NOW(),
+			updated_at = NOW(),
+			notes      = COALESCE($9, organization_limit_overrides.notes)
+		RETURNING organization_id, max_campaigns, max_active_campaigns, max_team_members,
+			max_email_accounts, max_contacts, daily_campaign_limit,
+			granted_by, granted_at, updated_at, notes`
+
+	var o models.OrganizationLimitOverrides
+	err := r.db.QueryRow(ctx, query,
+		orgID,
+		maxCampaigns, maxActive, maxMembers,
+		maxEmails, maxContacts, dailyLimit,
+		grantedBy, notes,
+	).Scan(
+		&o.OrganizationID, &o.MaxCampaigns, &o.MaxActiveCampaigns, &o.MaxTeamMembers,
+		&o.MaxEmailAccounts, &o.MaxContacts, &o.DailyCampaignLimit,
+		&o.GrantedBy, &o.GrantedAt, &o.UpdatedAt, &o.Notes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+func nullableInt(p *int) interface{} {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// CreateLimitRequest inserts a new limit-increase request row. The
+// (organization_id, field) WHERE status = 'pending' partial unique
+// index in migration 000046 makes duplicate-pending rejection a
+// constraint violation rather than a service-side query.
+func (r *organizationRepository) CreateLimitRequest(ctx context.Context, req *models.LimitIncreaseRequest) error {
+	const query = `
+		INSERT INTO limit_increase_requests
+			(id, organization_id, field, current_effective, requested,
+			 reason, status, submitted_by, submitted_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, NOW())
+		RETURNING submitted_at`
+	return r.db.QueryRow(ctx, query,
+		req.ID, req.OrganizationID, req.Field, req.CurrentEffective, req.Requested,
+		req.Reason, req.SubmittedBy,
+	).Scan(&req.SubmittedAt)
+}
+
+func (r *organizationRepository) GetLimitRequest(ctx context.Context, id uuid.UUID) (*models.LimitIncreaseRequest, error) {
+	const query = `
+		SELECT id, organization_id, field, current_effective, requested,
+			reason, status, submitted_by, submitted_at,
+			reviewed_by, reviewed_at, review_notes
+		FROM limit_increase_requests
+		WHERE id = $1`
+	var lr models.LimitIncreaseRequest
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&lr.ID, &lr.OrganizationID, &lr.Field, &lr.CurrentEffective, &lr.Requested,
+		&lr.Reason, &lr.Status, &lr.SubmittedBy, &lr.SubmittedAt,
+		&lr.ReviewedBy, &lr.ReviewedAt, &lr.ReviewNotes,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lr, nil
+}
+
+func (r *organizationRepository) ListLimitRequestsForOrg(ctx context.Context, orgID uuid.UUID) ([]models.LimitIncreaseRequest, error) {
+	const query = `
+		SELECT id, organization_id, field, current_effective, requested,
+			reason, status, submitted_by, submitted_at,
+			reviewed_by, reviewed_at, review_notes
+		FROM limit_increase_requests
+		WHERE organization_id = $1
+		ORDER BY submitted_at DESC`
+	rows, err := r.db.Query(ctx, query, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.LimitIncreaseRequest{}
+	for rows.Next() {
+		var lr models.LimitIncreaseRequest
+		if err := rows.Scan(
+			&lr.ID, &lr.OrganizationID, &lr.Field, &lr.CurrentEffective, &lr.Requested,
+			&lr.Reason, &lr.Status, &lr.SubmittedBy, &lr.SubmittedAt,
+			&lr.ReviewedBy, &lr.ReviewedAt, &lr.ReviewNotes,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, lr)
+	}
+	return out, nil
+}
+
+// ListLimitRequestsForAdmin joins org + submitter so the admin queue can
+// show context per row without an extra fan-out fetch.
+func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	args := []interface{}{}
+	where := "WHERE 1=1"
+	if status != "" && status != "all" {
+		where += " AND lr.status = $1"
+		args = append(args, status)
+	}
+	args = append(args, limit)
+	limitParam := "$" + itoa(len(args))
+
+	query := `
+		SELECT lr.id, lr.organization_id, lr.field, lr.current_effective, lr.requested,
+			lr.reason, lr.status, lr.submitted_by, lr.submitted_at,
+			lr.reviewed_by, lr.reviewed_at, lr.review_notes,
+			o.id, o.name, o.slug, o.owner_user_id, o.created_at, o.updated_at,
+			u.id, u.first_name, u.last_name, u.email, u.created_at, u.updated_at
+		FROM limit_increase_requests lr
+		JOIN organizations o ON o.id = lr.organization_id
+		JOIN users u ON u.id = lr.submitted_by
+		` + where + `
+		ORDER BY lr.submitted_at DESC
+		LIMIT ` + limitParam
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.LimitIncreaseRequest{}
+	for rows.Next() {
+		var lr models.LimitIncreaseRequest
+		var org models.Organization
+		var user models.User
+		if err := rows.Scan(
+			&lr.ID, &lr.OrganizationID, &lr.Field, &lr.CurrentEffective, &lr.Requested,
+			&lr.Reason, &lr.Status, &lr.SubmittedBy, &lr.SubmittedAt,
+			&lr.ReviewedBy, &lr.ReviewedAt, &lr.ReviewNotes,
+			&org.ID, &org.Name, &org.Slug, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt,
+			&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.CreatedAt, &user.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		lr.Organization = &org
+		lr.SubmittedByUser = &user
+		out = append(out, lr)
+	}
+	return out, nil
+}
+
+func (r *organizationRepository) UpdateLimitRequestStatus(ctx context.Context, id uuid.UUID, status models.LimitRequestStatus, reviewedBy uuid.UUID, notes string) error {
+	const query = `
+		UPDATE limit_increase_requests
+		SET status = $2, reviewed_by = $3, reviewed_at = NOW(), review_notes = $4
+		WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, id, status, reviewedBy, notes)
+	return err
 }

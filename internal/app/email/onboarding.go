@@ -11,6 +11,8 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/app/dailythrottle"
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/pkg/crypt"
@@ -52,6 +54,19 @@ func (s *emailService) OAuthStart(ctx context.Context, userID string, orgID *uui
 		oauth2.ApprovalForce, // force refresh_token issuance on reconnect
 	)
 	return &models.EmailOnboardingStartResponse{URL: url, State: state}, nil
+}
+
+// guardMailboxThrottle bounds new-mailbox connection rate per org per
+// day so abuse paths (or accidents) can't connect 200 mailboxes in
+// one tab session. Caller-supplied orgID; nil means "best-effort
+// skip" (orgless flows are vanishing but still exist). The check
+// fires only on the actual create paths, not on OAuthStart, so
+// retrying a failed flow doesn't consume the day's budget.
+func (s *emailService) guardMailboxThrottle(ctx context.Context, orgID *uuid.UUID) *errx.Error {
+	if s.throttle == nil || orgID == nil {
+		return nil
+	}
+	return s.throttle.CheckAndIncrement(ctx, *orgID, dailythrottle.ResourceMailbox, config.DailyThrottleNewMailboxes)
 }
 
 // guardInboxLimit enforces the per-org inbox cap for free-trial users.
@@ -132,6 +147,10 @@ func (s *emailService) OAuthFinish(ctx context.Context, userID, code, state stri
 		name = deriveNameFromEmail(owner.Email)
 	}
 
+	if xerr := s.guardMailboxThrottle(ctx, sess.OrganizationID); xerr != nil {
+		return nil, xerr
+	}
+
 	acc, xerr := s.emailRepository.NewOauthAccount(ctx, userID, models.NewOauthAccount{
 		OrganizationID: sess.OrganizationID,
 		Provider:       provider,
@@ -181,6 +200,10 @@ func (s *emailService) OnboardSMTPIMAP(ctx context.Context, userID string, orgID
 
 	creds := &models.SmtpImap{SMTP: data.SMTP, IMAP: data.IMAP}
 	if xerr := s.ValidateCredentials(ctx, uid, w.ID.String(), creds); xerr != nil {
+		return nil, xerr
+	}
+
+	if xerr := s.guardMailboxThrottle(ctx, orgID); xerr != nil {
 		return nil, xerr
 	}
 

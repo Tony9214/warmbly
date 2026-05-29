@@ -433,7 +433,19 @@ func Run(
 			org.GET("/current/danger-zone", m.RequireOrganization(), h.GetOrganizationDangerZone)
 			org.POST("/current/danger-zone/delete", m.RequireOrganization(), h.ScheduleOrganizationDeletion)
 			org.DELETE("/current/danger-zone/delete", m.RequireOrganization(), h.CancelOrganizationDeletion)
+
+			// Customer-facing limit-increase requests. The "current
+			// effective" value is computed server-side at submission
+			// time so the org/admin can see what the user was looking
+			// at when they asked.
+			org.POST("/:orgId/limit-requests", h.SubmitLimitIncreaseRequest)
+			org.GET("/:orgId/limit-requests", h.ListOrgLimitRequests)
 		}
+
+		// Cancel a pending limit request by id (submitter-only). Sits
+		// outside the /organization group so the URL doesn't need
+		// double-encoding of the org id.
+		jwtOnly.DELETE("/limit-requests/:id", h.CancelLimitRequest)
 
 		account := jwtOnly.Group("/me")
 		{
@@ -514,6 +526,28 @@ func Run(
 		adminRoutes.GET("/users/:id/rate-limits", middleware.RequireAdminPermission(models.AdminPermManageRateLimits), h.AdminGetUserRateLimits)
 		adminRoutes.PATCH("/users/:id/rate-limits", middleware.RequireAdminPermission(models.AdminPermManageRateLimits), h.AdminUpdateUserRateLimits)
 
+		// Organization (Workspace) Management
+		adminRoutes.GET("/organizations", middleware.RequireAdminPermission(models.AdminPermViewOrganizations), h.AdminListOrganizations)
+		adminRoutes.GET("/organizations/:id", middleware.RequireAdminPermission(models.AdminPermViewOrganizations), h.AdminGetOrganization)
+		adminRoutes.GET("/organizations/:id/members", middleware.RequireAdminPermission(models.AdminPermViewOrganizations), h.AdminGetOrganizationMembers)
+		adminRoutes.GET("/organizations/:id/overrides", middleware.RequireAdminPermission(models.AdminPermViewOrganizations), h.AdminGetOrgOverrides)
+		adminRoutes.PUT("/organizations/:id/overrides", middleware.RequireAdminPermission(models.AdminPermManageOrganizations), h.AdminUpdateOrgOverrides)
+
+		// Limit-increase request queue. Approval writes the override
+		// row via the same SetLimitOverrides path used by direct
+		// edits, so granted_by + audit-log story stays unified.
+		adminRoutes.GET("/limit-requests", middleware.RequireAdminPermission(models.AdminPermViewOrganizations), h.AdminListLimitRequests)
+		adminRoutes.POST("/limit-requests/:id/approve", middleware.RequireAdminPermission(models.AdminPermManageOrganizations), h.AdminApproveLimitRequest)
+		adminRoutes.POST("/limit-requests/:id/reject", middleware.RequireAdminPermission(models.AdminPermManageOrganizations), h.AdminRejectLimitRequest)
+
+		// Admin outreach composer. Reuses ManageOrganizations (the
+		// audit story is the same as direct overrides — admin sends
+		// a thing on behalf of the platform); a dedicated
+		// SendOutreach bit can be carved out later if outreach review
+		// becomes its own surface.
+		adminRoutes.POST("/outreach", middleware.RequireAdminPermission(models.AdminPermManageOrganizations), h.AdminSendOutreach)
+		adminRoutes.GET("/outreach", middleware.RequireAdminPermission(models.AdminPermViewOrganizations), h.AdminListOutreach)
+
 		// Worker Management
 		adminRoutes.GET("/workers", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminListWorkers)
 		adminRoutes.GET("/workers/:id", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminGetWorker)
@@ -580,6 +614,11 @@ func Run(
 		adminRoutes.GET("/warmup/appeals/:id", middleware.RequireAdminPermission(models.AdminPermReviewAppeals), h.AdminGetAppeal)
 		adminRoutes.POST("/warmup/appeals/:id/approve", middleware.RequireAdminPermission(models.AdminPermReviewAppeals), h.AdminApproveAppeal)
 		adminRoutes.POST("/warmup/appeals/:id/reject", middleware.RequireAdminPermission(models.AdminPermReviewAppeals), h.AdminRejectAppeal)
+
+		// Mailbox admin (cross-org). Reuses ViewUsers since mailboxes
+		// are tightly coupled to user/org context; a dedicated bit
+		// can be carved later if mailbox-specific actions land.
+		adminRoutes.GET("/mailboxes", middleware.RequireAdminPermission(models.AdminPermViewUsers), h.AdminSearchMailboxes)
 
 		// Campaign Management
 		adminRoutes.GET("/campaigns", middleware.RequireAdminPermission(models.AdminPermViewCampaigns), h.AdminSearchCampaigns)

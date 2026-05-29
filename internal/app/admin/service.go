@@ -13,11 +13,14 @@ import (
 
 // AdminService defines the interface for admin operations
 type AdminService interface {
+	// Mailbox admin
+	SearchMailboxes(ctx context.Context, search *models.AdminMailboxSearch) (*models.AdminMailboxesResult, *errx.Error)
+
 	// User Management
 	SearchUsers(ctx context.Context, search *models.AdminUserSearch) (*models.AdminUsersResult, *errx.Error)
 	GetUserDetail(ctx context.Context, userID uuid.UUID) (*models.AdminUserDetail, *errx.Error)
 	GetUserPreview(ctx context.Context, userID uuid.UUID) (*models.AdminUserPreview, *errx.Error)
-	BanUser(ctx context.Context, adminID, userID uuid.UUID, reason string, ipAddress, userAgent string) *errx.Error
+	BanUser(ctx context.Context, adminID, userID uuid.UUID, reason string, scope models.BanScope, ipAddress, userAgent string) *errx.Error
 	UnbanUser(ctx context.Context, adminID, userID uuid.UUID, reason string, ipAddress, userAgent string) *errx.Error
 	GetUserBans(ctx context.Context, userID uuid.UUID) ([]models.UserBan, *errx.Error)
 	GetUserCampaigns(ctx context.Context, userID uuid.UUID, cursor *uuid.UUID, limit int) (*models.AdminCampaignsResult, *errx.Error)
@@ -130,6 +133,15 @@ func (s *adminService) LogAdminAction(ctx context.Context, adminID uuid.UUID, ac
 
 // User Management
 
+func (s *adminService) SearchMailboxes(ctx context.Context, search *models.AdminMailboxSearch) (*models.AdminMailboxesResult, *errx.Error) {
+	result, err := s.repo.SearchMailboxesForAdmin(ctx, search)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to search mailboxes")
+	}
+	return result, nil
+}
+
 func (s *adminService) SearchUsers(ctx context.Context, search *models.AdminUserSearch) (*models.AdminUsersResult, *errx.Error) {
 	result, err := s.repo.SearchUsers(ctx, search)
 	if err != nil {
@@ -163,7 +175,7 @@ func (s *adminService) GetUserPreview(ctx context.Context, userID uuid.UUID) (*m
 	return preview, nil
 }
 
-func (s *adminService) BanUser(ctx context.Context, adminID, userID uuid.UUID, reason string, ipAddress, userAgent string) *errx.Error {
+func (s *adminService) BanUser(ctx context.Context, adminID, userID uuid.UUID, reason string, scope models.BanScope, ipAddress, userAgent string) *errx.Error {
 	// Check if user exists
 	user, err := s.repo.GetUserDetail(ctx, userID)
 	if err != nil {
@@ -184,12 +196,18 @@ func (s *adminService) BanUser(ctx context.Context, adminID, userID uuid.UUID, r
 		return errx.New(errx.Forbidden, "cannot ban admin users")
 	}
 
-	if err := s.repo.BanUser(ctx, userID, adminID, reason); err != nil {
+	// Default to login-only ban when the caller leaves scope empty so
+	// the legacy "you can't log in" behaviour is preserved.
+	if scope == 0 {
+		scope = models.BanScopeLogin
+	}
+
+	if err := s.repo.BanUser(ctx, userID, adminID, reason, uint32(scope)); err != nil {
 		sentry.CaptureException(err)
 		return errx.New(errx.Internal, "failed to ban user")
 	}
 
-	s.logAction(ctx, adminID, "ban_user", "user", userID, map[string]any{"reason": reason}, ipAddress, userAgent)
+	s.logAction(ctx, adminID, "ban_user", "user", userID, map[string]any{"reason": reason, "scope": uint32(scope)}, ipAddress, userAgent)
 	return nil
 }
 

@@ -20,7 +20,7 @@ type AdminRepository interface {
 	GetUserDetail(ctx context.Context, userID uuid.UUID) (*models.AdminUserDetail, error)
 	GetUserPreview(ctx context.Context, userID uuid.UUID) (*models.AdminUserPreview, error)
 	UpdateUserAdminPermissions(ctx context.Context, userID uuid.UUID, permissions uint32, grantedBy uuid.UUID) error
-	BanUser(ctx context.Context, userID, bannedBy uuid.UUID, reason string) error
+	BanUser(ctx context.Context, userID, bannedBy uuid.UUID, reason string, scope uint32) error
 	UnbanUser(ctx context.Context, userID, unbannedBy uuid.UUID, reason string) error
 	GetUserBans(ctx context.Context, userID uuid.UUID) ([]models.UserBan, error)
 	GetUserEmails(ctx context.Context, userID uuid.UUID, cursor *uuid.UUID, limit int) ([]models.AdminWorkerEmail, *models.Pagination, error)
@@ -80,6 +80,11 @@ type AdminRepository interface {
 	// User Rate Limits
 	GetUserRateLimits(ctx context.Context, userID uuid.UUID) (*models.AdminUserRateLimits, error)
 	UpdateUserRateLimits(ctx context.Context, userID uuid.UUID, update *models.UpdateUserRateLimitsRequest) error
+
+	// Mailboxes (platform-wide). Joins email_accounts → users → orgs
+	// so the admin table can answer "whose mailbox is this and where
+	// does it live" without N+1 fetches.
+	SearchMailboxesForAdmin(ctx context.Context, search *models.AdminMailboxSearch) (*models.AdminMailboxesResult, error)
 }
 
 type adminRepository struct {
@@ -343,16 +348,20 @@ func (r *adminRepository) UpdateUserAdminPermissions(ctx context.Context, userID
 	return err
 }
 
-// BanUser bans a user
-func (r *adminRepository) BanUser(ctx context.Context, userID, bannedBy uuid.UUID, reason string) error {
+// BanUser bans a user. Scope is the BanScope bitmask describing which
+// actions are blocked while banned. Callers should pass a non-zero
+// scope; the handler defaults to BanScopeLogin if missing.
+func (r *adminRepository) BanUser(ctx context.Context, userID, bannedBy uuid.UUID, reason string, scope uint32) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	// Update user
-	_, err = tx.Exec(ctx, `UPDATE users SET banned_at = NOW(), updated_at = NOW() WHERE id = $1`, userID)
+	// Update user — stamp banned_at and the scope together so any
+	// caller that only checks banned_at sees the existing "fully banned"
+	// behavior unless they explicitly read ban_scope.
+	_, err = tx.Exec(ctx, `UPDATE users SET banned_at = NOW(), ban_scope = $2, updated_at = NOW() WHERE id = $1`, userID, scope)
 	if err != nil {
 		return err
 	}
@@ -377,8 +386,9 @@ func (r *adminRepository) UnbanUser(ctx context.Context, userID, unbannedBy uuid
 	}
 	defer tx.Rollback(ctx)
 
-	// Update user
-	_, err = tx.Exec(ctx, `UPDATE users SET banned_at = NULL, updated_at = NOW() WHERE id = $1`, userID)
+	// Update user — clear both banned_at and ban_scope so subsequent
+	// auth + send checks see a clean account.
+	_, err = tx.Exec(ctx, `UPDATE users SET banned_at = NULL, ban_scope = 0, updated_at = NOW() WHERE id = $1`, userID)
 	if err != nil {
 		return err
 	}
@@ -1909,6 +1919,111 @@ func (r *adminRepository) UpdateUserRateLimits(ctx context.Context, userID uuid.
 		update.MaxConnections, update.DailyEmailLimit,
 	)
 	return err
+}
+
+// SearchMailboxesForAdmin lists connected mailboxes platform-wide with
+// owner + workspace joined. Cursor pagination by ea.id descending —
+// admin tables don't sort by anything more interesting most of the
+// time and that keeps the query plan trivial.
+func (r *adminRepository) SearchMailboxesForAdmin(ctx context.Context, search *models.AdminMailboxSearch) (*models.AdminMailboxesResult, error) {
+	limit := search.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	args := []interface{}{}
+	argNum := 1
+	where := "WHERE 1=1"
+
+	if search.Query != "" {
+		where += ` AND (ea.email ILIKE $` + itoa(argNum) +
+			` OR u.email ILIKE $` + itoa(argNum) +
+			` OR o.name ILIKE $` + itoa(argNum) + `)`
+		args = append(args, "%"+search.Query+"%")
+		argNum++
+	}
+	switch search.Status {
+	case "", "active":
+		where += " AND ea.status = 'active'"
+	case "inactive":
+		where += " AND ea.status <> 'active'"
+	case "all":
+		// no-op
+	default:
+		where += " AND ea.status = $" + itoa(argNum)
+		args = append(args, search.Status)
+		argNum++
+	}
+	if search.Provider != "" {
+		where += " AND ea.provider = $" + itoa(argNum)
+		args = append(args, search.Provider)
+		argNum++
+	}
+	if search.Cursor != nil {
+		where += " AND ea.id < $" + itoa(argNum)
+		args = append(args, *search.Cursor)
+		argNum++
+	}
+
+	args = append(args, limit+1)
+	limitParam := "$" + itoa(argNum)
+
+	query := `
+		SELECT ea.id, ea.email, ea.provider::text, ea.status::text,
+			ea.user_id, u.email,
+			ea.organization_id, o.name,
+			ea.worker_id,
+			(ea.warmup IS NOT NULL) AS warmup_enabled,
+			ea.campaign_limit, ea.last_synced_at, ea.created_at
+		FROM email_accounts ea
+		JOIN users u ON u.id = ea.user_id
+		LEFT JOIN organizations o ON o.id = ea.organization_id
+		` + where + `
+		ORDER BY ea.id DESC
+		LIMIT ` + limitParam
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []models.AdminMailboxRow{}
+	for rows.Next() {
+		var m models.AdminMailboxRow
+		if err := rows.Scan(
+			&m.ID, &m.Email, &m.Provider, &m.Status,
+			&m.UserID, &m.OwnerEmail,
+			&m.OrganizationID, &m.OrgName,
+			&m.WorkerID,
+			&m.WarmupEnabled,
+			&m.CampaignLimit, &m.LastSyncedAt, &m.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, m)
+	}
+
+	result := &models.AdminMailboxesResult{
+		Data:       items,
+		Pagination: models.Pagination{HasMore: len(items) > limit},
+	}
+	if len(items) > limit {
+		result.Data = items[:limit]
+		last := items[limit-1].ID
+		result.Pagination.NextCursor = &last
+	}
+
+	// Total count for the same filter (drop the trailing LIMIT arg).
+	countQuery := `
+		SELECT COUNT(*) FROM email_accounts ea
+		JOIN users u ON u.id = ea.user_id
+		LEFT JOIN organizations o ON o.id = ea.organization_id ` + where
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
+	}
+	return result, nil
 }
 
 // Helper functions

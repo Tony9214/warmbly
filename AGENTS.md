@@ -13,6 +13,24 @@ At a product level, the app does four main things:
 
 The backend API is the control plane. Workers are the execution plane.
 
+## Working In This Repo
+
+CI is strict. `go build ./...` succeeding is not enough — `golangci-lint` runs `gofmt` as part of its checks, and a single unformatted import block or mis-indented doc comment will fail the PR even when the code compiles cleanly. Before declaring any Go change done:
+
+- run `gofmt -w` on every Go file you touched (or `gofmt -w internal/ cmd/` to be safe)
+- run `make lint` locally when the toolchain is installed, or at minimum `gofmt -l ./...` should print nothing
+- do not rely on `go build` as the "ship signal" — it ignores formatting and stylistic lint rules that CI enforces
+
+Other CI-touching rules:
+
+- the frontend trees (`admin/`, `web/`, `site/`) each have their own CI jobs; run `pnpm typecheck` in any tree you touched and `pnpm lint` when the rules are non-trivial
+- never push without first re-running the relevant `*build*` / `*typecheck*` / `*lint*` step on the affected tree
+- a `make lint` (or `gofmt -l`) failure is always a real CI failure; do not push hoping it will pass
+
+Commit hygiene:
+
+- commit messages on this repo do not include `Co-Authored-By:` or other AI/agent attribution footers. Keep messages to subject + body explaining the why. If a commit slips through with an attribution footer, rewrite it before opening or updating a PR.
+
 ## System Shape
 
 - `cmd/backend`: API and business orchestration

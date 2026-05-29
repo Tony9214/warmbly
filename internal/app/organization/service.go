@@ -9,6 +9,8 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/app/dailythrottle"
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -68,12 +70,43 @@ type OrganizationService interface {
 
 	// Admin permissions (for admin middleware)
 	GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error)
+
+	// Admin: read-only org listing for the admin panel. Detail composes
+	// the list-shape row with counts, plan defaults, the override row,
+	// and the effective limits the runtime actually enforces.
+	SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, *errx.Error)
+	GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, *errx.Error)
+	GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, *errx.Error)
+
+	// Admin: per-org limit overrides. Read returns nil if the org has
+	// never been touched. Set is an upsert that stamps granted_by /
+	// granted_at on every write.
+	GetLimitOverrides(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimitOverrides, *errx.Error)
+	SetLimitOverrides(ctx context.Context, orgID uuid.UUID, req *models.UpdateOrgOverridesRequest, grantedBy uuid.UUID) (*models.OrganizationLimitOverrides, *errx.Error)
+
+	// Effective limits: plan defaults overlaid with overrides. This is
+	// what the in-app limit checks (CanAddMember / Campaign / EmailAccount)
+	// compare counts against.
+	GetEffectiveLimits(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimits, *errx.Error)
+
+	// Limit-increase request workflow. Users self-serve via
+	// SubmitLimitIncreaseRequest from the dashboard; admins drain the
+	// queue with the AdminListLimitRequests / ApproveLimitRequest /
+	// RejectLimitRequest path. Approving rewrites the override row via
+	// SetLimitOverrides so the audit story stays unified.
+	SubmitLimitIncreaseRequest(ctx context.Context, orgID, submitterID uuid.UUID, req *models.CreateLimitIncreaseRequest) (*models.LimitIncreaseRequest, *errx.Error)
+	ListLimitRequestsForOrg(ctx context.Context, orgID uuid.UUID) ([]models.LimitIncreaseRequest, *errx.Error)
+	CancelLimitRequest(ctx context.Context, id, userID uuid.UUID) *errx.Error
+	AdminListLimitRequests(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, *errx.Error)
+	ApproveLimitRequest(ctx context.Context, id, reviewerID uuid.UUID, notes string) (*models.LimitIncreaseRequest, *errx.Error)
+	RejectLimitRequest(ctx context.Context, id, reviewerID uuid.UUID, notes string) (*models.LimitIncreaseRequest, *errx.Error)
 }
 
 type organizationService struct {
 	orgRepo  repository.OrganizationRepository
 	subRepo  repository.SubscriptionRepository
 	userRepo repository.UserRepository
+	throttle dailythrottle.Service
 }
 
 // NewService creates a new organization service
@@ -81,16 +114,36 @@ func NewService(
 	orgRepo repository.OrganizationRepository,
 	subRepo repository.SubscriptionRepository,
 	userRepo repository.UserRepository,
+	throttle dailythrottle.Service,
 ) OrganizationService {
 	return &organizationService{
 		orgRepo:  orgRepo,
 		subRepo:  subRepo,
 		userRepo: userRepo,
+		throttle: throttle,
 	}
 }
 
 // Create creates a new organization and adds the user as owner
 func (s *organizationService) Create(ctx context.Context, userID uuid.UUID, name string) (*models.Organization, *errx.Error) {
+	// Ban-scope enforcement (migration 000045). Block new workspace
+	// creation when the admin's set the BanScopeOrgCreate bit, even
+	// if the user can otherwise log in.
+	if scope, scopeErr := s.userRepo.GetBanState(ctx, userID); scopeErr == nil {
+		if models.BanScope(scope).Has(models.BanScopeOrgCreate) {
+			return nil, errx.New(errx.Forbidden, "this account cannot create new workspaces")
+		}
+	}
+
+	// Daily creation throttle — caps "new workspaces per owner per
+	// day" so a script can't spawn 100 orgs from one user account.
+	// Scope is the owner uuid (not the org, which doesn't exist yet).
+	if s.throttle != nil {
+		if xerr := s.throttle.CheckAndIncrement(ctx, userID, dailythrottle.ResourceOrg, config.DailyThrottleNewOrgs); xerr != nil {
+			return nil, xerr
+		}
+	}
+
 	// Check organization limit
 	user, userErr := s.userRepo.GetUser(ctx, userID)
 	if userErr != nil {
@@ -509,7 +562,7 @@ func (s *organizationService) RequirePermission(ctx context.Context, orgID, user
 
 // CanAddMember checks if the organization can add more members based on plan limits
 func (s *organizationService) CanAddMember(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
-	limits, err := s.GetOrganizationLimits(ctx, orgID)
+	limits, err := s.GetEffectiveLimits(ctx, orgID)
 	if err != nil {
 		return false, err
 	}
@@ -530,7 +583,7 @@ func (s *organizationService) CanAddMember(ctx context.Context, orgID uuid.UUID)
 
 // CanAddCampaign checks if the organization can add more campaigns based on plan limits
 func (s *organizationService) CanAddCampaign(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
-	limits, err := s.GetOrganizationLimits(ctx, orgID)
+	limits, err := s.GetEffectiveLimits(ctx, orgID)
 	if err != nil {
 		return false, err
 	}
@@ -555,7 +608,7 @@ func (s *organizationService) CanAddCampaign(ctx context.Context, orgID uuid.UUI
 
 // CanAddEmailAccount checks if the organization can add more email accounts based on plan limits
 func (s *organizationService) CanAddEmailAccount(ctx context.Context, orgID uuid.UUID) (bool, *errx.Error) {
-	limits, err := s.GetOrganizationLimits(ctx, orgID)
+	limits, err := s.GetEffectiveLimits(ctx, orgID)
 	if err != nil {
 		return false, err
 	}
@@ -686,4 +739,336 @@ func generateInvitationToken() (string, error) {
 // GetUserAdminPermissions retrieves the admin permissions for a user
 func (s *organizationService) GetUserAdminPermissions(ctx context.Context, userID uuid.UUID) (uint32, error) {
 	return s.orgRepo.GetUserAdminPermissions(ctx, userID)
+}
+
+// SearchOrganizationsForAdmin returns the paginated admin org listing.
+func (s *organizationService) SearchOrganizationsForAdmin(ctx context.Context, search *models.AdminOrgSearch) (*models.AdminOrgsResult, *errx.Error) {
+	result, err := s.orgRepo.SearchOrganizationsForAdmin(ctx, search)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to search organizations")
+	}
+	return result, nil
+}
+
+// GetOrganizationAdminDetail returns the per-org admin payload — the
+// list-shape row plus a counts snapshot and plan/subscription state.
+// Limits come from the org's plan via GetOrganizationLimits so admin
+// callers see the same numbers the in-app limit checks enforce.
+func (s *organizationService) GetOrganizationAdminDetail(ctx context.Context, orgID uuid.UUID) (*models.AdminOrgDetail, *errx.Error) {
+	detail, err := s.orgRepo.GetOrganizationAdminDetail(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load organization")
+	}
+	if detail == nil {
+		return nil, errx.New(errx.NotFound, "organization not found")
+	}
+
+	if limits, xerr := s.GetOrganizationLimits(ctx, orgID); xerr == nil {
+		detail.Limits = limits
+	}
+	if overrides, xerr := s.GetLimitOverrides(ctx, orgID); xerr == nil {
+		detail.Overrides = overrides
+	}
+	if effective, xerr := s.GetEffectiveLimits(ctx, orgID); xerr == nil {
+		detail.EffectiveLimits = effective
+	}
+	if counts, xerr := s.GetOrganizationCounts(ctx, orgID); xerr == nil {
+		detail.Counts = counts
+	}
+
+	return detail, nil
+}
+
+// GetOrganizationMembersForAdmin returns the members of an org with
+// joined user info for the admin panel.
+func (s *organizationService) GetOrganizationMembersForAdmin(ctx context.Context, orgID uuid.UUID) ([]models.AdminOrgMember, *errx.Error) {
+	members, err := s.orgRepo.GetOrganizationMembersForAdmin(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load members")
+	}
+	return members, nil
+}
+
+// GetLimitOverrides returns the override row for an org, or nil if no
+// admin has touched it yet.
+func (s *organizationService) GetLimitOverrides(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimitOverrides, *errx.Error) {
+	o, err := s.orgRepo.GetOrganizationLimitOverrides(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load limit overrides")
+	}
+	return o, nil
+}
+
+// SetLimitOverrides applies a partial update to the override row. The
+// caller is responsible for the audit log write — the service stays
+// audit-agnostic so it can be reused outside admin handlers later
+// (e.g. limit-request approval in slice 3).
+func (s *organizationService) SetLimitOverrides(ctx context.Context, orgID uuid.UUID, req *models.UpdateOrgOverridesRequest, grantedBy uuid.UUID) (*models.OrganizationLimitOverrides, *errx.Error) {
+	o, err := s.orgRepo.UpsertOrganizationLimitOverrides(ctx, orgID, req, grantedBy)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to write limit overrides")
+	}
+	return o, nil
+}
+
+// GetEffectiveLimits returns the limits the runtime actually enforces.
+// Resolution per field:
+//
+//  1. override > 0  → use override
+//  2. plan != nil   → use plan column
+//  3. otherwise     → fall back to the product-level hard cap
+//
+// Never returns nil values: even an "unlimited" plan is bounded by the
+// product hard caps in config/constants.go. Admins can raise individual
+// caps per-org by writing an override.
+func (s *organizationService) GetEffectiveLimits(ctx context.Context, orgID uuid.UUID) (*models.OrganizationLimits, *errx.Error) {
+	plan, err := s.GetOrganizationLimits(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	override, err := s.GetLimitOverrides(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	resolve := func(overrideVal int, planVal *int, hardCap int) *int {
+		if overrideVal > 0 {
+			v := overrideVal
+			return &v
+		}
+		if planVal != nil {
+			return planVal
+		}
+		v := hardCap
+		return &v
+	}
+
+	var ovMaxCampaigns, ovMaxActive, ovMaxMembers, ovMaxEmails, ovMaxContacts, ovDaily int
+	if override != nil {
+		ovMaxCampaigns = override.MaxCampaigns
+		ovMaxActive = override.MaxActiveCampaigns
+		ovMaxMembers = override.MaxTeamMembers
+		ovMaxEmails = override.MaxEmailAccounts
+		ovMaxContacts = override.MaxContacts
+		ovDaily = override.DailyCampaignLimit
+	}
+
+	var planLimits models.OrganizationLimits
+	if plan != nil {
+		planLimits = *plan
+	}
+
+	return &models.OrganizationLimits{
+		MaxCampaigns:       resolve(ovMaxCampaigns, planLimits.MaxCampaigns, config.HardCapCampaignsTotal),
+		MaxActiveCampaigns: resolve(ovMaxActive, planLimits.MaxActiveCampaigns, config.HardCapCampaignsActive),
+		MaxTeamMembers:     resolve(ovMaxMembers, planLimits.MaxTeamMembers, config.HardCapTeamMembers),
+		MaxEmailAccounts:   resolve(ovMaxEmails, planLimits.MaxEmailAccounts, config.HardCapMailboxes),
+		MaxContacts:        resolve(ovMaxContacts, planLimits.MaxContacts, config.HardCapContacts),
+		DailyCampaignLimit: resolve(ovDaily, planLimits.DailyCampaignLimit, config.HardCapDailyCampaignSends),
+	}, nil
+}
+
+// limitFieldUpdater maps a request's `field` string onto the override
+// column it should write. Keeping this map adjacent to the request flow
+// makes it obvious what's user-requestable; adding a new field is two
+// lines here plus the override model.
+var limitFieldUpdater = map[string]func(req *models.UpdateOrgOverridesRequest, v int){
+	"max_campaigns":        func(r *models.UpdateOrgOverridesRequest, v int) { r.MaxCampaigns = &v },
+	"max_active_campaigns": func(r *models.UpdateOrgOverridesRequest, v int) { r.MaxActiveCampaigns = &v },
+	"max_team_members":     func(r *models.UpdateOrgOverridesRequest, v int) { r.MaxTeamMembers = &v },
+	"max_email_accounts":   func(r *models.UpdateOrgOverridesRequest, v int) { r.MaxEmailAccounts = &v },
+	"max_contacts":         func(r *models.UpdateOrgOverridesRequest, v int) { r.MaxContacts = &v },
+	"daily_campaign_limit": func(r *models.UpdateOrgOverridesRequest, v int) { r.DailyCampaignLimit = &v },
+}
+
+// limitFieldEffective extracts the currently-enforced value for a field
+// off the effective-limits resolver result. Used at submission time so
+// the stored row records what the user was looking at when they asked.
+func limitFieldEffective(field string, eff *models.OrganizationLimits) int {
+	if eff == nil {
+		return 0
+	}
+	get := func(p *int) int {
+		if p == nil {
+			return 0
+		}
+		return *p
+	}
+	switch field {
+	case "max_campaigns":
+		return get(eff.MaxCampaigns)
+	case "max_active_campaigns":
+		return get(eff.MaxActiveCampaigns)
+	case "max_team_members":
+		return get(eff.MaxTeamMembers)
+	case "max_email_accounts":
+		return get(eff.MaxEmailAccounts)
+	case "max_contacts":
+		return get(eff.MaxContacts)
+	case "daily_campaign_limit":
+		return get(eff.DailyCampaignLimit)
+	}
+	return 0
+}
+
+func (s *organizationService) SubmitLimitIncreaseRequest(ctx context.Context, orgID, submitterID uuid.UUID, req *models.CreateLimitIncreaseRequest) (*models.LimitIncreaseRequest, *errx.Error) {
+	if _, ok := limitFieldUpdater[req.Field]; !ok {
+		return nil, errx.New(errx.BadRequest, "unknown field")
+	}
+	if req.Requested <= 0 {
+		return nil, errx.New(errx.BadRequest, "requested value must be positive")
+	}
+
+	// Membership check — only members of the org can submit requests
+	// on its behalf. Owner check happens at the per-org-permission
+	// layer for org-config writes; for limit requests any active
+	// member is acceptable.
+	if _, xerr := s.GetMembership(ctx, orgID, submitterID); xerr != nil {
+		return nil, xerr
+	}
+
+	effective, xerr := s.GetEffectiveLimits(ctx, orgID)
+	if xerr != nil {
+		return nil, xerr
+	}
+	current := limitFieldEffective(req.Field, effective)
+	if req.Requested <= current {
+		return nil, errx.New(errx.BadRequest, "requested value must exceed current effective limit")
+	}
+
+	lr := &models.LimitIncreaseRequest{
+		ID:               uuid.New(),
+		OrganizationID:   orgID,
+		Field:            req.Field,
+		CurrentEffective: current,
+		Requested:        req.Requested,
+		Reason:           req.Reason,
+		Status:           models.LimitRequestStatusPending,
+		SubmittedBy:      submitterID,
+	}
+
+	if err := s.orgRepo.CreateLimitRequest(ctx, lr); err != nil {
+		// The (org, field) WHERE status='pending' unique index trips
+		// when the same workspace already has an open request for the
+		// same resource. Surface as 409 so the dashboard can render
+		// "you already have a pending request" instead of a generic
+		// 500.
+		if strings.Contains(err.Error(), "uq_limit_requests_one_pending_per_field") {
+			return nil, errx.New(errx.Conflict, "a pending request already exists for this field")
+		}
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to submit request")
+	}
+	return lr, nil
+}
+
+func (s *organizationService) ListLimitRequestsForOrg(ctx context.Context, orgID uuid.UUID) ([]models.LimitIncreaseRequest, *errx.Error) {
+	rows, err := s.orgRepo.ListLimitRequestsForOrg(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load requests")
+	}
+	return rows, nil
+}
+
+// CancelLimitRequest lets the original submitter walk back a pending
+// request. Approved / rejected rows are immutable — they survive as
+// the audit record of what was decided and when.
+func (s *organizationService) CancelLimitRequest(ctx context.Context, id, userID uuid.UUID) *errx.Error {
+	lr, err := s.orgRepo.GetLimitRequest(ctx, id)
+	if err != nil {
+		sentry.CaptureException(err)
+		return errx.New(errx.Internal, "failed to load request")
+	}
+	if lr == nil {
+		return errx.New(errx.NotFound, "request not found")
+	}
+	if lr.SubmittedBy != userID {
+		return errx.ErrForbidden
+	}
+	if lr.Status != models.LimitRequestStatusPending {
+		return errx.New(errx.BadRequest, "only pending requests can be cancelled")
+	}
+	if err := s.orgRepo.UpdateLimitRequestStatus(ctx, id, models.LimitRequestStatusCancelled, userID, ""); err != nil {
+		sentry.CaptureException(err)
+		return errx.New(errx.Internal, "failed to cancel request")
+	}
+	return nil
+}
+
+func (s *organizationService) AdminListLimitRequests(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, *errx.Error) {
+	rows, err := s.orgRepo.ListLimitRequestsForAdmin(ctx, status, limit)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load limit requests")
+	}
+	return rows, nil
+}
+
+// ApproveLimitRequest stamps the row and writes the corresponding
+// override column via SetLimitOverrides — same write path the admin
+// uses for direct overrides, so the granted_by audit trail is unified.
+func (s *organizationService) ApproveLimitRequest(ctx context.Context, id, reviewerID uuid.UUID, notes string) (*models.LimitIncreaseRequest, *errx.Error) {
+	lr, err := s.orgRepo.GetLimitRequest(ctx, id)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load request")
+	}
+	if lr == nil {
+		return nil, errx.New(errx.NotFound, "request not found")
+	}
+	if lr.Status != models.LimitRequestStatusPending {
+		return nil, errx.New(errx.BadRequest, "only pending requests can be approved")
+	}
+
+	updater, ok := limitFieldUpdater[lr.Field]
+	if !ok {
+		return nil, errx.New(errx.Internal, "request references an unknown field")
+	}
+
+	override := &models.UpdateOrgOverridesRequest{}
+	updater(override, lr.Requested)
+	if notes != "" {
+		notesCopy := "approved request " + lr.ID.String() + ": " + notes
+		override.Notes = &notesCopy
+	}
+	if _, xerr := s.SetLimitOverrides(ctx, lr.OrganizationID, override, reviewerID); xerr != nil {
+		return nil, xerr
+	}
+
+	if err := s.orgRepo.UpdateLimitRequestStatus(ctx, id, models.LimitRequestStatusApproved, reviewerID, notes); err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to mark request approved")
+	}
+	lr.Status = models.LimitRequestStatusApproved
+	lr.ReviewedBy = &reviewerID
+	lr.ReviewNotes = notes
+	return lr, nil
+}
+
+func (s *organizationService) RejectLimitRequest(ctx context.Context, id, reviewerID uuid.UUID, notes string) (*models.LimitIncreaseRequest, *errx.Error) {
+	lr, err := s.orgRepo.GetLimitRequest(ctx, id)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load request")
+	}
+	if lr == nil {
+		return nil, errx.New(errx.NotFound, "request not found")
+	}
+	if lr.Status != models.LimitRequestStatusPending {
+		return nil, errx.New(errx.BadRequest, "only pending requests can be rejected")
+	}
+	if err := s.orgRepo.UpdateLimitRequestStatus(ctx, id, models.LimitRequestStatusRejected, reviewerID, notes); err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to mark request rejected")
+	}
+	lr.Status = models.LimitRequestStatusRejected
+	lr.ReviewedBy = &reviewerID
+	lr.ReviewNotes = notes
+	return lr, nil
 }

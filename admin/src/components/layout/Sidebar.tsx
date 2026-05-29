@@ -7,6 +7,7 @@ import { NavLink } from "react-router-dom";
 import {
     Activity,
     BarChart3,
+    Briefcase,
     Building2,
     Cloud,
     Cog,
@@ -14,6 +15,7 @@ import {
     Database,
     FileText,
     Flame,
+    Gauge,
     HardDrive,
     Inbox,
     LayoutDashboard,
@@ -65,7 +67,10 @@ const GROUPS: NavGroup[] = [
         items: [
             { to: "/users", label: "Users", icon: Users },
             { to: "/organizations", label: "Organizations", icon: Building2 },
+            { to: "/limit-requests", label: "Limit requests", icon: Gauge },
             { to: "/plans", label: "Plans & Billing", icon: CreditCard },
+            { to: "/enterprise", label: "Enterprise", icon: Briefcase },
+            { to: "/outreach", label: "Outreach", icon: Send },
         ],
     },
     {

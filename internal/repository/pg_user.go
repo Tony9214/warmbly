@@ -23,6 +23,11 @@ type UserRepository interface {
 	SetFreeTrialUsed(ctx context.Context, userID uuid.UUID) error
 	UpdateOnboarding(ctx context.Context, userID uuid.UUID, firstName, lastName, referralSource string) error
 	UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL *string) error
+
+	// GetBanState returns the user's ban_scope bitmask (0 = not
+	// banned). Used by middleware to enforce BanScopeLogin etc.
+	// without re-fetching the full user row.
+	GetBanState(ctx context.Context, userID uuid.UUID) (scope uint32, err error)
 }
 
 type userRepository struct {
@@ -155,4 +160,15 @@ func (r *userRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 	const q = `UPDATE users SET avatar_url=$2, updated_at=NOW() WHERE id=$1`
 	_, err := r.DB.Exec(ctx, q, userID, avatarURL)
 	return err
+}
+
+// GetBanState reads only ban_scope — banned_at is implied by
+// scope > 0 since unban sets both back to zero. Returns 0 for unbanned
+// users and for users that don't exist (the latter is fine because
+// those callers fail elsewhere on the auth check).
+func (r *userRepository) GetBanState(ctx context.Context, userID uuid.UUID) (uint32, error) {
+	const q = `SELECT ban_scope FROM users WHERE id = $1`
+	var scope uint32
+	err := r.DB.QueryRow(ctx, q, userID).Scan(&scope)
+	return scope, err
 }

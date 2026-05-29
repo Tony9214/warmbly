@@ -85,7 +85,7 @@ func (h *Handler) AdminBanUser(c *gin.Context) {
 		return
 	}
 
-	xerr := h.AdminService.BanUser(c.Request.Context(), *adminID, userID, req.Reason, c.ClientIP(), c.GetHeader("User-Agent"))
+	xerr := h.AdminService.BanUser(c.Request.Context(), *adminID, userID, req.Reason, req.Scope, c.ClientIP(), c.GetHeader("User-Agent"))
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return

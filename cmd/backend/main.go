@@ -18,6 +18,7 @@ import (
 	"github.com/warmbly/warmbly/internal/api/handler"
 	"github.com/warmbly/warmbly/internal/api/middleware"
 	"github.com/warmbly/warmbly/internal/app/admin"
+	"github.com/warmbly/warmbly/internal/app/adminoutreach"
 	"github.com/warmbly/warmbly/internal/app/advanced"
 	"github.com/warmbly/warmbly/internal/app/apikey"
 	"github.com/warmbly/warmbly/internal/app/audit"
@@ -26,6 +27,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/contact"
 	"github.com/warmbly/warmbly/internal/app/crm"
+	"github.com/warmbly/warmbly/internal/app/dailythrottle"
 	"github.com/warmbly/warmbly/internal/app/dangerzone"
 	"github.com/warmbly/warmbly/internal/app/email"
 	"github.com/warmbly/warmbly/internal/app/emailsend"
@@ -124,6 +126,8 @@ func main() {
 
 	// Admin
 	var adminService admin.AdminService
+	var adminOutreachService adminoutreach.Service
+	var dailyThrottleService dailythrottle.Service
 
 	// Worker orchestrator (SSH-driven admin worker lifecycle)
 	var workerOrchestrator *worker_orchestrator.Orchestrator
@@ -469,7 +473,12 @@ func main() {
 		featureGateService = feature.NewService(subscriptionRepository, planRepository)
 		workerAssignmentService = worker.NewAssignmentService(workerRepository, subscriptionRepository, planRepository)
 		subscriptionService = subscription.NewService(subscriptionRepository, planRepository)
-		organizationService = organization.NewService(organizationRepository, subscriptionRepository, userRepostory)
+		// dailyThrottleService needs the cache that's constructed
+		// earlier in main; instantiate up here so org create can use it.
+		if dailyThrottleService == nil {
+			dailyThrottleService = dailythrottle.NewService(cache)
+		}
+		organizationService = organization.NewService(organizationRepository, subscriptionRepository, userRepostory, dailyThrottleService)
 
 		// Load Stripe config and initialize service
 		stripeCfg, err := cfg.LoadStripeConfig(ctx)
@@ -617,7 +626,11 @@ func main() {
 		)
 		// Fan out email-account lifecycle events to customer webhooks.
 		emailService.WireWebhooks(webhookService)
-		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, streamingPublisher)
+		// Same wire-after-construct pattern for the daily throttle —
+		// only the prod backend has a real cache; jobs / tests build
+		// emailService without one.
+		emailService.WireThrottle(dailyThrottleService)
+		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, dailyThrottleService, streamingPublisher)
 		sequenceService = sequence.NewService(sequenceRepostory)
 		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository)
 		apiKeyService = apikey.NewService(cache, apiKeyRepository)
@@ -641,7 +654,7 @@ func main() {
 		// Template & email send services
 		templateService = template.NewService(templateRepository)
 		schedulerService := scheduler.NewSchedulerService(taskRepository, warmupRepository, campaignProgressRepository, emailRepostory, campaignRepostory)
-		emailSendService = emailsend.NewService(taskRepository, emailRepostory, schedulerService, tasksClient, featureGateService)
+		emailSendService = emailsend.NewService(taskRepository, emailRepostory, userRepostory, schedulerService, tasksClient, featureGateService)
 		advancedService = advanced.NewService(
 			advancedRepository,
 			campaignRepostory,
@@ -679,6 +692,16 @@ func main() {
 		// Admin service
 		adminRepository := repository.NewAdminRepository(primaryDB.Pool)
 		adminService = admin.NewService(adminRepository)
+
+		// Admin outreach composer — sends from the platform mailer
+		// (SES/SMTP) with a configurable Reply-To, audits every send.
+		adminOutreachRepo := repository.NewAdminOutreachRepository(primaryDB.Pool)
+		adminOutreachService = adminoutreach.NewService(
+			adminOutreachRepo,
+			userRepostory,
+			organizationRepository,
+			emailNotificationService,
+		)
 
 		folderService = group.NewService(folderRepostory)
 		tagService = group.NewService(tagRepostory)
@@ -749,7 +772,8 @@ func main() {
 		EmailSendService: emailSendService,
 
 		// Admin
-		AdminService: adminService,
+		AdminService:         adminService,
+		AdminOutreachService: adminOutreachService,
 
 		// SSH-managed worker lifecycle
 		WorkerOrchestrator: workerOrchestrator,
