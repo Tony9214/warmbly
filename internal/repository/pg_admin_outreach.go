@@ -11,10 +11,10 @@ import (
 
 // AdminOutreachRepository is the persistence layer for the
 // admin-outreach audit log. Writes happen in two phases:
-//   1. Insert the row with status='queued' so the audit story exists
-//      even if the SMTP/SES call hangs or panics.
-//   2. After the send returns, MarkSent / MarkFailed transitions the
-//      row to its terminal state and records the error if any.
+//  1. Insert the row with status='queued' so the audit story exists
+//     even if the SMTP/SES call hangs or panics.
+//  2. After the send returns, MarkSent / MarkFailed transitions the
+//     row to its terminal state and records the error if any.
 type AdminOutreachRepository interface {
 	Insert(ctx context.Context, m *models.AdminOutreachMessage) error
 	MarkSent(ctx context.Context, id uuid.UUID) error
