@@ -28,7 +28,7 @@ func (h *Handler) GetUniboxIncoming(c *gin.Context) {
 		if orgID != nil {
 			canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
 			if !canUse {
-				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
+				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires an active trial or paid subscription"))
 				return
 			}
 		}
@@ -121,7 +121,7 @@ func (h *Handler) GetUniboxEmail(c *gin.Context) {
 		if orgID != nil {
 			canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
 			if !canUse {
-				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
+				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires an active trial or paid subscription"))
 				return
 			}
 		}
@@ -160,7 +160,7 @@ func (h *Handler) GetUniboxThread(c *gin.Context) {
 		if orgID != nil {
 			canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
 			if !canUse {
-				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires a paid subscription"))
+				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires an active trial or paid subscription"))
 				return
 			}
 		}

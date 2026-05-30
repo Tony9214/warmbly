@@ -90,6 +90,16 @@ var (
 
 	// Discount codes (00000000-0000-0000-0000-000000000Fxx).
 	DiscountWelcome10ID = uuid.MustParse("00000000-0000-0000-0000-000000000f01")
+
+	// Unibox emails (00000000-0000-0000-0000-0000000010xx).
+	UniboxAcmeReplyID      = uuid.MustParse("00000000-0000-0000-0000-000000001001")
+	UniboxAcmeFollowupID   = uuid.MustParse("00000000-0000-0000-0000-000000001002")
+	UniboxAcmeBounceID     = uuid.MustParse("00000000-0000-0000-0000-000000001003")
+	UniboxAcmeOOOID        = uuid.MustParse("00000000-0000-0000-0000-000000001004")
+	UniboxAcmeMeetingID    = uuid.MustParse("00000000-0000-0000-0000-000000001005")
+	UniboxAcmeVendorID     = uuid.MustParse("00000000-0000-0000-0000-000000001006")
+	UniboxGlobexReplyID    = uuid.MustParse("00000000-0000-0000-0000-000000001007")
+	UniboxGlobexQuestionID = uuid.MustParse("00000000-0000-0000-0000-000000001008")
 )
 
 // contactID derives a stable per-org contact UUID from a small sequence number.

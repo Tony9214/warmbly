@@ -136,12 +136,12 @@ export function ConversationList() {
                 ) : emails.length === 0 ? (
                     <div className="px-5 py-16 text-center">
                         <p className="text-[12.5px] text-slate-700 font-medium mb-1">
-                            {search.trim() || params.from || params.accountId || params.unseen || params.since
+                            {search.trim() || params.from || params.accountIds?.length || params.unseen || params.since
                                 ? "No matches"
                                 : "Nothing in your inbox yet"}
                         </p>
                         <p className="text-[11.5px] text-slate-400 max-w-[28ch] mx-auto leading-relaxed">
-                            {search.trim() || params.from || params.accountId || params.unseen || params.since
+                            {search.trim() || params.from || params.accountIds?.length || params.unseen || params.since
                                 ? "Try a different filter or clear them all."
                                 : "Replies and inbound mail will land here automatically."}
                         </p>

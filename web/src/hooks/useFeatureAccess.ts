@@ -29,7 +29,7 @@ export interface FeatureAccess {
     plan: PlanID;
     /** Active subscription on any paid tier. */
     paid: boolean;
-    /** Unified inbox — Starter+. */
+    /** Unified inbox — free trial and Starter+. */
     hasInbox: boolean;
     /** Advanced outreach (AB tests, custom rules) — Business+. */
     hasAdvanced: boolean;
@@ -70,7 +70,7 @@ export default function useFeatureAccess(): FeatureAccess {
         status,
         plan,
         paid: isPaid,
-        hasInbox: isPaid && isAtLeast(plan, "starter"),
+        hasInbox: status === "trialing" || (isPaid && isAtLeast(plan, "starter")),
         hasAdvanced: isPaid && isAtLeast(plan, "business"),
         hasDedicatedIps: isPaid && isAtLeast(plan, "business"),
         hasRealtime: true,

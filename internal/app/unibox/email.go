@@ -2,6 +2,7 @@ package unibox
 
 import (
 	"context"
+	"strings"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
@@ -14,6 +15,8 @@ func (s *uniboxService) GetByID(
 	userID, id uuid.UUID,
 ) (*models.EmailMessage, *errx.Error) {
 	var resp models.EmailMessage
+	var snippet string
+	var seededMessage bool
 
 	// Fetch email data by id index
 	{
@@ -44,6 +47,8 @@ func (s *uniboxService) GetByID(
 		resp.Size = msg.Size
 		resp.InternalDate = msg.InternalDate
 		resp.ModSeq = msg.ModSeq
+		snippet = msg.Snippet
+		seededMessage = strings.HasPrefix(msg.MessageID, "<seed-")
 	}
 
 	// Fetch body from s3 storage
@@ -51,6 +56,10 @@ func (s *uniboxService) GetByID(
 		out, err := s.GetBody(ctx, userID, id)
 		if err != nil {
 			sentry.CaptureException(err)
+			if seededMessage {
+				resp.BodyPlain = snippet
+				return &resp, nil
+			}
 			return nil, errx.InternalError()
 		}
 

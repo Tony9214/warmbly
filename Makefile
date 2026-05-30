@@ -23,7 +23,7 @@ PROTO_DIR := internal/tasks/proto
 PROTO_GEN_FILES := $(PROTO_DIR)/tasks.pb.go
 
 .PHONY: setup-tools fmt lint proto check-proto \
-        up sim seed reset logs status stop down tools test-seed \
+        up sim seed seed-plan reset logs status stop down tools test-seed \
         restart restart-go restart-all infra infra-down app app-down app-logs \
         backend consumer worker run tracking realtime web \
         admin site grant-admin revoke-admin
@@ -77,6 +77,27 @@ sim:
 # swallow the seed's stdout).
 seed:
 	$(COMPOSE) --profile seed run --rm -T seed
+
+# Switch the seeded dev workspace between trial/paid plans without going
+# through Stripe. Run after `make seed`.
+#
+#   make seed-plan PLAN=trial    # 14-day free trial
+#   make seed-plan PLAN=starter
+#   make seed-plan PLAN=pro
+#   make seed-plan PLAN=enterprise
+PLAN ?= trial
+seed-plan:
+	@case "$(PLAN)" in \
+		trial) plan_id="00000000-0000-0000-0000-000000000001"; status="trialing"; stripe_sub=""; price="";; \
+		starter) plan_id="00000000-0000-0000-0000-000000000110"; status="active"; stripe_sub="sub_seed_dev_starter"; price="price_starter_seed";; \
+		pro) plan_id="00000000-0000-0000-0000-000000000120"; status="active"; stripe_sub="sub_seed_dev_pro"; price="price_pro_monthly_seed";; \
+		enterprise) plan_id="00000000-0000-0000-0000-000000000130"; status="active"; stripe_sub="sub_seed_dev_enterprise"; price="price_enterprise_seed";; \
+		*) echo "Usage: make seed-plan PLAN=trial|starter|pro|enterprise"; exit 1;; \
+	esac; \
+	$(COMPOSE) exec -T postgres psql -U warmbly -d warmbly_dev \
+		-v plan_id="$$plan_id" -v status="$$status" -v stripe_sub="$$stripe_sub" -v price="$$price" \
+		-c "INSERT INTO subscriptions (id, user_id, organization_id, plan_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, current_period_start, current_period_end, free_trial_started_at, free_trial_ends_at, is_enterprise, created_at, updated_at) VALUES ('88888888-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', :'plan_id', 'cus_seed_dev', NULLIF(:'stripe_sub', ''), NULLIF(:'price', ''), :'status', NOW(), NOW() + INTERVAL '30 days', CASE WHEN :'status' = 'trialing' THEN NOW() ELSE NULL END, CASE WHEN :'status' = 'trialing' THEN NOW() + INTERVAL '14 days' ELSE NULL END, :'plan_id' = '00000000-0000-0000-0000-000000000130', NOW(), NOW()) ON CONFLICT (organization_id) DO UPDATE SET plan_id = EXCLUDED.plan_id, stripe_subscription_id = EXCLUDED.stripe_subscription_id, stripe_price_id = EXCLUDED.stripe_price_id, status = EXCLUDED.status, current_period_start = EXCLUDED.current_period_start, current_period_end = EXCLUDED.current_period_end, free_trial_started_at = EXCLUDED.free_trial_started_at, free_trial_ends_at = EXCLUDED.free_trial_ends_at, is_enterprise = EXCLUDED.is_enterprise, updated_at = NOW();"
+	@echo "Seeded dev organization switched to $(PLAN). Log in as dev@warmbly.com / password123."
 
 # Spin up debugging UIs (kafka-ui).
 tools:
