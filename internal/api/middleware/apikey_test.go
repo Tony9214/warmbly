@@ -6,11 +6,57 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/models"
 )
 
 func init() {
 	gin.SetMode(gin.TestMode)
+}
+
+func TestRequireAPIKeyEmailAccountParam(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	allowedID := uuid.New()
+	deniedID := uuid.New()
+
+	tests := []struct {
+		name       string
+		authType   string
+		allowlist  []uuid.UUID
+		pathID     uuid.UUID
+		wantStatus int
+	}{
+		{"jwt bypasses allowlist", AuthTypeJWT, []uuid.UUID{allowedID}, deniedID, http.StatusOK},
+		{"unrestricted key bypasses allowlist", AuthTypeAPIKey, nil, deniedID, http.StatusOK},
+		{"allowed key passes", AuthTypeAPIKey, []uuid.UUID{allowedID}, allowedID, http.StatusOK},
+		{"denied key fails", AuthTypeAPIKey, []uuid.UUID{allowedID}, deniedID, http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := gin.New()
+			r.Use(RequestIDMiddleware())
+			r.GET("/emails/:id",
+				func(c *gin.Context) {
+					c.Set(AuthTypeKey, tt.authType)
+					c.Set(APIKeyAllowedEmailAccountsKey, tt.allowlist)
+					c.Next()
+				},
+				RequireAPIKeyEmailAccountParam("id"),
+				func(c *gin.Context) {
+					c.Status(http.StatusOK)
+				},
+			)
+
+			req := httptest.NewRequest(http.MethodGet, "/emails/"+tt.pathID.String(), nil)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+		})
+	}
 }
 
 func TestRequireAPIPermission(t *testing.T) {

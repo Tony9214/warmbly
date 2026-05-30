@@ -18,7 +18,7 @@ func (h *Handler) EmailsSearch(c *gin.Context) {
 	tag := c.Query("tag")
 	limit := c.Query("limit")
 
-	resp, err := h.EmailService.Search(c.Request.Context(), userID, query, cursor, tag, limit)
+	resp, err := h.EmailService.Search(c.Request.Context(), userID, query, cursor, tag, limit, middleware.GetAPIKeyAllowedEmailAccounts(c))
 	if err != nil {
 		errx.Handle(c, err)
 		return

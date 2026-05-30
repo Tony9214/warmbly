@@ -29,6 +29,7 @@ Other CI-touching rules:
 
 Commit hygiene:
 
+- when instructed to make a commit, use the subject format `feat: one line explanation`
 - commit messages on this repo do not include `Co-Authored-By:` or other AI/agent attribution footers. Keep messages to subject + body explaining the why. If a commit slips through with an attribution footer, rewrite it before opening or updating a PR.
 
 ### Verification: what to run, what to skip
@@ -63,6 +64,21 @@ Infra runs in docker; the Go services and frontends run natively on the host for
 - `make fmt` / `make lint` — format and lint Go.
 
 Prefer native `make backend` over rebuilding the docker backend image: docker rebuilds are slow because the image bakes in the migrations and the compiled binary, so a one-line change means a full image build + container recreate. The native targets skip all of that. The dockerized hot-reload flow (`make app`) and prod-image smoke test (`make up`) remain available when you specifically need containers.
+
+Dashboard realtime:
+
+- dashboard experiences should be realtime by default. When emails arrive, contacts are added, records change, or any dashboard-visible feature updates, the dashboard should reflect it live without requiring a manual refresh
+- aim for a responsive, Discord-like product feel: presence, counts, lists, detail panes, notifications, and workflow state should stay current across every dashboard feature where live updates are meaningful
+- when changing dashboard behavior, it is acceptable to safely change the API structure if a better solution exists. Before making an API shape change, ask the user how they want to handle it, especially when the current API may already be published or backwards compatibility might require a new API version
+
+Public API quality bar:
+
+- treat customer-facing API changes as contract changes. Prefer additive changes inside a version, and use a new API version for incompatible behavior once an endpoint is published
+- every API-key-capable route must have an explicit API permission gate and, for JWT callers, the matching organization permission gate
+- side-effectful POST/PATCH/PUT/DELETE endpoints should support `Idempotency-Key` or have a documented reason why retries are naturally safe
+- error responses should include stable machine-readable `code` and `request_id` fields in addition to human-readable text
+- list endpoints should use consistent `data` plus `pagination` shapes with opaque cursors; invalid cursors or limits should return `400` instead of being ignored
+- webhook endpoints must stay HMAC-signed, HTTPS by default, and protected against obvious SSRF targets. Only development/self-hosted environments should opt into unsafe webhook URLs
 
 ## System Shape
 

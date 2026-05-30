@@ -36,6 +36,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/app/fleet"
 	"github.com/warmbly/warmbly/internal/app/group"
+	idempotencyapp "github.com/warmbly/warmbly/internal/app/idempotency"
 	"github.com/warmbly/warmbly/internal/app/integration"
 	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/ratelimit"
@@ -116,6 +117,7 @@ func main() {
 	var categoryService group.GroupService
 	var crmService crm.CRMService
 	var apiKeyService apikey.APIKeyService
+	var idempotencyService idempotencyapp.Service
 
 	// New services for trial, feature gates, and worker assignment
 	var trialService trial.TrialService
@@ -458,6 +460,7 @@ func main() {
 		organizationRepoForHandler = organizationRepository
 		taskRepository := repository.NewTaskRepository(primaryDB.Pool)
 		apiKeyRepository := repository.NewAPIKeyRepository(primaryDB)
+		idempotencyService = idempotencyapp.NewService(primaryDB.Pool)
 		crmRepository := repository.NewCRMRepository(primaryDB.Pool)
 		advancedRepository := repository.NewAdvancedOutreachRepository(primaryDB.Pool)
 		templateRepository := repository.NewTemplateRepository(primaryDB.Pool)
@@ -594,18 +597,23 @@ func main() {
 			credentialsRepository,
 			cipherService,
 			worker_orchestrator.WorkerEnvConfig{
-				AppEnv:               os.Getenv("APP_ENV"),
-				WorkerImage:          getenvDefault("WORKER_IMAGE", "ghcr.io/warmbly/worker:latest"),
-				KafkaBootstrap:       os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
-				KafkaSASLUsername:    os.Getenv("KAFKA_SASL_USERNAME"),
-				KafkaSASLPassword:    os.Getenv("KAFKA_SASL_PASSWORD"),
-				SchemaRegistryURL:    os.Getenv("SCHEMA_REGISTRY_URL"),
-				SchemaRegistryKey:    os.Getenv("SCHEMA_REGISTRY_KEY"),
-				SchemaRegistrySecret: os.Getenv("SCHEMA_REGISTRY_SECRET"),
-				RedisURL:             os.Getenv("REDIS"),
-				AWSRegion:            os.Getenv("AWS_REGION"),
-				AWSAccessKeyID:       os.Getenv("WORKER_AWS_ACCESS_KEY_ID"),
-				AWSSecretAccessKey:   os.Getenv("WORKER_AWS_SECRET_ACCESS_KEY"),
+				AppEnv:                   os.Getenv("APP_ENV"),
+				WorkerImage:              getenvDefault("WORKER_IMAGE", "ghcr.io/warmbly/worker:latest"),
+				KafkaBootstrap:           os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
+				KafkaSASLUsername:        os.Getenv("KAFKA_SASL_USERNAME"),
+				KafkaSASLPassword:        os.Getenv("KAFKA_SASL_PASSWORD"),
+				SchemaRegistryURL:        os.Getenv("SCHEMA_REGISTRY_URL"),
+				SchemaRegistryKey:        os.Getenv("SCHEMA_REGISTRY_KEY"),
+				SchemaRegistrySecret:     os.Getenv("SCHEMA_REGISTRY_SECRET"),
+				RedisURL:                 os.Getenv("REDIS"),
+				AWSRegion:                os.Getenv("AWS_REGION"),
+				AWSAccessKeyID:           os.Getenv("WORKER_AWS_ACCESS_KEY_ID"),
+				AWSSecretAccessKey:       os.Getenv("WORKER_AWS_SECRET_ACCESS_KEY"),
+				EncryptedKeysBackendURL:  os.Getenv("ENCRYPTED_KEYS_BACKEND_URL"),
+				EncryptedKeysWorkerToken: os.Getenv("INTERNAL_API_TOKEN"),
+				EventBusProvider:         os.Getenv("EVENTBUS_PROVIDER"),
+				NATSURL:                  os.Getenv("NATS_URL"),
+				CodecProvider:            os.Getenv("CODEC_PROVIDER"),
 			},
 			getenvDefault("WORKER_INSTALLER_PATH", "/app/scripts/install-worker.sh"),
 		)
@@ -639,6 +647,7 @@ func main() {
 			cache,
 			&oauth2Cfg.InboxAuthorization,
 			workerAssignmentService,
+			streamingPublisher,
 		)
 		// Fan out email-account lifecycle events to customer webhooks.
 		emailService.WireWebhooks(webhookService)
@@ -655,7 +664,7 @@ func main() {
 		rateLimitRepository := repository.NewRateLimitRepository(primaryDB)
 		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)
 		sequenceService = sequence.NewService(sequenceRepostory)
-		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository)
+		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository, streamingPublisher)
 		apiKeyService = apikey.NewService(cache, apiKeyRepository)
 		crmService = crm.NewService(crmRepository)
 		socketService = socket.NewService(cache, tokenService)
@@ -845,6 +854,7 @@ func main() {
 	m := &middleware.Handler{
 		TokenService:        tokenService,
 		APIKeyService:       apiKeyService,
+		IdempotencyService:  idempotencyService,
 		OrganizationService: organizationService,
 	}
 

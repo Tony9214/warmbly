@@ -43,6 +43,10 @@ const (
 
 	// Audit trail
 	APIPermReadAuditLogs
+
+	// Organization operations
+	APIPermIntegrations  // Connect and manage third-party integrations
+	APIPermWarmupRouting // Manage warmup routing rules
 )
 
 // AllAPIPermissionsMask is the OR of every defined permission bit.
@@ -58,7 +62,8 @@ const AllAPIPermissionsMask uint64 = APIPermReadEmails | APIPermReadCampaigns |
 	APIPermSendCampaigns |
 	APIPermReadTemplates | APIPermWriteTemplates |
 	APIPermReadCRM | APIPermWriteCRM |
-	APIPermReadAuditLogs
+	APIPermReadAuditLogs |
+	APIPermIntegrations | APIPermWarmupRouting
 
 // Preset permission sets surfaced via GET /api-keys/permissions so a
 // caller can grant a sane default without picking bits by hand.
@@ -73,7 +78,8 @@ var (
 		APIPermBulkContacts | APIPermBulkCampaigns |
 		APIPermSendCampaigns |
 		APIPermWriteTemplates | APIPermWriteCRM |
-		APIPermRealtimeSubscribe | APIPermWebhooks | APIPermAPIKeys
+		APIPermRealtimeSubscribe | APIPermWebhooks | APIPermAPIKeys |
+		APIPermIntegrations | APIPermWarmupRouting
 )
 
 type APIPermission struct {
@@ -104,6 +110,8 @@ var AllAPIPermissions = []APIPermission{
 	{"REALTIME_SUBSCRIBE", APIPermRealtimeSubscribe, "Subscribe to realtime events", "special"},
 	{"WEBHOOKS", APIPermWebhooks, "Manage webhook endpoints", "special"},
 	{"API_KEYS", APIPermAPIKeys, "Create and manage API keys", "special"},
+	{"INTEGRATIONS", APIPermIntegrations, "Connect and manage third-party integrations", "special"},
+	{"WARMUP_ROUTING", APIPermWarmupRouting, "Manage warmup routing rules", "special"},
 }
 
 // HasAPIPermission reports whether the bitmask grants every bit in `required`.

@@ -22,6 +22,7 @@ func Run(
 	gin.SetMode(ginMode)
 
 	r := gin.Default()
+	r.Use(middleware.RequestIDMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
@@ -36,6 +37,12 @@ func Run(
 	// rotatable from the dashboard.
 	r.POST("/api/v1/integrations/inbound/calendly/:secret", h.InboundCalendly)
 	r.POST("/api/v1/integrations/inbound/cal-com/:secret", h.InboundCalCom)
+
+	// Public worker enrollment. The one-time enrollment token is the
+	// credential; successful exchange returns a dotenv file for the installer
+	// and consumes the token.
+	r.GET("/worker-install.sh", h.ServeWorkerInstaller)
+	r.POST("/api/v1/workers/enroll", h.EnrollWorker)
 
 	// Public OAuth-bouncer pages used by the mailbox onboarding popup.
 	// The provider redirects here; the page postMessages the code/state
@@ -61,10 +68,23 @@ func Run(
 	}
 
 	corsConfig := cors.Config{
-		AllowMethods:  []string{"POST", "GET", "PATCH", "OPTIONS", "DELETE"},
-		AllowHeaders:  []string{"Origin", "Content-Type", "Authorization"},
-		ExposeHeaders: []string{"Content-Length"},
-		MaxAge:        12 * time.Hour,
+		AllowMethods: []string{"POST", "GET", "PUT", "PATCH", "OPTIONS", "DELETE"},
+		AllowHeaders: []string{
+			"Origin",
+			"Content-Type",
+			"Authorization",
+			"Idempotency-Key",
+			"X-Request-Id",
+		},
+		ExposeHeaders: []string{
+			"Content-Length",
+			"X-Request-Id",
+			"X-RateLimit-Limit",
+			"X-RateLimit-Remaining",
+			"X-RateLimit-Policy",
+			"Retry-After",
+		},
+		MaxAge: 12 * time.Hour,
 	}
 	switch {
 	case len(allowedOrigins) == 0 && ginMode != gin.ReleaseMode:
@@ -127,17 +147,17 @@ func Run(
 	// auth types; APIKeyUsageMiddleware records one log row per API-key
 	// request (JWT requests are skipped).
 	protected := r.Group("")
-	protected.Use(m.CombinedAuthMiddleware(), m.APIKeyUsageMiddleware())
+	protected.Use(m.CombinedAuthMiddleware(), m.APIKeyUsageMiddleware(), m.IdempotencyMiddleware())
 	{
 		emails := protected.Group("/emails")
 		emails.Use(m.RateLimitMiddleware(models.RateLimitWrite))
 		{
 			emails.GET("", m.RequireAccess(models.PermViewCampaigns, models.APIPermReadEmails), h.EmailsSearch)
-			emails.GET("/:id", m.RequireAccess(models.PermViewCampaigns, models.APIPermReadEmails), h.GetEmail)
-			emails.PATCH("/:id", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), h.UpdateEmail)
-			emails.PATCH("/:id/track", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), h.UpdateEmailTrackingDomain)
-			emails.DELETE("/:id", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), h.DeleteEmail)
-			emails.POST("/:id/send", m.RequireOrganization(), m.RequireAccess(models.PermSendCampaigns, models.APIPermSendCampaigns), h.SendEmailFromAccount)
+			emails.GET("/:id", m.RequireAccess(models.PermViewCampaigns, models.APIPermReadEmails), middleware.RequireAPIKeyEmailAccountParam("id"), h.GetEmail)
+			emails.PATCH("/:id", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), middleware.RequireAPIKeyEmailAccountParam("id"), h.UpdateEmail)
+			emails.PATCH("/:id/track", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), middleware.RequireAPIKeyEmailAccountParam("id"), h.UpdateEmailTrackingDomain)
+			emails.DELETE("/:id", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), middleware.RequireAPIKeyEmailAccountParam("id"), h.DeleteEmail)
+			emails.POST("/:id/send", m.RequireOrganization(), m.RequireAccess(models.PermSendCampaigns, models.APIPermSendCampaigns), middleware.RequireAPIKeyEmailAccountParam("id"), h.SendEmailFromAccount)
 		}
 
 		// Email onboarding is JWT-only — it writes user-encrypted refresh
@@ -217,12 +237,11 @@ func Run(
 			contacts.GET("/:id/deals", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.GetDealsByContact)
 		}
 
-		// Group endpoints (folders / tags / categories) don't yet have
-		// dedicated permission bits — gate them on the broadest read scope
-		// for now so an API key needs at least one collection permission.
-		grouph.New(protected, h.FolderService, "folders")
-		grouph.New(protected, h.TagService, "tags")
-		grouph.New(protected, h.CategoryService, "categories")
+		// Group endpoints map to the resources they organize: campaign
+		// folders, email-account tags, and contact categories.
+		grouph.New(protected, h.FolderService, "folders", m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns))
+		grouph.New(protected, h.TagService, "tags", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails))
+		grouph.New(protected, h.CategoryService, "categories", m.RequireAccess(models.PermManageContacts, models.APIPermWriteContacts))
 
 		unibox := protected.Group("/unibox")
 		unibox.Use(m.RateLimitMiddleware(models.RateLimitRead))
@@ -312,7 +331,7 @@ func Run(
 
 		// Customer-facing webhooks (org-scoped).
 		webhooks := protected.Group("/webhooks")
-		webhooks.Use(m.RequireOrganization(), m.RateLimitMiddleware(models.RateLimitWrite))
+		webhooks.Use(m.RequireOrganization(), m.RequireAccess(models.PermManageSettings, models.APIPermWebhooks), m.RateLimitMiddleware(models.RateLimitWrite))
 		{
 			webhooks.GET("", h.ListWebhookEndpoints)
 			webhooks.POST("", h.CreateWebhookEndpoint)
@@ -326,7 +345,7 @@ func Run(
 		// "available integrations" list; connections are this org's live
 		// state for each provider.
 		integrations := protected.Group("/integrations")
-		integrations.Use(m.RequireOrganization(), m.RateLimitMiddleware(models.RateLimitWrite))
+		integrations.Use(m.RequireOrganization(), m.RequireAccess(models.PermManageSettings, models.APIPermIntegrations), m.RateLimitMiddleware(models.RateLimitWrite))
 		{
 			integrations.GET("/catalog", h.ListIntegrationCatalog)
 			integrations.GET("/connections", h.ListIntegrationConnections)
@@ -339,7 +358,7 @@ func Run(
 		// preferences for premium-pool partner selection — e.g. send
 		// to Gmail recipients only from Google-classified senders.
 		warmupRouting := protected.Group("/warmup/routing")
-		warmupRouting.Use(m.RequireOrganization(), m.RateLimitMiddleware(models.RateLimitWrite))
+		warmupRouting.Use(m.RequireOrganization(), m.RequireAccess(models.PermManageSettings, models.APIPermWarmupRouting), m.RateLimitMiddleware(models.RateLimitWrite))
 		{
 			warmupRouting.GET("", h.ListWarmupRoutingRules)
 			warmupRouting.POST("", h.CreateWarmupRoutingRule)

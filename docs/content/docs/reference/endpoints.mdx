@@ -116,6 +116,15 @@ When an endpoint says "JWT permission: X / API permission: Y", the dual-auth mid
 | POST | `/deliverability/events` | `WRITE_CAMPAIGNS` |
 | GET | `/tasks/dlq` | `SEND_CAMPAIGNS` |
 | POST | `/tasks/dlq/:id/replay` | `SEND_CAMPAIGNS` |
+| GET/POST/PATCH/DELETE | `/webhooks[/:id]` | `WEBHOOKS` |
+| POST | `/webhooks/:id/rotate-secret` | `WEBHOOKS` |
+| GET | `/webhooks/:id/deliveries` | `WEBHOOKS` |
+| GET/POST/DELETE | `/integrations/*` | `INTEGRATIONS` |
+| GET/POST/PATCH/DELETE | `/warmup/routing[/:id]` | `WARMUP_ROUTING` |
+
+### Retry safety
+
+Mutating API requests may include an `Idempotency-Key` header. Warmbly stores the completed response for 24 hours per organization and key. Reusing the same key with the same method, route, query, and body replays the original response with `X-Idempotent-Replayed: true`; reusing the key with a different request returns `409 Conflict`.
 
 ### Reference data
 
