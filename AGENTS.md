@@ -31,6 +31,38 @@ Commit hygiene:
 
 - commit messages on this repo do not include `Co-Authored-By:` or other AI/agent attribution footers. Keep messages to subject + body explaining the why. If a commit slips through with an attribution footer, rewrite it before opening or updating a PR.
 
+### Verification: what to run, what to skip
+
+Keep the loop fast. The signals that matter are formatting, lint, and typecheck — not local builds or browser automation.
+
+Always, before calling a Go change done:
+
+- run `make fmt` (or `gofmt -w cmd internal`); `gofmt -l ./...` must print nothing
+- run `make lint` (golangci-lint)
+
+For frontend changes, run `pnpm typecheck` and `pnpm lint` in any tree you touched.
+
+Do not:
+
+- do not run `go build ./...`, `pnpm build`, or docker image builds as a "did it work" check. They are slow and are not what CI gates on. `go run` (via the make dev targets) already compiles; `make fmt` + `make lint` + `pnpm typecheck` are the real signals.
+- do not write or run Python/Playwright (or any browser-automation) scripts to test the app. Manual, in-browser verification is the user's job against the native dev stack (`make infra` + `make backend` + `make web`). Do not add screenshot/e2e test harnesses to this repo.
+- do not run the Go test suite as a default gate unless the task is specifically about those tests.
+- do not push hoping CI passes; a `gofmt -l` / `make lint` / `pnpm typecheck` failure is always a real CI failure.
+
+## Local Development
+
+Infra runs in docker; the Go services and frontends run natively on the host for fast iteration — no docker image rebuilds when you change app code. Targets live in the `Makefile`.
+
+- `make infra` — start the backing services in docker (postgres, redis, kafka, schema-registry, mailpit, localstack + init, cloud-tasks, stripe-mock). Run once; leave running.
+- `make backend` — run the API natively on `:8080` (applies the embedded migrations on boot against the docker postgres).
+- `make consumer` / `make worker` — run those Go services natively, each in its own terminal.
+- `make run` — backend + consumer + worker together in one terminal (Ctrl-C stops all).
+- `make web` / `make admin` / `make site` — frontend dev servers (5173 / 5174 / 4321), pointed at the native backend.
+- `make seed` — load fixtures (after the backend has applied migrations).
+- `make fmt` / `make lint` — format and lint Go.
+
+Prefer native `make backend` over rebuilding the docker backend image: docker rebuilds are slow because the image bakes in the migrations and the compiled binary, so a one-line change means a full image build + container recreate. The native targets skip all of that. The dockerized hot-reload flow (`make app`) and prod-image smoke test (`make up`) remain available when you specifically need containers.
+
 ## System Shape
 
 - `cmd/backend`: API and business orchestration
