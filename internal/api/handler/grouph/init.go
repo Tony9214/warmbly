@@ -10,13 +10,16 @@ type Handler struct {
 	service group.GroupService
 }
 
-func New(r *gin.RouterGroup, service group.GroupService, name string) {
+func New(r *gin.RouterGroup, service group.GroupService, name string, middleware ...gin.HandlerFunc) {
 	h := &Handler{
 		name:    name,
 		service: service,
 	}
 
 	g := r.Group("/" + name)
+	if len(middleware) > 0 {
+		g.Use(middleware...)
+	}
 	{
 		g.POST("", h.Create)
 		g.PATCH("/:gid", h.Update)
