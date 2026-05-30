@@ -681,7 +681,7 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		SET %s
 		WHERE user_id = $1 AND id = $2
 		RETURNING id, organization_id, email, name, signature_plain, signature_html, signature_sync, signature_code, provider, status,
-		          COALESCE(last_synced_at, created_at) AS last_synced_at, last_id, campaign_limit, min_wait_time, reply_to, tracking_domain,
+		          COALESCE(last_synced_at, created_at) AS last_synced_at, last_id, campaign_limit, min_wait_time, reply_to, tracking_domain, tracking_domain_verified, tracking_domain_verified_at,
 		          warmup, warmup_base, warmup_max, warmup_increase, warmup_reply_rate, warmup_tag, warmup_pool_type,
 		          warmup_start_time, warmup_end_time, warmup_days, created_at, updated_at
 	`, strings.Join(setClauses, ", "))

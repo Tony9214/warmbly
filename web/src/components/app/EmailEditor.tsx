@@ -10,6 +10,18 @@ import {
 import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
+// htmlToPlain renders the HTML signature down to a plain-text equivalent,
+// turning block elements and <br> into line breaks. Used to keep the plain
+// version in lockstep with the HTML one while "sync" is on.
+function htmlToPlain(html: string): string {
+    const withBreaks = html
+        .replace(/<\s*br\s*\/?>/gi, "\n")
+        .replace(/<\/\s*(p|div|h[1-6]|li|tr)\s*>/gi, "\n");
+    const tmp = document.createElement("div");
+    tmp.innerHTML = withBreaks;
+    return (tmp.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 interface EmailEditorProps {
     id: string;
     htmlText: string;
@@ -36,9 +48,16 @@ export default function EmailEditor({
     const editorRef = useRef<HTMLDivElement>(null);
     const [activeTab, setActiveTab] = useState<"html" | "plain">("html");
 
+    // commitHtml writes the HTML signature and, while sync is on, keeps the
+    // plain-text version derived from it so the two stay identical.
+    function commitHtml(html: string) {
+        setHtmlText(html);
+        if (sync) setPlainText(htmlToPlain(html));
+    }
+
     function exec(command: string, value?: string) {
         document.execCommand(command, false, value);
-        if (editorRef.current) setHtmlText(editorRef.current.innerHTML);
+        if (editorRef.current) commitHtml(editorRef.current.innerHTML);
     }
 
     const toolbarButtons = [
@@ -124,29 +143,47 @@ export default function EmailEditor({
                             {code ? <RiText className="w-3.5 h-3.5" /> : <RiCodeView className="w-3.5 h-3.5" />}
                         </button>
                     )}
-                    <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none pl-1">
+                    <label
+                        className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none pl-1"
+                        title="Generate the plain-text version from the HTML and keep them identical"
+                    >
                         <input
                             type="checkbox"
                             checked={sync}
-                            onChange={(e) => setSync(e.target.checked)}
+                            onChange={(e) => {
+                                const on = e.target.checked;
+                                setSync(on);
+                                if (on) setPlainText(htmlToPlain(htmlText));
+                            }}
                             className="w-3 h-3 rounded accent-sky-600"
                         />
-                        Sync to replies
+                        Sync HTML &amp; plain
                     </label>
                 </div>
             </div>
 
             {activeTab === "plain" ? (
-                <textarea
-                    value={plainText}
-                    onChange={(e) => setPlainText(e.target.value)}
-                    className="w-full min-h-[120px] px-3 py-2.5 text-[13px] text-slate-800 outline-none resize-none font-mono"
-                    placeholder="Plain text version…"
-                />
+                <div>
+                    {sync && (
+                        <div className="px-3 pt-2 text-[10.5px] text-slate-400">
+                            Generated from the HTML version. Turn off sync to edit it separately.
+                        </div>
+                    )}
+                    <textarea
+                        value={plainText}
+                        onChange={(e) => setPlainText(e.target.value)}
+                        readOnly={sync}
+                        className={cn(
+                            "w-full min-h-[120px] px-3 py-2.5 text-[13px] text-slate-800 outline-none resize-none font-mono",
+                            sync && "bg-slate-50/60 text-slate-500 cursor-not-allowed",
+                        )}
+                        placeholder="Plain text version…"
+                    />
+                </div>
             ) : code ? (
                 <textarea
                     value={htmlText}
-                    onChange={(e) => setHtmlText(e.target.value)}
+                    onChange={(e) => commitHtml(e.target.value)}
                     className="w-full min-h-[120px] px-3 py-2.5 text-[12px] text-slate-800 outline-none resize-none font-mono"
                     placeholder="<p>HTML source…</p>"
                     spellCheck={false}
@@ -156,7 +193,7 @@ export default function EmailEditor({
                     ref={editorRef}
                     id={id}
                     contentEditable
-                    onInput={(e) => setHtmlText(e.currentTarget.innerHTML)}
+                    onInput={(e) => commitHtml(e.currentTarget.innerHTML)}
                     className="min-h-[120px] px-3 py-2.5 text-[13px] text-slate-800 outline-none prose prose-sm max-w-none"
                     dangerouslySetInnerHTML={{ __html: htmlText }}
                 />

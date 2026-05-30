@@ -22,7 +22,7 @@ func (h *Handler) GetUniboxIncoming(c *gin.Context) {
 		return
 	}
 
-	// Check if organization can use unibox (paid subscription required)
+	// Check if organization can use unibox (active free trial or paid subscription)
 	if h.FeatureGateService != nil {
 		orgID := middleware.GetOrganizationID(c)
 		if orgID != nil {
@@ -166,19 +166,30 @@ func (h *Handler) GetUniboxThread(c *gin.Context) {
 		}
 	}
 
+	// email_id is optional. When omitted, the thread is read across
+	// every mailbox the user owns — the natural unified-inbox view
+	// where the caller only knows the thread.
+	var eid uuid.UUID
 	emailID := c.Query("email")
 	if emailID == "" {
 		emailID = c.Query("email_id")
 	}
-	eid, err := uuid.Parse(emailID)
-	if err != nil {
-		errx.Handle(c, errx.ErrUuid)
-		return
+	if emailID != "" {
+		parsed, err := uuid.Parse(emailID)
+		if err != nil {
+			errx.Handle(c, errx.ErrUuid)
+			return
+		}
+		eid = parsed
 	}
 
 	threadID := c.Query("id")
 	if threadID == "" {
 		threadID = c.Query("thread_id")
+	}
+	if threadID == "" {
+		errx.Handle(c, errx.New(errx.BadRequest, "thread_id is required"))
+		return
 	}
 	cursor := c.Query("cursor")
 	limit := c.Query("limit")

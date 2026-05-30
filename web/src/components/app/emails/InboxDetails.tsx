@@ -22,6 +22,8 @@ import {
     CalendarIcon,
     ReplyIcon,
     SendIcon,
+    CopyIcon,
+    CheckIcon,
     type LucideIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -31,6 +33,7 @@ import type { AccountError } from "@/lib/api/models/app/analytics/AccountStatus"
 import useAccountStatus from "@/lib/api/hooks/app/analytics/useAccountStatus";
 import useWarmupAnalytics from "@/lib/api/hooks/app/analytics/useWarmupAnalytics";
 import useUpdateEmail from "@/lib/api/hooks/app/emails/useUpdateEmail";
+import useUpdateEmailTrackingDomain from "@/lib/api/hooks/app/emails/useUpdateEmailTrackingDomain";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import EmailEditor from "../EmailEditor";
@@ -151,7 +154,7 @@ export default function InboxDetails({
 /* ── editable fields tracked for the save bar ─────────────────────── */
 const EDITABLE: (keyof Inbox)[] = [
     "name", "signature_html", "signature_plain", "signature_sync", "signature_code",
-    "tags", "campaign_limit", "min_wait_time", "reply_to", "tracking_domain",
+    "tags", "campaign_limit", "min_wait_time", "reply_to",
     "warmup_base", "warmup_max", "warmup_increase", "warmup_reply_rate",
 ];
 
@@ -227,7 +230,13 @@ function Detail({ mailbox, onClose }: { mailbox: Inbox; onClose: () => void }) {
                         >
                             <t.icon className="w-3.5 h-3.5" />
                             {t.label}
-                            {active && <span className="absolute left-1.5 right-1.5 -bottom-px h-0.5 rounded-full bg-sky-600" />}
+                            {active && (
+                                <motion.span
+                                    layoutId="inbox-tab-underline"
+                                    className="absolute left-1.5 right-1.5 -bottom-px h-0.5 rounded-full bg-sky-600"
+                                    transition={{ type: "spring", duration: 0.3, bounce: 0.15 }}
+                                />
+                            )}
                         </button>
                     );
                 })}
@@ -238,7 +247,7 @@ function Detail({ mailbox, onClose }: { mailbox: Inbox; onClose: () => void }) {
                 {tab === "overview" && <OverviewTab status={status.data} loading={status.isPending} mailbox={mailbox} />}
                 {tab === "analytics" && <AnalyticsTab warmup={warmup.data} loading={warmup.isPending} />}
                 {tab === "warmup" && <WarmupTab form={form} update={update} status={status.data} />}
-                {tab === "settings" && <SettingsTab form={form} update={update} />}
+                {tab === "settings" && <SettingsTab form={form} update={update} mailbox={mailbox} />}
             </div>
 
             {/* Save bar — only when something changed */}
@@ -450,9 +459,134 @@ function WarmupTab({ form, update, status }: { form: Inbox; update: (p: Partial<
     );
 }
 
+/* ── Tracking domain (own save + DNS verify flow) ─────────────────────── */
+
+// TRACKING_TARGET is the shared host customers point their CNAME at.
+// Keep in sync with the backend TRACKING_DOMAIN default.
+const TRACKING_TARGET = "t.warmbly.com";
+
+function TrackingDomainCard({ mailbox }: { mailbox: Inbox }) {
+    const [domain, setDomain] = useState(mailbox.tracking_domain ?? "");
+    const [copied, setCopied] = useState(false);
+    const mutation = useUpdateEmailTrackingDomain(mailbox.id);
+
+    const saved = (mailbox.tracking_domain ?? "").trim();
+    const verified = mailbox.tracking_domain_verified;
+    const dirty = domain.trim() !== saved;
+
+    const copyTarget = async () => {
+        try {
+            await navigator.clipboard.writeText(TRACKING_TARGET);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+        } catch {
+            // clipboard may be unavailable (insecure context); ignore
+        }
+    };
+
+    const save = async () => {
+        const next = domain.trim();
+        try {
+            const res = await mutation.mutateAsync(next);
+            if (!next) {
+                toast.success("Tracking domain cleared");
+            } else if (res.tracking_domain_verified) {
+                toast.success("Tracking domain verified");
+            } else {
+                toast("Saved. DNS hasn't propagated yet, re-verify in a few minutes.", { icon: "⏳" });
+            }
+        } catch (e) {
+            toast.error(buildError(e as AppError));
+        }
+    };
+
+    const clear = async () => {
+        setDomain("");
+        try {
+            await mutation.mutateAsync("");
+            toast.success("Tracking domain cleared");
+        } catch (e) {
+            toast.error(buildError(e as AppError));
+        }
+    };
+
+    return (
+        <div className="px-5 py-5 space-y-3">
+            <div className="flex items-center justify-between">
+                <Eyebrow>Tracking domain</Eyebrow>
+                {saved ? (
+                    verified ? (
+                        <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-emerald-100 bg-emerald-50 text-emerald-700 text-[10px] font-semibold uppercase tracking-wide">
+                            <CheckCircle2Icon className="w-3 h-3" /> Verified
+                        </span>
+                    ) : (
+                        <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-amber-100 bg-amber-50 text-amber-700 text-[10px] font-semibold uppercase tracking-wide">
+                            <ClockIcon className="w-3 h-3" /> Pending DNS
+                        </span>
+                    )
+                ) : (
+                    <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-slate-200 bg-slate-100 text-slate-500 text-[10px] font-semibold uppercase tracking-wide">
+                        Not set
+                    </span>
+                )}
+            </div>
+
+            <FieldShell label="Custom tracking domain" hint="Track opens & clicks through your own subdomain instead of the shared host. Improves deliverability.">
+                <TextInput value={domain} placeholder="track.yourdomain.com" onChange={setDomain} className="w-full h-9" />
+            </FieldShell>
+
+            {domain.trim() && (
+                <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3 space-y-2">
+                    <div className="text-[11px] text-slate-500 leading-relaxed">
+                        Add this CNAME record at your DNS provider, then save to verify:
+                    </div>
+                    <div className="grid grid-cols-[56px_1fr] gap-x-3 gap-y-1.5 text-[11.5px] items-center">
+                        <span className="text-slate-400">Type</span>
+                        <span className="font-mono text-slate-700">CNAME</span>
+                        <span className="text-slate-400">Name</span>
+                        <span className="font-mono text-slate-700 truncate">{domain.trim()}</span>
+                        <span className="text-slate-400">Value</span>
+                        <span className="font-mono text-slate-700 inline-flex items-center gap-1.5 min-w-0">
+                            <span className="truncate">{TRACKING_TARGET}</span>
+                            <button
+                                type="button"
+                                onClick={copyTarget}
+                                className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors"
+                                aria-label="Copy CNAME target"
+                            >
+                                {copied ? <CheckIcon className="w-3 h-3 text-emerald-600" /> : <CopyIcon className="w-3 h-3" />}
+                            </button>
+                        </span>
+                    </div>
+                </div>
+            )}
+
+            <div className="flex items-center gap-2">
+                <button
+                    onClick={save}
+                    disabled={mutation.isPending || (!dirty && (verified || !saved))}
+                    className="h-8 px-3.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                >
+                    {mutation.isPending && <Loading className="!w-3.5 h-3.5 text-white" />}
+                    {!saved || dirty ? "Save & verify" : verified ? "Verified" : "Re-verify"}
+                </button>
+                {saved && !dirty && (
+                    <button
+                        onClick={clear}
+                        disabled={mutation.isPending}
+                        className="h-8 px-3 rounded-md border border-slate-200 hover:border-slate-300 text-[12px] text-slate-600 hover:text-slate-900 transition-colors disabled:opacity-60"
+                    >
+                        Clear
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
 /* ── Settings (editable) ─────────────────────── */
 
-function SettingsTab({ form, update }: { form: Inbox; update: (p: Partial<Inbox>) => void }) {
+function SettingsTab({ form, update, mailbox }: { form: Inbox; update: (p: Partial<Inbox>) => void; mailbox: Inbox }) {
     return (
         <div className="divide-y divide-slate-200/60">
             <div className="px-5 py-5 space-y-4">
@@ -501,15 +635,10 @@ function SettingsTab({ form, update }: { form: Inbox; update: (p: Partial<Inbox>
                 </FieldShell>
             </div>
 
-            <div className="px-5 py-5 space-y-2">
-                <Eyebrow>Tracking domain</Eyebrow>
-                <FieldShell label="Custom tracking domain" hint="Track opens & clicks through your own domain (CNAME). Improves deliverability.">
-                    <TextInput value={form.tracking_domain ?? ""} placeholder="track.yourdomain.com" onChange={(v) => update({ tracking_domain: v })} className="w-full h-9" />
-                </FieldShell>
-            </div>
+            <TrackingDomainCard mailbox={mailbox} />
 
             <div className="flex items-center gap-1.5 px-5 py-3 text-[11px] text-slate-400">
-                <SendIcon className="w-3 h-3" /> Changes apply to new sends. <ReplyIcon className="w-3 h-3 ml-1" /> Signature syncs to replies too.
+                <SendIcon className="w-3 h-3" /> Changes apply to new sends. <ReplyIcon className="w-3 h-3 ml-1" /> Signature applies to replies too.
             </div>
         </div>
     );

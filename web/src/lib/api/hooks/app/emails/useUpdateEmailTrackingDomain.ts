@@ -3,7 +3,7 @@ import type GetEmails from "@/lib/api/models/app/emails/GetEmails";
 import type Inbox from "@/lib/api/models/app/emails/Inbox";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 
-export default function useUpdateEmail(id: string) {
+export default function useUpdateEmailTrackingDomain(id: string) {
     const queryClient = useQueryClient();
 
     return useMutation({
@@ -23,6 +23,8 @@ export default function useUpdateEmail(id: string) {
                         data: page.data.map((c) => c.id === id ? {
                             ...c,
                             tracking_domain: data.tracking_domain,
+                            tracking_domain_verified: data.tracking_domain_verified,
+                            tracking_domain_verified_at: data.tracking_domain_verified_at,
                         } : c),
                     })),
                 });
@@ -36,6 +38,8 @@ export default function useUpdateEmail(id: string) {
                     return {
                         ...oldData,
                         tracking_domain: data.tracking_domain,
+                        tracking_domain_verified: data.tracking_domain_verified,
+                        tracking_domain_verified_at: data.tracking_domain_verified_at,
                     }
                 }
             );

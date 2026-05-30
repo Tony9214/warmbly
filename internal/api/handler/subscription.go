@@ -257,13 +257,14 @@ func (h *Handler) ChangePlan(c *gin.Context) {
 		PlanID            uuid.UUID `json:"plan_id" binding:"required"`
 		ProrationBehavior string    `json:"proration_behavior"` // "create_prorations", "always_invoice", "none"
 		DiscountCode      string    `json:"discount_code"`
+		Interval          string    `json:"interval"` // "month" or "year"; defaults to monthly
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errx.JSON(c, errx.New(errx.BadRequest, "invalid request body"))
 		return
 	}
 
-	updated, errX := h.StripeService.ChangePlan(c.Request.Context(), *orgID, req.PlanID, req.ProrationBehavior, req.DiscountCode)
+	updated, errX := h.StripeService.ChangePlan(c.Request.Context(), *orgID, req.PlanID, req.ProrationBehavior, req.DiscountCode, req.Interval)
 	if errX != nil {
 		errx.JSON(c, errX)
 		return

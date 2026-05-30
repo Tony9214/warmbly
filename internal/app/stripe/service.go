@@ -51,7 +51,7 @@ type StripeService interface {
 	CancelSubscription(ctx context.Context, subscriptionID string, cancelAtPeriodEnd bool) *errx.Error
 
 	// Plan changes with proration. discountCode is optional ("" for none).
-	ChangePlan(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID, prorationBehavior, discountCode string) (*stripe.Subscription, *errx.Error)
+	ChangePlan(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID, prorationBehavior, discountCode, interval string) (*stripe.Subscription, *errx.Error)
 	PreviewPlanChange(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID) (*ProrationPreview, *errx.Error)
 
 	// Webhooks
@@ -294,7 +294,7 @@ func (s *stripeService) CancelSubscription(ctx context.Context, subscriptionID s
 }
 
 // ChangePlan changes the organization's subscription to a new plan with proration
-func (s *stripeService) ChangePlan(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID, prorationBehavior, discountCode string) (*stripe.Subscription, *errx.Error) {
+func (s *stripeService) ChangePlan(ctx context.Context, orgID uuid.UUID, newPlanID uuid.UUID, prorationBehavior, discountCode, interval string) (*stripe.Subscription, *errx.Error) {
 	sub, err := s.subRepo.GetByOrganizationID(ctx, orgID)
 	if err != nil {
 		return nil, errx.New(errx.Internal, "failed to get subscription")
@@ -307,7 +307,13 @@ func (s *stripeService) ChangePlan(ctx context.Context, orgID uuid.UUID, newPlan
 	if err != nil || newPlan == nil {
 		return nil, errx.New(errx.NotFound, "plan not found")
 	}
-	if newPlan.StripePriceID == nil {
+
+	// Pick the monthly or yearly Stripe price for the requested interval.
+	priceID := newPlan.StripePriceID
+	if interval == string(models.DurationYear) && newPlan.StripePriceIDYearly != nil {
+		priceID = newPlan.StripePriceIDYearly
+	}
+	if priceID == nil {
 		return nil, errx.New(errx.BadRequest, "plan has no Stripe price")
 	}
 
@@ -368,7 +374,7 @@ func (s *stripeService) ChangePlan(ctx context.Context, orgID uuid.UUID, newPlan
 		Items: []*stripe.SubscriptionItemsParams{
 			{
 				ID:    stripe.String(itemID),
-				Price: stripe.String(*newPlan.StripePriceID),
+				Price: stripe.String(*priceID),
 			},
 		},
 		ProrationBehavior: stripe.String(prorationBehavior),

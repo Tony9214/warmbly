@@ -36,6 +36,8 @@ import { TextInput } from "@/components/ui/field";
 import { Row, Section, SectionShell } from "../_components/SectionShell";
 import { PLAN_ACCENT_CLASSES, PAID_PLANS, getPlan, type PlanID } from "@/lib/plans";
 
+type BillingInterval = "monthly" | "annual";
+
 export default function BillingSettingsPage() {
     const access = useFeatureAccess();
     const sub = useSubscription();
@@ -47,6 +49,8 @@ export default function BillingSettingsPage() {
     const plansQuery = usePlans();
     const [codeInput, setCodeInput] = React.useState("");
     const [applied, setApplied] = React.useState<DiscountPreview | null>(null);
+    const [billingInterval, setBillingInterval] =
+        React.useState<BillingInterval>("annual");
 
     if (!access.loading && !access.isOwner) {
         return (
@@ -138,8 +142,12 @@ export default function BillingSettingsPage() {
         const code = applied?.valid ? applied.code : undefined;
         const target = resolveServerPlan(catalogId);
         const onPaid = currentPlan.id !== "free";
+        const annual = billingInterval === "annual";
+        const priceId = annual
+            ? target?.stripe_price_id_yearly
+            : target?.stripe_price_id;
 
-        if (!target || (!onPaid && !target.stripe_price_id)) {
+        if (!target || (!onPaid && !priceId)) {
             openPortal();
             return;
         }
@@ -147,7 +155,11 @@ export default function BillingSettingsPage() {
         try {
             if (onPaid) {
                 await toast.promise(
-                    changePlan.mutateAsync({ plan_id: target.id, discount_code: code }),
+                    changePlan.mutateAsync({
+                        plan_id: target.id,
+                        discount_code: code,
+                        interval: annual ? "year" : "month",
+                    }),
                     {
                         loading: "Updating your plan…",
                         success: "Plan updated",
@@ -158,7 +170,7 @@ export default function BillingSettingsPage() {
                 const base = `${window.location.origin}/app/settings/billing`;
                 const { checkout_url } = await toast.promise(
                     checkout.mutateAsync({
-                        price_id: target.stripe_price_id as string,
+                        price_id: priceId as string,
                         success_url: `${base}?checkout=success`,
                         cancel_url: `${base}?checkout=cancel`,
                         discount_code: code,
@@ -304,6 +316,17 @@ export default function BillingSettingsPage() {
                 eyebrow="Compare plans"
                 description="Same lineup as the public pricing page."
             >
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <span className="text-[11.5px] text-slate-500">
+                        {billingInterval === "annual"
+                            ? "Annual billing — save 20%."
+                            : "Monthly billing."}
+                    </span>
+                    <BillingIntervalToggle
+                        interval={billingInterval}
+                        onChange={setBillingInterval}
+                    />
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                     {PAID_PLANS.map((id) => (
                         <PlanCard
@@ -311,6 +334,7 @@ export default function BillingSettingsPage() {
                             id={id}
                             active={currentPlan.id === id}
                             discount={applied}
+                            interval={billingInterval}
                             onUpgrade={() => upgrade(id)}
                         />
                     ))}
@@ -411,20 +435,63 @@ export default function BillingSettingsPage() {
     );
 }
 
+function BillingIntervalToggle({
+    interval,
+    onChange,
+}: {
+    interval: BillingInterval;
+    onChange: (i: BillingInterval) => void;
+}) {
+    return (
+        <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 p-0.5 text-[12px]">
+            {(["monthly", "annual"] as BillingInterval[]).map((opt) => {
+                const active = interval === opt;
+                return (
+                    <button
+                        key={opt}
+                        type="button"
+                        onClick={() => onChange(opt)}
+                        className={`h-6 px-2.5 rounded inline-flex items-center gap-1 font-medium transition-colors ${
+                            active
+                                ? "bg-white text-slate-900 shadow-sm"
+                                : "text-slate-500 hover:text-slate-700"
+                        }`}
+                    >
+                        {opt === "monthly" ? "Monthly" : "Annual"}
+                        {opt === "annual" && (
+                            <span
+                                className={`text-[10px] font-semibold ${
+                                    active ? "text-emerald-600" : "text-emerald-500"
+                                }`}
+                            >
+                                −20%
+                            </span>
+                        )}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
 function PlanCard({
     id,
     active,
     discount,
+    interval,
     onUpgrade,
 }: {
     id: PlanID;
     active: boolean;
     discount?: DiscountPreview | null;
+    interval: BillingInterval;
     onUpgrade: () => void;
 }) {
     const plan = getPlan(id);
     const accent = PLAN_ACCENT_CLASSES[plan.accent];
-    const disc = discountedMonthly(plan.priceMonthly, discount);
+    const annual = interval === "annual";
+    const base = annual ? plan.priceAnnual : plan.priceMonthly;
+    const disc = discountedPrice(base, discount);
 
     return (
         <div
@@ -448,8 +515,8 @@ function PlanCard({
                     </span>
                 )}
             </div>
-            <div className="flex items-baseline gap-1 mb-2">
-                {plan.priceMonthly == null ? (
+            <div className="flex items-baseline gap-1 mb-0.5">
+                {base == null ? (
                     <span className="text-[18px] font-semibold text-slate-900 tabular-nums">
                         Custom
                     </span>
@@ -459,18 +526,25 @@ function PlanCard({
                             ${fmtMoney(disc)}
                         </span>
                         <span className="text-[11px] text-slate-400 line-through tabular-nums">
-                            ${fmtMoney(plan.priceMonthly)}
+                            ${fmtMoney(base)}
                         </span>
                         <span className="text-[10.5px] text-slate-500">/ mo</span>
                     </>
                 ) : (
                     <>
                         <span className="text-[18px] font-semibold text-slate-900 tabular-nums">
-                            ${fmtMoney(plan.priceMonthly)}
+                            ${fmtMoney(base)}
                         </span>
                         <span className="text-[10.5px] text-slate-500">/ mo</span>
                     </>
                 )}
+            </div>
+            <div className="text-[10px] text-slate-400 mb-2 h-3">
+                {base == null
+                    ? "contact sales"
+                    : annual
+                      ? "billed annually · 20% off"
+                      : "billed monthly"}
             </div>
             <ul className="space-y-1 mb-3 flex-1">
                 {plan.bullets.map((b) => (
@@ -599,10 +673,10 @@ function describeDiscount(d: DiscountPreview): string {
     return `${base} on your first invoice`;
 }
 
-// discountedMonthly returns the discounted monthly price for a money discount,
-// or null when the discount doesn't change the price (trial extensions, custom
-// plans, or no applied code).
-function discountedMonthly(
+// discountedPrice returns the discounted price for a money discount, or null
+// when the discount doesn't change the price (trial extensions, custom plans,
+// or no applied code). Works for either the monthly or annual base price.
+function discountedPrice(
     price: number | null,
     d: DiscountPreview | null | undefined,
 ): number | null {
