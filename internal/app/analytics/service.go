@@ -213,7 +213,7 @@ func (s *analyticsService) GetAccountStatus(ctx context.Context, userID, account
 
 func (s *analyticsService) GetAllAccountStatuses(ctx context.Context, userID uuid.UUID) ([]models.EmailAccountStatus, *errx.Error) {
 	// Get all email accounts for user
-	emailsResult, xerr := s.emailRepo.Search(ctx, userID.String(), "", nil, nil, 1000)
+	emailsResult, xerr := s.emailRepo.Search(ctx, userID.String(), "", nil, nil, 1000, nil)
 	if xerr != nil {
 		return nil, xerr
 	}

@@ -3,13 +3,14 @@ package email
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
-func (s *emailService) Search(ctx context.Context, userID, search, cursor, tag, limit string) (*models.EmailsResult, *errx.Error) {
+func (s *emailService) Search(ctx context.Context, userID, search, cursor, tag, limit string, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error) {
 	cursorId, err := validate.Uuid(cursor)
 	if err != nil {
 		return nil, err
@@ -28,7 +29,7 @@ func (s *emailService) Search(ctx context.Context, userID, search, cursor, tag, 
 		return nil, err
 	}
 
-	return s.emailRepository.Search(ctx, userID, search, cursorId, tagId, limitN)
+	return s.emailRepository.Search(ctx, userID, search, cursorId, tagId, limitN, allowedAccountIDs)
 }
 
 func (s *emailService) Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error) {

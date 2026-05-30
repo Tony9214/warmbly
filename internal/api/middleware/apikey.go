@@ -13,12 +13,13 @@ import (
 )
 
 const (
-	APIKeyIDKey          = "api_key_id"
-	APIKeyPermissionsKey = "api_key_permissions"
-	APIKeyUserIDKey      = "api_key_user_id"
-	AuthTypeKey          = "auth_type"
-	AuthTypeJWT          = "jwt"
-	AuthTypeAPIKey       = "api_key"
+	APIKeyIDKey                   = "api_key_id"
+	APIKeyPermissionsKey          = "api_key_permissions"
+	APIKeyAllowedEmailAccountsKey = "api_key_allowed_email_accounts"
+	APIKeyUserIDKey               = "api_key_user_id"
+	AuthTypeKey                   = "auth_type"
+	AuthTypeJWT                   = "jwt"
+	AuthTypeAPIKey                = "api_key"
 )
 
 // APIKeyMiddleware accepts only API key auth ("Bearer wmbly_..."). Reserved
@@ -106,6 +107,7 @@ func (h *Handler) validateAPIKey(c *gin.Context, rawKey string) {
 	c.Set(AuthTypeKey, AuthTypeAPIKey)
 	c.Set(APIKeyIDKey, key.ID.String())
 	c.Set(APIKeyPermissionsKey, key.Permissions)
+	c.Set(APIKeyAllowedEmailAccountsKey, key.AllowedEmailAccounts)
 	c.Set(UserIDKey, key.UserID.String())
 	c.Set(OrganizationIDKey, key.OrganizationID)
 
@@ -215,6 +217,41 @@ func (h *Handler) RequireAccess(orgPerm models.OrganizationPermission, apiPerm u
 	}
 }
 
+// RequireAPIKeyEmailAccountParam enforces an API key's optional
+// allowed_email_accounts allowlist against a route parameter. JWT callers and
+// unrestricted API keys pass through.
+func RequireAPIKeyEmailAccountParam(param string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetString(AuthTypeKey) != AuthTypeAPIKey {
+			c.Next()
+			return
+		}
+
+		allowed := GetAPIKeyAllowedEmailAccounts(c)
+		if len(allowed) == 0 {
+			c.Next()
+			return
+		}
+
+		accountID, err := uuid.Parse(c.Param(param))
+		if err != nil {
+			errx.Handle(c, errx.ErrUuid)
+			c.Abort()
+			return
+		}
+
+		for _, id := range allowed {
+			if id == accountID {
+				c.Next()
+				return
+			}
+		}
+
+		errx.Handle(c, errx.New(errx.Forbidden, "email account is not allowed for this API key"))
+		c.Abort()
+	}
+}
+
 // GetAuthType returns "jwt" or "api_key" (empty if unauthenticated).
 func GetAuthType(c *gin.Context) string {
 	return c.GetString(AuthTypeKey)
@@ -246,4 +283,18 @@ func GetAPIKeyPermissions(c *gin.Context) uint64 {
 		return 0
 	}
 	return permissions
+}
+
+// GetAPIKeyAllowedEmailAccounts returns the optional email-account allowlist
+// attached to the authenticating API key. Empty means unrestricted.
+func GetAPIKeyAllowedEmailAccounts(c *gin.Context) []uuid.UUID {
+	value, exists := c.Get(APIKeyAllowedEmailAccountsKey)
+	if !exists {
+		return nil
+	}
+	ids, ok := value.([]uuid.UUID)
+	if !ok {
+		return nil
+	}
+	return ids
 }

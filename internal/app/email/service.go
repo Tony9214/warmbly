@@ -21,7 +21,7 @@ import (
 )
 
 type EmailService interface {
-	Search(ctx context.Context, userID, search, cursor, tag, limit string) (*models.EmailsResult, *errx.Error)
+	Search(ctx context.Context, userID, search, cursor, tag, limit string, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error)
 	Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error)
 	Update(ctx context.Context, userID, emailAccountID string, udata *models.UpdateEmail) (*models.Email, *errx.Error)
 	UpdateTrackingDomain(ctx context.Context, userID, emailAccountID, domain string) *errx.Error

@@ -40,7 +40,7 @@ type OAuthCredentials struct {
 }
 
 type EmailRepository interface {
-	Search(ctx context.Context, userID, search string, cursor, tag *string, limit int32) (*models.EmailsResult, *errx.Error)
+	Search(ctx context.Context, userID, search string, cursor, tag *string, limit int32, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error)
 	Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error)
 	GetByID(ctx context.Context, emailAccountID uuid.UUID) (*models.Email, *errx.Error)
 	GetByTags(ctx context.Context, userID string, tags []string) ([]models.Email, *errx.Error)
@@ -350,7 +350,7 @@ func (r *emailRepository) NewSMTPIMAPAccount(ctx context.Context, userID string,
 	}, nil
 }
 
-func (r *emailRepository) Search(ctx context.Context, userID, search string, cursor, tag *string, limit int32) (*models.EmailsResult, *errx.Error) {
+func (r *emailRepository) Search(ctx context.Context, userID, search string, cursor, tag *string, limit int32, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		db.CaptureError(err, "", nil, "begin")
@@ -384,17 +384,23 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 		 AND ($4::uuid IS NULL OR EXISTS (
 		  SELECT 1 FROM email_tags cf WHERE cf.email_id = ea.id AND cf.tag_id = $4
 		 ))
+		 AND ($6::uuid[] IS NULL OR ea.id = ANY($6::uuid[]))
 		GROUP BY ea.id
 		ORDER BY ea.created_at DESC, ea.id DESC
 		LIMIT $5
 	`
 
+	var allowedAccountParam any
+	if len(allowedAccountIDs) > 0 {
+		allowedAccountParam = allowedAccountIDs
+	}
 	params := []any{
 		userID,
 		cursor,
 		"%" + search + "%",
 		tag,
 		limit + 1,
+		allowedAccountParam,
 	}
 
 	rows, err := tx.Query(ctx, query, params...)
@@ -441,12 +447,14 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 			  AND ($3::uuid IS NULL OR EXISTS (
 				SELECT 1 FROM email_tags cf WHERE cf.email_id = ea.id AND cf.tag_id = $3
 			  ))
+			  AND ($4::uuid[] IS NULL OR ea.id = ANY($4::uuid[]))
 		`
 
 		params = []any{
 			userID,
 			"%" + search + "%",
 			tag,
+			allowedAccountParam,
 		}
 
 		var tmp int64

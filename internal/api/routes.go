@@ -147,11 +147,11 @@ func Run(
 		emails.Use(m.RateLimitMiddleware(models.RateLimitWrite))
 		{
 			emails.GET("", m.RequireAccess(models.PermViewCampaigns, models.APIPermReadEmails), h.EmailsSearch)
-			emails.GET("/:id", m.RequireAccess(models.PermViewCampaigns, models.APIPermReadEmails), h.GetEmail)
-			emails.PATCH("/:id", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), h.UpdateEmail)
-			emails.PATCH("/:id/track", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), h.UpdateEmailTrackingDomain)
-			emails.DELETE("/:id", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), h.DeleteEmail)
-			emails.POST("/:id/send", m.RequireOrganization(), m.RequireAccess(models.PermSendCampaigns, models.APIPermSendCampaigns), h.SendEmailFromAccount)
+			emails.GET("/:id", m.RequireAccess(models.PermViewCampaigns, models.APIPermReadEmails), middleware.RequireAPIKeyEmailAccountParam("id"), h.GetEmail)
+			emails.PATCH("/:id", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), middleware.RequireAPIKeyEmailAccountParam("id"), h.UpdateEmail)
+			emails.PATCH("/:id/track", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), middleware.RequireAPIKeyEmailAccountParam("id"), h.UpdateEmailTrackingDomain)
+			emails.DELETE("/:id", m.RequireAccess(models.PermManageEmails, models.APIPermWriteEmails), middleware.RequireAPIKeyEmailAccountParam("id"), h.DeleteEmail)
+			emails.POST("/:id/send", m.RequireOrganization(), m.RequireAccess(models.PermSendCampaigns, models.APIPermSendCampaigns), middleware.RequireAPIKeyEmailAccountParam("id"), h.SendEmailFromAccount)
 		}
 
 		// Email onboarding is JWT-only — it writes user-encrypted refresh
