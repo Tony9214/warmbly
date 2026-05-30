@@ -14,9 +14,13 @@ All errors follow this structure:
 ```json
 {
   "error": "Error Type",
-  "message": "Human-readable description of what went wrong."
+  "message": "Human-readable description of what went wrong.",
+  "code": "machine_readable_code",
+  "request_id": "req_or_uuid_for_support"
 }
 ```
+
+`error` and `message` are for people. Client logic should use `code`, HTTP status, and endpoint-specific fields such as `retry_after`. Include `request_id` when contacting support.
 
 ## HTTP Status Codes
 
@@ -56,7 +60,9 @@ Returned when the request cannot be processed due to invalid syntax.
 ```json
 {
   "error": "Bad Request",
-  "message": "invalid request body"
+  "message": "invalid request body",
+  "code": "bad_request",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 

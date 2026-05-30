@@ -1,6 +1,6 @@
 ---
 title: Permissions Reference
-description: Complete reference for the 20 API permissions available in Warmbly.
+description: Complete reference for the 22 API permissions available in Warmbly.
 ---
 
 # Permissions Reference
@@ -23,7 +23,7 @@ Warmbly uses a bitmask system for API permissions. Each permission is one bit in
 | `BULK_CONTACTS` | 9 | 512 | bulk | Bulk import/export/delete contacts |
 | `BULK_CAMPAIGNS` | 10 | 1024 | bulk | Bulk campaign operations |
 | `REALTIME_SUBSCRIBE` | 11 | 2048 | special | Subscribe to realtime events |
-| `WEBHOOKS` | 12 | 4096 | special | Manage webhook endpoints (reserved) |
+| `WEBHOOKS` | 12 | 4096 | special | Manage webhook endpoints |
 | `API_KEYS` | 13 | 8192 | special | Create and manage API keys |
 | `SEND_CAMPAIGNS` | 14 | 16384 | write | Start and stop campaigns (sends real mail) |
 | `READ_TEMPLATES` | 15 | 32768 | read | View reply templates |
@@ -31,6 +31,8 @@ Warmbly uses a bitmask system for API permissions. Each permission is one bit in
 | `READ_CRM` | 17 | 131072 | read | View pipelines, deals, and CRM tasks |
 | `WRITE_CRM` | 18 | 262144 | write | Create and modify pipelines, deals, CRM tasks |
 | `READ_AUDIT_LOGS` | 19 | 524288 | read | View organization audit logs |
+| `INTEGRATIONS` | 20 | 1048576 | special | Connect and manage third-party integrations |
+| `WARMUP_ROUTING` | 21 | 2097152 | special | Manage warmup routing rules |
 
 `SEND_CAMPAIGNS` is intentionally separate from `WRITE_CAMPAIGNS`: editing a campaign draft and starting one that actually transmits mail are different blast radii, so a key can be granted the first without the second.
 
@@ -50,7 +52,7 @@ High-volume operations. These can touch large numbers of rows in a single reques
 
 ### Special
 
-Realtime subscriptions, webhooks, self-service key management. Grant individually.
+Realtime subscriptions, webhooks, integrations, warmup routing, and self-service key management. Grant individually.
 
 ## Preset Combinations
 
@@ -67,12 +69,12 @@ READ_EMAILS | READ_CAMPAIGNS | READ_CONTACTS | READ_UNIBOX | READ_ANALYTICS
 = 688159
 ```
 
-### Full Access — 1048575
+### Full Access — 4194303
 
-All 20 permissions:
+All 22 permissions:
 
 ```
-(1 << 20) - 1 = 1048575
+(1 << 22) - 1 = 4194303
 ```
 
 ## Working with Bitmasks
@@ -101,7 +103,7 @@ hasPermission(16387, 64);    // false — WRITE_CAMPAIGNS missing
 
 ### Rejecting unknown bits
 
-`POST /api-keys` rejects any request whose `permissions` field has bits outside the known set, so a stale client can't accidentally request a future permission. The current mask of valid bits is `1048575`.
+`POST /api-keys` rejects any request whose `permissions` field has bits outside the known set, so a stale client can't accidentally request a future permission. The current mask of valid bits is `4194303`.
 
 ## Common Permission Sets
 

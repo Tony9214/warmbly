@@ -38,6 +38,15 @@ Dashboard realtime:
 - aim for a responsive, Discord-like product feel: presence, counts, lists, detail panes, notifications, and workflow state should stay current across every dashboard feature where live updates are meaningful
 - when changing dashboard behavior, it is acceptable to safely change the API structure if a better solution exists. Before making an API shape change, ask the user how they want to handle it, especially when the current API may already be published or backwards compatibility might require a new API version
 
+Public API quality bar:
+
+- treat customer-facing API changes as contract changes. Prefer additive changes inside a version, and use a new API version for incompatible behavior once an endpoint is published
+- every API-key-capable route must have an explicit API permission gate and, for JWT callers, the matching organization permission gate
+- side-effectful POST/PATCH/PUT/DELETE endpoints should support `Idempotency-Key` or have a documented reason why retries are naturally safe
+- error responses should include stable machine-readable `code` and `request_id` fields in addition to human-readable text
+- list endpoints should use consistent `data` plus `pagination` shapes with opaque cursors; invalid cursors or limits should return `400` instead of being ignored
+- webhook endpoints must stay HMAC-signed, HTTPS by default, and protected against obvious SSRF targets. Only development/self-hosted environments should opt into unsafe webhook URLs
+
 ## System Shape
 
 - `cmd/backend`: API and business orchestration
