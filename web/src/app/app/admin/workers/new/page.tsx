@@ -57,7 +57,7 @@ const initialState: WizardState = {
     risk_pool: "clean",
     dedicated_user_id: "",
     dedicated_subscription_id: "",
-    auto_install: true,
+    auto_install: false,
 };
 
 const purposeDefaults: Record<Purpose, Partial<WizardState>> = {
@@ -123,6 +123,7 @@ export default function AdminAddWorkerWizard() {
                 ssh_host: state.ssh_host,
                 ssh_port: state.ssh_port,
                 ssh_user: state.ssh_user,
+                generate_enrollment_token: true,
             });
             setResult(created);
             append("✓ worker row created");
@@ -134,7 +135,13 @@ export default function AdminAddWorkerWizard() {
                 append("✓ profile assigned");
             }
 
-            // Stop here unless admin wants to install now too.
+            if (created.enrollment_token) {
+                append("ready — run the enrollment command on the VPS");
+                setRunning(false);
+                return;
+            }
+
+            // Stop here unless admin wants the older SSH install path too.
             if (!state.auto_install) {
                 append("ready — paste the SSH key into the VPS, then click Test → Install on the detail page");
                 setRunning(false);
@@ -193,7 +200,7 @@ export default function AdminAddWorkerWizard() {
     const canNext = (() => {
         switch (step) {
             case 1: return true;
-            case 2: return state.ssh_host && state.ssh_port > 0 && preflight?.ok;
+            case 2: return state.ssh_host && state.ssh_port > 0;
             case 3: return state.name.length > 0;
             case 4: return state.purpose !== "dedicated" || (state.dedicated_user_id && state.dedicated_subscription_id);
             default: return true;
@@ -265,10 +272,10 @@ export default function AdminAddWorkerWizard() {
             {/* Step 2 */}
             {step === 2 && (
                 <>
-                    <StepHeader n={2} title="How do we reach the VPS?" />
+                    <StepHeader n={2} title="Where will this worker run?" />
                     <p className="text-slate-500 text-sm mb-3">
-                        We'll check reachability before creating any database rows, so a typo here
-                        won't leave an orphan worker behind.
+                        This IP is used for the worker record and the one-command enrollment config.
+                        SSH reachability is only needed if you use the older dashboard-driven install path.
                     </p>
                     <div className="grid grid-cols-3 gap-3">
                         <div className="col-span-2">
@@ -438,21 +445,13 @@ export default function AdminAddWorkerWizard() {
                                     )}
                                 </dl>
                             </div>
-                            <label className="flex items-center gap-2 text-sm text-slate-600 mb-3">
-                                <input
-                                    type="checkbox"
-                                    checked={state.auto_install}
-                                    onChange={(e) => setState((s) => ({ ...s, auto_install: e.target.checked }))}
-                                />
-                                Install immediately after creating (recommended)
-                            </label>
                             {err && <p className="text-red-600 text-sm mb-2">{err}</p>}
                             <button
                                 onClick={activate}
                                 disabled={running}
                                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                             >
-                                {running ? "Creating…" : "Create worker"}
+                                {running ? "Creating…" : "Create enrollment command"}
                             </button>
                         </>
                     ) : (
@@ -624,12 +623,35 @@ function PostCreatePanel({
     onInstall: () => void;
 }) {
     const [pasted, setPasted] = useState(false);
+    const enrollCommand = result.enrollment_token
+        ? `curl -fsSL https://get.warmbly.com/worker | sudo bash -s -- --enroll ${result.enrollment_token}`
+        : "";
 
     return (
         <div>
             <div className="border rounded-lg p-3 bg-green-50 border-green-200 mb-4 text-sm">
                 ✓ Worker created. ID: <span className="font-mono">{result.id}</span>
             </div>
+
+            {result.enrollment_token && (
+                <div className="mb-4">
+                    <div className={lbl}>Run on the VPS</div>
+                    <div className="bg-slate-900 text-slate-100 p-3 rounded text-xs font-mono overflow-auto whitespace-pre-wrap">
+                        {enrollCommand}
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                        <p className="text-slate-500 text-xs">
+                            Token expires in {Math.round((result.enrollment_token_ttl_seconds ?? 7200) / 60)} minutes and is consumed after first use.
+                        </p>
+                        <button
+                            onClick={() => navigator.clipboard?.writeText(enrollCommand)}
+                            className="text-xs text-blue-600 hover:underline"
+                        >
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            )}
 
             <div className="mb-4">
                 <div className={lbl}>SSH public key</div>
@@ -654,14 +676,16 @@ function PostCreatePanel({
                 </div>
             </div>
 
-            <div className="mb-4 bg-slate-900 text-slate-100 p-3 rounded text-xs font-mono overflow-auto">
-                <div className="text-slate-400 mb-1">Or run this one-liner on the VPS:</div>
-                ssh root@{result.ssh_host ?? "&lt;host&gt;"} {"\\"}
-                {"\n"}
-                {"  "}'mkdir -p ~/.ssh &amp;&amp; chmod 700 ~/.ssh &amp;&amp; echo "{result.ssh_public_key}" &gt;&gt; ~/.ssh/authorized_keys'
-            </div>
+            {!result.enrollment_token && (
+                <div className="mb-4 bg-slate-900 text-slate-100 p-3 rounded text-xs font-mono overflow-auto">
+                    <div className="text-slate-400 mb-1">Or run this one-liner on the VPS:</div>
+                    ssh root@{result.ssh_host ?? "&lt;host&gt;"} {"\\"}
+                    {"\n"}
+                    {"  "}'mkdir -p ~/.ssh &amp;&amp; chmod 700 ~/.ssh &amp;&amp; echo "{result.ssh_public_key}" &gt;&gt; ~/.ssh/authorized_keys'
+                </div>
+            )}
 
-            {autoInstall && (
+            {autoInstall && !result.enrollment_token && (
                 <>
                     <label className="flex items-center gap-2 text-sm text-slate-600 mb-3">
                         <input
