@@ -110,12 +110,16 @@ func (s *emailService) syncWarmupPoolMembership(ctx context.Context, account *mo
 		return
 	}
 
-	if !s.shouldParticipateInWarmupPool(ctx, account) {
+	if !s.canUseWarmupPool(ctx, account) {
 		s.removeFromAllWarmupPools(ctx, account)
 		return
 	}
 
-	_ = s.warmupService.EnsurePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+	role := "recipient_only"
+	if account.Warmup != nil {
+		role = "sender_receiver"
+	}
+	_ = s.warmupService.EnsurePoolMembershipWithRole(ctx, account.ID, s.resolveWarmupPoolType(ctx, account), role)
 }
 
 func (s *emailService) removeFromAllWarmupPools(ctx context.Context, account *models.Email) {
@@ -128,8 +132,8 @@ func (s *emailService) removeFromAllWarmupPools(ctx context.Context, account *mo
 	}
 }
 
-func (s *emailService) shouldParticipateInWarmupPool(ctx context.Context, account *models.Email) bool {
-	if account == nil || account.Warmup == nil || account.Status != "active" || account.OrganizationID == nil || s.featureGate == nil {
+func (s *emailService) canUseWarmupPool(ctx context.Context, account *models.Email) bool {
+	if account == nil || account.Status != "active" || account.OrganizationID == nil || s.featureGate == nil {
 		return false
 	}
 

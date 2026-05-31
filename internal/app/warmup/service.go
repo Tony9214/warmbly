@@ -54,6 +54,7 @@ const (
 
 type Service interface {
 	EnsurePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error
+	EnsurePoolMembershipWithRole(ctx context.Context, accountID uuid.UUID, poolType, role string) *errx.Error
 	RemovePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error
 	CanParticipate(ctx context.Context, accountID uuid.UUID, poolType string) (bool, string, *errx.Error)
 	ApplySpamReport(ctx context.Context, reporterAccountID, reportedAccountID uuid.UUID, messageID, reportType string) (*models.WarmupParticipantHealth, *errx.Error)
@@ -141,6 +142,14 @@ func (s *service) dispatchHealthEvent(ctx context.Context, accountID uuid.UUID, 
 }
 
 func (s *service) EnsurePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error {
+	return s.EnsurePoolMembershipWithRole(ctx, accountID, poolType, "sender_receiver")
+}
+
+func (s *service) EnsurePoolMembershipWithRole(ctx context.Context, accountID uuid.UUID, poolType, role string) *errx.Error {
+	if role != "sender_receiver" && role != "recipient_only" {
+		return errx.New(errx.BadRequest, "invalid warmup participant role")
+	}
+
 	pool, err := s.repo.GetPoolByType(ctx, poolType)
 	if err != nil {
 		return errx.InternalError()
@@ -149,6 +158,9 @@ func (s *service) EnsurePoolMembership(ctx context.Context, accountID uuid.UUID,
 		return errx.New(errx.BadRequest, "warmup pool not found")
 	}
 	if err := s.repo.JoinPool(ctx, pool.ID, accountID); err != nil {
+		return errx.InternalError()
+	}
+	if err := s.repo.SetParticipantRole(ctx, pool.ID, accountID, role); err != nil {
 		return errx.InternalError()
 	}
 	return nil

@@ -12,6 +12,11 @@ import (
 // priority order. Premium first so paid orgs apply premium-pool health.
 var poolTypesForHealthLookup = []string{"premium", "free"}
 
+const (
+	minWarmupRecipientRecheck = 4 * time.Hour
+	maxWarmupRecipientRecheck = 8 * time.Hour
+)
+
 // healthAdjustment captures how the throttled/watch health state should
 // dampen warmup throughput. The scheduler reads this off the participant's
 // current state instead of carrying it on the task payload, so a state
@@ -34,6 +39,20 @@ func adjustmentFor(state models.WarmupHealthState) healthAdjustment {
 	default:
 		return healthAdjustment{volumeMultiplier: 1.0, minWaitMultiplier: 1.0}
 	}
+}
+
+func warmupPoolTypeForAccount(account *models.Email) string {
+	if account != nil && account.WarmupPoolType != "" {
+		return account.WarmupPoolType
+	}
+	return "premium"
+}
+
+func recipientRecheckTime() time.Time {
+	return time.Now().Add(time.Duration(randomJitter(
+		int(minWarmupRecipientRecheck/time.Minute),
+		int(maxWarmupRecipientRecheck/time.Minute),
+	)) * time.Minute)
 }
 
 // resolveHealthState looks up the participant's current health state across
@@ -93,6 +112,24 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 		account.WarmupMax,
 	)
 
+	// STEP 2.1: Cap per-mailbox volume to actual recipient capacity. The
+	// sender should not send multiple warmup messages to the same recipient
+	// in a single day just to hit an arbitrary target; that creates obvious
+	// pool loops when membership is small. Recipient-only participants count
+	// here, so operators can add inbound capacity without making those
+	// mailboxes warmup senders.
+	if s.warmupRepo != nil {
+		eligibleRecipients, err := s.warmupRepo.CountEligibleRecipients(ctx, warmupPoolTypeForAccount(account), accountID)
+		if err == nil {
+			if eligibleRecipients <= 0 {
+				return recipientRecheckTime(), nil
+			}
+			if targetVolume > eligibleRecipients {
+				targetVolume = eligibleRecipients
+			}
+		}
+	}
+
 	// STEP 2.5: Apply health-state adjustments. Throttled/watch participants
 	// run at reduced volume and wider spacing until the health sweep clears
 	// them back to healthy. We never zero out volume — even degraded mailboxes
@@ -114,7 +151,7 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 	}
 
 	// STEP 3: Count emails already sent today
-	emailsSentToday, err := s.taskRepo.CountEmailsSentToday(ctx, accountID)
+	emailsSentToday, err := s.taskRepo.CountWarmupEmailsSentToday(ctx, accountID)
 	if err != nil {
 		return time.Time{}, err
 	}
