@@ -2,23 +2,45 @@
 //
 // Numbers come from /unibox/overview so the strip is server-truth,
 // not a sample of whatever happens to be loaded in the list.
+//
+// On phones and tablets the desktop ScopeRail is hidden, so we
+// render a "Scope" pill in the strip that opens a ScopeSheet. The
+// pill always sits on the left edge so it stays reachable even when
+// the rest of the strip scrolls horizontally.
 
-import { ActivityIcon, XIcon } from "lucide-react";
+import { ActivityIcon, LayoutGridIcon, XIcon } from "lucide-react";
 import useUniboxOverview from "@/lib/api/hooks/app/unibox/useUniboxOverview";
 import { cn } from "@/lib/utils";
 
 interface UniboxHeaderProps {
     scopeLabel: string;
     onClearScope?: () => void;
+    onOpenScopeSheet?: () => void;
 }
 
-export function UniboxHeader({ scopeLabel, onClearScope }: UniboxHeaderProps) {
+export function UniboxHeader({
+    scopeLabel,
+    onClearScope,
+    onOpenScopeSheet,
+}: UniboxHeaderProps) {
     const overview = useUniboxOverview();
     const data = overview.data;
 
     return (
-        <header className="h-10 px-4 border-b border-slate-200 bg-white flex items-center gap-3 shrink-0 overflow-x-auto">
-            <span className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-semibold shrink-0">
+        <header className="h-10 px-3 sm:px-4 border-b border-slate-200 bg-white flex items-center gap-2 sm:gap-3 shrink-0 overflow-x-auto">
+            {onOpenScopeSheet && (
+                <button
+                    type="button"
+                    onClick={onOpenScopeSheet}
+                    aria-label="Switch scope"
+                    className="lg:hidden inline-flex items-center gap-1 h-6 px-1.5 rounded-md border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 text-[11.5px] font-medium transition-colors shrink-0"
+                >
+                    <LayoutGridIcon className="w-3 h-3" />
+                    Scope
+                </button>
+            )}
+
+            <span className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-semibold shrink-0 hidden sm:inline">
                 Inbox
             </span>
 
@@ -34,7 +56,7 @@ export function UniboxHeader({ scopeLabel, onClearScope }: UniboxHeaderProps) {
                 </button>
             )}
 
-            <div className="h-4 w-px bg-slate-200 shrink-0" />
+            <div className="h-4 w-px bg-slate-200 shrink-0 hidden sm:block" />
 
             <div className="flex items-center gap-3.5 min-w-0">
                 <Stat

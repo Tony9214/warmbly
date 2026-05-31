@@ -20,6 +20,7 @@ import { ConversationList } from "@/components/app/unibox/ConversationList";
 import { ScheduledList } from "@/components/app/unibox/ScheduledList";
 import { ThreadView } from "@/components/app/unibox/ThreadView";
 import { ScopeRail, type UniboxScope } from "@/components/app/unibox/ScopeRail";
+import { ScopeSheet } from "@/components/app/unibox/ScopeSheet";
 import { UniboxHeader } from "@/components/app/unibox/UniboxHeader";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
 import { LockedSurface } from "@/components/layout/LockedSurface";
@@ -44,6 +45,7 @@ export default function UniboxPage() {
     const access = useFeatureAccess();
     const overview = useUniboxOverview();
     const [searchParams, setSearchParams] = useSearchParams();
+    const [scopeSheetOpen, setScopeSheetOpen] = React.useState(false);
 
     // ── URL state (deep-linkable threads + scope) ──────────────────
     const urlThread = searchParams.get("thread");
@@ -220,6 +222,14 @@ export default function UniboxPage() {
                 <UniboxHeader
                     scopeLabel={scopeLabel}
                     onClearScope={() => setScope({ kind: "all" })}
+                    onOpenScopeSheet={() => setScopeSheetOpen(true)}
+                />
+
+                <ScopeSheet
+                    open={scopeSheetOpen}
+                    setOpen={setScopeSheetOpen}
+                    scope={scope}
+                    onChange={setScope}
                 />
 
                 <div className="flex-1 min-h-0 flex">

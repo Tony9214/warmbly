@@ -874,9 +874,10 @@ function TemplatePickerContent({
     );
 }
 
-// TemplateRow : one rich template entry. Two-line layout with an
-// icon badge, name on top, body preview below. Hover shows a sky
-// accent on the left edge to reinforce that the row is actionable.
+// TemplateRow : one template entry. Two compact lines, no icon, no
+// left accent bar : just name on top, single-line body preview
+// underneath. Hover and active states are conveyed by the row
+// background alone.
 function TemplateRow({
     template,
     onPick,
@@ -884,40 +885,25 @@ function TemplateRow({
     template: Template;
     onPick: () => void;
 }) {
-    const subj = template.subject?.trim() ?? "";
     const bodyPreview = (template.body_plain ?? "")
         .replace(/\s+/g, " ")
         .trim()
-        .slice(0, 140);
+        .slice(0, 120);
 
     return (
         <button
             type="button"
             onClick={onPick}
-            className="group relative w-full text-left rounded-md pl-3 pr-2.5 py-2 flex items-start gap-2.5 hover:bg-slate-50 active:bg-slate-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+            className="w-full text-left rounded-md px-2.5 py-1.5 flex flex-col gap-0.5 hover:bg-slate-50 active:bg-slate-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
         >
-            <span
-                aria-hidden
-                className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-sky-500 opacity-0 group-hover:opacity-100 transition-opacity"
-            />
-            <span className="size-7 shrink-0 rounded-md bg-sky-50 text-sky-700 inline-flex items-center justify-center mt-0.5 group-hover:bg-sky-100 transition-colors">
-                <FileTextIcon className="w-3.5 h-3.5" />
+            <span className="text-[12.5px] font-medium text-slate-900 truncate">
+                {template.name}
             </span>
-            <span className="flex-1 min-w-0 flex flex-col gap-0.5">
-                <span className="text-[12.5px] font-medium text-slate-900 truncate">
-                    {template.name}
+            {bodyPreview && (
+                <span className="text-[11px] text-slate-400 truncate leading-snug">
+                    {bodyPreview}
                 </span>
-                {subj && (
-                    <span className="text-[11px] text-slate-500 truncate">
-                        {subj}
-                    </span>
-                )}
-                {bodyPreview && (
-                    <span className="text-[11px] text-slate-400 line-clamp-1 leading-snug">
-                        {bodyPreview}
-                    </span>
-                )}
-            </span>
+            )}
         </button>
     );
 }
