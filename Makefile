@@ -226,21 +226,49 @@ app-logs:
 # host-published ports (postgres 15432, redis 16379, kafka 9092,
 # schema-registry 8081, localstack 4566, mailpit smtp 11025,
 # cloud-tasks 8123, stripe-mock 12111) instead of the in-network names.
+#
+# Remote infra: by default the native services connect to infra on this
+# same machine (INFRA_HOST=localhost). To run the Go services against
+# infra hosted on a different computer, point them at it:
+#
+#   make run INFRA_HOST=192.168.1.50
+#
+# That rewrites every infra endpoint (postgres, redis, kafka, schema
+# registry, localstack/AWS, stripe-mock, mailpit, cloud-tasks) to the
+# remote host. Two things must also be true on the infra side:
+#
+#   1. Kafka has to advertise a reachable address, not `localhost`. On the
+#      infra machine bring the stack up with its LAN IP/hostname:
+#        KAFKA_ADVERTISED_HOST=192.168.1.50 make infra
+#      (see KAFKA_ADVERTISED_LISTENERS in docker-compose.yml). Without
+#      this, clients connect to :9092 and get redirected to their own
+#      localhost.
+#   2. The infra machine must publish those ports on an interface the dev
+#      box can reach (the compose `ports:` already bind 0.0.0.0).
+#
+# CLOUD_TASKS_WEBHOOK_URL is the callback the cloud-tasks emulator uses to
+# reach *this* backend, so it points the other way. With remote infra, set
+# SELF_HOST to this machine's address as seen from the infra host:
+#
+#   make run INFRA_HOST=192.168.1.50 SELF_HOST=192.168.1.42
+#
+INFRA_HOST ?= localhost
+SELF_HOST  ?= localhost
 
 # Shared by the control-plane services (backend, consumer). Flattened to
 # one line by make so it can prefix a command as inline env.
 GO_DEV_ENV := \
 	APP_ENV=dev \
 	AWS_CONFIG_ENABLED=false \
-	AWS_ENDPOINT_URL=http://localhost:4566 \
+	AWS_ENDPOINT_URL=http://$(INFRA_HOST):4566 \
 	AWS_REGION=us-east-1 \
 	AWS_ACCESS_KEY_ID=test \
 	AWS_SECRET_ACCESS_KEY=test \
-	PRIMARY_DB=postgres://warmbly:warmbly@localhost:15432/warmbly_dev?sslmode=disable \
-	REDIS=redis://localhost:16379 \
-	KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+	PRIMARY_DB=postgres://warmbly:warmbly@$(INFRA_HOST):15432/warmbly_dev?sslmode=disable \
+	REDIS=redis://$(INFRA_HOST):16379 \
+	KAFKA_BOOTSTRAP_SERVERS=$(INFRA_HOST):9092 \
 	KAFKA_CONSUMER_GROUP=consumer-group \
-	SCHEMA_REGISTRY_URL=http://localhost:8081 \
+	SCHEMA_REGISTRY_URL=http://$(INFRA_HOST):8081 \
 	ASTRA_DB_ID=local-astra-db-id \
 	ASTRA_DB_REGION=local-region \
 	ASTRA_KEYSPACE_NAME=warmbly_dev \
@@ -252,13 +280,13 @@ GO_DEV_ENV := \
 WORKER_DEV_ENV := \
 	APP_ENV=dev \
 	AWS_CONFIG_ENABLED=false \
-	AWS_ENDPOINT_URL=http://localhost:4566 \
+	AWS_ENDPOINT_URL=http://$(INFRA_HOST):4566 \
 	AWS_REGION=us-east-1 \
 	AWS_ACCESS_KEY_ID=test \
 	AWS_SECRET_ACCESS_KEY=test \
-	REDIS=redis://localhost:16379 \
-	KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
-	SCHEMA_REGISTRY_URL=http://localhost:8081
+	REDIS=redis://$(INFRA_HOST):16379 \
+	KAFKA_BOOTSTRAP_SERVERS=$(INFRA_HOST):9092 \
+	SCHEMA_REGISTRY_URL=http://$(INFRA_HOST):8081
 
 # API server on :8080. Applies the embedded migrations on boot against
 # the docker postgres.
@@ -279,21 +307,21 @@ backend:
 	APPLE_KEY_SECRET=local-apple-key-secret-base64 \
 	TURNSTILE_SECRET=1x0000000000000000000000000000000AA \
 	TURNSTILE_BYPASS_TOKEN=warmbly-local-turnstile-bypass \
-	STRIPE_API_BASE=http://localhost:12111 \
+	STRIPE_API_BASE=http://$(INFRA_HOST):12111 \
 	STRIPE_SECRET_KEY=sk_test_local \
 	STRIPE_WEBHOOK_SECRET=whsec_local \
 	STRIPE_PUBLISHABLE_KEY=pk_test_local \
 	EMAIL_NAME='Warmbly Dev' \
 	EMAIL_ADDRESS=dev@warmbly.local \
 	TRACKING_DOMAIN=t.warmbly.com \
-	SMTP_HOST=localhost \
+	SMTP_HOST=$(INFRA_HOST) \
 	SMTP_PORT=11025 \
 	GEODB_PATH=data/GeoLite2-City.mmdb \
 	INTERNAL_API_TOKEN=local-dev-internal-token \
 	GOOGLE_APPLICATION_CREDENTIALS_JSON=dev@local.iam.gserviceaccount.com \
-	CLOUD_TASKS_EMULATOR_HOST=localhost:8123 \
+	CLOUD_TASKS_EMULATOR_HOST=$(INFRA_HOST):8123 \
 	CLOUD_TASKS_QUEUE_NAME=projects/local/locations/local/queues/default \
-	CLOUD_TASKS_WEBHOOK_URL=http://localhost:8080/webhook/email \
+	CLOUD_TASKS_WEBHOOK_URL=http://$(SELF_HOST):8080/webhook/email \
 	go run ./cmd/backend
 
 # Kafka -> postgres consumer.

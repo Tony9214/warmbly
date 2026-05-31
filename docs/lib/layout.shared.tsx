@@ -9,8 +9,8 @@ export function baseOptions(): BaseLayoutProps {
           <Image
             src="/logo.svg"
             alt="Warmbly"
-            width={32}
-            height={32}
+            width={24}
+            height={25}
             className="dark:invert"
           />
           <span className="font-semibold">Warmbly</span>
