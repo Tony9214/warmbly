@@ -59,6 +59,15 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		return errx.ErrNotFound
 	}
 
+	if taskRecord.Status != "pending" {
+		log.Info().
+			Str("task_id", taskID.String()).
+			Str("status", taskRecord.Status).
+			Msg("campaign task skipped: task not in pending state")
+		executionStatus = "completed"
+		return nil
+	}
+
 	// STEP 3: Mark task as active (with advisory lock)
 	if err := s.taskRepo.UpdateTaskStatusWithLock(ctx, taskID, "active"); err != nil {
 		sentry.CaptureException(err)
@@ -534,8 +543,12 @@ func (s *tasksService) createCampaignTask(ctx context.Context, campaignID, accou
 		CampaignID: &campaignID,
 	}
 
-	if err := s.taskRepo.CreateTaskWithLock(ctx, newTask, campaignTask); err != nil {
+	created, err := s.taskRepo.CreateTaskWithLock(ctx, newTask, campaignTask)
+	if err != nil {
 		return err
+	}
+	if !created {
+		return nil
 	}
 
 	// Create GCP Cloud Task

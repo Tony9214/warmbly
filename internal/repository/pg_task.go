@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -118,7 +119,8 @@ type TaskRepository interface {
 	DeleteTask(ctx context.Context, taskID uuid.UUID) error
 
 	// Task locking
-	CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) error
+	CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) (bool, error)
+	CreateWarmupTaskWithLock(ctx context.Context, task *Task, warmupTask *WarmupTask) (bool, error)
 	UpdateTaskStatusWithLock(ctx context.Context, taskID uuid.UUID, status string) error
 
 	// Update campaign task with contact/sequence IDs (for tracking)
@@ -569,11 +571,12 @@ func (r *taskRepository) DeleteTask(ctx context.Context, taskID uuid.UUID) error
 	return err
 }
 
-// CreateTaskWithLock creates a task with a PostgreSQL advisory lock to prevent duplicate creation
-func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) error {
+// CreateTaskWithLock creates a campaign task with a PostgreSQL advisory lock.
+// It returns false when the campaign already has a pending wakeup task.
+func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) (bool, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback(ctx)
 
@@ -581,7 +584,23 @@ func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, cam
 	if campaignTask != nil && campaignTask.CampaignID != nil {
 		_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('campaign_task_' || $1::text))`, *campaignTask.CampaignID)
 		if err != nil {
-			return err
+			return false, err
+		}
+
+		var existing uuid.UUID
+		err = tx.QueryRow(ctx, `
+			SELECT t.id
+			FROM tasks t
+			INNER JOIN campaign_tasks ct ON ct.task_id = t.id
+			WHERE ct.campaign_id = $1
+			  AND t.status = 'pending'
+			LIMIT 1
+		`, *campaignTask.CampaignID).Scan(&existing)
+		if err == nil {
+			return false, nil
+		}
+		if err != pgx.ErrNoRows {
+			return false, err
 		}
 	}
 
@@ -592,7 +611,7 @@ func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, cam
 	`
 	_, err = tx.Exec(ctx, taskQuery, task.ID, task.TaskType, task.EmailAccountID, task.Status, task.MessageID, task.ScheduledAt)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Create campaign task entry if provided
@@ -600,11 +619,61 @@ func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, cam
 		ctQuery := `INSERT INTO campaign_tasks (task_id, campaign_id, contact_id, sequence_id) VALUES ($1, $2, $3, $4)`
 		_, err = tx.Exec(ctx, ctQuery, campaignTask.TaskID, campaignTask.CampaignID, campaignTask.ContactID, campaignTask.SequenceID)
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 
-	return tx.Commit(ctx)
+	return true, tx.Commit(ctx)
+}
+
+// CreateWarmupTaskWithLock creates one pending warmup wakeup per mailbox.
+// It returns false when the account already has a pending warmup task.
+func (r *taskRepository) CreateWarmupTaskWithLock(ctx context.Context, task *Task, warmupTask *WarmupTask) (bool, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('warmup_task_' || $1::text))`, task.EmailAccountID)
+	if err != nil {
+		return false, err
+	}
+
+	var existing uuid.UUID
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM tasks
+		WHERE email_account_id = $1
+		  AND task_type = 'warmup'
+		  AND status = 'pending'
+		LIMIT 1
+	`, task.EmailAccountID).Scan(&existing)
+	if err == nil {
+		return false, nil
+	}
+	if err != pgx.ErrNoRows {
+		return false, err
+	}
+
+	taskQuery := `
+		INSERT INTO tasks (id, task_type, email_account_id, status, message_id, scheduled_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+	`
+	_, err = tx.Exec(ctx, taskQuery, task.ID, task.TaskType, task.EmailAccountID, task.Status, task.MessageID, task.ScheduledAt)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO warmup_tasks (task_id, target_account_id)
+		VALUES ($1, $2)
+	`, warmupTask.TaskID, warmupTask.TargetAccountID)
+	if err != nil {
+		return false, err
+	}
+
+	return true, tx.Commit(ctx)
 }
 
 // UpdateTaskStatusWithLock updates task status with an advisory lock to prevent race conditions

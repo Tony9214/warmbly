@@ -49,7 +49,7 @@ const (
 	// 5,000 mailboxes overnight" can't happen without explicit approval.
 	HardCapMailboxes          = 200       // total connected mailboxes per org
 	HardCapCampaignsTotal     = 500       // total campaigns ever created
-	HardCapCampaignsActive    = 100       // simultaneously active campaigns
+	HardCapCampaignsActive    = 50        // simultaneously active campaigns
 	HardCapTeamMembers        = 100       // seats per org
 	HardCapContacts           = 1_000_000 // contacts per org
 	HardCapDailyCampaignSends = 1000      // campaign emails per org per day

@@ -36,6 +36,7 @@ type CampaignRepository interface {
 	StopCampaign(ctx context.Context, campaignID uuid.UUID) error
 	ValidateCampaignReady(ctx context.Context, campaignID uuid.UUID) error
 	GetPendingCampaignTasks(ctx context.Context, campaignID uuid.UUID) ([]Task, error)
+	CountActiveForOrganization(ctx context.Context, orgID uuid.UUID) (int, error)
 }
 
 type campaignRepository struct {
@@ -1010,6 +1011,13 @@ func (r *campaignRepository) GetPendingCampaignTasks(ctx context.Context, campai
 	}
 
 	return tasks, rows.Err()
+}
+
+func (r *campaignRepository) CountActiveForOrganization(ctx context.Context, orgID uuid.UUID) (int, error) {
+	query := `SELECT COUNT(*) FROM campaigns WHERE organization_id = $1 AND status = 'active'`
+	var count int
+	err := r.DB.QueryRow(ctx, query, orgID).Scan(&count)
+	return count, err
 }
 
 // UpdateStatusWithLock updates campaign status using a PostgreSQL advisory lock to prevent concurrent updates.
