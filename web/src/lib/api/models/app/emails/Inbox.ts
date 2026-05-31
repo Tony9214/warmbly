@@ -15,6 +15,8 @@ export default interface Inbox {
     min_wait_time: number;
     reply_to: string;
     tracking_domain: string;
+    tracking_domain_verified: boolean;
+    tracking_domain_verified_at?: Date | null;
     warmup?: Date | null;
     warmup_base: number;
     warmup_max: number;

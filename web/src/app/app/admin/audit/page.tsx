@@ -200,6 +200,7 @@ export default function AdminAuditPage() {
             {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
 
             <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
                         <tr>
@@ -222,6 +223,7 @@ export default function AdminAuditPage() {
                         )}
                     </tbody>
                 </table>
+                </div>
             </div>
 
             {/* Pagination */}

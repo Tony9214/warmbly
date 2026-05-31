@@ -55,7 +55,7 @@ export default function InboundUrlDialog({
                 onClick={onClose}
                 className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]"
             />
-            <div className="relative z-10 w-[520px] bg-white rounded-lg shadow-xl border border-slate-200 overflow-hidden">
+            <div className="relative z-10 w-[520px] max-w-[92vw] bg-white rounded-lg shadow-xl border border-slate-200 overflow-hidden">
                 <div className="h-12 px-5 border-b border-slate-200 flex items-center gap-3">
                     <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">Webhook URL</div>
                     <div className="h-4 w-px bg-slate-200" />

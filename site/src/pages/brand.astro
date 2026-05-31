@@ -96,7 +96,7 @@ const assets = [
 ];
 ---
 <Layout
-  title="Brand · Warmbly"
+  title="Brand Assets & Guidelines | Warmbly"
   description="The Warmbly visual identity. Wordmark, mark, sky palette, typography, and usage guidance."
 >
   <!-- ============================================================
@@ -425,7 +425,7 @@ const assets = [
 
       <!-- Ramp -->
       <div class="rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)] bg-white">
-        <div class="grid grid-cols-5 lg:grid-cols-10">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10">
           {palette.map((c, i) => (
             <div
               class="relative aspect-[2/3] p-3 flex flex-col justify-between transition-transform hover:-translate-y-0.5 duration-200"
@@ -447,7 +447,7 @@ const assets = [
 
         <!-- Marker row -->
         <div class="relative border-t border-[color:var(--border)] px-3 py-3 bg-white">
-          <div class="grid grid-cols-5 lg:grid-cols-10 text-[10px] font-mono text-muted-foreground">
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 text-[10px] font-mono text-muted-foreground">
             {palette.map((c, i) => (
               <div class="text-center">
                 {i === primaryIdx && <span class="text-[#0284c7] font-semibold">Primary</span>}

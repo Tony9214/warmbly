@@ -594,7 +594,7 @@ function DealDialog({
                                 <Label>Deal name</Label>
                                 <TextInput value={name} onChange={setName} placeholder="e.g. Q1 outbound · Acme" autoFocus className="w-full" />
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div>
                                     <Label>Stage</Label>
                                     <StagePill stages={stages} value={stageId} onChange={setStageId} />
@@ -621,7 +621,7 @@ function DealDialog({
                                     </div>
                                 )}
                             </div>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                 <div className="col-span-2">
                                     <Label>Value</Label>
                                     <TextInput value={value} onChange={setValue} placeholder="12000" className="w-full" />

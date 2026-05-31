@@ -17,6 +17,8 @@ import {
     KeyIcon,
     Loader2Icon,
     LockIcon,
+    MinusIcon,
+    PlusIcon,
     ShieldCheckIcon,
     ShieldIcon,
     SlidersIcon,
@@ -194,7 +196,7 @@ function ConfigureStep({
                 </Field>
 
                 <Field label="Permissions">
-                    <div className="grid grid-cols-3 gap-1.5 mb-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 mb-2">
                         <PresetCard
                             icon={<ShieldIcon className="w-3 h-3" />}
                             label="Read-only"
@@ -218,10 +220,21 @@ function ConfigureStep({
                         />
                     </div>
                     {perms.isPending ? (
-                        <div className="h-20 rounded-md bg-slate-50 animate-pulse" />
+                        <div className="h-24 rounded-md bg-slate-50 animate-pulse" />
+                    ) : perms.isError ? (
+                        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-3 text-[11.5px] text-rose-700 flex items-center justify-between gap-2">
+                            <span>Couldn't load permissions.</span>
+                            <button type="button" onClick={() => perms.refetch()} className="font-medium underline underline-offset-2 hover:no-underline">
+                                Retry
+                            </button>
+                        </div>
+                    ) : (perms.data?.permissions?.length ?? 0) === 0 ? (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-[11.5px] text-slate-500">
+                            No permissions available for this account.
+                        </div>
                     ) : (
                         <PermissionMatrix
-                            permissions={perms.data?.permissions ?? []}
+                            permissions={perms.data!.permissions}
                             bitmask={permissionsBitmask}
                             onToggle={togglePermission}
                         />
@@ -229,33 +242,7 @@ function ConfigureStep({
                 </Field>
 
                 <Field label="Rate limit" hint="Soft cap, sliding window. We return 429 + Retry-After when exceeded.">
-                    <div className="flex items-center gap-2">
-                        <input
-                            type="number"
-                            min={1}
-                            max={10000}
-                            value={rateLimit}
-                            onChange={(e) => setRateLimit(Math.max(1, Math.min(10000, Number(e.target.value) || 60)))}
-                            className="w-24 h-8 px-2.5 rounded-md border border-slate-200 focus:border-sky-400 focus:ring-1 focus:ring-sky-200 outline-none text-[12.5px] text-slate-900 text-right tabular-nums"
-                        />
-                        <span className="text-[11.5px] text-slate-500">requests / minute</span>
-                        <div className="ml-auto flex items-center gap-1">
-                            {[30, 60, 120, 600].map((v) => (
-                                <button
-                                    key={v}
-                                    type="button"
-                                    onClick={() => setRateLimit(v)}
-                                    className={`h-6 px-2 rounded text-[11px] tabular-nums transition-colors ${
-                                        rateLimit === v
-                                            ? "bg-slate-900 text-white"
-                                            : "border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300"
-                                    }`}
-                                >
-                                    {v}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                    <RateLimitSetter value={rateLimit} onChange={setRateLimit} />
                 </Field>
 
                 <Field label="Expires">
@@ -417,6 +404,64 @@ function Field({
     );
 }
 
+function RateLimitSetter({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+    const clamp = (n: number) => Math.max(1, Math.min(10000, Math.round(n) || 1));
+    const presets = [30, 60, 120, 600, 1000];
+    const stepBtn =
+        "w-8 h-8 rounded-md border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 inline-flex items-center justify-center transition-colors disabled:opacity-40 disabled:hover:text-slate-500 disabled:hover:border-slate-200";
+
+    return (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+            <div className="flex items-center justify-center gap-3">
+                <button type="button" onClick={() => onChange(clamp(value - 10))} disabled={value <= 1} className={stepBtn} aria-label="Decrease by 10">
+                    <MinusIcon className="w-3.5 h-3.5" />
+                </button>
+                <div className="flex items-baseline gap-1.5">
+                    <input
+                        type="number"
+                        min={1}
+                        max={10000}
+                        value={value}
+                        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+                        className="w-[74px] text-center text-[22px] font-semibold tabular-nums text-slate-900 bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="text-[11px] text-slate-400 whitespace-nowrap">req / min</span>
+                </div>
+                <button type="button" onClick={() => onChange(clamp(value + 10))} disabled={value >= 10000} className={stepBtn} aria-label="Increase by 10">
+                    <PlusIcon className="w-3.5 h-3.5" />
+                </button>
+            </div>
+
+            <input
+                type="range"
+                min={1}
+                max={1000}
+                step={1}
+                value={Math.min(value, 1000)}
+                onChange={(e) => onChange(clamp(Number(e.target.value)))}
+                className="w-full mt-3 h-1.5 accent-sky-600 cursor-pointer"
+            />
+
+            <div className="flex items-center justify-center gap-1.5 mt-2.5">
+                {presets.map((v) => (
+                    <button
+                        key={v}
+                        type="button"
+                        onClick={() => onChange(v)}
+                        className={`h-6 px-2.5 rounded-md text-[11px] tabular-nums transition-colors ${
+                            value === v
+                                ? "bg-sky-600 text-white"
+                                : "border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300"
+                        }`}
+                    >
+                        {v >= 1000 ? "1k" : v}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function PresetCard({
     icon,
     label,
@@ -461,16 +506,25 @@ function PermissionMatrix({
     onToggle: (value: number) => void;
 }) {
     const grouped = React.useMemo(() => {
-        const out: Record<string, APIPermission[]> = { read: [], write: [], bulk: [], special: [] };
+        const out: Record<string, APIPermission[]> = {};
         for (const p of permissions) {
             (out[p.category] ?? (out[p.category] = [])).push(p);
         }
         return out;
     }, [permissions]);
 
+    // Render the known categories in a sensible order, then ANY others the API
+    // returns — so a new/renamed category can never silently hide its scopes.
+    const categories = React.useMemo(() => {
+        const known = ["read", "write", "bulk", "special"];
+        const ordered = known.filter((c) => grouped[c]?.length);
+        const extra = Object.keys(grouped).filter((c) => !known.includes(c));
+        return [...ordered, ...extra];
+    }, [grouped]);
+
     return (
         <div className="rounded-md border border-slate-200 divide-y divide-slate-200/60 max-h-56 overflow-y-auto">
-            {(["read", "write", "bulk", "special"] as const).map((cat) =>
+            {categories.map((cat) =>
                 grouped[cat] && grouped[cat].length > 0 ? (
                     <div key={cat}>
                         <div className="px-2.5 py-1.5 bg-slate-50/60 text-[10px] uppercase tracking-[0.14em] text-slate-500 font-medium">

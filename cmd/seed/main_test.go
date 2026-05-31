@@ -107,6 +107,10 @@ func TestSeedBaseline_FreshAndIdempotent(t *testing.T) {
 	if devEndpoints != 1 {
 		t.Errorf("expected 1 dev webhook endpoint, got %d", devEndpoints)
 	}
+	devUnibox := countRows(t, pool, ctx, `SELECT COUNT(*) FROM unibox_emails WHERE user_id::text = $1`, userDev.String())
+	if devUnibox != 2 {
+		t.Errorf("expected 2 dev unibox emails, got %d", devUnibox)
+	}
 
 	// Second run should not error and should not duplicate.
 	if err := seedBaseline(ctx, pool); err != nil {
@@ -119,6 +123,10 @@ func TestSeedBaseline_FreshAndIdempotent(t *testing.T) {
 	devAccountsAfter := countRows(t, pool, ctx, `SELECT COUNT(*) FROM email_accounts WHERE organization_id::text = $1`, orgDev.String())
 	if devAccountsAfter != devAccounts {
 		t.Fatalf("dev account seeding not idempotent: %d → %d", devAccounts, devAccountsAfter)
+	}
+	devUniboxAfter := countRows(t, pool, ctx, `SELECT COUNT(*) FROM unibox_emails WHERE user_id::text = $1`, userDev.String())
+	if devUniboxAfter != devUnibox {
+		t.Fatalf("dev unibox seeding not idempotent: %d → %d", devUnibox, devUniboxAfter)
 	}
 }
 
@@ -148,6 +156,7 @@ func TestSeedRich_FreshAndIdempotent(t *testing.T) {
 		{"10 contacts", `SELECT COUNT(*) FROM contacts WHERE id::text LIKE '66666666-%'`, 10},
 		{"2 unsubscribed contacts", `SELECT COUNT(*) FROM contacts WHERE id::text LIKE '66666666-%' AND subscribed = false`, 2},
 		{"10 campaign leads", `SELECT COUNT(*) FROM campaign_leads cl JOIN contacts c ON c.id = cl.contact_id WHERE c.id::text LIKE '66666666-%'`, 10},
+		{"4 legacy unibox emails", `SELECT COUNT(*) FROM unibox_emails WHERE id::text LIKE '77777777-%'`, 4},
 	}
 	for _, ch := range checks {
 		var got int64

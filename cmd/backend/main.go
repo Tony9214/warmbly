@@ -20,6 +20,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/admin"
 	"github.com/warmbly/warmbly/internal/app/adminoutreach"
 	"github.com/warmbly/warmbly/internal/app/advanced"
+	"github.com/warmbly/warmbly/internal/app/analytics"
 	"github.com/warmbly/warmbly/internal/app/apikey"
 	"github.com/warmbly/warmbly/internal/app/audit"
 	"github.com/warmbly/warmbly/internal/app/auth"
@@ -29,13 +30,16 @@ import (
 	"github.com/warmbly/warmbly/internal/app/crm"
 	"github.com/warmbly/warmbly/internal/app/dailythrottle"
 	"github.com/warmbly/warmbly/internal/app/dangerzone"
+	"github.com/warmbly/warmbly/internal/app/discount"
 	"github.com/warmbly/warmbly/internal/app/email"
 	"github.com/warmbly/warmbly/internal/app/emailsend"
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/app/fleet"
 	"github.com/warmbly/warmbly/internal/app/group"
+	idempotencyapp "github.com/warmbly/warmbly/internal/app/idempotency"
 	"github.com/warmbly/warmbly/internal/app/integration"
 	"github.com/warmbly/warmbly/internal/app/organization"
+	"github.com/warmbly/warmbly/internal/app/ratelimit"
 	"github.com/warmbly/warmbly/internal/app/releases"
 	"github.com/warmbly/warmbly/internal/app/sequence"
 	"github.com/warmbly/warmbly/internal/app/settings"
@@ -92,6 +96,8 @@ func main() {
 	var userService user.UserService
 	var emailService email.EmailService
 	var campaignService campaign.CampaignService
+	var analyticsService analytics.AnalyticsService
+	var rateLimitService ratelimit.RateLimitService
 	var sequenceService sequence.SequenceService
 	var contactService contact.ContactService
 	var socketService socket.SocketService
@@ -111,6 +117,7 @@ func main() {
 	var categoryService group.GroupService
 	var crmService crm.CRMService
 	var apiKeyService apikey.APIKeyService
+	var idempotencyService idempotencyapp.Service
 
 	// New services for trial, feature gates, and worker assignment
 	var trialService trial.TrialService
@@ -118,6 +125,7 @@ func main() {
 	var workerAssignmentService worker.WorkerAssignmentService
 	var subscriptionService subscription.SubscriptionService
 	var stripeService stripe.StripeService
+	var discountService discount.DiscountService
 	var organizationService organization.OrganizationService
 
 	// Email send & templates
@@ -437,11 +445,22 @@ func main() {
 		// New repositories for subscription & worker management
 		subscriptionRepository := repository.NewSubscriptionRepository(primaryDB.Pool)
 		planRepository := repository.NewPlanRepository(primaryDB.Pool)
+
+		// Admin + discount management. Constructed before the Stripe service:
+		// the Stripe service depends on the discount service (to validate codes
+		// and record redemptions at checkout), and the discount service audits
+		// management actions through the admin service.
+		adminRepository := repository.NewAdminRepository(primaryDB.Pool)
+		adminService = admin.NewService(adminRepository)
+		discountCodeRepository := repository.NewDiscountCodeRepository(primaryDB.Pool)
+		discountRedemptionRepository := repository.NewDiscountRedemptionRepository(primaryDB.Pool)
+		discountService = discount.NewService(discountCodeRepository, discountRedemptionRepository, planRepository, adminService)
 		workerRepository := repository.NewWorkerRepository(primaryDB.Pool)
 		organizationRepository := repository.NewOrganizationRepository(primaryDB.Pool)
 		organizationRepoForHandler = organizationRepository
 		taskRepository := repository.NewTaskRepository(primaryDB.Pool)
 		apiKeyRepository := repository.NewAPIKeyRepository(primaryDB)
+		idempotencyService = idempotencyapp.NewService(primaryDB.Pool)
 		crmRepository := repository.NewCRMRepository(primaryDB.Pool)
 		advancedRepository := repository.NewAdvancedOutreachRepository(primaryDB.Pool)
 		templateRepository := repository.NewTemplateRepository(primaryDB.Pool)
@@ -486,7 +505,7 @@ func main() {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
-		stripeService = stripe.NewService(stripeCfg, subscriptionRepository, planRepository, workerAssignmentService)
+		stripeService = stripe.NewService(stripeCfg, subscriptionRepository, planRepository, workerAssignmentService, discountService)
 
 		tokenService = token.NewService(primaryDB, tokenRepostory, cache, geoloc, authCfg.AuthSecret)
 		userService = user.NewService(userRepostory, cache)
@@ -578,18 +597,23 @@ func main() {
 			credentialsRepository,
 			cipherService,
 			worker_orchestrator.WorkerEnvConfig{
-				AppEnv:               os.Getenv("APP_ENV"),
-				WorkerImage:          getenvDefault("WORKER_IMAGE", "ghcr.io/warmbly/worker:latest"),
-				KafkaBootstrap:       os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
-				KafkaSASLUsername:    os.Getenv("KAFKA_SASL_USERNAME"),
-				KafkaSASLPassword:    os.Getenv("KAFKA_SASL_PASSWORD"),
-				SchemaRegistryURL:    os.Getenv("SCHEMA_REGISTRY_URL"),
-				SchemaRegistryKey:    os.Getenv("SCHEMA_REGISTRY_KEY"),
-				SchemaRegistrySecret: os.Getenv("SCHEMA_REGISTRY_SECRET"),
-				RedisURL:             os.Getenv("REDIS"),
-				AWSRegion:            os.Getenv("AWS_REGION"),
-				AWSAccessKeyID:       os.Getenv("WORKER_AWS_ACCESS_KEY_ID"),
-				AWSSecretAccessKey:   os.Getenv("WORKER_AWS_SECRET_ACCESS_KEY"),
+				AppEnv:                   os.Getenv("APP_ENV"),
+				WorkerImage:              getenvDefault("WORKER_IMAGE", "ghcr.io/warmbly/worker:latest"),
+				KafkaBootstrap:           os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
+				KafkaSASLUsername:        os.Getenv("KAFKA_SASL_USERNAME"),
+				KafkaSASLPassword:        os.Getenv("KAFKA_SASL_PASSWORD"),
+				SchemaRegistryURL:        os.Getenv("SCHEMA_REGISTRY_URL"),
+				SchemaRegistryKey:        os.Getenv("SCHEMA_REGISTRY_KEY"),
+				SchemaRegistrySecret:     os.Getenv("SCHEMA_REGISTRY_SECRET"),
+				RedisURL:                 os.Getenv("REDIS"),
+				AWSRegion:                os.Getenv("AWS_REGION"),
+				AWSAccessKeyID:           os.Getenv("WORKER_AWS_ACCESS_KEY_ID"),
+				AWSSecretAccessKey:       os.Getenv("WORKER_AWS_SECRET_ACCESS_KEY"),
+				EncryptedKeysBackendURL:  os.Getenv("ENCRYPTED_KEYS_BACKEND_URL"),
+				EncryptedKeysWorkerToken: os.Getenv("INTERNAL_API_TOKEN"),
+				EventBusProvider:         os.Getenv("EVENTBUS_PROVIDER"),
+				NATSURL:                  os.Getenv("NATS_URL"),
+				CodecProvider:            os.Getenv("CODEC_PROVIDER"),
 			},
 			getenvDefault("WORKER_INSTALLER_PATH", "/app/scripts/install-worker.sh"),
 		)
@@ -623,6 +647,7 @@ func main() {
 			cache,
 			&oauth2Cfg.InboxAuthorization,
 			workerAssignmentService,
+			streamingPublisher,
 		)
 		// Fan out email-account lifecycle events to customer webhooks.
 		emailService.WireWebhooks(webhookService)
@@ -630,13 +655,17 @@ func main() {
 		// only the prod backend has a real cache; jobs / tests build
 		// emailService without one.
 		emailService.WireThrottle(dailyThrottleService)
-		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, dailyThrottleService, streamingPublisher)
+		analyticsRepository := repository.NewAnalyticsRepository(primaryDB)
+		emailAccountErrorRepository := repository.NewEmailAccountErrorRepository(primaryDB)
+		analyticsService = analytics.NewService(analyticsRepository, emailRepostory, campaignRepostory, emailAccountErrorRepository)
+
+		rateLimitRepository := repository.NewRateLimitRepository(primaryDB)
+		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)
 		sequenceService = sequence.NewService(sequenceRepostory)
-		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository)
+		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository, streamingPublisher)
 		apiKeyService = apikey.NewService(cache, apiKeyRepository)
 		crmService = crm.NewService(crmRepository)
 		socketService = socket.NewService(cache, tokenService)
-		uniboxService = unibox.NewService(cache, s3, uniboxRepository)
 
 		// Cloud Tasks client
 		cloudTasksCfg, err := cfg.LoadCloudTasksConfig(ctx)
@@ -654,7 +683,14 @@ func main() {
 		// Template & email send services
 		templateService = template.NewService(templateRepository)
 		schedulerService := scheduler.NewSchedulerService(taskRepository, warmupRepository, campaignProgressRepository, emailRepostory, campaignRepostory)
-		emailSendService = emailsend.NewService(taskRepository, emailRepostory, userRepostory, schedulerService, tasksClient, featureGateService)
+		campaignService = campaign.NewService(campaignRepostory, taskRepository, emailRepostory, campaignLogRepository, featureGateService, dailyThrottleService, schedulerService, tasksClient, streamingPublisher)
+		emailSendService = emailsend.NewService(taskRepository, emailRepostory, userRepostory, schedulerService, tasksClient, featureGateService, dailyThrottleService)
+		// uniboxService is constructed here (rather than alongside the
+		// other service constructors above) because cancel-scheduled
+		// needs the Cloud Tasks client for best-effort DeleteTask, and
+		// tasksClient isn't initialised until the Cloud Tasks config
+		// block runs.
+		uniboxService = unibox.NewService(cache, s3, uniboxRepository, taskRepository, tasksClient)
 		advancedService = advanced.NewService(
 			advancedRepository,
 			campaignRepostory,
@@ -688,10 +724,6 @@ func main() {
 			campaignLogRepository,
 			advancedService,
 		)
-
-		// Admin service
-		adminRepository := repository.NewAdminRepository(primaryDB.Pool)
-		adminService = admin.NewService(adminRepository)
 
 		// Admin outreach composer — sends from the platform mailer
 		// (SES/SMTP) with a configurable Reply-To, audits every send.
@@ -732,14 +764,16 @@ func main() {
 	}
 
 	h := &handler.Handler{
-		AuthService:     authService,
-		TokenService:    tokenService,
-		UserService:     userService,
-		EmailService:    emailService,
-		CampaignService: campaignService,
-		ContactService:  contactService,
-		SequenceService: sequenceService,
-		UniboxService:   uniboxService,
+		AuthService:      authService,
+		TokenService:     tokenService,
+		UserService:      userService,
+		EmailService:     emailService,
+		CampaignService:  campaignService,
+		AnalyticsService: analyticsService,
+		RateLimitService: rateLimitService,
+		ContactService:   contactService,
+		SequenceService:  sequenceService,
+		UniboxService:    uniboxService,
 
 		FolderService:   folderService,
 		TagService:      tagService,
@@ -755,6 +789,7 @@ func main() {
 		// Subscription & billing
 		SubscriptionService: subscriptionService,
 		StripeService:       stripeService,
+		DiscountService:     discountService,
 
 		// Trial & feature gates
 		TrialService:            trialService,
@@ -823,6 +858,7 @@ func main() {
 	m := &middleware.Handler{
 		TokenService:        tokenService,
 		APIKeyService:       apiKeyService,
+		IdempotencyService:  idempotencyService,
 		OrganizationService: organizationService,
 	}
 

@@ -29,7 +29,69 @@ Other CI-touching rules:
 
 Commit hygiene:
 
+- when instructed to make a commit, use the subject format `feat: one line explanation`
 - commit messages on this repo do not include `Co-Authored-By:` or other AI/agent attribution footers. Keep messages to subject + body explaining the why. If a commit slips through with an attribution footer, rewrite it before opening or updating a PR.
+
+### Verification: what to run, what to skip
+
+Keep the loop fast. The signals that matter are formatting, lint, and typecheck — not local builds or browser automation.
+
+Always, before calling a Go change done:
+
+- run `make fmt` (or `gofmt -w cmd internal`); `gofmt -l ./...` must print nothing
+- run `make lint` (golangci-lint)
+
+For frontend changes, run `pnpm typecheck` and `pnpm lint` in any tree you touched.
+
+Do not:
+
+- do not run `go build ./...`, `pnpm build`, or docker image builds as a "did it work" check. They are slow and are not what CI gates on. `go run` (via the make dev targets) already compiles; `make fmt` + `make lint` + `pnpm typecheck` are the real signals.
+- do not write or run Python/Playwright (or any browser-automation) scripts to test the app. Manual, in-browser verification is the user's job against the native dev stack (`make infra` + `make backend` + `make web`). Do not add screenshot/e2e test harnesses to this repo.
+- do not run the Go test suite as a default gate unless the task is specifically about those tests.
+- do not push hoping CI passes; a `gofmt -l` / `make lint` / `pnpm typecheck` failure is always a real CI failure.
+
+## Local Development
+
+Infra runs in docker; the Go services and frontends run natively on the host for fast iteration — no docker image rebuilds when you change app code. Targets live in the `Makefile`.
+
+- `make infra` — start the backing services in docker (postgres, redis, kafka, schema-registry, mailpit, localstack + init, cloud-tasks, stripe-mock). Run once; leave running.
+- `make backend` — run the API natively on `:8080` (applies the embedded migrations on boot against the docker postgres).
+- `make consumer` / `make worker` — run those Go services natively, each in its own terminal. The worker reads encrypted DEKs through the backend's `/internal/dek` endpoint (the prod `http` provider, no worker DB), so `make backend` must be running and their `INTERNAL_API_TOKEN` must match (the targets are pre-wired to match).
+- `make run` — backend + consumer + worker together in one terminal (Ctrl-C stops all).
+- `make tracking` / `make realtime` — the Rust tracking pixel service (:3000) and Elixir/Phoenix websocket fanout (:4000). Deliberately kept out of `make run`; start them only when needed, and only if you have the cargo / elixir toolchains on the host.
+- `make web` / `make admin` / `make site` — frontend dev servers (5173 / 5174 / 4321), pointed at the native backend.
+- `make seed` — load fixtures (after the backend has applied migrations).
+- `make fmt` / `make lint` — format and lint Go.
+
+Prefer native `make backend` over rebuilding the docker backend image: docker rebuilds are slow because the image bakes in the migrations and the compiled binary, so a one-line change means a full image build + container recreate. The native targets skip all of that. The dockerized hot-reload flow (`make app`) and prod-image smoke test (`make up`) remain available when you specifically need containers.
+
+Dashboard realtime:
+
+- dashboard experiences should be realtime by default. When emails arrive, contacts are added, records change, or any dashboard-visible feature updates, the dashboard should reflect it live without requiring a manual refresh
+- aim for a responsive, Discord-like product feel: presence, counts, lists, detail panes, notifications, and workflow state should stay current across every dashboard feature where live updates are meaningful
+- when changing dashboard behavior, it is acceptable to safely change the API structure if a better solution exists. Before making an API shape change, ask the user how they want to handle it, especially when the current API may already be published or backwards compatibility might require a new API version
+
+Public API quality bar:
+
+- treat customer-facing API changes as contract changes. Prefer additive changes inside a version, and use a new API version for incompatible behavior once an endpoint is published
+- every API-key-capable route must have an explicit API permission gate and, for JWT callers, the matching organization permission gate
+- side-effectful POST/PATCH/PUT/DELETE endpoints should support `Idempotency-Key` or have a documented reason why retries are naturally safe
+- error responses should include stable machine-readable `code` and `request_id` fields in addition to human-readable text
+- list endpoints should use consistent `data` plus `pagination` shapes with opaque cursors; invalid cursors or limits should return `400` instead of being ignored
+- webhook endpoints must stay HMAC-signed, HTTPS by default, and protected against obvious SSRF targets. Only development/self-hosted environments should opt into unsafe webhook URLs
+
+## Dashboard UI Conventions (`web/`)
+
+Everything in the dashboard must use our own theme, not browser/library defaults.
+
+- Number fields: never ship a raw `<input type="number">` with the native spinner. Use the shared `NumberInput` from `@/components/ui/field` — it strips the native up/down arrows (`appearance:none`) and renders our own themed chevron steppers. Do not re-add the default stepper anywhere.
+- Inputs/labels: reuse `TextInput`, `SearchInput`, `Label`, `NumberInput` from `@/components/ui/field`; don't hand-roll raw `<input>`/`<select>` with ad-hoc classes when a primitive exists.
+- Pickers: tag/category multi-selects share one visual language — bordered chip box + framer-motion dropdown with a search header + checkbox-square rows (see contacts `CategoryPicker` and `popup/select/TagSelector`). Reuse `useFlipPlacement` + `useClickOutside`.
+- Detail drawers + their tab bars share one pattern (see `emails/InboxDetails` and contacts `ContactEdit`): a `shrink-0 px-3 flex items-center gap-1 border-b border-slate-200` bar, each tab a `relative h-10 px-2.5 inline-flex items-center gap-1.5 text-[12.5px]` button with a lucide icon, active = `text-slate-900 font-medium` + a `bg-sky-600` underline span.
+- Theme tokens: slate borders (`border-slate-200`), sky accents (`focus:border-sky-400 focus:ring-sky-100`, `bg-sky-50 text-sky-700`), `rounded-md`, `text-[12.5px]` base, `h-7` controls, `10px uppercase tracking-[0.14em]` section labels.
+- Multi-select tables: when rows are selected, show a floating bottom-center selection bar with the count + bulk actions (mirror `SelectionBar` in contacts `ContactsTable.tsx`).
+- Row actions must be reachable on touch: never hide the only affordance behind `opacity-0 group-hover` with no mobile fallback. Use `opacity-100 md:opacity-0 md:group-hover:opacity-100`, or surface actions in the detail drawer.
+- Prefer realtime over polling: subscribe to the socket and `queryClient.invalidateQueries(...)` on the relevant event instead of `refetchInterval` where an event exists (see `useRealtimeEvents` / `RealtimeManager`).
 
 ## System Shape
 

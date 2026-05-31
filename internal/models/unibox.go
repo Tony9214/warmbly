@@ -113,6 +113,8 @@ type EmailMessageStoreDataPreview struct {
 	ID           uuid.UUID `json:"id"`
 	EmailID      uuid.UUID `json:"email_id"`
 	ThreadID     string    `json:"thread_id"`
+	FromAddr     []string  `json:"from_addr"`
+	ToAddr       []string  `json:"to_addr"`
 	Subject      string    `json:"subject"`
 	Snippet      string    `json:"snippet"`
 	InternalDate time.Time `json:"internal_date"`
@@ -146,11 +148,99 @@ type MailSearchParams struct {
 	// filter resolves client-side to the matching account IDs and
 	// passes them here.
 	EmailAccountIDs []uuid.UUID
-	PageSize        int
-	Cursor          string
+	// Snoozed scopes the result set:
+	//   nil   → exclude snoozed threads (default inbox behaviour)
+	//   true  → only snoozed threads
+	//   false → ignore the snooze filter entirely (raw view)
+	Snoozed *bool
+	// AwaitingReply, when true, narrows to threads where the latest
+	// message in the thread was sent by the user (i.e. the recipient
+	// hasn't replied yet). nil = no filter.
+	AwaitingReply *bool
+	PageSize      int
+	Cursor        string
 }
 
 type MarkSeen struct {
 	EmailIDs []uuid.UUID `json:"email_ids"`
 	Seen     bool        `json:"seen"`
+}
+
+// UniboxSnooze hides a thread from the user's inbox until SnoozedUntil
+// passes. UNIQUE per (user, thread); a second snooze on the same
+// thread updates SnoozedUntil in place.
+type UniboxSnooze struct {
+	ID           uuid.UUID `json:"id"`
+	UserID       uuid.UUID `json:"user_id"`
+	ThreadID     string    `json:"thread_id"`
+	SnoozedUntil time.Time `json:"snoozed_until"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// UniboxMailboxOverview captures per-mailbox counters for the scope
+// rail. Total counts every message in the mailbox; unread is the
+// classic dot-badge number.
+type UniboxMailboxOverview struct {
+	ID     uuid.UUID `json:"id"`
+	Email  string    `json:"email"`
+	Name   string    `json:"name"`
+	Unread int64     `json:"unread"`
+	Total  int64     `json:"total"`
+}
+
+// UniboxTagOverview gives the rail per-tag counts; resolved by joining
+// emails through the mailboxes that carry the tag.
+type UniboxTagOverview struct {
+	ID     uuid.UUID `json:"id"`
+	Title  string    `json:"title"`
+	Color  string    `json:"color"`
+	Unread int64     `json:"unread"`
+	Total  int64     `json:"total"`
+}
+
+// UniboxOverview powers the scope rail + top metric strip in one
+// request. Computed at /unibox/overview.
+type UniboxOverview struct {
+	Total            int64 `json:"total"`
+	Unread           int64 `json:"unread"`
+	Today            int64 `json:"today"`
+	Week             int64 `json:"week"`
+	Snoozed          int64 `json:"snoozed"`
+	AwaitingReply    int64 `json:"awaiting_reply"`
+	ScheduledPending int64 `json:"scheduled_pending"`
+	// ScheduledPendingMax is the hard cap on pending scheduled email
+	// tasks per user. The dashboard shows current/max so the user
+	// sees how close they are to the limit before hitting it.
+	ScheduledPendingMax int64                   `json:"scheduled_pending_max"`
+	Mailboxes           []UniboxMailboxOverview `json:"mailboxes"`
+	Tags                []UniboxTagOverview     `json:"tags"`
+	GeneratedAt         time.Time               `json:"generated_at"`
+	WindowTodayStart    time.Time               `json:"window_today_start"`
+	WindowWeekStart     time.Time               `json:"window_week_start"`
+}
+
+// UniboxScheduledItem describes one queued outbound message the user
+// can review or cancel before it fires. The shape mirrors what the
+// scheduled-list view needs to render: who it's going to, when, the
+// thread it'll thread into, and which mailbox is sending.
+type UniboxScheduledItem struct {
+	TaskID      uuid.UUID `json:"task_id"`
+	ScheduledAt time.Time `json:"scheduled_at"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// Sending mailbox.
+	AccountID    uuid.UUID `json:"account_id"`
+	AccountEmail string    `json:"account_email"`
+	AccountName  string    `json:"account_name"`
+
+	// Recipients + message contents (preview only).
+	To      []string `json:"to"`
+	CC      []string `json:"cc,omitempty"`
+	BCC     []string `json:"bcc,omitempty"`
+	Subject string   `json:"subject"`
+	Snippet string   `json:"snippet"`
+
+	// Thread the reply will land in (when the user queued from unibox).
+	ThreadID *string `json:"thread_id,omitempty"`
 }

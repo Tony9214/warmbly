@@ -36,11 +36,11 @@ func (r *planRepository) Create(ctx context.Context, plan *models.Plan) error {
 		INSERT INTO plans (
 			id, name, max_contacts, daily_emails, ai_generation, account_limit,
 			price, discounted_price, duration_id, savings, public,
-			stripe_price_id, stripe_product_id, created_at, updated_at
+			stripe_price_id, stripe_price_id_yearly, stripe_product_id, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			(SELECT id FROM durations WHERE title = $9),
-			$10, $11, $12, $13, $14, $15
+			$10, $11, $12, $13, $14, $15, $16
 		)
 	`
 
@@ -48,7 +48,7 @@ func (r *planRepository) Create(ctx context.Context, plan *models.Plan) error {
 	_, err := r.db.Exec(ctx, query,
 		plan.ID, plan.Name, plan.MaxContacts, plan.DailyEmails, plan.AIGeneration, plan.AccountLimit,
 		plan.Price, plan.DiscountedPrice, string(plan.Duration), plan.Savings, plan.Public,
-		plan.StripePriceID, plan.StripeProductID, now, now,
+		plan.StripePriceID, plan.StripePriceIDYearly, plan.StripeProductID, now, now,
 	)
 	return err
 }
@@ -66,15 +66,16 @@ func (r *planRepository) Update(ctx context.Context, plan *models.Plan) error {
 			savings = $9,
 			public = $10,
 			stripe_price_id = $11,
-			stripe_product_id = $12,
-			updated_at = $13
+			stripe_price_id_yearly = $12,
+			stripe_product_id = $13,
+			updated_at = $14
 		WHERE id = $1
 	`
 
 	_, err := r.db.Exec(ctx, query,
 		plan.ID, plan.Name, plan.MaxContacts, plan.DailyEmails, plan.AIGeneration, plan.AccountLimit,
 		plan.Price, plan.DiscountedPrice, plan.Savings, plan.Public,
-		plan.StripePriceID, plan.StripeProductID, time.Now(),
+		plan.StripePriceID, plan.StripePriceIDYearly, plan.StripeProductID, time.Now(),
 	)
 	return err
 }
@@ -83,7 +84,7 @@ func (r *planRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Pla
 	return r.scanPlan(ctx, `
 		SELECT p.id, p.name, p.max_contacts, p.daily_emails, p.ai_generation, p.account_limit,
 			   p.price, p.discounted_price, d.title, p.savings, p.public,
-			   p.stripe_price_id, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
+			   p.stripe_price_id, p.stripe_price_id_yearly, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
 			   p.created_at, p.updated_at
 		FROM plans p
 		LEFT JOIN durations d ON d.id = p.duration_id
@@ -95,11 +96,11 @@ func (r *planRepository) GetByStripePriceID(ctx context.Context, priceID string)
 	return r.scanPlan(ctx, `
 		SELECT p.id, p.name, p.max_contacts, p.daily_emails, p.ai_generation, p.account_limit,
 			   p.price, p.discounted_price, d.title, p.savings, p.public,
-			   p.stripe_price_id, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
+			   p.stripe_price_id, p.stripe_price_id_yearly, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
 			   p.created_at, p.updated_at
 		FROM plans p
 		LEFT JOIN durations d ON d.id = p.duration_id
-		WHERE p.stripe_price_id = $1
+		WHERE p.stripe_price_id = $1 OR p.stripe_price_id_yearly = $1
 	`, priceID)
 }
 
@@ -107,7 +108,7 @@ func (r *planRepository) GetByStripeProductID(ctx context.Context, productID str
 	return r.scanPlan(ctx, `
 		SELECT p.id, p.name, p.max_contacts, p.daily_emails, p.ai_generation, p.account_limit,
 			   p.price, p.discounted_price, d.title, p.savings, p.public,
-			   p.stripe_price_id, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
+			   p.stripe_price_id, p.stripe_price_id_yearly, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
 			   p.created_at, p.updated_at
 		FROM plans p
 		LEFT JOIN durations d ON d.id = p.duration_id
@@ -123,7 +124,7 @@ func (r *planRepository) scanPlan(ctx context.Context, query string, args ...int
 	err := row.Scan(
 		&plan.ID, &plan.Name, &plan.MaxContacts, &plan.DailyEmails, &plan.AIGeneration, &plan.AccountLimit,
 		&plan.Price, &plan.DiscountedPrice, &duration, &plan.Savings, &plan.Public,
-		&plan.StripePriceID, &plan.StripeProductID, &plan.DedicatedWorkers, &plan.DailyCampaignLimit,
+		&plan.StripePriceID, &plan.StripePriceIDYearly, &plan.StripeProductID, &plan.DedicatedWorkers, &plan.DailyCampaignLimit,
 		&plan.CreatedAt, &plan.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
@@ -143,7 +144,7 @@ func (r *planRepository) List(ctx context.Context, publicOnly bool) ([]*models.P
 	query := `
 		SELECT p.id, p.name, p.max_contacts, p.daily_emails, p.ai_generation, p.account_limit,
 			   p.price, p.discounted_price, d.title, p.savings, p.public,
-			   p.stripe_price_id, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
+			   p.stripe_price_id, p.stripe_price_id_yearly, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
 			   p.created_at, p.updated_at
 		FROM plans p
 		LEFT JOIN durations d ON d.id = p.duration_id
@@ -166,7 +167,7 @@ func (r *planRepository) List(ctx context.Context, publicOnly bool) ([]*models.P
 		err := rows.Scan(
 			&plan.ID, &plan.Name, &plan.MaxContacts, &plan.DailyEmails, &plan.AIGeneration, &plan.AccountLimit,
 			&plan.Price, &plan.DiscountedPrice, &duration, &plan.Savings, &plan.Public,
-			&plan.StripePriceID, &plan.StripeProductID, &plan.DedicatedWorkers, &plan.DailyCampaignLimit,
+			&plan.StripePriceID, &plan.StripePriceIDYearly, &plan.StripeProductID, &plan.DedicatedWorkers, &plan.DailyCampaignLimit,
 			&plan.CreatedAt, &plan.UpdatedAt,
 		)
 		if err != nil {

@@ -2,13 +2,18 @@ package email
 
 import (
 	"context"
+	"net"
+	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
+	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
-func (s *emailService) Search(ctx context.Context, userID, search, cursor, tag, limit string) (*models.EmailsResult, *errx.Error) {
+func (s *emailService) Search(ctx context.Context, userID, search, cursor, tag, limit string, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error) {
 	cursorId, err := validate.Uuid(cursor)
 	if err != nil {
 		return nil, err
@@ -27,7 +32,7 @@ func (s *emailService) Search(ctx context.Context, userID, search, cursor, tag, 
 		return nil, err
 	}
 
-	return s.emailRepository.Search(ctx, userID, search, cursorId, tagId, limitN)
+	return s.emailRepository.Search(ctx, userID, search, cursorId, tagId, limitN, allowedAccountIDs)
 }
 
 func (s *emailService) Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error) {
@@ -41,11 +46,40 @@ func (s *emailService) Update(ctx context.Context, userID, emailAccountID string
 	}
 
 	s.syncWarmupPoolMembership(ctx, account)
+	s.publishAccountEvent(ctx, pubsub.EventAccountSynced, account)
 	return account, nil
 }
 
-func (s *emailService) UpdateTrackingDomain(ctx context.Context, userID, emailAccountID, domain string) *errx.Error {
-	return s.emailRepository.UpdateTrackingDomain(ctx, userID, emailAccountID, domain)
+// trackingDomainTarget is the shared host customers point their CNAME at.
+// Keep in sync with the TRACKING_DOMAIN default (Makefile / config).
+const trackingDomainTarget = "t.warmbly.com"
+
+func (s *emailService) UpdateTrackingDomain(ctx context.Context, userID, emailAccountID, domain string) (*models.TrackingDomainStatus, *errx.Error) {
+	domain = strings.TrimSpace(strings.ToLower(domain))
+
+	status := &models.TrackingDomainStatus{TrackingDomain: domain}
+
+	// Empty clears the custom domain (back to the shared default).
+	if domain != "" {
+		// Resolve the CNAME chain for the customer's subdomain and treat
+		// it as verified once it points at our tracking host. DNS can lag
+		// behind a freshly-added record, so a miss is "pending", not an
+		// error — the customer just re-verifies.
+		if cname, err := net.LookupCNAME(domain); err == nil {
+			resolved := strings.TrimSuffix(strings.ToLower(cname), ".")
+			if strings.Contains(resolved, trackingDomainTarget) {
+				status.TrackingDomainVerified = true
+				now := time.Now().UTC()
+				status.TrackingDomainVerifiedAt = &now
+			}
+		}
+	}
+
+	if err := s.emailRepository.UpdateTrackingDomain(ctx, userID, emailAccountID, domain, status.TrackingDomainVerified, status.TrackingDomainVerifiedAt); err != nil {
+		return nil, err
+	}
+
+	return status, nil
 }
 
 func (s *emailService) Delete(ctx context.Context, userID, emailAccountID string) *errx.Error {
@@ -59,6 +93,7 @@ func (s *emailService) Delete(ctx context.Context, userID, emailAccountID string
 	}
 
 	s.removeFromAllWarmupPools(ctx, account)
+	s.publishAccountEvent(ctx, pubsub.EventAccountDisconnected, account)
 
 	if s.webhookService != nil && account != nil && account.OrganizationID != nil {
 		_, _ = s.webhookService.Dispatch(ctx, *account.OrganizationID, models.WebhookEventEmailAccountRemoved, map[string]any{

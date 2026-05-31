@@ -45,8 +45,9 @@ type Plan struct {
 	Public          bool      `json:"public"`
 
 	// Stripe integration
-	StripePriceID   *string `json:"stripe_price_id,omitempty"`
-	StripeProductID *string `json:"stripe_product_id,omitempty"`
+	StripePriceID       *string `json:"stripe_price_id,omitempty"`
+	StripePriceIDYearly *string `json:"stripe_price_id_yearly,omitempty"`
+	StripeProductID     *string `json:"stripe_product_id,omitempty"`
 
 	// Worker tier settings
 	DedicatedWorkers   int  `json:"dedicated_workers"`
@@ -168,9 +169,10 @@ func (s *Subscription) CanUseUnibox() bool {
 
 // FreeTrialInboxLimit caps how many email accounts a free-trial org may
 // connect. Paid orgs have no inbox-count cap (their plan governs sending,
-// not connections). Free-trial users get exactly one inbox so the product
-// can be evaluated without seeding the warmup pool with throwaway accounts.
-const FreeTrialInboxLimit = 1
+// not connections). Free-trial users get up to two inboxes so they can
+// evaluate the unified inbox across more than one mailbox without seeding
+// the warmup pool with throwaway accounts.
+const FreeTrialInboxLimit = 2
 
 // SubscriptionWithLimits includes rate limits for the subscription
 type SubscriptionWithLimits struct {

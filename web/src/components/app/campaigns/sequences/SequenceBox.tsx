@@ -1,3 +1,5 @@
+import MiniNumberInput from "@/components/app/popup/MiniNumberInput";
+
 export default function SequenceBox({
     children,
     next,

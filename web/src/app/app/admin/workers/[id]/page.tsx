@@ -204,7 +204,7 @@ export default function AdminWorkerDetailPage() {
                 <p className="text-slate-400 text-xs font-mono">{w.id}</p>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <Stat label="Install state" value={w.install_state} />
                 <Stat label="Tier" value={w.worker_type + (w.worker_type === "shared" ? (w.free_tier ? " / free" : " / premium") : "")} />
                 <Stat label="Accounts" value={String(w.account_count)} />
@@ -227,7 +227,7 @@ export default function AdminWorkerDetailPage() {
             </div>
 
             <Section title="Connection">
-                <dl className="text-sm grid grid-cols-[120px_1fr] gap-y-1">
+                <dl className="text-sm grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-y-1">
                     <dt className="text-slate-500">Host</dt><dd className="font-mono">{w.ssh_host}</dd>
                     <dt className="text-slate-500">Port</dt><dd className="font-mono">{w.ssh_port}</dd>
                     <dt className="text-slate-500">User</dt><dd className="font-mono">{w.ssh_user}</dd>
@@ -394,7 +394,7 @@ export default function AdminWorkerDetailPage() {
                             <select
                                 value={rewireTarget}
                                 onChange={(e) => setRewireTarget(e.target.value)}
-                                className="border rounded px-3 py-1.5 text-sm min-w-[18rem]"
+                                className="border rounded px-3 py-1.5 text-sm w-full sm:min-w-[18rem]"
                             >
                                 <option value="">— pick a target worker —</option>
                                 {candidates.map((c) => (

@@ -45,6 +45,7 @@ var (
 	EmailAcmeAliceID  = uuid.MustParse("00000000-0000-0000-0000-000000000601")
 	EmailAcmeBobID    = uuid.MustParse("00000000-0000-0000-0000-000000000602")
 	EmailGlobexHansID = uuid.MustParse("00000000-0000-0000-0000-000000000603")
+	EmailOwnerSelfID  = uuid.MustParse("00000000-0000-0000-0000-000000000604")
 
 	// Campaigns (00000000-0000-0000-0000-0000000007xx).
 	CampaignAcmeActiveID = uuid.MustParse("00000000-0000-0000-0000-000000000701")
@@ -87,6 +88,21 @@ var (
 
 	// Enterprise inquiry sample.
 	EnterpriseInquiryID = uuid.MustParse("00000000-0000-0000-0000-000000000d01")
+
+	// Discount codes (00000000-0000-0000-0000-000000000Fxx).
+	DiscountWelcome10ID = uuid.MustParse("00000000-0000-0000-0000-000000000f01")
+
+	// Unibox emails (00000000-0000-0000-0000-0000000010xx).
+	UniboxAcmeReplyID      = uuid.MustParse("00000000-0000-0000-0000-000000001001")
+	UniboxAcmeFollowupID   = uuid.MustParse("00000000-0000-0000-0000-000000001002")
+	UniboxAcmeBounceID     = uuid.MustParse("00000000-0000-0000-0000-000000001003")
+	UniboxAcmeOOOID        = uuid.MustParse("00000000-0000-0000-0000-000000001004")
+	UniboxAcmeMeetingID    = uuid.MustParse("00000000-0000-0000-0000-000000001005")
+	UniboxAcmeVendorID     = uuid.MustParse("00000000-0000-0000-0000-000000001006")
+	UniboxGlobexReplyID    = uuid.MustParse("00000000-0000-0000-0000-000000001007")
+	UniboxGlobexQuestionID = uuid.MustParse("00000000-0000-0000-0000-000000001008")
+	UniboxOwnerWelcomeID   = uuid.MustParse("00000000-0000-0000-0000-000000001009")
+	UniboxOwnerDigestID    = uuid.MustParse("00000000-0000-0000-0000-00000000100a")
 )
 
 // contactID derives a stable per-org contact UUID from a small sequence number.

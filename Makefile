@@ -22,9 +22,10 @@ PROTOC_GEN_GO_GRPC_VERSION ?= v1.6.1
 PROTO_DIR := internal/tasks/proto
 PROTO_GEN_FILES := $(PROTO_DIR)/tasks.pb.go
 
-.PHONY: setup-tools lint proto check-proto \
-        up sim seed reset logs status stop down tools test-seed \
+.PHONY: setup-tools fmt lint proto check-proto \
+        up sim seed seed-plan reset logs status stop down tools test-seed \
         restart restart-go restart-all infra infra-down app app-down app-logs \
+        backend consumer worker run tracking realtime web \
         admin site grant-admin revoke-admin
 
 setup-tools:
@@ -32,6 +33,11 @@ setup-tools:
 	GOBIN=$(GO_BIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	GOBIN=$(GO_BIN) go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	GOBIN=$(GO_BIN) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+
+# Format all Go code. CI's golangci-lint enforces gofmt, so this is the
+# formatting signal to run before committing — not `go build`.
+fmt:
+	gofmt -w ./cmd ./internal
 
 lint:
 	golangci-lint run --timeout=5m
@@ -65,12 +71,33 @@ up:
 sim:
 	$(COMPOSE) --profile sim up
 
-# Load rich fixture data. Requires backend up (via `make app` or
-# `make up`) so migrations have run. `-T` disables TTY allocation
-# (Make's shell isn't a tty; without -T compose can silently swallow
-# the seed's stdout).
+# Load rich fixture data. Requires backend up (via `make backend`,
+# `make app`, or `make up`) so migrations have run. `-T` disables TTY
+# allocation (Make's shell isn't a tty; without -T compose can silently
+# swallow the seed's stdout).
 seed:
 	$(COMPOSE) --profile seed run --rm -T seed
+
+# Switch the seeded dev workspace between trial/paid plans without going
+# through Stripe. Run after `make seed`.
+#
+#   make seed-plan PLAN=trial    # 14-day free trial
+#   make seed-plan PLAN=starter
+#   make seed-plan PLAN=pro
+#   make seed-plan PLAN=enterprise
+PLAN ?= trial
+seed-plan:
+	@case "$(PLAN)" in \
+		trial) plan_id="00000000-0000-0000-0000-000000000001"; status="trialing"; stripe_sub=""; price="";; \
+		starter) plan_id="00000000-0000-0000-0000-000000000110"; status="active"; stripe_sub="sub_seed_dev_starter"; price="price_starter_seed";; \
+		pro) plan_id="00000000-0000-0000-0000-000000000120"; status="active"; stripe_sub="sub_seed_dev_pro"; price="price_pro_monthly_seed";; \
+		enterprise) plan_id="00000000-0000-0000-0000-000000000130"; status="active"; stripe_sub="sub_seed_dev_enterprise"; price="price_enterprise_seed";; \
+		*) echo "Usage: make seed-plan PLAN=trial|starter|pro|enterprise"; exit 1;; \
+	esac; \
+	$(COMPOSE) exec -T postgres psql -U warmbly -d warmbly_dev \
+		-v plan_id="$$plan_id" -v status="$$status" -v stripe_sub="$$stripe_sub" -v price="$$price" \
+		-c "INSERT INTO subscriptions (id, user_id, organization_id, plan_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, current_period_start, current_period_end, free_trial_started_at, free_trial_ends_at, is_enterprise, created_at, updated_at) VALUES ('88888888-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', :'plan_id', 'cus_seed_dev', NULLIF(:'stripe_sub', ''), NULLIF(:'price', ''), :'status', NOW(), NOW() + INTERVAL '30 days', CASE WHEN :'status' = 'trialing' THEN NOW() ELSE NULL END, CASE WHEN :'status' = 'trialing' THEN NOW() + INTERVAL '14 days' ELSE NULL END, :'plan_id' = '00000000-0000-0000-0000-000000000130', NOW(), NOW()) ON CONFLICT (organization_id) DO UPDATE SET plan_id = EXCLUDED.plan_id, stripe_subscription_id = EXCLUDED.stripe_subscription_id, stripe_price_id = EXCLUDED.stripe_price_id, status = EXCLUDED.status, current_period_start = EXCLUDED.current_period_start, current_period_end = EXCLUDED.current_period_end, free_trial_started_at = EXCLUDED.free_trial_started_at, free_trial_ends_at = EXCLUDED.free_trial_ends_at, is_enterprise = EXCLUDED.is_enterprise, updated_at = NOW();"
+	@echo "Seeded dev organization switched to $(PLAN). Log in as dev@warmbly.com / password123."
 
 # Spin up debugging UIs (kafka-ui).
 tools:
@@ -140,30 +167,19 @@ restart-all:
 #   2. From the worktree you're iterating on:  make app
 #      Brings up the language services in hot-reload mode against the
 #      already-running infra. Bind-mounted source means saves trigger
-#      in-container rebuilds with no image churn:
-#        - backend / consumer / worker-shared-1  → air rebuilds the
-#          binary into ./tmp/main and restarts in place
-#        - tracking                              → cargo-watch reruns
-#          `cargo run` on changes under tracking/src
-#        - realtime                              → Phoenix reloads
-#          modules in-process; no external watcher
-#
-#   3. Switching worktrees:  cd <other-worktree> && make app
-#      Because every worktree pins `-p warmbly`, this recreates the
-#      app containers in place against the new worktree's source.
-#      Infra is never touched. Caches (Go mod + build, Cargo registry
-#      + target, Mix deps + _build) live on named volumes whose
-#      `name:` skips the per-project prefix, so the first switch into
-#      a worktree is a warm compile (seconds), subsequent switches are
-#      near-instant.
+#      in-container rebuilds with no image churn.
 #
 # `make up` is the separate prod-image flow for smoke tests.
 
 DEV_COMPOSE := $(COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml
 
 # Stateful infrastructure. Brought up once and left running.
-INFRA_SVCS  := postgres redis zookeeper kafka schema-registry \
-               mailpit localstack stripe-mock cloud-tasks-emulator
+# localstack-init is a one-shot that (re)creates the KMS alias, DynamoDB
+# tables, and S3 bucket. localstack runs with PERSISTENCE=0, so those are
+# wiped on every restart and must be recreated before any service (incl.
+# the natively-run backend) touches KMS/Dynamo/S3.
+INFRA_SVCS  := postgres redis zookeeper kafka kafka-init schema-registry \
+               mailpit localstack localstack-init stripe-mock cloud-tasks-emulator
 
 # Language services. The things you iterate on; recreated per worktree.
 APP_SVCS    := backend consumer worker-shared-1 tracking realtime web
@@ -172,7 +188,7 @@ infra:
 	$(DEV_COMPOSE) up -d $(INFRA_SVCS)
 	@echo ""
 	@echo "Infra up under project 'warmbly'. Switch worktrees freely;"
-	@echo "run 'make app' in whichever worktree you want to iterate on."
+	@echo "run 'make app' (docker) or 'make backend' (native) to iterate."
 
 infra-down:
 	$(COMPOSE) stop $(INFRA_SVCS)
@@ -191,17 +207,180 @@ app-down:
 app-logs:
 	$(DEV_COMPOSE) logs -f --tail=200 $(APP_SVCS)
 
-# ─── standalone frontends (admin + marketing site) ──────────────────────
+# ─── native dev (host-run Go, no docker rebuilds) ───────────────────────
 #
-# `admin/` and `site/` are pnpm workspaces that live outside the docker
-# compose stack. They have no backing service in docker-compose.yml, so
-# `make app` does not start them. Run each in its own terminal:
+# The fastest loop: infra stays in docker (`make infra`); the Go services
+# run directly on the host with `go run`. Save a file, re-run the target,
+# and it recompiles against the warm Go build cache in a second or two —
+# no docker image build, no container recreate. This is the answer to
+# "docker takes too long to restart".
 #
+#   make infra        # once: postgres, redis, kafka, localstack (+init), ...
+#   make backend      # API on :8080 (own terminal; applies migrations on boot)
+#   make consumer     # kafka -> postgres consumer (own terminal)
+#   make worker       # send/sync worker (own terminal)
+#   make run          # all three at once in one terminal (Ctrl-C stops all)
+#   make web          # dashboard dev server, pointed at the native backend
+#
+# Env mirrors the docker-compose service definitions but targets the
+# host-published ports (postgres 15432, redis 16379, kafka 9092,
+# schema-registry 8081, localstack 4566, mailpit smtp 11025,
+# cloud-tasks 8123, stripe-mock 12111) instead of the in-network names.
+
+# Shared by the control-plane services (backend, consumer). Flattened to
+# one line by make so it can prefix a command as inline env.
+GO_DEV_ENV := \
+	APP_ENV=dev \
+	AWS_CONFIG_ENABLED=false \
+	AWS_ENDPOINT_URL=http://localhost:4566 \
+	AWS_REGION=us-east-1 \
+	AWS_ACCESS_KEY_ID=test \
+	AWS_SECRET_ACCESS_KEY=test \
+	PRIMARY_DB=postgres://warmbly:warmbly@localhost:15432/warmbly_dev?sslmode=disable \
+	REDIS=redis://localhost:16379 \
+	KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+	KAFKA_CONSUMER_GROUP=consumer-group \
+	SCHEMA_REGISTRY_URL=http://localhost:8081 \
+	ASTRA_DB_ID=local-astra-db-id \
+	ASTRA_DB_REGION=local-region \
+	ASTRA_KEYSPACE_NAME=warmbly_dev \
+	ASTRA_APPLICATION_TOKEN=local-astra-token \
+	GCP_PROJECT_ID=
+
+# Worker keeps the infra/AWS env but never Postgres or the consumer group
+# — it has no relational access by design.
+WORKER_DEV_ENV := \
+	APP_ENV=dev \
+	AWS_CONFIG_ENABLED=false \
+	AWS_ENDPOINT_URL=http://localhost:4566 \
+	AWS_REGION=us-east-1 \
+	AWS_ACCESS_KEY_ID=test \
+	AWS_SECRET_ACCESS_KEY=test \
+	REDIS=redis://localhost:16379 \
+	KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+	SCHEMA_REGISTRY_URL=http://localhost:8081
+
+# API server on :8080. Applies the embedded migrations on boot against
+# the docker postgres.
+backend:
+	$(GO_DEV_ENV) \
+	API_HOST=0.0.0.0:8080 \
+	GIN_MODE=debug \
+	APP_URL=http://localhost:5173 \
+	WEBSOCKET_URL=ws://localhost:4000/socket/websocket \
+	KAFKA_TRACKING_TOPIC=tracking-events \
+	AUTH_SECRET=local-dev-auth-secret-minimum-32-characters-long \
+	GOOGLE_CLIENT_ID=local-google-client-id \
+	GOOGLE_CLIENT_SECRET=local-google-client-secret \
+	GOOGLE_REDIRECT_URI=http://localhost:3000/auth/google/callback \
+	APPLE_APP_ID=local-apple-app-id \
+	APPLE_TEAM_ID=local-apple-team-id \
+	APPLE_KEY_ID=local-apple-key-id \
+	APPLE_KEY_SECRET=local-apple-key-secret-base64 \
+	TURNSTILE_SECRET=1x0000000000000000000000000000000AA \
+	TURNSTILE_BYPASS_TOKEN=warmbly-local-turnstile-bypass \
+	STRIPE_API_BASE=http://localhost:12111 \
+	STRIPE_SECRET_KEY=sk_test_local \
+	STRIPE_WEBHOOK_SECRET=whsec_local \
+	STRIPE_PUBLISHABLE_KEY=pk_test_local \
+	EMAIL_NAME='Warmbly Dev' \
+	EMAIL_ADDRESS=dev@warmbly.local \
+	TRACKING_DOMAIN=t.warmbly.com \
+	SMTP_HOST=localhost \
+	SMTP_PORT=11025 \
+	GEODB_PATH=data/GeoLite2-City.mmdb \
+	INTERNAL_API_TOKEN=local-dev-internal-token \
+	GOOGLE_APPLICATION_CREDENTIALS_JSON=dev@local.iam.gserviceaccount.com \
+	CLOUD_TASKS_EMULATOR_HOST=localhost:8123 \
+	CLOUD_TASKS_QUEUE_NAME=projects/local/locations/local/queues/default \
+	CLOUD_TASKS_WEBHOOK_URL=http://localhost:8080/webhook/email \
+	go run ./cmd/backend
+
+# Kafka -> postgres consumer.
+consumer:
+	$(GO_DEV_ENV) \
+	go run ./cmd/consumer
+
+# Send/sync worker. No Postgres by design. WORKER_ID is an explicit UUID
+# (the worker resolves identity from WORKER_ID first, then bind IP, then
+# hostname), so it boots cleanly off-box.
+#
+# The worker reads encrypted DEKs through the backend's /internal/dek
+# endpoint (the prod `http` provider, no worker DB), so `make backend`
+# must be running and INTERNAL_API_TOKEN must match.
+worker:
+	$(WORKER_DEV_ENV) \
+	WORKER_ID=10c8f5e4-1c39-5b2a-9c8b-3d2f0a8b1a01 \
+	WORKER_TIER=shared \
+	ENCRYPTED_KEYS_PROVIDER=http \
+	ENCRYPTED_KEYS_BACKEND_URL=http://localhost:8080 \
+	ENCRYPTED_KEYS_WORKER_TOKEN=local-dev-internal-token \
+	go run ./cmd/worker
+
+# backend + consumer + worker together in one terminal. Ctrl-C stops all
+# (kill 0 takes down go run and its child binaries). Run `make infra` first.
+run:
+	@echo "backend + consumer + worker (native). Ctrl-C stops all. Run 'make infra' first if infra is down."
+	@trap 'kill 0' INT TERM; \
+	$(MAKE) --no-print-directory backend & \
+	$(MAKE) --no-print-directory consumer & \
+	$(MAKE) --no-print-directory worker & \
+	wait
+
+# ─── other native services (Rust tracking, Elixir realtime) ──────────────
+#
+# Deliberately NOT part of `make run` — run them on their own only when you
+# need the open/click tracking pixel service or the websocket fanout. Each
+# needs its language toolchain on the host (cargo / elixir+mix).
+
+# Open/click tracking service (Rust) on :3000.
+tracking:
+	cd tracking && \
+	APP_ENV=dev \
+	AWS_CONFIG_ENABLED=false \
+	TRACKING_HOST=0.0.0.0 \
+	TRACKING_PORT=3000 \
+	KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+	KAFKA_TRACKING_TOPIC=tracking-events \
+	SCHEMA_REGISTRY_URL=http://localhost:8081 \
+	cargo run
+
+# Websocket fanout service (Elixir/Phoenix) on :4000. MIX_ENV=dev skips
+# the prod-only env guards in runtime.exs; reads discrete DATABASE_* and
+# REDIS_URL.
+realtime:
+	cd realtime && \
+	export MIX_ENV=dev \
+	       PORT=4000 \
+	       PHX_HOST=localhost \
+	       DATABASE_HOST=localhost \
+	       DATABASE_PORT=15432 \
+	       DATABASE_NAME=warmbly_dev \
+	       DATABASE_USER=warmbly \
+	       DATABASE_PASSWORD=warmbly \
+	       REDIS_URL=redis://localhost:16379 && \
+	mix deps.get && mix phx.server
+
+# ─── standalone frontends (web + admin + marketing site) ─────────────────
+#
+# Run each in its own terminal; all foreground the dev server (Ctrl-C to
+# stop) and assume `pnpm install` has already run in the directory.
+#
+#   make web      # Vite dev server on http://localhost:5173 (dashboard)
 #   make admin    # Vite dev server on http://localhost:5174
 #   make site     # Astro dev server on http://localhost:4321
 #
-# Both targets foreground the dev server (Ctrl-C to stop) and assume
-# `pnpm install` has already run in the respective directory.
+# `make web` points the dashboard at the natively-run backend on :8080,
+# so you don't need the dockerized `web` service from `make app`.
+
+web:
+	cd web && \
+	VITE_APP_URL=http://localhost:5173 \
+	VITE_API_URL=http://localhost:8080 \
+	VITE_TRACKING_DOMAIN=t.warmbly.com \
+	VITE_TURNSTILE_KEY=1x00000000000000000000AA \
+	VITE_TURNSTILE_BYPASS_TOKEN=warmbly-local-turnstile-bypass \
+	pnpm dev
 
 admin:
 	cd admin && pnpm dev
@@ -217,18 +396,11 @@ site:
 #
 #   make grant-admin EMAIL=you@example.com               # super (all perms)
 #   make grant-admin EMAIL=you@example.com ROLE=support
-#   make grant-admin EMAIL=you@example.com ROLE=ops
-#   make grant-admin EMAIL=you@example.com ROLE=analyst
 #   make grant-admin EMAIL=you@example.com BITMASK=1     # raw bitmask
 #   make revoke-admin EMAIL=you@example.com              # back to 0
 #
 # Role bitmasks mirror AdminRolePermissions in
-# internal/models/admin_permission.go. Keep them in sync with that file
-# (this is a dev helper; production grants go through the admin UI).
-#
-# Requires `make infra` (or `make app` / `make up`) to be running so the
-# postgres container is up. Sign up the user through the dashboard first
-# so the row exists with a real password hash.
+# internal/models/admin_permission.go.
 ROLE ?= super
 grant-admin:
 	@if [ -z "$(EMAIL)" ]; then \

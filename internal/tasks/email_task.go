@@ -56,6 +56,15 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		return errx.ErrNotFound
 	}
 
+	if taskRecord.Status != "pending" {
+		log.Info().
+			Str("task_id", taskID.String()).
+			Str("status", taskRecord.Status).
+			Msg("warmup task skipped: task not in pending state")
+		executionStatus = "completed"
+		return nil
+	}
+
 	// STEP 3: Load email account
 	account, xerr := s.emailRepo.GetByID(ctx, taskRecord.EmailAccountID)
 	if xerr != nil {
@@ -465,17 +474,17 @@ func (s *tasksService) createWarmupTask(ctx context.Context, accountID uuid.UUID
 		ScheduledAt:    &scheduleTime,
 	}
 
-	if err := s.taskRepo.CreateTask(ctx, newTask); err != nil {
-		return err
-	}
-
 	// Create warmup task entry
 	warmupTask := &WarmupTask{
 		TaskID: newTaskID,
 	}
 
-	if err := s.taskRepo.CreateWarmupTask(ctx, warmupTask); err != nil {
+	created, err := s.taskRepo.CreateWarmupTaskWithLock(ctx, newTask, warmupTask)
+	if err != nil {
 		return err
+	}
+	if !created {
+		return nil
 	}
 
 	// Create GCP Cloud Task

@@ -72,7 +72,7 @@ export default function RolesSettingsPage() {
                 eyebrow="Built-in roles"
                 description="Pick the closest match for each member. Custom permission bundles coming later."
             >
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     {ROLE_CATALOG.filter((r) => r.id !== "member").map((r) => (
                         <RoleSummaryCard
                             key={r.id}

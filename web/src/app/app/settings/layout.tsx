@@ -75,14 +75,16 @@ export default function SettingsLayout() {
                 subtitle={current?.description ?? "Account and workspace"}
             />
 
-            <div className="flex-1 min-h-0 flex">
-                <nav className="w-[220px] shrink-0 border-r border-slate-200/70 py-2 overflow-y-auto">
+            <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+                {/* Mobile: a horizontally-scrollable tab strip across the top.
+                    >=md: the vertical left rail. */}
+                <nav className="flex md:block shrink-0 gap-1 md:gap-0 overflow-x-auto md:overflow-y-auto border-b md:border-b-0 md:border-r border-slate-200/70 px-2 md:px-0 py-2 md:w-[220px]">
                     {visibleSections.map((s) => (
                         <NavLink
                             key={s.path}
                             to={`/app/settings/${s.path}`}
                             className={({ isActive }) =>
-                                `group block w-[calc(100%-0.75rem)] mx-1.5 my-px flex items-center gap-2 px-2 h-7 rounded text-[12.5px] text-left transition-colors ${
+                                `group shrink-0 md:w-[calc(100%-0.75rem)] md:mx-1.5 md:my-px flex items-center gap-2 px-3 md:px-2 h-7 rounded text-[12.5px] whitespace-nowrap text-left transition-colors ${
                                     isActive
                                         ? "bg-slate-200/70 text-slate-900 font-medium"
                                         : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/40"

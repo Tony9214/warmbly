@@ -357,7 +357,7 @@ function DateRange({
                 {label}
             </button>
             {open && (
-                <div className="absolute right-0 top-7 z-50 w-64 p-2.5 rounded-md border border-slate-200 bg-white shadow-lg">
+                <div className="absolute right-0 top-7 z-50 w-64 max-w-[min(256px,calc(100vw-2rem))] p-2.5 rounded-md border border-slate-200 bg-white shadow-lg">
                     <div className="grid grid-cols-2 gap-2">
                         <div>
                             <label className="block text-[10px] uppercase tracking-[0.12em] font-medium text-slate-500 mb-1">

@@ -44,7 +44,7 @@ export default function ProfileSettingsPage() {
             }
         >
             <Section eyebrow="Identity" description="Names appear on outgoing emails.">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <FieldLabel>First name</FieldLabel>
                         <TextInput value={firstName} onChange={setFirstName} className="w-full" />
@@ -63,7 +63,7 @@ export default function ProfileSettingsPage() {
                         type="email"
                         value={user.email}
                         disabled
-                        className="w-[280px] h-7 px-2.5 rounded-md border border-slate-200 bg-slate-50 text-[12.5px] text-slate-500 font-mono"
+                        className="w-full max-w-[280px] h-7 px-2.5 rounded-md border border-slate-200 bg-slate-50 text-[12.5px] text-slate-500 font-mono"
                     />
                 </Row>
                 <Row
@@ -75,7 +75,7 @@ export default function ProfileSettingsPage() {
                         type="text"
                         value={Intl.DateTimeFormat().resolvedOptions().timeZone}
                         disabled
-                        className="w-[280px] h-7 px-2.5 rounded-md border border-slate-200 bg-slate-50 text-[12.5px] text-slate-500 font-mono"
+                        className="w-full max-w-[280px] h-7 px-2.5 rounded-md border border-slate-200 bg-slate-50 text-[12.5px] text-slate-500 font-mono"
                     />
                 </Row>
             </Section>

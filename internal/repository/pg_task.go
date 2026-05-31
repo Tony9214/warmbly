@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -60,6 +62,28 @@ type TaskFailure struct {
 	Message string
 }
 
+// ScheduledEmailItem is the join shape returned by
+// ListScheduledForUser — task + email_task + sender mailbox columns,
+// shaped for the dashboard's "Scheduled" view.
+type ScheduledEmailItem struct {
+	TaskID      uuid.UUID
+	ScheduledAt time.Time
+	CreatedAt   time.Time
+
+	AccountID    uuid.UUID
+	AccountEmail string
+	AccountName  string
+
+	To       []string
+	CC       []string
+	BCC      []string
+	Subject  string
+	Body     string
+	BodyHTML string
+
+	ThreadID *string
+}
+
 // TaskRepository defines methods for task data access
 type TaskRepository interface {
 	// Create operations
@@ -96,11 +120,36 @@ type TaskRepository interface {
 	DeleteTask(ctx context.Context, taskID uuid.UUID) error
 
 	// Task locking
-	CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) error
+	CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) (bool, error)
+	CreateWarmupTaskWithLock(ctx context.Context, task *Task, warmupTask *WarmupTask) (bool, error)
 	UpdateTaskStatusWithLock(ctx context.Context, taskID uuid.UUID, status string) error
 
 	// Update campaign task with contact/sequence IDs (for tracking)
 	UpdateCampaignTaskTracking(ctx context.Context, taskID, contactID, sequenceID uuid.UUID) error
+
+	// ListScheduledForUser returns every pending email task scheduled
+	// for the user's mailboxes, ordered by next-to-fire. Used by the
+	// unibox "Scheduled" view.
+	ListScheduledForUser(ctx context.Context, userID uuid.UUID, limit int) ([]ScheduledEmailItem, error)
+	// ListScheduledForUserByThread is the same query scoped to a
+	// single email thread. ThreadView uses it to render queued sends
+	// inline alongside already-sent messages so the user can see (and
+	// cancel) what's about to fire on the conversation they're
+	// reading.
+	ListScheduledForUserByThread(ctx context.Context, userID uuid.UUID, threadID string, limit int) ([]ScheduledEmailItem, error)
+	// CountScheduledForUser returns the number of pending email tasks
+	// currently scheduled (regardless of fire time). Used for the
+	// scope-rail counter.
+	CountScheduledForUser(ctx context.Context, userID uuid.UUID) (int64, error)
+	// CancelScheduledByUser flips a pending email task to status
+	// 'cancelled' only when (a) it belongs to a mailbox the user owns,
+	// (b) it's still pending. Returns (cloudTaskName, ok, err) — the
+	// Cloud Task resource name is included so the caller can issue a
+	// best-effort DeleteTask to clean the queue. The handler still
+	// short-circuits on a non-pending status, so a failed DeleteTask
+	// just degrades to a harmless no-op dispatch — never a real send.
+	// `ok` distinguishes 404 (no row updated) from 200.
+	CancelScheduledByUser(ctx context.Context, taskID, userID uuid.UUID) (cloudTaskName *string, ok bool, err error)
 }
 
 type taskRepository struct {
@@ -530,11 +579,12 @@ func (r *taskRepository) DeleteTask(ctx context.Context, taskID uuid.UUID) error
 	return err
 }
 
-// CreateTaskWithLock creates a task with a PostgreSQL advisory lock to prevent duplicate creation
-func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) error {
+// CreateTaskWithLock creates a campaign task with a PostgreSQL advisory lock.
+// It returns false when the campaign already has a pending wakeup task.
+func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) (bool, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback(ctx)
 
@@ -542,7 +592,23 @@ func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, cam
 	if campaignTask != nil && campaignTask.CampaignID != nil {
 		_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('campaign_task_' || $1::text))`, *campaignTask.CampaignID)
 		if err != nil {
-			return err
+			return false, err
+		}
+
+		var existing uuid.UUID
+		err = tx.QueryRow(ctx, `
+			SELECT t.id
+			FROM tasks t
+			INNER JOIN campaign_tasks ct ON ct.task_id = t.id
+			WHERE ct.campaign_id = $1
+			  AND t.status = 'pending'
+			LIMIT 1
+		`, *campaignTask.CampaignID).Scan(&existing)
+		if err == nil {
+			return false, nil
+		}
+		if err != pgx.ErrNoRows {
+			return false, err
 		}
 	}
 
@@ -553,7 +619,7 @@ func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, cam
 	`
 	_, err = tx.Exec(ctx, taskQuery, task.ID, task.TaskType, task.EmailAccountID, task.Status, task.MessageID, task.ScheduledAt)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Create campaign task entry if provided
@@ -561,11 +627,61 @@ func (r *taskRepository) CreateTaskWithLock(ctx context.Context, task *Task, cam
 		ctQuery := `INSERT INTO campaign_tasks (task_id, campaign_id, contact_id, sequence_id) VALUES ($1, $2, $3, $4)`
 		_, err = tx.Exec(ctx, ctQuery, campaignTask.TaskID, campaignTask.CampaignID, campaignTask.ContactID, campaignTask.SequenceID)
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 
-	return tx.Commit(ctx)
+	return true, tx.Commit(ctx)
+}
+
+// CreateWarmupTaskWithLock creates one pending warmup wakeup per mailbox.
+// It returns false when the account already has a pending warmup task.
+func (r *taskRepository) CreateWarmupTaskWithLock(ctx context.Context, task *Task, warmupTask *WarmupTask) (bool, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('warmup_task_' || $1::text))`, task.EmailAccountID)
+	if err != nil {
+		return false, err
+	}
+
+	var existing uuid.UUID
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM tasks
+		WHERE email_account_id = $1
+		  AND task_type = 'warmup'
+		  AND status = 'pending'
+		LIMIT 1
+	`, task.EmailAccountID).Scan(&existing)
+	if err == nil {
+		return false, nil
+	}
+	if err != pgx.ErrNoRows {
+		return false, err
+	}
+
+	taskQuery := `
+		INSERT INTO tasks (id, task_type, email_account_id, status, message_id, scheduled_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+	`
+	_, err = tx.Exec(ctx, taskQuery, task.ID, task.TaskType, task.EmailAccountID, task.Status, task.MessageID, task.ScheduledAt)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO warmup_tasks (task_id, target_account_id)
+		VALUES ($1, $2)
+	`, warmupTask.TaskID, warmupTask.TargetAccountID)
+	if err != nil {
+		return false, err
+	}
+
+	return true, tx.Commit(ctx)
 }
 
 // UpdateTaskStatusWithLock updates task status with an advisory lock to prevent race conditions
@@ -610,4 +726,188 @@ func (r *taskRepository) UpdateCampaignTaskTracking(ctx context.Context, taskID,
 
 	_, err := r.db.Exec(ctx, query, taskID, contactID, sequenceID)
 	return err
+}
+
+// ListScheduledForUser returns user-initiated email tasks still in
+// 'pending' state, ordered by scheduled_at. Joins tasks → email_tasks
+// → email_accounts so callers don't need three lookups per row.
+func (r *taskRepository) ListScheduledForUser(ctx context.Context, userID uuid.UUID, limit int) ([]ScheduledEmailItem, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	query := `
+		SELECT
+			t.id,
+			t.scheduled_at,
+			t.created_at,
+			ea.id,
+			ea.email,
+			COALESCE(ea.name, ''),
+			et.to_addrs,
+			et.cc,
+			et.bcc,
+			et.subject,
+			et.body_plain,
+			et.body_html,
+			et.thread_id
+		FROM tasks t
+		INNER JOIN email_tasks et ON et.task_id = t.id
+		INNER JOIN email_accounts ea ON ea.id = t.email_account_id
+		WHERE ea.user_id = $1
+		  AND t.task_type = 'email'
+		  AND t.status = 'pending'
+		ORDER BY t.scheduled_at ASC NULLS LAST, t.created_at ASC
+		LIMIT $2
+	`
+	rows, err := r.db.Query(ctx, query, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]ScheduledEmailItem, 0)
+	for rows.Next() {
+		var it ScheduledEmailItem
+		var scheduledAt sql.NullTime
+		if err := rows.Scan(
+			&it.TaskID,
+			&scheduledAt,
+			&it.CreatedAt,
+			&it.AccountID,
+			&it.AccountEmail,
+			&it.AccountName,
+			&it.To,
+			&it.CC,
+			&it.BCC,
+			&it.Subject,
+			&it.Body,
+			&it.BodyHTML,
+			&it.ThreadID,
+		); err != nil {
+			return nil, err
+		}
+		if scheduledAt.Valid {
+			it.ScheduledAt = scheduledAt.Time
+		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+// ListScheduledForUserByThread is ListScheduledForUser scoped to a
+// single thread. Same join + ownership enforcement, plus an extra
+// thread_id filter. Empty threadID is treated as "no rows" so the
+// caller can't accidentally fall back to the full list.
+func (r *taskRepository) ListScheduledForUserByThread(ctx context.Context, userID uuid.UUID, threadID string, limit int) ([]ScheduledEmailItem, error) {
+	if threadID == "" {
+		return []ScheduledEmailItem{}, nil
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	query := `
+		SELECT
+			t.id,
+			t.scheduled_at,
+			t.created_at,
+			ea.id,
+			ea.email,
+			COALESCE(ea.name, ''),
+			et.to_addrs,
+			et.cc,
+			et.bcc,
+			et.subject,
+			et.body_plain,
+			et.body_html,
+			et.thread_id
+		FROM tasks t
+		INNER JOIN email_tasks et ON et.task_id = t.id
+		INNER JOIN email_accounts ea ON ea.id = t.email_account_id
+		WHERE ea.user_id = $1
+		  AND t.task_type = 'email'
+		  AND t.status = 'pending'
+		  AND et.thread_id = $2
+		ORDER BY t.scheduled_at ASC NULLS LAST, t.created_at ASC
+		LIMIT $3
+	`
+	rows, err := r.db.Query(ctx, query, userID, threadID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]ScheduledEmailItem, 0)
+	for rows.Next() {
+		var it ScheduledEmailItem
+		var scheduledAt sql.NullTime
+		if err := rows.Scan(
+			&it.TaskID,
+			&scheduledAt,
+			&it.CreatedAt,
+			&it.AccountID,
+			&it.AccountEmail,
+			&it.AccountName,
+			&it.To,
+			&it.CC,
+			&it.BCC,
+			&it.Subject,
+			&it.Body,
+			&it.BodyHTML,
+			&it.ThreadID,
+		); err != nil {
+			return nil, err
+		}
+		if scheduledAt.Valid {
+			it.ScheduledAt = scheduledAt.Time
+		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+// CountScheduledForUser returns how many email tasks are pending across
+// every mailbox the user owns. Cheap enough to fold into the overview
+// payload.
+func (r *taskRepository) CountScheduledForUser(ctx context.Context, userID uuid.UUID) (int64, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM tasks t
+		INNER JOIN email_accounts ea ON ea.id = t.email_account_id
+		WHERE ea.user_id = $1
+		  AND t.task_type = 'email'
+		  AND t.status = 'pending'
+	`
+	var n int64
+	err := r.db.QueryRow(ctx, query, userID).Scan(&n)
+	return n, err
+}
+
+// CancelScheduledByUser flips a single pending email task to
+// 'cancelled', enforcing ownership through the email_accounts join.
+// Returns the Cloud Task resource name (if the row had one) so the
+// caller can issue a best-effort DeleteTask to clean up the GCP
+// queue. ok=false when the task either doesn't exist, isn't owned by
+// this user, isn't an email task, or already left the pending state.
+func (r *taskRepository) CancelScheduledByUser(ctx context.Context, taskID, userID uuid.UUID) (*string, bool, error) {
+	query := `
+		UPDATE tasks t
+		SET status = 'cancelled',
+		    updated_at = NOW()
+		FROM email_accounts ea
+		WHERE t.id = $1
+		  AND t.email_account_id = ea.id
+		  AND ea.user_id = $2
+		  AND t.task_type = 'email'
+		  AND t.status = 'pending'
+		RETURNING t.cloud_task_name
+	`
+	var cloudTaskName *string
+	err := r.db.QueryRow(ctx, query, taskID, userID).Scan(&cloudTaskName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return cloudTaskName, true, nil
 }

@@ -48,6 +48,8 @@ x-worker-base: &worker-base
   depends_on:
     kafka:
       condition: service_healthy
+    kafka-init:
+      condition: service_completed_successfully
     redis:
       condition: service_healthy
     schema-registry:
@@ -131,6 +133,24 @@ services:
       timeout: 10s
       retries: 12
       start_period: 30s
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-lc"]
+    # Pre-creates the Kafka topics used by the platform. Only ".", "_", "-",
+    # and alphanumerics are legal in Kafka topic names, so the ":"-separated
+    # logical names the app uses (e.g. "jobs:worker-events", "w:<uuid>") only
+    # work when the eventbus runs over NATS — Kafka can't host them at all.
+    # The remaining topics here are the legal ones the system actually publishes
+    # to Kafka.
+    command:
+      - >-
+        for topic in tracking-events email-events warmup-events; do
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic "$$topic" --partitions 1 --replication-factor 1;
+        done
 
   schema-registry:
     image: confluentinc/cp-schema-registry:7.5.0
@@ -277,6 +297,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       schema-registry:
         condition: service_started
       cloud-tasks-emulator:
@@ -317,6 +339,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       schema-registry:
         condition: service_started
 
@@ -365,6 +389,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       schema-registry:
         condition: service_started
 

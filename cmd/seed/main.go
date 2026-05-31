@@ -92,6 +92,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("full: %v", err)
 		}
+		if err := upsertDevTrialSubscription(ctx, pool); err != nil {
+			log.Fatalf("dev trial subscription: %v", err)
+		}
 		result.Print(os.Stdout)
 	}
 
@@ -134,6 +137,26 @@ func seedBaseline(ctx context.Context, pool *pgxpool.Pool) error {
 		if err := joinWarmupPool(ctx, pool, a.id, a.poolType); err != nil {
 			return fmt.Errorf("dev pool join %s: %w", a.email, err)
 		}
+	}
+	if err := seedLegacyUnibox(ctx, pool, []legacyUniboxEmail{
+		{
+			id: uuid.MustParse("77777777-0000-0000-0000-000000000101"), userID: userDev,
+			emailID: devAccounts[0].id, threadID: "seed-dev-thread-reply",
+			messageID: "<seed-dev-reply@northwind.test>", uid: 101,
+			from: []string{"Aiden Park <aiden.park@northwind.test>"}, to: []string{"Dev Sender <dev.send@warmbly.test>"},
+			subject: "Re: Dev seed inbox check", snippet: "This unread reply is here so the unified inbox can be tested immediately after make seed.",
+			internalDate: "2026-05-30T09:20:00Z",
+		},
+		{
+			id: uuid.MustParse("77777777-0000-0000-0000-000000000102"), userID: userDev,
+			emailID: devAccounts[1].id, threadID: "seed-dev-thread-bounce",
+			messageID: "<seed-dev-bounce@mailer-daemon.test>", uid: 201,
+			from: []string{"Mail Delivery Subsystem <mailer-daemon@warmbly.test>"}, to: []string{"Dev Outbound <dev.outbound@warmbly.test>"},
+			subject: "Delivery Status Notification (Failure)", snippet: "A seeded bounce-style message for testing filters, unread counts, and message detail fallback.",
+			internalDate: "2026-05-29T16:05:00Z",
+		},
+	}); err != nil {
+		return fmt.Errorf("dev unibox: %w", err)
 	}
 
 	// Sample webhook endpoint. The URL targets a local sink (e.g. an
@@ -236,6 +259,27 @@ func seedRich(ctx context.Context, pool *pgxpool.Pool) error {
 		if err := joinWarmupPool(ctx, pool, a.id, a.poolType); err != nil {
 			return fmt.Errorf("join pool for %s: %w", a.email, err)
 		}
+	}
+	if err := seedLegacyUnibox(ctx, pool, []legacyUniboxEmail{
+		{
+			id: uuid.MustParse("77777777-0000-0000-0000-000000000201"), userID: userBeta,
+			emailID: accounts[2].id, threadID: "seed-beta-thread-meeting",
+			messageID: "<seed-beta-meeting@initech.test>", uid: 301,
+			from: []string{"Beth Chen <beth.chen@initech.test>"}, to: []string{"Beth Pro <beth.send@beta.test>"},
+			subject: "Tuesday works", snippet: "Tuesday at 10 works. Please send the invite and include the placement dashboard example.",
+			internalDate: "2026-05-30T08:45:00Z",
+		},
+		{
+			id: uuid.MustParse("77777777-0000-0000-0000-000000000202"), userID: userBeta,
+			emailID: accounts[3].id, threadID: "seed-beta-thread-ooo",
+			messageID: "<seed-beta-ooo@piedpiper.test>", uid: 401,
+			flags: []string{"\\Seen"}, seen: true,
+			from: []string{"Carlos Diaz <carlos.diaz@piedpiper.test>"}, to: []string{"Beth Pro <beth.outbound@beta.test>"},
+			subject: "Automatic reply: Quick question", snippet: "I am away until Monday with limited access to email.",
+			internalDate: "2026-05-28T11:12:00Z",
+		},
+	}); err != nil {
+		return fmt.Errorf("rich unibox: %w", err)
 	}
 
 	// campaign + sequence + contacts for Beta
@@ -369,6 +413,106 @@ func joinWarmupPool(ctx context.Context, pool *pgxpool.Pool, accountID uuid.UUID
 		ON CONFLICT DO NOTHING`,
 		accountID, poolType)
 	return err
+}
+
+func upsertDevTrialSubscription(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
+		INSERT INTO subscriptions (
+			id, user_id, organization_id, plan_id,
+			stripe_customer_id, status,
+			free_trial_started_at, free_trial_ends_at,
+			is_enterprise, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4,
+			'', 'trialing',
+			NOW(), NOW() + INTERVAL '14 days',
+			FALSE, NOW(), NOW()
+		)
+		ON CONFLICT (organization_id) DO UPDATE SET
+			plan_id = EXCLUDED.plan_id,
+			status = 'trialing',
+			free_trial_started_at = EXCLUDED.free_trial_started_at,
+			free_trial_ends_at = EXCLUDED.free_trial_ends_at,
+			updated_at = NOW()
+	`, uuid.MustParse("88888888-0000-0000-0000-000000000001"), userDev, orgDev, seed.PlanFreeTrialID)
+	return err
+}
+
+type legacyUniboxEmail struct {
+	id           uuid.UUID
+	userID       uuid.UUID
+	emailID      uuid.UUID
+	threadID     string
+	messageID    string
+	uid          uint32
+	flags        []string
+	from         []string
+	to           []string
+	subject      string
+	snippet      string
+	seen         bool
+	internalDate string
+}
+
+func seedLegacyUnibox(ctx context.Context, pool *pgxpool.Pool, rows []legacyUniboxEmail) error {
+	for _, row := range rows {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO unibox_mailboxes (email_id, uid_validity, mailbox, attributes, highestmodseq, updated_at)
+			VALUES ($1, $2, 'INBOX', ARRAY['\HasNoChildren'], 1, NOW())
+			ON CONFLICT (email_id, uid_validity) DO UPDATE SET
+				mailbox = EXCLUDED.mailbox,
+				attributes = EXCLUDED.attributes,
+				highestmodseq = EXCLUDED.highestmodseq,
+				updated_at = NOW()
+		`, row.emailID, row.uid); err != nil {
+			return err
+		}
+
+		internalDate, err := time.Parse(time.RFC3339, row.internalDate)
+		if err != nil {
+			return err
+		}
+		if row.flags == nil {
+			row.flags = []string{}
+		}
+
+		_, err = pool.Exec(ctx, `
+			INSERT INTO unibox_emails (
+				id, user_id, email_id, mailbox, thread_id, message_id,
+				gmail_id, parent_id, uid, mod_seq,
+				flags, bcc, cc, from_addr, in_reply_to, reply_to,
+				to_addr, subject, size, internal_date, sent_date,
+				snippet, seen, created_at, updated_at
+			) VALUES (
+				$1, $2, $3, 0, $4, $5,
+				'', '', $6, 1,
+				$7, '{}', '{}', $8, '{}', '{}',
+				$9, $10, $11, $12, $12,
+				$13, $14, NOW(), NOW()
+			)
+			ON CONFLICT (id) DO UPDATE SET
+				email_id = EXCLUDED.email_id,
+				thread_id = EXCLUDED.thread_id,
+				message_id = EXCLUDED.message_id,
+				uid = EXCLUDED.uid,
+				flags = EXCLUDED.flags,
+				from_addr = EXCLUDED.from_addr,
+				to_addr = EXCLUDED.to_addr,
+				subject = EXCLUDED.subject,
+				size = EXCLUDED.size,
+				internal_date = EXCLUDED.internal_date,
+				sent_date = EXCLUDED.sent_date,
+				snippet = EXCLUDED.snippet,
+				seen = EXCLUDED.seen,
+				updated_at = NOW()
+		`, row.id, row.userID, row.emailID, row.threadID, row.messageID, row.uid,
+			row.flags, row.from, row.to, row.subject, int64(len(row.snippet)),
+			internalDate, row.snippet, row.seen)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func upsertCampaign(ctx context.Context, pool *pgxpool.Pool, id, userID, orgID uuid.UUID, name string) error {

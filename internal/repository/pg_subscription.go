@@ -10,6 +10,15 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 )
 
+// subscriptionColumns lists the subscriptions columns in the exact order
+// scanSubscription's row.Scan binds them. We must NOT use `SELECT *` here:
+// free_trial_started_at / free_trial_ends_at were appended to the table by a
+// later migration, so the physical column order no longer matches the struct
+// order. With `SELECT *`, the trailing NULL free-trial timestamps land in the
+// non-nullable created_at/updated_at scan slots and pgx fails with
+// "cannot scan NULL into *time.Time", 500-ing every subscription read.
+const subscriptionColumns = `id, user_id, organization_id, plan_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, current_period_start, current_period_end, cancel_at_period_end, canceled_at, trial_start, trial_end, free_trial_started_at, free_trial_ends_at, is_enterprise, created_at, updated_at`
+
 type SubscriptionRepository interface {
 	Create(ctx context.Context, sub *models.Subscription) error
 	Update(ctx context.Context, sub *models.Subscription) error
@@ -95,23 +104,23 @@ func (r *subscriptionRepository) Update(ctx context.Context, sub *models.Subscri
 }
 
 func (r *subscriptionRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error) {
-	return r.scanSubscription(ctx, `SELECT * FROM subscriptions WHERE id = $1`, id)
+	return r.scanSubscription(ctx, `SELECT `+subscriptionColumns+` FROM subscriptions WHERE id = $1`, id)
 }
 
 func (r *subscriptionRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.Subscription, error) {
-	return r.scanSubscription(ctx, `SELECT * FROM subscriptions WHERE user_id = $1 LIMIT 1`, userID)
+	return r.scanSubscription(ctx, `SELECT `+subscriptionColumns+` FROM subscriptions WHERE user_id = $1 LIMIT 1`, userID)
 }
 
 func (r *subscriptionRepository) GetByOrganizationID(ctx context.Context, orgID uuid.UUID) (*models.Subscription, error) {
-	return r.scanSubscription(ctx, `SELECT * FROM subscriptions WHERE organization_id = $1`, orgID)
+	return r.scanSubscription(ctx, `SELECT `+subscriptionColumns+` FROM subscriptions WHERE organization_id = $1`, orgID)
 }
 
 func (r *subscriptionRepository) GetByStripeCustomerID(ctx context.Context, customerID string) (*models.Subscription, error) {
-	return r.scanSubscription(ctx, `SELECT * FROM subscriptions WHERE stripe_customer_id = $1`, customerID)
+	return r.scanSubscription(ctx, `SELECT `+subscriptionColumns+` FROM subscriptions WHERE stripe_customer_id = $1`, customerID)
 }
 
 func (r *subscriptionRepository) GetByStripeSubscriptionID(ctx context.Context, subscriptionID string) (*models.Subscription, error) {
-	return r.scanSubscription(ctx, `SELECT * FROM subscriptions WHERE stripe_subscription_id = $1`, subscriptionID)
+	return r.scanSubscription(ctx, `SELECT `+subscriptionColumns+` FROM subscriptions WHERE stripe_subscription_id = $1`, subscriptionID)
 }
 
 func (r *subscriptionRepository) scanSubscription(ctx context.Context, query string, args ...interface{}) (*models.Subscription, error) {

@@ -106,7 +106,7 @@ func (s *tokenService) GenerateSessionWithOrg(ctx context.Context, userID uuid.U
 	session.LastRefreshedAt = issuedAt
 	session.CreatedAt = issuedAt
 
-	accessTokenExpiresAt := issuedAt.Add(10 * time.Minute)
+	accessTokenExpiresAt := issuedAt.Add(AccessTokenLifeTime)
 	accessNonce, err := crypt.Nonce()
 	if err != nil {
 		sentry.CaptureException(err)
@@ -120,7 +120,7 @@ func (s *tokenService) GenerateSessionWithOrg(ctx context.Context, userID uuid.U
 		return nil, errx.InternalError()
 	}
 
-	refreshTokenExpiresAt := issuedAt.Add(2 * 30 * 24 * time.Hour)
+	refreshTokenExpiresAt := issuedAt.Add(RefreshTokenLifeTime)
 	session.ExpiresAt = &refreshTokenExpiresAt
 	refreshNonce, err := crypt.Nonce()
 	if err != nil {

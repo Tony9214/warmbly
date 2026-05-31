@@ -22,11 +22,13 @@ import {
     MegaphoneIcon,
     SettingsIcon,
     UsersIcon,
+    XIcon,
 } from "lucide-react";
 import { useMemo } from "react";
 import { useAppStore } from "@/stores";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
 import { UserNav } from "./UserNav";
+import { Logo } from "@/components/svg";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -330,9 +332,50 @@ function Sparkline() {
     );
 }
 
-export function AppNav() {
+export function AppNav({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
     return (
-        <aside className="w-64 shrink-0 flex flex-col text-slate-900">
+        <>
+            {/* Mobile-only scrim. Tapping it closes the drawer. */}
+            <div
+                aria-hidden
+                onClick={onClose}
+                className={cn(
+                    "fixed inset-0 z-40 bg-slate-900/40 transition-opacity duration-300 md:hidden",
+                    open ? "opacity-100" : "pointer-events-none opacity-0",
+                )}
+            />
+
+            <aside
+                className={cn(
+                    // Mobile: off-canvas drawer that slides in from the left.
+                    "fixed inset-y-0 left-0 z-50 w-64 flex flex-col text-slate-900 bg-white shadow-2xl transition-transform duration-300 ease-out",
+                    open ? "translate-x-0" : "-translate-x-full",
+                    // >=md: static sidebar column over the chrome, no transform/shadow.
+                    "md:static md:z-auto md:translate-x-0 md:bg-transparent md:shadow-none md:transition-none shrink-0",
+                )}
+            >
+                {/* Mobile drawer header: brand + close. (The desktop sidebar
+                    has no chrome of its own — the brand lives in AppHeader.) */}
+                <div className="md:hidden flex items-center justify-between px-3 h-14 border-b border-slate-200/70">
+                    <Link to="/app/emails" onClick={onClose} className="flex items-center gap-2.5">
+                        <Logo className="w-6 text-slate-900" />
+                        <span
+                            style={{ fontFamily: "var(--font-display)" }}
+                            className="font-extrabold text-[15px] tracking-tight text-slate-900"
+                        >
+                            Warmbly
+                        </span>
+                    </Link>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        aria-label="Close menu"
+                        className="w-8 h-8 -mr-1 rounded-md flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                    >
+                        <XIcon className="w-4 h-4" />
+                    </button>
+                </div>
+
             <LivePanel />
 
             <nav className="flex-1 overflow-y-auto pb-3">
@@ -355,6 +398,7 @@ export function AppNav() {
             <div className="border-t border-slate-200/60 shrink-0">
                 <UserNav />
             </div>
-        </aside>
+            </aside>
+        </>
     );
 }

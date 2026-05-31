@@ -44,7 +44,7 @@ func (s *tokenService) RefreshToken(ctx context.Context, refreshToken string) (*
 		return nil, errx.InternalError()
 	}
 
-	refreshTokenExpiresAt := issuedAt.Add(2 * 30 * 24 * time.Hour)
+	refreshTokenExpiresAt := issuedAt.Add(RefreshTokenLifeTime)
 	refreshNonce, xerr := crypt.Nonce()
 	if xerr != nil {
 		sentry.CaptureException(xerr)
