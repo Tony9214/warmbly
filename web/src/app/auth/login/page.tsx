@@ -294,7 +294,7 @@ export default function LoginPage() {
             }
         } finally {
             setPasskeyPending(false);
-            prepareExplicitPasskey();
+            prepareExplicitPasskey(!signedIn);
             // Re-arm autofill (unless we're navigating away) so a synced/roaming
             // passkey keeps being offered on the email field.
             if (!signedIn) void runConditionalPasskey();
@@ -589,6 +589,9 @@ function EmailStep({
         resolver: zodResolver(emailSchema),
         defaultValues: { email: defaultEmail },
     });
+    const passkeyLoading = passkeyPending || passkeyStatus === "preparing" || passkeyStatus === "waiting";
+    const passkeyLocked = passkeyPending || passkeyStatus === "waiting";
+    const passkeyLabel = passkeyStatus === "preparing" ? "Preparing" : passkeyStatus === "waiting" ? "Waiting" : "Passkey";
 
     return (
         <div className="space-y-6">
@@ -675,7 +678,13 @@ function EmailStep({
                 </div>
 
                 <ExternalLogin
-                    passkey={mode === "signin" && passkeySupported() ? { onClick: onPasskey, onPrepare: onPasskeyPrepare, loading: passkeyPending } : undefined}
+                    passkey={mode === "signin" && passkeySupported() ? {
+                        onClick: onPasskey,
+                        onPrepare: onPasskeyPrepare,
+                        loading: passkeyLoading,
+                        disabled: passkeyLocked,
+                        label: passkeyLabel,
+                    } : undefined}
                 />
 
                 <AnimatePresence>

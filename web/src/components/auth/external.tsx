@@ -37,7 +37,7 @@ function CellBody({ children }: { children: React.ReactNode }) {
 export default function ExternalLogin({
     passkey,
 }: {
-    passkey?: { onClick: () => void; onPrepare: () => void; loading: boolean };
+    passkey?: { onClick: () => void; onPrepare: () => void; loading: boolean; disabled?: boolean; label?: string };
 }) {
     const passkeyRef = useRef<HTMLButtonElement | null>(null);
 
@@ -69,7 +69,7 @@ export default function ExternalLogin({
                         onPointerEnter={() => passkey.onPrepare()}
                         onPointerDown={() => passkey.onPrepare()}
                         onFocus={() => passkey.onPrepare()}
-                        disabled={passkey.loading}
+                        disabled={passkey.disabled}
                         aria-label="Sign in with a passkey"
                         aria-busy={passkey.loading}
                         initial={{ opacity: 0, scale: 0.85 }}
@@ -102,7 +102,7 @@ export default function ExternalLogin({
                                     )}
                                 </AnimatePresence>
                             </span>
-                            Passkey
+                            {passkey.label ?? "Passkey"}
                         </CellBody>
                     </motion.button>
                 )}
