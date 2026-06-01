@@ -37,6 +37,7 @@ type CampaignRepository interface {
 	ValidateCampaignReady(ctx context.Context, campaignID uuid.UUID) error
 	GetPendingCampaignTasks(ctx context.Context, campaignID uuid.UUID) ([]Task, error)
 	CountActiveForOrganization(ctx context.Context, orgID uuid.UUID) (int, error)
+	AccountHasActiveCampaign(ctx context.Context, accountID uuid.UUID) (bool, error)
 }
 
 type campaignRepository struct {
@@ -1018,6 +1019,24 @@ func (r *campaignRepository) CountActiveForOrganization(ctx context.Context, org
 	var count int
 	err := r.DB.QueryRow(ctx, query, orgID).Scan(&count)
 	return count, err
+}
+
+func (r *campaignRepository) AccountHasActiveCampaign(ctx context.Context, accountID uuid.UUID) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM email_accounts ea
+			JOIN email_tags et ON et.email_id = ea.id
+			JOIN campaign_email_tags cet ON cet.tag_id = et.tag_id
+			JOIN campaigns c ON c.id = cet.campaign_id
+			WHERE ea.id = $1
+			  AND ea.status = 'active'
+			  AND c.status = 'active'
+		)
+	`
+	var exists bool
+	err := r.DB.QueryRow(ctx, query, accountID).Scan(&exists)
+	return exists, err
 }
 
 // UpdateStatusWithLock updates campaign status using a PostgreSQL advisory lock to prevent concurrent updates.

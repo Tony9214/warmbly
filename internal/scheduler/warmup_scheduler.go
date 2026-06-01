@@ -15,6 +15,7 @@ var poolTypesForHealthLookup = []string{"premium", "free"}
 const (
 	minWarmupRecipientRecheck = 4 * time.Hour
 	maxWarmupRecipientRecheck = 8 * time.Hour
+	activeCampaignWarmupCap   = 5
 )
 
 // healthAdjustment captures how the throttled/watch health state should
@@ -111,6 +112,16 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 		account.WarmupBase+int(daysSinceStart)*account.WarmupIncrease,
 		account.WarmupMax,
 	)
+
+	// Active campaign mailboxes already have production sending pressure.
+	// Keep warmup as a lightweight reputation heartbeat instead of stacking
+	// the full warmup ramp on top of campaign traffic.
+	if s.campaignRepo != nil {
+		hasActiveCampaign, err := s.campaignRepo.AccountHasActiveCampaign(ctx, accountID)
+		if err == nil && hasActiveCampaign && targetVolume > activeCampaignWarmupCap {
+			targetVolume = activeCampaignWarmupCap
+		}
+	}
 
 	// STEP 2.1: Cap per-mailbox volume to actual recipient capacity. The
 	// sender should not send multiple warmup messages to the same recipient
