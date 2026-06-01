@@ -25,12 +25,20 @@ export class SessionExpiredError extends Error {
 
 export class APIError<T = unknown> extends Error {
     status: number;
+    // Machine-readable code + request id from the backend's standard error
+    // envelope ({ error, message, code, request_id }). Surfaced in the UI so a
+    // failed page can show exactly what broke instead of a generic message.
+    code?: string;
+    requestId?: string;
     body?: T;
     constructor(message: string, status: number, body?: T) {
         super(message);
         this.name = "APIError";
         this.status = status;
         this.body = body;
+        const b = body as { code?: string; request_id?: string } | undefined;
+        this.code = b?.code;
+        this.requestId = b?.request_id;
     }
 }
 
