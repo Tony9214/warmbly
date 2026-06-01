@@ -116,6 +116,34 @@ down:
 reset:
 	$(COMPOSE) --profile sim --profile seed --profile tools down -v
 
+# Wipe ONLY the Postgres data and bring a fresh, empty database back up.
+# Migrations are embedded and re-apply on the next `make backend` boot, so
+# the usual flow is `make db-reset && make backend`. Redis/Kafka/etc. volumes
+# are left untouched (use `make reset` to nuke every volume).
+db-reset:
+	$(DEV_COMPOSE) rm -sf postgres
+	-docker volume rm warmbly_postgres_data
+	$(DEV_COMPOSE) up -d postgres
+	@echo ""
+	@echo "Fresh Postgres up. Run 'make backend' to apply migrations (then 'make seed' for fixtures)."
+
+# Drop every table/type/sequence in-place by recreating the public schema.
+# Keeps the running container + volume (no recreate), so it's faster than
+# db-reset and works while the rest of the stack stays up. golang-migrate's
+# schema_migrations table is dropped too, so `make backend` re-applies every
+# migration from scratch. Postgres must already be running (`make infra`).
+db-wipe:
+	$(COMPOSE) exec -T postgres psql -U warmbly -d warmbly_dev -v ON_ERROR_STOP=1 \
+		-c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO warmbly; GRANT ALL ON SCHEMA public TO public;'
+	@echo ""
+	@echo "Schema wiped. Run 'make migrate' (or 'make backend') to re-apply migrations (then 'make seed' for fixtures)."
+
+# Apply all pending migrations and exit — no API server. Same embedded
+# migrations the backend runs on boot, against the dev Postgres. Pair with
+# db-wipe/db-reset, e.g. `make db-wipe && make migrate && make seed`.
+migrate:
+	$(GO_DEV_ENV) go run ./cmd/migrate
+
 # Stream container logs.
 #   make logs              # all services, last 200 lines + follow
 #   make logs backend      # one service

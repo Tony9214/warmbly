@@ -24,20 +24,27 @@ import {
     SendIcon,
     CopyIcon,
     CheckIcon,
+    PlayIcon,
+    PauseIcon,
+    ShieldCheckIcon,
     type LucideIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import type Inbox from "@/lib/api/models/app/emails/Inbox";
+import type AccountStatusModel from "@/lib/api/models/app/analytics/AccountStatus";
 import type { AccountError } from "@/lib/api/models/app/analytics/AccountStatus";
 import useAccountStatus from "@/lib/api/hooks/app/analytics/useAccountStatus";
 import useWarmupAnalytics from "@/lib/api/hooks/app/analytics/useWarmupAnalytics";
 import useUpdateEmail from "@/lib/api/hooks/app/emails/useUpdateEmail";
+import useWarmupLifecycle from "@/lib/api/hooks/app/emails/useWarmupLifecycle";
 import useUpdateEmailTrackingDomain from "@/lib/api/hooks/app/emails/useUpdateEmailTrackingDomain";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import EmailEditor from "../EmailEditor";
 import TagSelector from "../popup/select/TagSelector";
+import TimeSelector from "../popup/select/TimeSelector";
+import WeekdayBitmask from "../campaigns/schedule/WeekdayBitmask";
 import { Loading } from "@/components/loader";
 import { NumberInput, TextInput } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
@@ -116,10 +123,14 @@ export default function InboxDetails({
     emails,
     view,
     setView,
+    initialTab = "overview",
+    canWarmup = true,
 }: {
     emails: Inbox[] | null;
     view: string;
     setView: React.Dispatch<React.SetStateAction<string>>;
+    initialTab?: string;
+    canWarmup?: boolean;
 }) {
     const mailbox = emails?.find((e) => e.id === view) ?? null;
     const close = () => setView("");
@@ -143,7 +154,7 @@ export default function InboxDetails({
                         transition={{ type: "spring", damping: 32, stiffness: 320 }}
                         className="fixed right-0 top-0 z-50 h-full w-full sm:w-[600px] bg-white border-l border-slate-200 shadow-[0_0_60px_-12px_rgba(15,23,42,0.3)] flex flex-col"
                     >
-                        <Detail key={mailbox.id} mailbox={mailbox} onClose={close} />
+                        <Detail key={mailbox.id} mailbox={mailbox} onClose={close} initialTab={initialTab} canWarmup={canWarmup} />
                     </motion.aside>
                 </>
             )}
@@ -156,10 +167,11 @@ const EDITABLE: (keyof Inbox)[] = [
     "name", "signature_html", "signature_plain", "signature_sync", "signature_code",
     "tags", "campaign_limit", "min_wait_time", "reply_to",
     "warmup_base", "warmup_max", "warmup_increase", "warmup_reply_rate",
+    "warmup_start_time", "warmup_end_time", "warmup_days",
 ];
 
-function Detail({ mailbox, onClose }: { mailbox: Inbox; onClose: () => void }) {
-    const [tab, setTab] = useState("overview");
+function Detail({ mailbox, onClose, initialTab = "overview", canWarmup = true }: { mailbox: Inbox; onClose: () => void; initialTab?: string; canWarmup?: boolean }) {
+    const [tab, setTab] = useState(initialTab);
     const [form, setForm] = useState<Inbox>(mailbox);
     const update = (patch: Partial<Inbox>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -246,7 +258,7 @@ function Detail({ mailbox, onClose }: { mailbox: Inbox; onClose: () => void }) {
             <div className="flex-1 min-h-0 overflow-y-auto">
                 {tab === "overview" && <OverviewTab status={status.data} loading={status.isPending} mailbox={mailbox} />}
                 {tab === "analytics" && <AnalyticsTab warmup={warmup.data} loading={warmup.isPending} />}
-                {tab === "warmup" && <WarmupTab form={form} update={update} status={status.data} />}
+                {tab === "warmup" && <WarmupTab form={form} update={update} status={status.data} mailbox={mailbox} canWarmup={canWarmup} />}
                 {tab === "settings" && <SettingsTab form={form} update={update} mailbox={mailbox} />}
             </div>
 
@@ -419,27 +431,152 @@ function AnalyticsTab({ warmup, loading }: { warmup?: import("@/lib/api/models/a
 
 /* ── Warmup (editable) ─────────────────────── */
 
-function WarmupTab({ form, update, status }: { form: Inbox; update: (p: Partial<Inbox>) => void; status?: import("@/lib/api/models/app/analytics/AccountStatus").default }) {
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+const warmupStateTone: Record<string, { text: string; bar: string; label: string }> = {
+    healthy: { text: "text-emerald-600", bar: "bg-emerald-500", label: "Healthy" },
+    watch: { text: "text-amber-600", bar: "bg-amber-500", label: "Watch" },
+    throttled: { text: "text-amber-700", bar: "bg-amber-500", label: "Throttled" },
+    quarantined: { text: "text-rose-600", bar: "bg-rose-500", label: "Quarantined" },
+    blocked: { text: "text-rose-700", bar: "bg-rose-600", label: "Blocked" },
+};
+
+function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: Inbox; update: (p: Partial<Inbox>) => void; status?: AccountStatusModel; mailbox: Inbox; canWarmup?: boolean }) {
     const ws = status?.warmup_status;
+    const wh = status?.warmup_health;
+    const inCampaign = status?.in_campaign;
+
+    // Warmup on/off is a lifecycle action (immediate), not a saved form field —
+    // read live state off the mailbox prop, which the lifecycle mutation patches
+    // back into cache on success.
+    const life = useWarmupLifecycle(mailbox.id);
+    const off = !mailbox.warmup;
+    const paused = !!mailbox.warmup && !!mailbox.warmup_paused_at;
+    const active = !!mailbox.warmup && !mailbox.warmup_paused_at;
+
+    const run = (action: "start" | "pause" | "resume" | "stop", verb: string) =>
+        life.mutate(action, {
+            onSuccess: () => toast.success(`Warmup ${verb}`),
+            onError: (e) => toast.error(buildError(e as unknown as AppError)),
+        });
+
+    const stopReset = () => {
+        if (!window.confirm("Stop warmup and reset ramp progress? Restarting begins from the base volume. Use Pause to keep progress.")) return;
+        run("stop", "stopped");
+    };
+
+    const baseOverMax = form.warmup_base > form.warmup_max;
+
     return (
         <div className="divide-y divide-slate-200/60">
-            {ws && (
-                <div className="px-5 py-4">
-                    <Eyebrow>Live status</Eyebrow>
-                    <div className="mt-2 flex items-center gap-2 text-[12.5px] text-slate-700">
-                        <FlameIcon className={cn("w-4 h-4", ws.enabled ? "text-orange-500" : "text-slate-300")} />
-                        {ws.enabled
-                            ? <span>Sending <b className="text-slate-900 tabular-nums">{ws.current_volume}</b> of <b className="text-slate-900 tabular-nums">{ws.target_volume}</b> today · day {ws.days_active}</span>
-                            : <span className="text-slate-400">Warmup not active</span>}
+            {/* Lifecycle control */}
+            <div className="px-5 py-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", active ? "bg-orange-50 text-orange-600" : paused ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-400")}>
+                        <FlameIcon className="w-4 h-4" />
                     </div>
-                    {ws.enabled && (
-                        <div className="mt-2.5 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                            <div className="h-full rounded-full bg-orange-400 transition-all" style={{ width: `${Math.min(100, (ws.current_volume / Math.max(1, ws.target_volume)) * 100)}%` }} />
-                        </div>
+                    <div className="min-w-0">
+                        <div className="text-[12.5px] font-medium text-slate-900">{active ? "Warming up" : paused ? "Paused" : "Warmup off"}</div>
+                        <div className="text-[11px] text-slate-400 truncate">{active ? "Building sender reputation" : paused ? "Ramp progress kept — resume anytime" : "Not building reputation"}</div>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                    {(off || paused) && canWarmup && (
+                        <button
+                            onClick={() => run(off ? "start" : "resume", off ? "started" : "resumed")}
+                            disabled={life.isPending}
+                            className="h-8 px-3 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                        >
+                            {life.isPending ? <Loading className="!w-3.5 h-3.5 text-white" /> : <PlayIcon className="w-3.5 h-3.5" />}
+                            {off ? "Start" : "Resume"}
+                        </button>
+                    )}
+                    {active && (
+                        <>
+                            <button
+                                onClick={() => run("pause", "paused")}
+                                disabled={life.isPending}
+                                className="h-8 px-3 rounded-md border border-slate-200 hover:border-slate-300 text-[12px] font-medium text-slate-700 hover:text-slate-900 inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                            >
+                                {life.isPending ? <Loading className="!w-3.5 h-3.5" /> : <PauseIcon className="w-3.5 h-3.5" />}
+                                Pause
+                            </button>
+                            <button
+                                onClick={stopReset}
+                                disabled={life.isPending}
+                                title="Stop warmup and reset ramp progress"
+                                className="h-8 px-3 rounded-md border border-slate-200 hover:border-rose-200 text-[12px] font-medium text-slate-600 hover:text-rose-600 inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                            >
+                                Stop
+                            </button>
+                        </>
+                    )}
+                    {paused && (
+                        <button
+                            onClick={stopReset}
+                            disabled={life.isPending}
+                            title="Stop warmup and reset ramp progress"
+                            className="h-8 px-3 rounded-md border border-slate-200 hover:border-rose-200 text-[12px] font-medium text-slate-600 hover:text-rose-600 inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                        >
+                            Stop
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Upsell when warmup isn't available on the plan */}
+            {off && !canWarmup && (
+                <div className="px-5 py-4">
+                    <div className="rounded-md border border-violet-100 bg-violet-50/70 px-3 py-2.5 text-[11.5px] text-violet-900/90 leading-relaxed">
+                        Warmup is available on paid plans. Upgrade to build and protect sender reputation automatically.
+                    </div>
+                </div>
+            )}
+
+            {/* Live volume */}
+            {ws && active && (
+                <div className="px-5 py-4">
+                    <Eyebrow>Today</Eyebrow>
+                    <div className="mt-2 flex items-center gap-2 text-[12.5px] text-slate-700">
+                        <span>Sending <b className="text-slate-900 tabular-nums">{ws.current_volume}</b> of <b className="text-slate-900 tabular-nums">{ws.target_volume}</b> · day {ws.days_active}</span>
+                    </div>
+                    <div className="mt-2.5 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                        <div className="h-full rounded-full bg-orange-400 transition-all" style={{ width: `${Math.min(100, (ws.current_volume / Math.max(1, ws.target_volume)) * 100)}%` }} />
+                    </div>
+                </div>
+            )}
+
+            {/* Warmup reputation (pool health) */}
+            {wh && (
+                <div className="px-5 py-4">
+                    <div className="flex items-center justify-between">
+                        <Eyebrow>Warmup reputation</Eyebrow>
+                        <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", warmupStateTone[wh.state]?.text ?? "text-slate-500")}>
+                            <ShieldCheckIcon className="w-3.5 h-3.5" /> {warmupStateTone[wh.state]?.label ?? wh.state}
+                        </span>
+                    </div>
+                    {wh.reason && <p className="mt-1.5 text-[11.5px] text-slate-500 leading-relaxed">{wh.reason}</p>}
+                    {wh.blocked_until && (
+                        <p className="mt-1 text-[11px] text-rose-600">Paused from the pool until {new Date(wh.blocked_until).toLocaleDateString()}.</p>
                     )}
                 </div>
             )}
 
+            {/* In-campaign health-check explainer */}
+            {inCampaign && (
+                <div className="px-5 py-4">
+                    <div className="rounded-md border border-sky-100 bg-sky-50/70 px-3 py-2.5 flex gap-2.5">
+                        <ShieldCheckIcon className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                        <p className="text-[11.5px] text-sky-900/90 leading-relaxed">
+                            This mailbox is active in a campaign. Warmbly keeps a low volume of
+                            {" "}<b>health-check warmup (~5/day)</b> flowing{active ? "" : " even while warmup is off"} so we can
+                            continuously watch deliverability while it sends cold outreach.
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {/* Ramp configuration */}
             <div className="px-5 py-5 space-y-5">
                 <Eyebrow>Ramp configuration</Eyebrow>
                 <FieldShell label="Starting volume" hint="Emails per day when warmup begins.">
@@ -451,8 +588,33 @@ function WarmupTab({ form, update, status }: { form: Inbox; update: (p: Partial<
                 <FieldShell label="Maximum volume" hint="Ceiling the ramp grows toward. Keep conservative for new mailboxes (≈40/day).">
                     <NumField value={form.warmup_max} onChange={(v) => update({ warmup_max: v })} suffix="emails / day" />
                 </FieldShell>
+                {baseOverMax && (
+                    <p className="text-[11px] text-rose-600 -mt-3">Starting volume can't exceed the maximum.</p>
+                )}
                 <FieldShell label="Reply rate" hint="Share of warmup mail that gets a reply, to mimic real conversation.">
                     <NumField value={form.warmup_reply_rate} onChange={(v) => update({ warmup_reply_rate: v })} suffix="%" />
+                </FieldShell>
+            </div>
+
+            {/* Schedule */}
+            <div className="px-5 py-5 space-y-5">
+                <Eyebrow>Sending window</Eyebrow>
+                <div className="grid grid-cols-2 gap-3">
+                    <FieldShell label="Start time">
+                        <TimeSelector value={form.warmup_start_time || "08:00"} onChange={(v) => update({ warmup_start_time: v })} />
+                    </FieldShell>
+                    <FieldShell label="End time">
+                        <TimeSelector value={form.warmup_end_time || "20:00"} onChange={(v) => update({ warmup_end_time: v })} />
+                    </FieldShell>
+                </div>
+                <FieldShell label="Sending days" hint="Days warmup mail goes out. Leave all unchecked to send every day.">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-1">
+                        <WeekdayBitmask
+                            weekdays={WEEKDAYS}
+                            value={form.warmup_days ?? 0}
+                            setValue={(v) => update({ warmup_days: v })}
+                        />
+                    </div>
                 </FieldShell>
             </div>
         </div>

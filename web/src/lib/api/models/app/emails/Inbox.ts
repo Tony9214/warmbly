@@ -18,10 +18,15 @@ export default interface Inbox {
     tracking_domain_verified: boolean;
     tracking_domain_verified_at?: Date | null;
     warmup?: Date | null;
+    warmup_paused_at?: Date | null;
     warmup_base: number;
     warmup_max: number;
     warmup_increase: number;
     warmup_reply_rate: number;
+    warmup_pool_type?: string;
+    warmup_start_time?: string;
+    warmup_end_time?: string;
+    warmup_days?: number;
     created_at: Date;
     updated_at: Date;
 }

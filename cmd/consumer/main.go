@@ -176,6 +176,11 @@ func main() {
 	emailAccountErrorRepo := repository.NewEmailAccountErrorRepository(primaryDB)
 	warmupRepo := repository.NewWarmupRepository(primaryDB.Pool)
 	warmupService := warmupapp.NewService(warmupRepo)
+	// Push warmup-health transitions live to the dashboard. The health sweep
+	// runs in this process, so the realtime publisher is wired here.
+	if streamingPublisher != nil {
+		warmupService.WireRealtime(streamingPublisher, emailRepo)
+	}
 	workerRepo := repository.NewWorkerRepository(primaryDB.Pool)
 	subscriptionRepoConsumer := repository.NewSubscriptionRepository(primaryDB.Pool)
 	planRepoConsumer := repository.NewPlanRepository(primaryDB.Pool)

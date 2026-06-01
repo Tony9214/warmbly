@@ -37,6 +37,12 @@ type CampaignRepository interface {
 	ValidateCampaignReady(ctx context.Context, campaignID uuid.UUID) error
 	GetPendingCampaignTasks(ctx context.Context, campaignID uuid.UUID) ([]Task, error)
 	CountActiveForOrganization(ctx context.Context, orgID uuid.UUID) (int, error)
+	AccountHasActiveCampaign(ctx context.Context, accountID uuid.UUID) (bool, error)
+	// CountActiveCampaignsForAccount returns how many active campaigns send
+	// from the given mailbox (matched through the campaign's email tags).
+	// Used by the warmup scheduler to keep a low-volume health-check warmup
+	// running whenever a mailbox is in use by a live campaign.
+	CountActiveCampaignsForAccount(ctx context.Context, accountID uuid.UUID) (int, error)
 }
 
 type campaignRepository struct {
@@ -1017,6 +1023,36 @@ func (r *campaignRepository) CountActiveForOrganization(ctx context.Context, org
 	query := `SELECT COUNT(*) FROM campaigns WHERE organization_id = $1 AND status = 'active'`
 	var count int
 	err := r.DB.QueryRow(ctx, query, orgID).Scan(&count)
+	return count, err
+}
+
+func (r *campaignRepository) AccountHasActiveCampaign(ctx context.Context, accountID uuid.UUID) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM email_accounts ea
+			JOIN email_tags et ON et.email_id = ea.id
+			JOIN campaign_email_tags cet ON cet.tag_id = et.tag_id
+			JOIN campaigns c ON c.id = cet.campaign_id
+			WHERE ea.id = $1
+			  AND ea.status = 'active'
+			  AND c.status = 'active'
+		)
+	`
+	var exists bool
+	err := r.DB.QueryRow(ctx, query, accountID).Scan(&exists)
+	return exists, err
+}
+
+func (r *campaignRepository) CountActiveCampaignsForAccount(ctx context.Context, accountID uuid.UUID) (int, error) {
+	query := `
+		SELECT COUNT(DISTINCT c.id)
+		FROM campaigns c
+		JOIN campaign_email_tags cet ON cet.campaign_id = c.id
+		JOIN email_tags et ON et.tag_id = cet.tag_id
+		WHERE et.email_id = $1 AND c.status = 'active'`
+	var count int
+	err := r.DB.QueryRow(ctx, query, accountID).Scan(&count)
 	return count, err
 }
 

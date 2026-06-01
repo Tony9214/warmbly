@@ -28,6 +28,11 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 
 	executionKey := "warmup:" + taskID.String()
 	executionStatus := "failed"
+	// lane distinguishes a normal user-enabled warmup send ("warmup") from a
+	// health-check send kept flowing only because the mailbox backs a live
+	// campaign ("health_check"). Set once the account is loaded; the defer
+	// reads it at completion time.
+	lane := "warmup"
 	if s.advanced != nil {
 		duplicate, xerr := s.advanced.StartTaskExecution(ctx, taskID, executionKey, map[string]interface{}{
 			"task_type": "warmup",
@@ -41,6 +46,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		defer func() {
 			_ = s.advanced.CompleteTaskExecution(ctx, taskID, executionKey, executionStatus, map[string]interface{}{
 				"task_type": "warmup",
+				"lane":      lane,
 			})
 		}()
 	}
@@ -73,13 +79,37 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	if account == nil {
 		return errx.ErrNotFound
 	}
-	if account.Status != "active" || account.Warmup == nil {
+	// Keep the warmup chain alive while the mailbox is actively warming OR
+	// while it backs a live campaign (the low-volume health-check lane). Once
+	// neither holds, the chain is allowed to wind down.
+	activelyWarming := account.IsWarmingActive()
+	inCampaign := false
+	if !activelyWarming {
+		inCampaign = s.accountInActiveCampaign(ctx, account.ID)
+	}
+	if account.Status != "active" || (!activelyWarming && !inCampaign) {
 		if s.warmupHealth != nil {
-			_ = s.warmupHealth.RemovePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+			if account.Status == "active" && account.OrganizationID != nil && s.featureGate != nil {
+				canWarmup, _ := s.featureGate.CanUseWarmup(ctx, *account.OrganizationID)
+				if canWarmup {
+					_ = s.warmupHealth.EnsurePoolMembershipWithRole(ctx, account.ID, s.resolveWarmupPoolType(ctx, account), "recipient_only")
+				} else {
+					_ = s.warmupHealth.RemovePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+				}
+			} else {
+				_ = s.warmupHealth.RemovePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+			}
 		}
 		_ = s.taskRepo.UpdateTaskStatus(ctx, taskID, "cancelled")
 		executionStatus = "completed"
 		return nil
+	}
+	if !activelyWarming && inCampaign {
+		lane = "health_check"
+		log.Info().
+			Str("task_id", taskID.String()).
+			Str("email_account_id", account.ID.String()).
+			Msg("warmup health-check send (mailbox in active campaign, warmup off)")
 	}
 
 	// STEP 3.5: Check if organization can use warmup (only paid orgs)
@@ -98,7 +128,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 
 	poolType := s.resolveWarmupPoolType(ctx, account)
 	if s.warmupHealth != nil {
-		if err := s.warmupHealth.EnsurePoolMembership(ctx, account.ID, poolType); err != nil {
+		if err := s.warmupHealth.EnsurePoolMembershipWithRole(ctx, account.ID, poolType, "sender_receiver"); err != nil {
 			return err
 		}
 
@@ -123,13 +153,18 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	// STEP 5: Select warmup partner from pool
 	partner, err := s.selectWarmupPartner(ctx, *account)
 	if err != nil {
-		s.taskRepo.RecordTaskFailure(ctx, taskID, "No warmup partner", err.Error())
-		if s.advanced != nil {
-			_ = s.advanced.CaptureTaskDeadLetter(ctx, taskID, "warmup", map[string]interface{}{
-				"reason": "no_warmup_partner",
-			}, err.Error(), 1)
-			_ = s.taskRepo.UpdateTaskStatus(ctx, taskID, "dead_lettered")
+		_ = s.taskRepo.UpdateTaskStatus(ctx, taskID, "skipped_warmup_protected")
+		nextTime, scheduleErr := s.scheduler.CalculateNextWarmupTime(ctx, account.ID)
+		if scheduleErr != nil {
+			nextTime = warmupPartnerRecheckTime()
 		}
+		if nextTime.Before(time.Now().Add(4 * time.Hour)) {
+			nextTime = warmupPartnerRecheckTime()
+		}
+		if createErr := s.createWarmupTask(ctx, account.ID, nextTime); createErr != nil {
+			log.Warn().Err(createErr).Str("task_id", taskID.String()).Str("email_account_id", account.ID.String()).Msg("Failed to reschedule warmup task after partner exhaustion")
+		}
+		executionStatus = "completed"
 		return nil
 	}
 
@@ -257,6 +292,21 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	return nil
 }
 
+// accountInActiveCampaign reports whether the mailbox currently backs at
+// least one active campaign. Failing closed on error keeps the health-check
+// lane conservative — a transient DB error just lets the chain wind down if
+// warmup is otherwise off.
+func (s *tasksService) accountInActiveCampaign(ctx context.Context, accountID uuid.UUID) bool {
+	if s.campaignRepo == nil {
+		return false
+	}
+	count, err := s.campaignRepo.CountActiveCampaignsForAccount(ctx, accountID)
+	if err != nil {
+		return false
+	}
+	return count > 0
+}
+
 // recentPartnerWindow controls how long a partner stays excluded from
 // re-selection after being used. Bumped from 24h to 72h so a small pool
 // does not rotate through the same handful of mailboxes every day.
@@ -272,13 +322,17 @@ const recentDomainWindow = 7 * 24 * time.Hour
 // that mailbox providers can cluster on.
 const smallPoolWarnThreshold = 8
 
+func warmupPartnerRecheckTime() time.Time {
+	return time.Now().Add(time.Duration(240+rand.Intn(240)) * time.Minute)
+}
+
 // selectWarmupPartner selects a warmup partner from the pool, preferring
 // partners on under-represented recipient domains to avoid concentrating
 // traffic on a single provider (e.g. all-Gmail warmup loops).
 func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (*Email, error) {
 	poolType := s.resolveWarmupPoolType(ctx, &account)
 
-	participantIDs, err := s.warmupRepo.GetPoolParticipants(ctx, poolType, true)
+	participantIDs, err := s.warmupRepo.GetPoolRecipientParticipants(ctx, poolType, true)
 	if err != nil {
 		return nil, err
 	}
@@ -323,6 +377,14 @@ func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (
 		}
 	}
 
+	todayPartnerSet := map[uuid.UUID]struct{}{}
+	todayPartnerIDs, err := s.warmupRepo.GetRecentlyUsedPartners(ctx, account.ID, time.Now().Truncate(24*time.Hour))
+	if err == nil {
+		for _, pid := range todayPartnerIDs {
+			todayPartnerSet[pid] = struct{}{}
+		}
+	}
+
 	domainCounts, err := s.warmupRepo.GetRecentPartnerDomainCounts(ctx, account.ID, time.Now().Add(-recentDomainWindow))
 	if err != nil {
 		domainCounts = nil
@@ -332,6 +394,9 @@ func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (
 	var fallbackPartners []uuid.UUID
 	for _, id := range participantIDs {
 		if id == account.ID {
+			continue
+		}
+		if _, usedToday := todayPartnerSet[id]; usedToday {
 			continue
 		}
 		fallbackPartners = append(fallbackPartners, id)
@@ -460,6 +525,19 @@ func (s *tasksService) scheduleWarmupRecovery(ctx context.Context, accountID uui
 	if err := s.createWarmupTask(ctx, accountID, *health.BlockedUntil); err != nil {
 		log.Warn().Err(err).Str("email_account_id", accountID.String()).Str("pool_type", poolType).Msg("Failed to create warmup recovery task")
 	}
+}
+
+// EnsureWarmupScheduled makes sure the mailbox has a pending warmup task so
+// its warmup / health-check chain is running. Safe to call repeatedly: the
+// per-mailbox advisory lock in CreateWarmupTaskWithLock means a duplicate
+// pending task is never created. Returns ErrWarmupNotEnabled (benign) when
+// the mailbox is neither warming nor backing a live campaign.
+func (s *tasksService) EnsureWarmupScheduled(ctx context.Context, accountID uuid.UUID) error {
+	nextTime, err := s.scheduler.CalculateNextWarmupTime(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	return s.createWarmupTask(ctx, accountID, nextTime)
 }
 
 // createWarmupTask creates a new warmup task in GCP Cloud Tasks

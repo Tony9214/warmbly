@@ -50,6 +50,22 @@ func (s *emailService) Update(ctx context.Context, userID, emailAccountID string
 	return account, nil
 }
 
+// SetWarmupLifecycle applies a warmup start/pause/resume/disable transition,
+// then re-syncs pool membership and fans out the change so dashboards update
+// live. Seeding the actual warmup task chain is the caller's responsibility
+// (the API handler triggers EnsureWarmupScheduled) — this service has no
+// Cloud Tasks client.
+func (s *emailService) SetWarmupLifecycle(ctx context.Context, userID, emailAccountID, action string) (*models.Email, *errx.Error) {
+	account, err := s.emailRepository.SetWarmupLifecycle(ctx, userID, emailAccountID, action)
+	if err != nil {
+		return nil, err
+	}
+
+	s.syncWarmupPoolMembership(ctx, account)
+	s.publishAccountEvent(ctx, pubsub.EventAccountSynced, account)
+	return account, nil
+}
+
 // trackingDomainTarget is the shared host customers point their CNAME at.
 // Keep in sync with the TRACKING_DOMAIN default (Makefile / config).
 const trackingDomainTarget = "t.warmbly.com"
@@ -110,12 +126,16 @@ func (s *emailService) syncWarmupPoolMembership(ctx context.Context, account *mo
 		return
 	}
 
-	if !s.shouldParticipateInWarmupPool(ctx, account) {
+	if !s.canUseWarmupPool(ctx, account) {
 		s.removeFromAllWarmupPools(ctx, account)
 		return
 	}
 
-	_ = s.warmupService.EnsurePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+	role := "recipient_only"
+	if account.Warmup != nil {
+		role = "sender_receiver"
+	}
+	_ = s.warmupService.EnsurePoolMembershipWithRole(ctx, account.ID, s.resolveWarmupPoolType(ctx, account), role)
 }
 
 func (s *emailService) removeFromAllWarmupPools(ctx context.Context, account *models.Email) {
@@ -128,8 +148,8 @@ func (s *emailService) removeFromAllWarmupPools(ctx context.Context, account *mo
 	}
 }
 
-func (s *emailService) shouldParticipateInWarmupPool(ctx context.Context, account *models.Email) bool {
-	if account == nil || account.Warmup == nil || account.Status != "active" || account.OrganizationID == nil || s.featureGate == nil {
+func (s *emailService) canUseWarmupPool(ctx context.Context, account *models.Email) bool {
+	if account == nil || account.Status != "active" || account.OrganizationID == nil || s.featureGate == nil {
 		return false
 	}
 

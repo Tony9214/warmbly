@@ -12,6 +12,12 @@ import (
 // priority order. Premium first so paid orgs apply premium-pool health.
 var poolTypesForHealthLookup = []string{"premium", "free"}
 
+const (
+	minWarmupRecipientRecheck = 4 * time.Hour
+	maxWarmupRecipientRecheck = 8 * time.Hour
+	activeCampaignWarmupCap   = 5
+)
+
 // healthAdjustment captures how the throttled/watch health state should
 // dampen warmup throughput. The scheduler reads this off the participant's
 // current state instead of carrying it on the task payload, so a state
@@ -36,6 +42,38 @@ func adjustmentFor(state models.WarmupHealthState) healthAdjustment {
 	}
 }
 
+func warmupPoolTypeForAccount(account *models.Email) string {
+	if account != nil && account.WarmupPoolType != "" {
+		return account.WarmupPoolType
+	}
+	return "premium"
+}
+
+func recipientRecheckTime() time.Time {
+	return time.Now().Add(time.Duration(randomJitter(
+		int(minWarmupRecipientRecheck/time.Minute),
+		int(maxWarmupRecipientRecheck/time.Minute),
+	)) * time.Minute)
+}
+
+// warmupRampTarget computes the day's warmup volume before recipient-capacity
+// and health-state adjustments. An actively-warming mailbox follows its ramp
+// (base + daysWarming*increase, capped at max), reduced to the in-campaign cap
+// when it also backs a live campaign so warmup doesn't stack on production
+// sending pressure. A mailbox kept warm only because it backs a campaign (the
+// monitor lane) runs at the in-campaign cap. Pure (no DB) so the policy is
+// unit-testable.
+func warmupRampTarget(activelyWarming bool, base, increase, max, daysWarming int, inCampaign bool) int {
+	if !activelyWarming {
+		return activeCampaignWarmupCap
+	}
+	target := min(base+daysWarming*increase, max)
+	if inCampaign && target > activeCampaignWarmupCap {
+		target = activeCampaignWarmupCap
+	}
+	return target
+}
+
 // resolveHealthState looks up the participant's current health state across
 // the warmup pools they may belong to. Returns Healthy if the account is not
 // in any pool or the lookup fails — failing open keeps warmup running rather
@@ -54,6 +92,21 @@ func (s *schedulerService) resolveHealthState(ctx context.Context, accountID uui
 	return models.WarmupHealthHealthy
 }
 
+// accountInActiveCampaign reports whether the mailbox currently backs at
+// least one active campaign (matched through the campaign's email tags).
+// Failing closed on error keeps warmup behaviour conservative: a transient
+// DB error simply means no in-campaign health-check floor this cycle.
+func (s *schedulerService) accountInActiveCampaign(ctx context.Context, accountID uuid.UUID) bool {
+	if s.campaignRepo == nil {
+		return false
+	}
+	count, err := s.campaignRepo.CountActiveCampaignsForAccount(ctx, accountID)
+	if err != nil {
+		return false
+	}
+	return count > 0
+}
+
 // CalculateNextWarmupTime calculates the next best time to send a warmup email
 // This implements the progressive warmup algorithm with anti-spam patterns
 func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountID uuid.UUID) (time.Time, error) {
@@ -63,7 +116,14 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 		return time.Time{}, xerr
 	}
 
-	if account.Warmup == nil {
+	// Two reasons a mailbox warms up:
+	//   1. The user has warmup actively enabled — follow the normal ramp.
+	//   2. The mailbox backs a live campaign — keep a small health-check
+	//      volume flowing even when warmup is paused/off so reputation
+	//      signals stay fresh while it sends cold outreach.
+	activelyWarming := account.IsWarmingActive()
+	inCampaign := s.accountInActiveCampaign(ctx, accountID)
+	if !activelyWarming && !inCampaign {
 		return time.Time{}, ErrWarmupNotEnabled
 	}
 
@@ -86,12 +146,31 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 		}
 	}
 
-	// STEP 2: Calculate target volume for today based on progression
-	daysSinceStart := time.Since(*account.Warmup).Hours() / 24
-	targetVolume := min(
-		account.WarmupBase+int(daysSinceStart)*account.WarmupIncrease,
-		account.WarmupMax,
-	)
+	// STEP 2: Calculate target volume for today (before recipient-capacity and
+	// health adjustments). Pure policy in warmupRampTarget so it's unit-tested.
+	daysWarming := 0
+	if activelyWarming {
+		daysWarming = int(time.Since(*account.Warmup).Hours() / 24)
+	}
+	targetVolume := warmupRampTarget(activelyWarming, account.WarmupBase, account.WarmupIncrease, account.WarmupMax, daysWarming, inCampaign)
+
+	// STEP 2.1: Cap per-mailbox volume to actual recipient capacity. The
+	// sender should not send multiple warmup messages to the same recipient
+	// in a single day just to hit an arbitrary target; that creates obvious
+	// pool loops when membership is small. Recipient-only participants count
+	// here, so operators can add inbound capacity without making those
+	// mailboxes warmup senders.
+	if s.warmupRepo != nil {
+		eligibleRecipients, err := s.warmupRepo.CountEligibleRecipients(ctx, warmupPoolTypeForAccount(account), accountID)
+		if err == nil {
+			if eligibleRecipients <= 0 {
+				return recipientRecheckTime(), nil
+			}
+			if targetVolume > eligibleRecipients {
+				targetVolume = eligibleRecipients
+			}
+		}
+	}
 
 	// STEP 2.5: Apply health-state adjustments. Throttled/watch participants
 	// run at reduced volume and wider spacing until the health sweep clears
@@ -99,22 +178,27 @@ func (s *schedulerService) CalculateNextWarmupTime(ctx context.Context, accountI
 	// keep a small heartbeat so the sweep has fresh sample data to evaluate.
 	adj := adjustmentFor(s.resolveHealthState(ctx, accountID))
 	if adj.volumeMultiplier < 1.0 {
+		floor := 1
+		if activelyWarming {
+			floor = account.WarmupBase
+		}
 		adjusted := int(float64(targetVolume)*adj.volumeMultiplier + 0.5)
-		if adjusted < account.WarmupBase {
-			adjusted = account.WarmupBase
+		if adjusted < floor {
+			adjusted = floor
 		}
 		if adjusted < 1 {
 			adjusted = 1
 		}
 		targetVolume = adjusted
 	}
+
 	minWaitSeconds := account.MinWaitTime
 	if adj.minWaitMultiplier > 1.0 {
 		minWaitSeconds = int(float64(account.MinWaitTime)*adj.minWaitMultiplier + 0.5)
 	}
 
 	// STEP 3: Count emails already sent today
-	emailsSentToday, err := s.taskRepo.CountEmailsSentToday(ctx, accountID)
+	emailsSentToday, err := s.taskRepo.CountWarmupEmailsSentToday(ctx, accountID)
 	if err != nil {
 		return time.Time{}, err
 	}

@@ -24,6 +24,7 @@ type WarmupPool struct {
 type WarmupPoolParticipant struct {
 	PoolID                uuid.UUID
 	EmailAccountID        uuid.UUID
+	ParticipantRole       string
 	JoinedAt              time.Time
 	BlockedAt             *time.Time
 	BlockedUntil          *time.Time
@@ -67,7 +68,9 @@ type WarmupRepository interface {
 	// Pool management
 	GetPoolByType(ctx context.Context, poolType string) (*WarmupPool, error)
 	GetPoolParticipants(ctx context.Context, poolType string, excludeBlocked bool) ([]uuid.UUID, error)
+	GetPoolRecipientParticipants(ctx context.Context, poolType string, excludeBlocked bool) ([]uuid.UUID, error)
 	JoinPool(ctx context.Context, poolID, accountID uuid.UUID) error
+	SetParticipantRole(ctx context.Context, poolID, accountID uuid.UUID, role string) error
 	LeavePool(ctx context.Context, poolID, accountID uuid.UUID) error
 	BlockFromPool(ctx context.Context, accountID uuid.UUID, reason string) error
 	UnblockFromPool(ctx context.Context, accountID uuid.UUID) error
@@ -111,6 +114,7 @@ type WarmupRepository interface {
 	// Partner diversity support
 	GetPoolParticipantDomains(ctx context.Context, poolType string, excludeBlocked bool) (map[uuid.UUID]string, error)
 	GetPoolParticipantEmails(ctx context.Context, poolType string, excludeBlocked bool) (map[uuid.UUID]string, error)
+	CountEligibleRecipients(ctx context.Context, poolType string, excludeAccountID uuid.UUID) (int, error)
 	GetRecentPartnerDomainCounts(ctx context.Context, accountID uuid.UUID, since time.Time) (map[string]int, error)
 }
 
@@ -155,7 +159,59 @@ func (r *warmupRepository) GetPoolParticipants(ctx context.Context, poolType str
 		SELECT wpp.email_account_id
 		FROM warmup_pool_participants wpp
 		JOIN warmup_pools wp ON wpp.pool_id = wp.id
+		JOIN email_accounts ea ON ea.id = wpp.email_account_id
 		WHERE wp.pool_type = $1
+		  AND wpp.participant_role = 'sender_receiver'
+		  AND ea.status = 'active'
+	`
+
+	if excludeBlocked {
+		query += `
+		 AND (
+		  wpp.health_state IN ('healthy', 'watch', 'throttled')
+		  OR (
+		   wpp.health_state IN ('quarantined', 'blocked')
+		   AND wpp.blocked_until IS NOT NULL
+		   AND wpp.blocked_until <= NOW()
+		  )
+		 )
+		 AND (
+		  wpp.blocked_at IS NULL
+		  OR (wpp.blocked_until IS NOT NULL AND wpp.blocked_until <= NOW())
+		 )
+		`
+	}
+
+	rows, err := r.db.Query(ctx, query, poolType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var accountIDs []uuid.UUID
+	for rows.Next() {
+		var accountID uuid.UUID
+		if err := rows.Scan(&accountID); err != nil {
+			return nil, err
+		}
+		accountIDs = append(accountIDs, accountID)
+	}
+
+	return accountIDs, rows.Err()
+}
+
+// GetPoolRecipientParticipants retrieves participant account IDs that can
+// receive warmup mail. Recipient-only rows increase safe inbound capacity
+// without scheduling outbound warmup sends from those mailboxes.
+func (r *warmupRepository) GetPoolRecipientParticipants(ctx context.Context, poolType string, excludeBlocked bool) ([]uuid.UUID, error) {
+	query := `
+		SELECT wpp.email_account_id
+		FROM warmup_pool_participants wpp
+		JOIN warmup_pools wp ON wpp.pool_id = wp.id
+		JOIN email_accounts ea ON ea.id = wpp.email_account_id
+		WHERE wp.pool_type = $1
+		  AND wpp.participant_role IN ('sender_receiver', 'recipient_only')
+		  AND ea.status = 'active'
 	`
 
 	if excludeBlocked {
@@ -196,13 +252,23 @@ func (r *warmupRepository) GetPoolParticipants(ctx context.Context, poolType str
 // JoinPool adds an account to a warmup pool
 func (r *warmupRepository) JoinPool(ctx context.Context, poolID, accountID uuid.UUID) error {
 	query := `
-		INSERT INTO warmup_pool_participants (pool_id, email_account_id, joined_at, spam_score)
-		VALUES ($1, $2, NOW(), 0)
+		INSERT INTO warmup_pool_participants (pool_id, email_account_id, joined_at, spam_score, participant_role)
+		VALUES ($1, $2, NOW(), 0, 'sender_receiver')
 		ON CONFLICT (pool_id, email_account_id) DO UPDATE
 		SET joined_at = warmup_pool_participants.joined_at
 	`
 
 	_, err := r.db.Exec(ctx, query, poolID, accountID)
+	return err
+}
+
+func (r *warmupRepository) SetParticipantRole(ctx context.Context, poolID, accountID uuid.UUID, role string) error {
+	query := `
+		UPDATE warmup_pool_participants
+		SET participant_role = $1
+		WHERE pool_id = $2 AND email_account_id = $3
+	`
+	_, err := r.db.Exec(ctx, query, role, poolID, accountID)
 	return err
 }
 
@@ -719,10 +785,12 @@ func (r *warmupRepository) GetPoolParticipantDomains(ctx context.Context, poolTy
 		JOIN warmup_pools wp ON wpp.pool_id = wp.id
 		JOIN email_accounts ea ON ea.id = wpp.email_account_id
 		WHERE wp.pool_type = $1
+		  AND ea.status = 'active'
 	`
 	if excludeBlocked {
 		query += " AND wpp.health_state IN ('healthy', 'watch', 'throttled')"
 	}
+	query += " AND wpp.participant_role IN ('sender_receiver', 'recipient_only')"
 
 	rows, err := r.db.Query(ctx, query, poolType)
 	if err != nil {
@@ -753,10 +821,12 @@ func (r *warmupRepository) GetPoolParticipantEmails(ctx context.Context, poolTyp
 		JOIN warmup_pools wp ON wpp.pool_id = wp.id
 		JOIN email_accounts ea ON ea.id = wpp.email_account_id
 		WHERE wp.pool_type = $1
+		  AND ea.status = 'active'
 	`
 	if excludeBlocked {
 		query += " AND wpp.health_state IN ('healthy', 'watch', 'throttled')"
 	}
+	query += " AND wpp.participant_role IN ('sender_receiver', 'recipient_only')"
 
 	rows, err := r.db.Query(ctx, query, poolType)
 	if err != nil {
@@ -774,6 +844,34 @@ func (r *warmupRepository) GetPoolParticipantEmails(ctx context.Context, poolTyp
 		out[id] = email
 	}
 	return out, rows.Err()
+}
+
+func (r *warmupRepository) CountEligibleRecipients(ctx context.Context, poolType string, excludeAccountID uuid.UUID) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM warmup_pool_participants wpp
+		JOIN warmup_pools wp ON wpp.pool_id = wp.id
+		JOIN email_accounts ea ON ea.id = wpp.email_account_id
+		WHERE wp.pool_type = $1
+		  AND wpp.email_account_id <> $2
+		  AND wpp.participant_role IN ('sender_receiver', 'recipient_only')
+		  AND ea.status = 'active'
+		  AND (
+		   wpp.health_state IN ('healthy', 'watch', 'throttled')
+		   OR (
+		    wpp.health_state IN ('quarantined', 'blocked')
+		    AND wpp.blocked_until IS NOT NULL
+		    AND wpp.blocked_until <= NOW()
+		   )
+		  )
+		  AND (
+		   wpp.blocked_at IS NULL
+		   OR (wpp.blocked_until IS NOT NULL AND wpp.blocked_until <= NOW())
+		  )
+	`
+	var count int
+	err := r.db.QueryRow(ctx, query, poolType, excludeAccountID).Scan(&count)
+	return count, err
 }
 
 // GetRecentPartnerDomainCounts returns a histogram of recipient domains the

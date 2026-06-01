@@ -43,6 +43,7 @@ type Email struct {
 	TrackingDomainVerifiedAt *time.Time `json:"tracking_domain_verified_at"`
 
 	Warmup          *time.Time `json:"warmup"`
+	WarmupPausedAt  *time.Time `json:"warmup_paused_at"`
 	WarmupBase      int        `json:"warmup_base"`
 	WarmupMax       int        `json:"warmup_max"`
 	WarmupIncrease  int        `json:"warmup_increase"`
@@ -59,6 +60,21 @@ type Email struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IsWarmingActive reports whether the mailbox is actively warming up: warmup
+// has been enabled (anchor set) and is not currently paused. The scheduler,
+// task runner, and analytics all key off this rather than the raw Warmup
+// pointer so a paused mailbox is treated as "not sending normal warmup" while
+// still preserving its ramp progress.
+func (e *Email) IsWarmingActive() bool {
+	return e.Warmup != nil && e.WarmupPausedAt == nil
+}
+
+// IsWarmupPaused reports whether warmup is enabled but paused. A paused
+// mailbox keeps its ramp progress (the anchor is shifted forward on resume).
+func (e *Email) IsWarmupPaused() bool {
+	return e.Warmup != nil && e.WarmupPausedAt != nil
 }
 
 type Service struct {

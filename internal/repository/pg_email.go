@@ -49,6 +49,12 @@ type EmailRepository interface {
 	GetWorkerID(ctx context.Context, emailAccountID uuid.UUID) (*uuid.UUID, *errx.Error)
 	SetWorkerID(ctx context.Context, emailAccountID, workerID uuid.UUID) *errx.Error
 	Update(ctx context.Context, userID, emailAccountID string, udata *models.UpdateEmail) (*models.Email, *errx.Error)
+	// SetWarmupLifecycle starts, pauses, resumes, or disables warmup for a
+	// mailbox. "start"/"resume" preserve ramp progress (a paused mailbox
+	// resumes where it left off); "pause" keeps progress; "disable" turns
+	// warmup off entirely. The timestamp math runs in SQL so the transition
+	// is atomic and idempotent.
+	SetWarmupLifecycle(ctx context.Context, userID, emailAccountID, action string) (*models.Email, *errx.Error)
 	UpdateTrackingDomain(ctx context.Context, userID, emailAccountID, domain string, verified bool, verifiedAt *time.Time) *errx.Error
 	Delete(ctx context.Context, userID, emailAccountID string) *errx.Error
 
@@ -62,6 +68,12 @@ type EmailRepository interface {
 	// CountForOrganization returns the number of email accounts attached to the
 	// given organization. Used by the free-trial inbox cap.
 	CountForOrganization(ctx context.Context, orgID uuid.UUID) (int, *errx.Error)
+
+	// ListWarmupScheduleCandidates returns active mailboxes that should have a
+	// running warmup chain but currently have no pending warmup task: either
+	// actively warming, or backing a live campaign (the health-check lane).
+	// Used by the warmup reconciler to (re)seed chains.
+	ListWarmupScheduleCandidates(ctx context.Context, limit int) ([]uuid.UUID, error)
 }
 
 type emailRepository struct {
@@ -83,6 +95,47 @@ func (r *emailRepository) ExistsForUser(ctx context.Context, userID, email strin
 		return false, errx.InternalError()
 	}
 	return exists, nil
+}
+
+func (r *emailRepository) ListWarmupScheduleCandidates(ctx context.Context, limit int) ([]uuid.UUID, error) {
+	query := `
+		SELECT ea.id
+		FROM email_accounts ea
+		WHERE ea.status = 'active'
+		  AND ea.worker_id IS NOT NULL
+		  AND (
+		    (ea.warmup IS NOT NULL AND ea.warmup_paused_at IS NULL)
+		    OR EXISTS (
+		      SELECT 1
+		      FROM email_tags et
+		      JOIN campaign_email_tags cet ON cet.tag_id = et.tag_id
+		      JOIN campaigns c ON c.id = cet.campaign_id
+		      WHERE et.email_id = ea.id AND c.status = 'active'
+		    )
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM tasks t
+		    WHERE t.email_account_id = ea.id
+		      AND t.task_type = 'warmup'
+		      AND t.status = 'pending'
+		  )
+		LIMIT $1`
+
+	rows, err := r.DB.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *emailRepository) CountForOrganization(ctx context.Context, orgID uuid.UUID) (int, *errx.Error) {
@@ -366,7 +419,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 		SELECT
 		 ea.id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 	 	 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
-		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_base,
+		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_paused_at, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days,
 		 ea.created_at, ea.updated_at,
 		 COALESCE(
@@ -416,7 +469,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 		err := rows.Scan(
 			&i.ID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode, &i.Provider, &i.Status,
 			&i.LastSyncedAt, &i.LastID, &i.CampaignLimit, &i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt,
-			&i.Warmup, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease,
+			&i.Warmup, &i.WarmupPausedAt, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease,
 			&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays,
 			&i.CreatedAt, &i.UpdatedAt, &i.Tags,
 		)
@@ -485,7 +538,7 @@ func (r *emailRepository) Get(ctx context.Context, userID, emailAccountID string
 		SELECT
 		ea.id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 		 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
-		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_base,
+		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_paused_at, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days,
 		 ea.created_at, ea.updated_at,
 		 COALESCE(array_agg(eat.tag_id) FILTER (WHERE eat.tag_id IS NOT NULL), '{}') AS tags
@@ -508,7 +561,7 @@ func (r *emailRepository) Get(ctx context.Context, userID, emailAccountID string
 	).Scan(
 		&i.ID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode, &i.Provider, &i.Status,
 		&i.LastSyncedAt, &i.LastID, &i.CampaignLimit, &i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt,
-		&i.Warmup, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease,
+		&i.Warmup, &i.WarmupPausedAt, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease,
 		&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays,
 		&i.CreatedAt, &i.UpdatedAt, &i.Tags,
 	)
@@ -596,6 +649,12 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		args = append(args, *udata.ReplyTo)
 		argPos++
 	}
+	// Cross-field guard: starting volume must not exceed the ceiling. Only
+	// enforced when both arrive together (the warmup form always sends both);
+	// each is still independently clamped below.
+	if udata.WarmupBase != nil && udata.WarmupMax != nil && *udata.WarmupBase > *udata.WarmupMax {
+		return nil, errx.ErrEmailWarmupBase
+	}
 	if udata.Warmup != nil {
 		var warmupTime *time.Time
 		if *udata.Warmup {
@@ -605,6 +664,10 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "warmup", argPos))
 		args = append(args, warmupTime)
 		argPos++
+		// A direct warmup on/off via PATCH always clears the pause marker so
+		// state stays coherent (enable = fresh ramp, disable = off). Pause and
+		// resume that preserve ramp progress go through the lifecycle endpoints.
+		setClauses = append(setClauses, "warmup_paused_at = NULL")
 	}
 	if udata.WarmupBase != nil {
 		if *udata.WarmupBase < 0 || *udata.WarmupBase > 100 {
@@ -682,7 +745,7 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 		WHERE user_id = $1 AND id = $2
 		RETURNING id, organization_id, email, name, signature_plain, signature_html, signature_sync, signature_code, provider, status,
 		          COALESCE(last_synced_at, created_at) AS last_synced_at, last_id, campaign_limit, min_wait_time, reply_to, tracking_domain, tracking_domain_verified, tracking_domain_verified_at,
-		          warmup, warmup_base, warmup_max, warmup_increase, warmup_reply_rate, warmup_tag, warmup_pool_type,
+		          warmup, warmup_paused_at, warmup_base, warmup_max, warmup_increase, warmup_reply_rate, warmup_tag, warmup_pool_type,
 		          warmup_start_time, warmup_end_time, warmup_days, created_at, updated_at
 	`, strings.Join(setClauses, ", "))
 
@@ -690,7 +753,7 @@ func (r *emailRepository) Update(ctx context.Context, userID, emailAccountID str
 	err = tx.QueryRow(ctx, query, args...).Scan(
 		&i.ID, &i.OrganizationID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode, &i.Provider, &i.Status,
 		&i.LastSyncedAt, &i.LastID, &i.CampaignLimit, &i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt,
-		&i.Warmup, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.WarmupPoolType,
+		&i.Warmup, &i.WarmupPausedAt, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.WarmupPoolType,
 		&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays,
 		&i.CreatedAt, &i.UpdatedAt,
 	)
@@ -775,12 +838,59 @@ func (r *emailRepository) Delete(ctx context.Context, userID, emailAccountID str
 }
 
 // GetByID retrieves an email account by ID without requiring userID (for internal service use)
+// SetWarmupLifecycle applies a warmup lifecycle transition. The CASE math
+// keeps every transition atomic and idempotent:
+//
+//   - start/resume: a fresh mailbox (warmup IS NULL) anchors at now(); a
+//     paused mailbox shifts its anchor forward by the paused duration so the
+//     ramp continues where it left off; an already-active mailbox is a no-op.
+//   - pause: stamps warmup_paused_at only while actively warming.
+//   - disable: clears warmup entirely (next restart begins a fresh ramp).
+func (r *emailRepository) SetWarmupLifecycle(ctx context.Context, userID, emailAccountID, action string) (*models.Email, *errx.Error) {
+	var setClause string
+	switch action {
+	case "start", "resume":
+		setClause = `warmup = CASE
+				WHEN warmup IS NULL THEN now()
+				WHEN warmup_paused_at IS NOT NULL THEN warmup + (now() - warmup_paused_at)
+				ELSE warmup
+			END,
+			warmup_paused_at = NULL`
+	case "pause":
+		setClause = `warmup_paused_at = CASE
+				WHEN warmup IS NOT NULL AND warmup_paused_at IS NULL THEN now()
+				ELSE warmup_paused_at
+			END`
+	case "disable", "stop":
+		setClause = `warmup = NULL, warmup_paused_at = NULL`
+	default:
+		return nil, errx.ErrInvalid
+	}
+
+	query := fmt.Sprintf(`
+		UPDATE email_accounts
+		SET %s, updated_at = now()
+		WHERE user_id = $1 AND id = $2
+	`, setClause)
+
+	tag, err := r.DB.Exec(ctx, query, userID, emailAccountID)
+	if err != nil {
+		db.CaptureError(err, query, []any{userID, emailAccountID}, "exec")
+		return nil, errx.InternalError()
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, errx.ErrNotFound
+	}
+
+	return r.Get(ctx, userID, emailAccountID)
+}
+
 func (r *emailRepository) GetByID(ctx context.Context, emailAccountID uuid.UUID) (*models.Email, *errx.Error) {
 	query := `
 		SELECT
 		 ea.id, ea.user_id, ea.organization_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 		 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
-		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_base,
+		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_paused_at, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag, ea.warmup_pool_type,
 		 ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days, ea.timezone,
 		 ea.created_at, ea.updated_at,
@@ -795,7 +905,7 @@ func (r *emailRepository) GetByID(ctx context.Context, emailAccountID uuid.UUID)
 	err := r.DB.QueryRow(ctx, query, emailAccountID).Scan(
 		&i.ID, &i.UserID, &i.OrganizationID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode,
 		&i.Provider, &i.Status, &i.LastSyncedAt, &i.LastID, &i.CampaignLimit,
-		&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt, &i.Warmup, &i.WarmupBase,
+		&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt, &i.Warmup, &i.WarmupPausedAt, &i.WarmupBase,
 		&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.WarmupPoolType,
 		&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays, &i.Timezone,
 		&i.CreatedAt, &i.UpdatedAt, &i.Tags,
@@ -821,7 +931,7 @@ func (r *emailRepository) GetByTags(ctx context.Context, userID string, tags []s
 		SELECT DISTINCT ON (ea.id)
 		 ea.id, ea.user_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 		 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
-		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_base,
+		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_paused_at, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag,
 		 ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days, ea.timezone,
 		 ea.created_at, ea.updated_at
@@ -846,7 +956,7 @@ func (r *emailRepository) GetByTags(ctx context.Context, userID string, tags []s
 		err := rows.Scan(
 			&i.ID, &i.UserID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode,
 			&i.Provider, &i.Status, &i.LastSyncedAt, &i.LastID, &i.CampaignLimit,
-			&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt, &i.Warmup, &i.WarmupBase,
+			&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt, &i.Warmup, &i.WarmupPausedAt, &i.WarmupBase,
 			&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag,
 			&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays, &i.Timezone,
 			&i.CreatedAt, &i.UpdatedAt,

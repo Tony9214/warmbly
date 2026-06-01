@@ -1,16 +1,27 @@
 import { RiFireLine, RiMoreLine } from "@remixicon/react";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import toast from "react-hot-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import useEmails from "@/lib/api/hooks/app/emails/useEmails";
+import useWarmupLifecycle from "@/lib/api/hooks/app/emails/useWarmupLifecycle";
+import useAccountStatuses from "@/lib/api/hooks/app/analytics/useAccountStatuses";
+import useFeatureStatus from "@/lib/api/hooks/app/subscription/useFeatureStatus";
+import warmupLifecycle from "@/lib/api/client/app/emails/warmupLifecycle";
 import removeEmail from "@/lib/api/client/app/emails/removeEmail";
 import { useUserProfile } from "@/hooks/context/user";
 import InboxDetails from "@/components/app/emails/InboxDetails";
 import type Tag from "@/lib/api/models/app/Tag";
+import type Inbox from "@/lib/api/models/app/emails/Inbox";
+import type AccountStatus from "@/lib/api/models/app/analytics/AccountStatus";
 import {
+    ActivityIcon,
     CheckIcon,
     FilterIcon,
+    GaugeIcon,
+    PauseIcon,
+    PlayIcon,
     PlusIcon,
+    RotateCcwIcon,
     Settings2Icon,
     Trash2Icon,
     XIcon,
@@ -41,6 +52,20 @@ const DefaultFolder = {
     color: "#c4c8cf",
 } as Tag;
 
+/* ── health helpers ───────────────────────────────── */
+
+// Rank used to detect when a mailbox's health worsens between refreshes, so we
+// can proactively toast the user (continuous health reporting).
+const HEALTH_RANK: Record<string, number> = { healthy: 0, warning: 1, error: 2 };
+
+function healthTone(status?: AccountStatus): { dot: string; text: string; label: string } {
+    const h = status?.health;
+    if (!h) return { dot: "bg-slate-300", text: "text-slate-500", label: "—" };
+    if (h.status === "healthy") return { dot: "bg-emerald-500", text: "text-emerald-600", label: `Healthy ${h.score}` };
+    if (h.status === "warning") return { dot: "bg-amber-500", text: "text-amber-600", label: `At risk ${h.score}` };
+    return { dot: "bg-rose-500", text: "text-rose-600", label: `Issue ${h.score}` };
+}
+
 export default function AddressesPage() {
     const p = useUserProfile();
 
@@ -49,8 +74,42 @@ export default function AddressesPage() {
     const emailsData = useEmails({ query, tag });
     const [selected, setSelected] = React.useState<string[]>([]);
     const [view, setView] = React.useState<string>("");
+    const [viewTab, setViewTab] = React.useState<string>("overview");
     const [removing, setRemoving] = React.useState(false);
     const queryClient = useQueryClient();
+
+    // Warmup is a paid/trial feature; gate the start controls when the org
+    // isn't entitled. Treat unknown (still loading) as allowed — the backend
+    // is the real enforcement point.
+    const featureStatus = useFeatureStatus();
+    const canWarmup = featureStatus.data?.can_use_warmup !== false;
+
+    // One query feeds live health for every row; the realtime layer already
+    // invalidates ["analytics","accounts",…] on warmup/account events.
+    const statuses = useAccountStatuses();
+    const statusById = useMemo(() => {
+        const m = new Map<string, AccountStatus>();
+        for (const s of statuses.data ?? []) m.set(s.id, s);
+        return m;
+    }, [statuses.data]);
+
+    // Proactively notify the user when a mailbox's health drops.
+    const prevHealth = useRef<Map<string, string>>(new Map());
+    useEffect(() => {
+        if (!statuses.data) return;
+        const prev = prevHealth.current;
+        const next = new Map<string, string>();
+        for (const s of statuses.data) {
+            const cur = s.health?.status ?? "healthy";
+            next.set(s.id, cur);
+            const before = prev.get(s.id);
+            if (before && (HEALTH_RANK[cur] ?? 0) > (HEALTH_RANK[before] ?? 0)) {
+                const reason = s.warmup_health?.reason || s.health?.issues?.[0];
+                toast.error(`${s.email} health dropped to ${cur}${reason ? ` — ${reason}` : ""}`);
+            }
+        }
+        prevHealth.current = next;
+    }, [statuses.data]);
 
     const removeSelected = async () => {
         if (selected.length === 0 || removing) return;
@@ -64,6 +123,24 @@ export default function AddressesPage() {
         setRemoving(false);
         if (failed > 0) toast.error(`${failed} mailbox${failed > 1 ? "es" : ""} couldn't be removed`);
         else toast.success(`Removed ${n} mailbox${n > 1 ? "es" : ""}`);
+    };
+
+    const bulkWarmup = async (action: "start" | "pause") => {
+        if (selected.length === 0) return;
+        const n = selected.length;
+        const results = await Promise.allSettled(selected.map((id) => warmupLifecycle(id, action)));
+        const failed = results.filter((r) => r.status === "rejected").length;
+        await queryClient.invalidateQueries({ queryKey: ["emails", "list"] });
+        await queryClient.invalidateQueries({ queryKey: ["analytics", "accounts"] });
+        setSelected([]);
+        const verb = action === "start" ? "started" : "paused";
+        if (failed > 0) toast.error(`${failed} mailbox${failed > 1 ? "es" : ""} couldn't be updated`);
+        else toast.success(`Warmup ${verb} for ${n} mailbox${n > 1 ? "es" : ""}`);
+    };
+
+    const openDetail = (id: string, tab: string = "overview") => {
+        setViewTab(tab);
+        setView(id);
     };
 
     const stag = useMemo(() => {
@@ -208,84 +285,27 @@ export default function AddressesPage() {
                                     />
                                 </th>
                                 <th className="px-3 py-2 text-[10px] font-medium text-slate-400 uppercase tracking-[0.14em]">Account</th>
-                                <th className="px-3 py-2 text-[10px] font-medium text-slate-400 uppercase tracking-[0.14em] w-20 text-right">Sent</th>
                                 <th className="px-3 py-2 text-[10px] font-medium text-slate-400 uppercase tracking-[0.14em] w-24 text-right">Warmup</th>
-                                <th className="px-3 py-2 text-[10px] font-medium text-slate-400 uppercase tracking-[0.14em] w-28">Status</th>
+                                <th className="px-3 py-2 text-[10px] font-medium text-slate-400 uppercase tracking-[0.14em] w-32">Health</th>
                                 <th className="px-3 py-2 w-16"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {emailsData.emails.map((box) => {
-                                const dot =
-                                    box.status === "healthy"
-                                        ? "bg-emerald-500"
-                                        : box.status === "warming"
-                                            ? "bg-amber-500"
-                                            : "bg-red-500";
-                                const statusText =
-                                    box.status === "healthy"
-                                        ? "text-emerald-600"
-                                        : box.status === "warming"
-                                            ? "text-amber-600"
-                                            : "text-red-500";
-                                return (
-                                    <tr
-                                        key={box.id}
-                                        className="border-b border-slate-200/60 hover:bg-slate-50/80 transition-colors group h-11"
-                                    >
-                                        <td className="pl-5 pr-2">
-                                            <input
-                                                type="checkbox"
-                                                className="w-3.5 h-3.5 rounded accent-sky-600"
-                                                checked={selected.includes(box.id)}
-                                                onChange={() => {
-                                                    selected.includes(box.id)
-                                                        ? setSelected((bef) => bef.filter((i) => i !== box.id))
-                                                        : setSelected((bef) => [...bef, box.id]);
-                                                }}
-                                            />
-                                        </td>
-                                        <td className="px-3">
-                                            <div className="flex items-center gap-2.5">
-                                                <div className="w-6 h-6 rounded-full bg-sky-100 flex items-center justify-center shrink-0">
-                                                    <span className="text-[9.5px] font-semibold text-sky-700">
-                                                        {box.email.slice(0, 2).toUpperCase()}
-                                                    </span>
-                                                </div>
-                                                <span className="text-[12.5px] font-medium text-slate-900 truncate">{box.email}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-3 text-[12px] text-slate-500 tabular-nums text-right font-mono">0</td>
-                                        <td className="px-3 text-[12px] text-slate-500 tabular-nums text-right font-mono">{box.warmup_base}</td>
-                                        <td className="px-3">
-                                            <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${statusText}`}>
-                                                <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-                                                <span className="uppercase tracking-[0.08em]">{box.status}</span>
-                                            </span>
-                                        </td>
-                                        <td className="px-3">
-                                            <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setView(box.id)}
-                                                    aria-label="Warmup settings"
-                                                    className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
-                                                >
-                                                    <RiFireLine className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
-                                                    onClick={() => setView(box.id)}
-                                                    aria-label="Account details"
-                                                >
-                                                    <RiMoreLine className="w-3.5 h-3.5" />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
+                            {emailsData.emails.map((box) => (
+                                <MailboxRow
+                                    key={box.id}
+                                    box={box}
+                                    status={statusById.get(box.id)}
+                                    canWarmup={canWarmup}
+                                    checked={selected.includes(box.id)}
+                                    onToggleSelect={() =>
+                                        selected.includes(box.id)
+                                            ? setSelected((bef) => bef.filter((i) => i !== box.id))
+                                            : setSelected((bef) => [...bef, box.id])
+                                    }
+                                    onOpen={openDetail}
+                                />
+                            ))}
                         </tbody>
                     </table>
                 )}
@@ -296,6 +316,25 @@ export default function AddressesPage() {
                             <CheckIcon className="w-3 h-3" />
                             <span>{selected.length} selected</span>
                         </div>
+                        {canWarmup && (
+                            <button
+                                type="button"
+                                onClick={() => bulkWarmup("start")}
+                                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded text-[12px] font-medium text-orange-600 hover:bg-orange-50 transition-colors"
+                            >
+                                <PlayIcon className="w-3.5 h-3.5" />
+                                Start warmup
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => bulkWarmup("pause")}
+                            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded text-[12px] font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                        >
+                            <PauseIcon className="w-3.5 h-3.5" />
+                            Pause
+                        </button>
+                        <div className="w-px h-4 bg-slate-200 mx-0.5" />
                         <button
                             type="button"
                             onClick={removeSelected}
@@ -317,7 +356,162 @@ export default function AddressesPage() {
                 )}
             </PageBody>
 
-            <InboxDetails emails={emailsData.emails} view={view} setView={setView} />
+            <InboxDetails emails={emailsData.emails} view={view} setView={setView} initialTab={viewTab} canWarmup={canWarmup} />
         </Page>
+    );
+}
+
+/* ── one mailbox row + its warmup dropdown ───────────────────────────── */
+
+function MailboxRow({
+    box,
+    status,
+    canWarmup,
+    checked,
+    onToggleSelect,
+    onOpen,
+}: {
+    box: Inbox;
+    status?: AccountStatus;
+    canWarmup: boolean;
+    checked: boolean;
+    onToggleSelect: () => void;
+    onOpen: (id: string, tab?: string) => void;
+}) {
+    const life = useWarmupLifecycle(box.id);
+
+    const off = !box.warmup;
+    const paused = !!box.warmup && !!box.warmup_paused_at;
+    const active = !!box.warmup && !box.warmup_paused_at;
+
+    const tone = healthTone(status);
+    const ws = status?.warmup_status;
+    const inCampaign = status?.in_campaign;
+
+    // Warmup column: what's flowing today and why.
+    const warmupLabel = active
+        ? `${ws?.current_volume ?? 0}/${ws?.target_volume ?? box.warmup_base}`
+        : paused
+            ? "Paused"
+            : inCampaign
+                ? "Health-check"
+                : "Off";
+    const warmupTone = active
+        ? "text-orange-600"
+        : paused
+            ? "text-amber-600"
+            : inCampaign
+                ? "text-sky-600"
+                : "text-slate-400";
+
+    const run = (action: "start" | "pause" | "resume", verb: string) => {
+        life.mutate(action, {
+            onSuccess: () => toast.success(`Warmup ${verb} for ${box.email}`),
+            onError: () => toast.error("Couldn't update warmup"),
+        });
+    };
+
+    const stopReset = () => {
+        if (!window.confirm(`Stop warmup for ${box.email}? This resets ramp progress — restarting begins from the base volume. Use Pause to keep progress.`)) return;
+        life.mutate("stop", {
+            onSuccess: () => toast.success(`Warmup stopped for ${box.email}`),
+            onError: () => toast.error("Couldn't update warmup"),
+        });
+    };
+
+    const upsell = () => toast("Warmup is available on paid plans", { icon: "✨" });
+
+    return (
+        <tr className="border-b border-slate-200/60 hover:bg-slate-50/80 transition-colors group h-11">
+            <td className="pl-5 pr-2">
+                <input
+                    type="checkbox"
+                    className="w-3.5 h-3.5 rounded accent-sky-600"
+                    checked={checked}
+                    onChange={onToggleSelect}
+                />
+            </td>
+            <td className="px-3">
+                <button type="button" onClick={() => onOpen(box.id)} className="flex items-center gap-2.5 text-left">
+                    <div className="w-6 h-6 rounded-full bg-sky-100 flex items-center justify-center shrink-0">
+                        <span className="text-[9.5px] font-semibold text-sky-700">
+                            {box.email.slice(0, 2).toUpperCase()}
+                        </span>
+                    </div>
+                    <span className="text-[12.5px] font-medium text-slate-900 truncate">{box.email}</span>
+                    {inCampaign && (
+                        <span className="hidden sm:inline-flex items-center gap-1 h-4 px-1.5 rounded-full bg-sky-50 text-sky-600 text-[9.5px] font-medium uppercase tracking-[0.08em]">
+                            <ActivityIcon className="w-2.5 h-2.5" /> In campaign
+                        </span>
+                    )}
+                </button>
+            </td>
+            <td className={`px-3 text-[12px] tabular-nums text-right font-mono ${warmupTone}`}>{warmupLabel}</td>
+            <td className="px-3">
+                <button
+                    type="button"
+                    onClick={() => onOpen(box.id, "overview")}
+                    className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${tone.text}`}
+                    title="View mailbox health"
+                >
+                    <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+                    <span className="uppercase tracking-[0.08em]">{tone.label}</span>
+                </button>
+            </td>
+            <td className="px-3">
+                <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <PopoverMenu align="end">
+                        <PopoverMenuTrigger asChild>
+                            <button
+                                type="button"
+                                aria-label="Warmup actions"
+                                disabled={life.isPending}
+                                className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-400 hover:text-orange-600 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                                <RiFireLine className={`w-3.5 h-3.5 ${active ? "text-orange-500" : paused ? "text-amber-500" : ""}`} />
+                            </button>
+                        </PopoverMenuTrigger>
+                        <PopoverMenuContent minWidth={208}>
+                            <PopoverMenuLabel>Warmup · {active ? "Active" : paused ? "Paused" : "Off"}</PopoverMenuLabel>
+                            {off && (
+                                <PopoverMenuItem onSelect={canWarmup ? () => run("start", "started") : upsell} icon={<PlayIcon className="w-3 h-3" />}>
+                                    {canWarmup ? "Start warmup" : "Upgrade to start warmup"}
+                                </PopoverMenuItem>
+                            )}
+                            {paused && (
+                                <PopoverMenuItem onSelect={canWarmup ? () => run("resume", "resumed") : upsell} icon={<PlayIcon className="w-3 h-3" />}>
+                                    {canWarmup ? "Resume warmup" : "Upgrade to resume warmup"}
+                                </PopoverMenuItem>
+                            )}
+                            {active && (
+                                <PopoverMenuItem onSelect={() => run("pause", "paused")} icon={<PauseIcon className="w-3 h-3" />}>
+                                    Pause warmup
+                                </PopoverMenuItem>
+                            )}
+                            {(active || paused) && (
+                                <PopoverMenuItem danger onSelect={stopReset} icon={<RotateCcwIcon className="w-3 h-3" />}>
+                                    Stop &amp; reset
+                                </PopoverMenuItem>
+                            )}
+                            <PopoverMenuSeparator />
+                            <PopoverMenuItem onSelect={() => onOpen(box.id, "warmup")} icon={<RiFireLine className="w-3 h-3" />}>
+                                Warmup settings
+                            </PopoverMenuItem>
+                            <PopoverMenuItem onSelect={() => onOpen(box.id, "overview")} icon={<GaugeIcon className="w-3 h-3" />}>
+                                Mailbox health
+                            </PopoverMenuItem>
+                        </PopoverMenuContent>
+                    </PopoverMenu>
+                    <button
+                        type="button"
+                        className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                        onClick={() => onOpen(box.id)}
+                        aria-label="Account details"
+                    >
+                        <RiMoreLine className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            </td>
+        </tr>
     );
 }

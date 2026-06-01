@@ -2,6 +2,7 @@ package wmail
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -104,12 +105,17 @@ func (w *WMail) sendViaGmail(ctx context.Context, req *SendRequest, bodyHTML str
 		return result
 	}
 
-	// Build parent reference for replies
+	// Build parent reference for replies. Warmup replies often only have the
+	// RFC Message-ID from the token flow, not a local provider thread record.
 	var parent *models.EmailMessageData
 	if req.InReplyTo != "" && req.Parent != nil {
 		parent = &models.EmailMessageData{
 			MessageID: req.Parent.MessageID,
 			ThreadID:  req.Parent.ThreadID,
+		}
+	} else if req.InReplyTo != "" {
+		parent = &models.EmailMessageData{
+			MessageID: strings.Trim(req.InReplyTo, "<>"),
 		}
 	}
 

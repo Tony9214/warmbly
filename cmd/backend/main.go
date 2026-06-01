@@ -690,7 +690,7 @@ func main() {
 		emailService.WireThrottle(dailyThrottleService)
 		analyticsRepository := repository.NewAnalyticsRepository(primaryDB)
 		emailAccountErrorRepository := repository.NewEmailAccountErrorRepository(primaryDB)
-		analyticsService = analytics.NewService(analyticsRepository, emailRepostory, campaignRepostory, emailAccountErrorRepository)
+		analyticsService = analytics.NewService(analyticsRepository, emailRepostory, campaignRepostory, emailAccountErrorRepository, warmupRepository)
 
 		rateLimitRepository := repository.NewRateLimitRepository(primaryDB)
 		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)
@@ -779,6 +779,12 @@ func main() {
 		trialExpirationJob := jobs.NewTrialExpirationJobWithDB(subscriptionRepository, primaryDB.Pool, emailNotificationService)
 		trialScheduler := jobs.NewTrialExpirationScheduler(trialExpirationJob, 1*time.Hour)
 		go trialScheduler.Start(ctx)
+
+		// Warmup reconciler: seed/repair warmup chains for mailboxes that are
+		// warming or backing a live campaign (the health-check lane). This is
+		// the bootstrap — enabling warmup or starting a campaign doesn't itself
+		// enqueue the first warmup task.
+		go tasksService.StartWarmupReconciler(ctx, 10*time.Minute)
 
 		// Danger zone: schedule + execute delayed deletions (orgs, accounts).
 		dangerZoneRepository := repository.NewDangerZoneRepository(primaryDB.Pool)

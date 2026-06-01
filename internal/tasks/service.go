@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/app/advanced"
@@ -44,6 +45,10 @@ type TasksService interface {
 	// Test email support
 	SendTestEmail(ctx context.Context, userID string, accountID uuid.UUID, recipient string, campaign *models.Campaign, sequence *models.Sequence) *errx.Error
 	GetCampaignSequences(ctx context.Context, campaignID uuid.UUID) ([]models.Sequence, error)
+
+	// Warmup scheduling lifecycle
+	EnsureWarmupScheduled(ctx context.Context, accountID uuid.UUID) error
+	StartWarmupReconciler(ctx context.Context, interval time.Duration)
 }
 
 type tasksService struct {

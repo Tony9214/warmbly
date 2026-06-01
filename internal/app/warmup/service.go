@@ -18,6 +18,13 @@ type WebhookDispatcher interface {
 	Dispatch(ctx context.Context, orgID uuid.UUID, eventType models.WebhookEventType, data any) (uuid.UUID, error)
 }
 
+// HealthRealtimePublisher pushes a health transition to the owning user's
+// realtime stream. Narrow + primitive-typed so the warmup package doesn't
+// import the pubsub event types. *pubsub.StreamingPublisher satisfies it.
+type HealthRealtimePublisher interface {
+	PublishAccountHealth(ctx context.Context, userID, accountID, email, prevState, newState, reason string)
+}
+
 const (
 	minSpamPlacementSample = 20
 
@@ -54,6 +61,7 @@ const (
 
 type Service interface {
 	EnsurePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error
+	EnsurePoolMembershipWithRole(ctx context.Context, accountID uuid.UUID, poolType, role string) *errx.Error
 	RemovePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error
 	CanParticipate(ctx context.Context, accountID uuid.UUID, poolType string) (bool, string, *errx.Error)
 	ApplySpamReport(ctx context.Context, reporterAccountID, reportedAccountID uuid.UUID, messageID, reportType string) (*models.WarmupParticipantHealth, *errx.Error)
@@ -71,12 +79,16 @@ type Service interface {
 	// WireWebhooks attaches the webhook dispatcher post-construction so
 	// health-state transitions fan out to subscribed customer endpoints.
 	WireWebhooks(w WebhookDispatcher, emailRepo repository.EmailRepository)
+	// WireRealtime attaches the realtime publisher so health transitions are
+	// also pushed live to the owning user's dashboard.
+	WireRealtime(r HealthRealtimePublisher, emailRepo repository.EmailRepository)
 }
 
 type service struct {
 	repo      repository.WarmupRepository
 	emailRepo repository.EmailRepository
 	webhooks  WebhookDispatcher
+	realtime  HealthRealtimePublisher
 	now       func() time.Time
 }
 
@@ -96,13 +108,39 @@ func (s *service) WireWebhooks(w WebhookDispatcher, emailRepo repository.EmailRe
 	s.emailRepo = emailRepo
 }
 
-// dispatchHealthEvent maps a health-state transition to a webhook event
-// (if any) and dispatches it. Quiet on the healthy↔watch transition since
-// that is too noisy; fires on entry into throttled / quarantined / blocked.
+// WireRealtime attaches the realtime publisher (and emailRepo, if not already
+// set via WireWebhooks) so health transitions push live to the dashboard.
+func (s *service) WireRealtime(r HealthRealtimePublisher, emailRepo repository.EmailRepository) {
+	s.realtime = r
+	if s.emailRepo == nil {
+		s.emailRepo = emailRepo
+	}
+}
+
+// dispatchHealthEvent fans a health-state transition out to (1) the owning
+// user's realtime stream so the dashboard updates live, and (2) subscribed
+// customer webhooks. Both are best-effort and independent — realtime still
+// fires when webhooks aren't wired (e.g. in the consumer). No-op on a
+// no-change transition or when the account can't be resolved.
 func (s *service) dispatchHealthEvent(ctx context.Context, accountID uuid.UUID, oldState, newState models.WarmupHealthState, reason string) {
-	if s.webhooks == nil || s.emailRepo == nil || oldState == newState {
+	if s.emailRepo == nil || oldState == newState {
 		return
 	}
+
+	account, _ := s.emailRepo.GetByID(ctx, accountID)
+	if account == nil || account.OrganizationID == nil {
+		return
+	}
+
+	// Realtime push to the dashboard (independent of webhooks).
+	if s.realtime != nil {
+		s.realtime.PublishAccountHealth(ctx, account.UserID, accountID.String(), account.Email, string(oldState), string(newState), reason)
+	}
+
+	if s.webhooks == nil {
+		return
+	}
+
 	var event models.WebhookEventType
 	switch newState {
 	case models.WarmupHealthBlocked:
@@ -117,10 +155,6 @@ func (s *service) dispatchHealthEvent(ctx context.Context, accountID uuid.UUID, 
 		return
 	}
 
-	account, _ := s.emailRepo.GetByID(ctx, accountID)
-	if account == nil || account.OrganizationID == nil {
-		return
-	}
 	payload := map[string]any{
 		"email_account_id": accountID,
 		"email":            account.Email,
@@ -141,6 +175,14 @@ func (s *service) dispatchHealthEvent(ctx context.Context, accountID uuid.UUID, 
 }
 
 func (s *service) EnsurePoolMembership(ctx context.Context, accountID uuid.UUID, poolType string) *errx.Error {
+	return s.EnsurePoolMembershipWithRole(ctx, accountID, poolType, "sender_receiver")
+}
+
+func (s *service) EnsurePoolMembershipWithRole(ctx context.Context, accountID uuid.UUID, poolType, role string) *errx.Error {
+	if role != "sender_receiver" && role != "recipient_only" {
+		return errx.New(errx.BadRequest, "invalid warmup participant role")
+	}
+
 	pool, err := s.repo.GetPoolByType(ctx, poolType)
 	if err != nil {
 		return errx.InternalError()
@@ -149,6 +191,9 @@ func (s *service) EnsurePoolMembership(ctx context.Context, accountID uuid.UUID,
 		return errx.New(errx.BadRequest, "warmup pool not found")
 	}
 	if err := s.repo.JoinPool(ctx, pool.ID, accountID); err != nil {
+		return errx.InternalError()
+	}
+	if err := s.repo.SetParticipantRole(ctx, pool.ID, accountID, role); err != nil {
 		return errx.InternalError()
 	}
 	return nil

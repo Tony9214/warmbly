@@ -24,6 +24,9 @@ type EmailService interface {
 	Search(ctx context.Context, userID, search, cursor, tag, limit string, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error)
 	Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error)
 	Update(ctx context.Context, userID, emailAccountID string, udata *models.UpdateEmail) (*models.Email, *errx.Error)
+	// SetWarmupLifecycle starts, pauses, resumes, or disables warmup for a
+	// mailbox. start/resume preserve ramp progress; disable turns warmup off.
+	SetWarmupLifecycle(ctx context.Context, userID, emailAccountID, action string) (*models.Email, *errx.Error)
 	UpdateTrackingDomain(ctx context.Context, userID, emailAccountID, domain string) (*models.TrackingDomainStatus, *errx.Error)
 	Delete(ctx context.Context, userID, emailAccountID string) *errx.Error
 

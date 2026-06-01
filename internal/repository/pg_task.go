@@ -112,6 +112,7 @@ type TaskRepository interface {
 
 	// Count only campaign tasks completed today (excludes warmup)
 	CountCampaignEmailsSentToday(ctx context.Context, accountID uuid.UUID) (int, error)
+	CountWarmupEmailsSentToday(ctx context.Context, accountID uuid.UUID) (int, error)
 
 	// Create user-initiated email task (transactional)
 	CreateEmailTaskFull(ctx context.Context, task *Task, emailTask *EmailTask) error
@@ -449,6 +450,21 @@ func (r *taskRepository) CountEmailsSentToday(ctx context.Context, accountID uui
 		FROM tasks
 		WHERE email_account_id = $1
 		  AND status = 'completed'
+		  AND DATE(completed_at) = CURRENT_DATE
+	`
+
+	var count int
+	err := r.db.QueryRow(ctx, query, accountID).Scan(&count)
+	return count, err
+}
+
+func (r *taskRepository) CountWarmupEmailsSentToday(ctx context.Context, accountID uuid.UUID) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM tasks
+		WHERE email_account_id = $1
+		  AND status = 'completed'
+		  AND task_type = 'warmup'
 		  AND DATE(completed_at) = CURRENT_DATE
 	`
 
