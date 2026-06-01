@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +17,7 @@ func TestRequestIDMiddlewareUsesClientRequestID(t *testing.T) {
 		c.String(http.StatusOK, c.GetString(RequestIDContextKey))
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil)
 	req.Header.Set(RequestIDHeader, "client-trace_123")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -40,7 +41,7 @@ func TestRequestIDMiddlewareReplacesUnsafeRequestID(t *testing.T) {
 		c.String(http.StatusOK, c.GetString(RequestIDContextKey))
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil)
 	req.Header.Set(RequestIDHeader, "bad/request/id")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)

@@ -24,7 +24,7 @@ func VerifyImap(ctx context.Context, host string, port int, user, pass string) b
 	if err := tlsConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return false
 	}
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		return false
 	}
 

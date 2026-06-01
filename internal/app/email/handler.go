@@ -81,7 +81,7 @@ func (s *emailService) UpdateTrackingDomain(ctx context.Context, userID, emailAc
 		// it as verified once it points at our tracking host. DNS can lag
 		// behind a freshly-added record, so a miss is "pending", not an
 		// error — the customer just re-verifies.
-		if cname, err := net.LookupCNAME(domain); err == nil {
+		if cname, err := net.DefaultResolver.LookupCNAME(ctx, domain); err == nil {
 			resolved := strings.TrimSuffix(strings.ToLower(cname), ".")
 			if strings.Contains(resolved, trackingDomainTarget) {
 				status.TrackingDomainVerified = true

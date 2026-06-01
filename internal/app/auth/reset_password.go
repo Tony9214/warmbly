@@ -66,7 +66,7 @@ func (s *authService) ResetPasswordStart(ctx context.Context, data *ResetPasswor
 		return errx.InternalError()
 	}
 
-	if err := s.emailNotificationService.Send(ctx, []string{u.Email}, nil, nil, "Password Reset Confirmation", text); err != nil {
+	if err := s.sendAuthEmail(ctx, u.Email, "Password Reset Confirmation", text); err != nil {
 		sentry.CaptureException(err)
 		return errx.InternalError()
 	}

@@ -55,7 +55,7 @@ func (s *authService) RegistrationStart(ctx context.Context, data *AuthData, ipa
 		return nil, errx.InternalError()
 	}
 
-	if xerr := s.emailNotificationService.Send(ctx, []string{data.Email}, nil, nil, "Your Verification Code", text); xerr != nil {
+	if xerr := s.sendAuthEmail(ctx, data.Email, "Your Verification Code", text); xerr != nil {
 		sentry.CaptureException(xerr)
 		return nil, errx.InternalError()
 	}
