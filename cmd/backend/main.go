@@ -724,27 +724,6 @@ func main() {
 			campaignLogRepository,
 			advancedService,
 		)
-		go func() {
-			ticker := time.NewTicker(15 * time.Minute)
-			defer ticker.Stop()
-
-			for {
-				reconcileCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-				created, xerr := tasksService.ReconcileWarmupTasks(reconcileCtx, 250)
-				cancel()
-				if xerr != nil {
-					log.Printf("warmup task reconciliation failed: %s", xerr.Error())
-				} else if created > 0 {
-					log.Printf("warmup task reconciliation created %d tasks", created)
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-				}
-			}
-		}()
 
 		// Admin outreach composer — sends from the platform mailer
 		// (SES/SMTP) with a configurable Reply-To, audits every send.

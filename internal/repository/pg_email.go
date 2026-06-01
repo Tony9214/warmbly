@@ -102,6 +102,7 @@ func (r *emailRepository) ListWarmupScheduleCandidates(ctx context.Context, limi
 		SELECT ea.id
 		FROM email_accounts ea
 		WHERE ea.status = 'active'
+		  AND ea.worker_id IS NOT NULL
 		  AND (
 		    (ea.warmup IS NOT NULL AND ea.warmup_paused_at IS NULL)
 		    OR EXISTS (

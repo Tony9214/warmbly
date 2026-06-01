@@ -113,7 +113,6 @@ type TaskRepository interface {
 	// Count only campaign tasks completed today (excludes warmup)
 	CountCampaignEmailsSentToday(ctx context.Context, accountID uuid.UUID) (int, error)
 	CountWarmupEmailsSentToday(ctx context.Context, accountID uuid.UUID) (int, error)
-	ListWarmupAccountsMissingPendingTask(ctx context.Context, limit int) ([]uuid.UUID, error)
 
 	// Create user-initiated email task (transactional)
 	CreateEmailTaskFull(ctx context.Context, task *Task, emailTask *EmailTask) error
@@ -472,45 +471,6 @@ func (r *taskRepository) CountWarmupEmailsSentToday(ctx context.Context, account
 	var count int
 	err := r.db.QueryRow(ctx, query, accountID).Scan(&count)
 	return count, err
-}
-
-func (r *taskRepository) ListWarmupAccountsMissingPendingTask(ctx context.Context, limit int) ([]uuid.UUID, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-
-	query := `
-		SELECT ea.id
-		FROM email_accounts ea
-		WHERE ea.status = 'active'
-		  AND ea.warmup IS NOT NULL
-		  AND ea.worker_id IS NOT NULL
-		  AND NOT EXISTS (
-		   SELECT 1
-		   FROM tasks t
-		   WHERE t.email_account_id = ea.id
-		     AND t.task_type = 'warmup'
-		     AND t.status = 'pending'
-		  )
-		ORDER BY ea.updated_at ASC
-		LIMIT $1
-	`
-
-	rows, err := r.db.Query(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	ids := make([]uuid.UUID, 0)
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }
 
 // GetLastEmailTime gets the last email send time for an account

@@ -41,7 +41,6 @@ type TasksService interface {
 	HandleCampaignTask(task *proto.ProcessTask) *errx.Error
 	HandleEmailTask(task *proto.ProcessTask) *errx.Error
 	HandleUserEmailTask(task *proto.ProcessTask) *errx.Error
-	ReconcileWarmupTasks(ctx context.Context, limit int) (int, *errx.Error)
 
 	// Test email support
 	SendTestEmail(ctx context.Context, userID string, accountID uuid.UUID, recipient string, campaign *models.Campaign, sequence *models.Sequence) *errx.Error

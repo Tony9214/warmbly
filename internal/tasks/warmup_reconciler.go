@@ -27,6 +27,20 @@ func (s *tasksService) ReconcileWarmupSchedules(ctx context.Context, limit int) 
 
 	seeded := 0
 	for _, id := range ids {
+		account, xerr := s.emailRepo.GetByID(ctx, id)
+		if xerr != nil || account == nil || account.OrganizationID == nil {
+			continue
+		}
+		if s.featureGate != nil {
+			canWarmup, _ := s.featureGate.CanUseWarmup(ctx, *account.OrganizationID)
+			if !canWarmup {
+				if s.warmupHealth != nil {
+					_ = s.warmupHealth.RemovePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+				}
+				continue
+			}
+		}
+
 		// EnsureWarmupScheduled is idempotent and returns ErrWarmupNotEnabled
 		// for mailboxes that raced out of an eligible state — both benign, so
 		// we skip rather than abort the whole pass.

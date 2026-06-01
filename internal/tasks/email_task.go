@@ -594,47 +594,6 @@ func (s *tasksService) publishWarmupEmailSentEvent(ctx context.Context, task *Ta
 	}
 }
 
-func (s *tasksService) ReconcileWarmupTasks(ctx context.Context, limit int) (int, *errx.Error) {
-	accountIDs, err := s.taskRepo.ListWarmupAccountsMissingPendingTask(ctx, limit)
-	if err != nil {
-		return 0, errx.InternalError()
-	}
-
-	created := 0
-	for _, accountID := range accountIDs {
-		account, xerr := s.emailRepo.GetByID(ctx, accountID)
-		if xerr != nil {
-			log.Warn().Str("email_account_id", accountID.String()).Msg("Failed to load account during warmup reconciliation")
-			continue
-		}
-		if account == nil || account.Status != "active" || account.Warmup == nil || account.OrganizationID == nil {
-			continue
-		}
-		if s.featureGate != nil {
-			canWarmup, _ := s.featureGate.CanUseWarmup(ctx, *account.OrganizationID)
-			if !canWarmup {
-				if s.warmupHealth != nil {
-					_ = s.warmupHealth.RemovePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
-				}
-				continue
-			}
-		}
-
-		nextTime, err := s.scheduler.CalculateNextWarmupTime(ctx, accountID)
-		if err != nil {
-			log.Warn().Err(err).Str("email_account_id", accountID.String()).Msg("Failed to calculate reconciled warmup time")
-			continue
-		}
-		if err := s.createWarmupTask(ctx, accountID, nextTime); err != nil {
-			log.Warn().Err(err).Str("email_account_id", accountID.String()).Msg("Failed to create reconciled warmup task")
-			continue
-		}
-		created++
-	}
-
-	return created, nil
-}
-
 // generateWarmupSubject picks a warmup subject. To reduce content
 // fingerprinting risk, ~40% of the time we synthesize a subject from
 // slot templates (yielding thousands of unique strings) instead of
