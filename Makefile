@@ -71,12 +71,14 @@ up:
 sim:
 	$(COMPOSE) --profile sim up
 
-# Load rich fixture data. Requires backend up (via `make backend`,
-# `make app`, or `make up`) so migrations have run. `-T` disables TTY
-# allocation (Make's shell isn't a tty; without -T compose can silently
-# swallow the seed's stdout).
+# Load rich fixture data. Runs natively like the other dev services — the
+# seeder only needs Postgres, so it does not depend on a (re)built docker
+# backend image, just `make infra` plus migrations applied (`make migrate`,
+# `make backend`, or `make run`). SEED_RICH/SEED_FULL match the old docker
+# seed profile: baseline + 3 orgs/workers/mailboxes + plans, team users
+# (incl. the admin@warmbly.local super-admin), CRM, and an API key.
 seed:
-	$(COMPOSE) --profile seed run --rm -T seed
+	$(GO_DEV_ENV) SEED_RICH=true SEED_FULL=true go run ./cmd/seed
 
 # Switch the seeded dev workspace between trial/paid plans without going
 # through Stripe. Run after `make seed`.
