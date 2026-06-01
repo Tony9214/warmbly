@@ -36,6 +36,7 @@ type analyticsService struct {
 	emailRepo              repository.EmailRepository
 	campaignRepo           repository.CampaignRepository
 	emailAccountErrorsRepo repository.EmailAccountErrorRepository
+	warmupRepo             repository.WarmupRepository
 }
 
 func NewService(
@@ -43,14 +44,20 @@ func NewService(
 	emailRepo repository.EmailRepository,
 	campaignRepo repository.CampaignRepository,
 	emailAccountErrorsRepo repository.EmailAccountErrorRepository,
+	warmupRepo repository.WarmupRepository,
 ) AnalyticsService {
 	return &analyticsService{
 		analyticsRepo:          analyticsRepo,
 		emailRepo:              emailRepo,
 		campaignRepo:           campaignRepo,
 		emailAccountErrorsRepo: emailAccountErrorsRepo,
+		warmupRepo:             warmupRepo,
 	}
 }
+
+// warmupHealthPoolLookup lists the pools to check for a participant's health,
+// premium first so paid orgs reflect their premium-pool reputation.
+var warmupHealthPoolLookup = []string{"premium", "free"}
 
 func (s *analyticsService) GetWarmupAnalytics(ctx context.Context, userID uuid.UUID, emailAccountID *uuid.UUID, from, to time.Time) (*models.WarmupAnalytics, *errx.Error) {
 	// Get daily stats
@@ -181,20 +188,32 @@ func (s *analyticsService) GetAccountStatus(ctx context.Context, userID, account
 		errors = make([]models.AccountError, 0)
 	}
 
-	// Calculate health
+	// Calculate health, then fold in warmup-pool reputation so the single
+	// score the user sees reflects spam placement / complaints / throttling.
 	health := calculateAccountHealth(email, errors)
+	warmupHealth := s.buildWarmupHealth(ctx, accountID)
+	applyWarmupHealth(&health, warmupHealth)
 
-	// Build warmup status if warmup is enabled
+	// Build warmup status if warmup has ever been enabled (active or paused).
 	var warmupStatus *models.WarmupStatusInfo
 	if email.Warmup != nil {
 		warmupStatus = &models.WarmupStatusInfo{
 			Enabled:       true,
+			Paused:        email.WarmupPausedAt != nil,
+			PausedAt:      email.WarmupPausedAt,
 			StartedAt:     *email.Warmup,
 			CurrentVolume: usage.WarmupSent,
 			TargetVolume:  calculateTargetVolume(email),
 			MaxVolume:     email.WarmupMax,
 			ReplyRate:     email.WarmupReplyRate,
 			DaysActive:    int(time.Since(*email.Warmup).Hours() / 24),
+		}
+	}
+
+	inCampaign := false
+	if s.campaignRepo != nil {
+		if n, err := s.campaignRepo.CountActiveCampaignsForAccount(ctx, accountID); err == nil {
+			inCampaign = n > 0
 		}
 	}
 
@@ -208,7 +227,80 @@ func (s *analyticsService) GetAccountStatus(ctx context.Context, userID, account
 		Errors:       errors,
 		DailyUsage:   *usage,
 		WarmupStatus: warmupStatus,
+		WarmupHealth: warmupHealth,
+		InCampaign:   inCampaign,
 	}, nil
+}
+
+// buildWarmupHealth looks up the mailbox's warmup-pool health (premium pool
+// first) and maps it into the API shape. Returns nil when the mailbox is not
+// in a pool or the lookup fails — health surfacing must never break status.
+func (s *analyticsService) buildWarmupHealth(ctx context.Context, accountID uuid.UUID) *models.WarmupHealthInfo {
+	if s.warmupRepo == nil {
+		return nil
+	}
+	for _, poolType := range warmupHealthPoolLookup {
+		h, err := s.warmupRepo.GetParticipantHealth(ctx, accountID, poolType)
+		if err != nil || h == nil {
+			continue
+		}
+		info := &models.WarmupHealthInfo{
+			State:        string(h.HealthState),
+			Score:        h.LastHealthScore,
+			SpamScore:    h.SpamScore,
+			BlockedUntil: h.BlockedUntil,
+			EvaluatedAt:  h.LastHealthEvaluatedAt,
+		}
+		if h.LastHealthReason != nil {
+			info.Reason = *h.LastHealthReason
+		}
+		return info
+	}
+	return nil
+}
+
+// applyWarmupHealth folds warmup-pool reputation into the unified account
+// health score so a throttled/quarantined mailbox reads as degraded even when
+// its connection and sync are fine. Healthy/empty states leave health intact.
+func applyWarmupHealth(health *models.AccountHealth, wh *models.WarmupHealthInfo) {
+	if wh == nil {
+		return
+	}
+
+	var penalty int
+	var issue string
+	switch models.WarmupHealthState(wh.State) {
+	case models.WarmupHealthWatch:
+		penalty, issue = 10, "Warmup reputation needs watching"
+	case models.WarmupHealthThrottled:
+		penalty, issue = 25, "Warmup throttled — spam placement elevated"
+	case models.WarmupHealthQuarantined:
+		penalty, issue = 50, "Warmup quarantined — mailbox temporarily removed from the pool"
+	case models.WarmupHealthBlocked:
+		penalty, issue = 70, "Warmup blocked — reputation requires review"
+	default:
+		return
+	}
+
+	if wh.Reason != "" {
+		issue = issue + " (" + wh.Reason + ")"
+	}
+
+	health.Score -= penalty
+	if health.Score < 0 {
+		health.Score = 0
+	}
+	switch models.WarmupHealthState(wh.State) {
+	case models.WarmupHealthWatch:
+		if health.Status == "healthy" {
+			health.Status = "warning"
+		}
+	default:
+		if health.Status != "error" {
+			health.Status = "error"
+		}
+	}
+	health.Issues = append(health.Issues, issue)
 }
 
 func (s *analyticsService) GetAllAccountStatuses(ctx context.Context, userID uuid.UUID) ([]models.EmailAccountStatus, *errx.Error) {

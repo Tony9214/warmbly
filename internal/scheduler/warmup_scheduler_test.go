@@ -31,3 +31,33 @@ func TestAdjustmentFor(t *testing.T) {
 		})
 	}
 }
+
+func TestWarmupRampTarget(t *testing.T) {
+	const campCap = activeCampaignWarmupCap
+
+	tests := []struct {
+		name           string
+		active         bool
+		base, inc, max int
+		days           int
+		inCampaign     bool
+		want           int
+	}{
+		{"ramp day 0", true, 10, 1, 40, 0, false, 10},
+		{"ramp day 5", true, 10, 1, 40, 5, false, 15},
+		{"ramp capped at max", true, 10, 1, 40, 100, false, 40},
+		{"in-campaign caps ramp down", true, 10, 1, 40, 20, true, campCap},
+		{"in-campaign leaves sub-cap ramp", true, 2, 1, 40, 0, true, 2},
+		{"monitor lane (warmup off, in campaign)", false, 10, 1, 40, 0, true, campCap},
+		{"not warming returns cap regardless of flag", false, 10, 1, 40, 0, false, campCap},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := warmupRampTarget(tt.active, tt.base, tt.inc, tt.max, tt.days, tt.inCampaign)
+			if got != tt.want {
+				t.Errorf("warmupRampTarget(active=%v base=%d inc=%d max=%d days=%d inCampaign=%v) = %d, want %d",
+					tt.active, tt.base, tt.inc, tt.max, tt.days, tt.inCampaign, got, tt.want)
+			}
+		})
+	}
+}

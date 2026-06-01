@@ -38,6 +38,11 @@ type CampaignRepository interface {
 	GetPendingCampaignTasks(ctx context.Context, campaignID uuid.UUID) ([]Task, error)
 	CountActiveForOrganization(ctx context.Context, orgID uuid.UUID) (int, error)
 	AccountHasActiveCampaign(ctx context.Context, accountID uuid.UUID) (bool, error)
+	// CountActiveCampaignsForAccount returns how many active campaigns send
+	// from the given mailbox (matched through the campaign's email tags).
+	// Used by the warmup scheduler to keep a low-volume health-check warmup
+	// running whenever a mailbox is in use by a live campaign.
+	CountActiveCampaignsForAccount(ctx context.Context, accountID uuid.UUID) (int, error)
 }
 
 type campaignRepository struct {
@@ -1037,6 +1042,18 @@ func (r *campaignRepository) AccountHasActiveCampaign(ctx context.Context, accou
 	var exists bool
 	err := r.DB.QueryRow(ctx, query, accountID).Scan(&exists)
 	return exists, err
+}
+
+func (r *campaignRepository) CountActiveCampaignsForAccount(ctx context.Context, accountID uuid.UUID) (int, error) {
+	query := `
+		SELECT COUNT(DISTINCT c.id)
+		FROM campaigns c
+		JOIN campaign_email_tags cet ON cet.campaign_id = c.id
+		JOIN email_tags et ON et.tag_id = cet.tag_id
+		WHERE et.email_id = $1 AND c.status = 'active'`
+	var count int
+	err := r.DB.QueryRow(ctx, query, accountID).Scan(&count)
+	return count, err
 }
 
 // UpdateStatusWithLock updates campaign status using a PostgreSQL advisory lock to prevent concurrent updates.

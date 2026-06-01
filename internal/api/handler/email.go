@@ -69,6 +69,52 @@ func (h *Handler) UpdateEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// StartWarmup enables (or resumes) warmup for a mailbox, preserving ramp
+// progress when resuming from a paused state.
+func (h *Handler) StartWarmup(c *gin.Context) { h.warmupLifecycle(c, "start") }
+
+// PauseWarmup pauses warmup without losing ramp progress; a later start
+// continues from the same daily volume.
+func (h *Handler) PauseWarmup(c *gin.Context) { h.warmupLifecycle(c, "pause") }
+
+// ResumeWarmup resumes a paused warmup, shifting the ramp anchor forward so
+// progress continues where it left off.
+func (h *Handler) ResumeWarmup(c *gin.Context) { h.warmupLifecycle(c, "resume") }
+
+// StopWarmup disables warmup entirely and clears ramp progress — a later
+// start begins a fresh ramp. Distinct from PauseWarmup, which preserves
+// progress.
+func (h *Handler) StopWarmup(c *gin.Context) { h.warmupLifecycle(c, "stop") }
+
+func (h *Handler) warmupLifecycle(c *gin.Context, action string) {
+	userIDStr := middleware.GetUserID(c)
+	emailAccountID := c.Param("id")
+
+	resp, err := h.EmailService.SetWarmupLifecycle(c.Request.Context(), userIDStr, emailAccountID, action)
+	if err != nil {
+		errx.Handle(c, err)
+		return
+	}
+
+	// Seed/repair the warmup chain immediately so warming starts now rather
+	// than on the next reconciler pass. Best-effort: the reconciler is the
+	// backstop, and pause has nothing to seed.
+	if action == "start" || action == "resume" {
+		if accountID, perr := uuid.Parse(emailAccountID); perr == nil {
+			_ = h.TasksService.EnsureWarmupScheduled(c.Request.Context(), accountID)
+		}
+	}
+
+	// Audit log
+	if userID, err := uuid.Parse(userIDStr); err == nil {
+		if accountID, err := uuid.Parse(emailAccountID); err == nil {
+			h.AuditService.LogAction(c.Request.Context(), userID, models.AuditActionUpdate, models.AuditEntityEmailAccount, &accountID, c.ClientIP(), c.Request.UserAgent(), map[string]string{"warmup": action}, nil)
+		}
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 func (h *Handler) UpdateEmailTrackingDomain(c *gin.Context) {
 	userIDStr := middleware.GetUserID(c)
 

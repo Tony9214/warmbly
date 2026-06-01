@@ -50,6 +50,22 @@ func (s *emailService) Update(ctx context.Context, userID, emailAccountID string
 	return account, nil
 }
 
+// SetWarmupLifecycle applies a warmup start/pause/resume/disable transition,
+// then re-syncs pool membership and fans out the change so dashboards update
+// live. Seeding the actual warmup task chain is the caller's responsibility
+// (the API handler triggers EnsureWarmupScheduled) — this service has no
+// Cloud Tasks client.
+func (s *emailService) SetWarmupLifecycle(ctx context.Context, userID, emailAccountID, action string) (*models.Email, *errx.Error) {
+	account, err := s.emailRepository.SetWarmupLifecycle(ctx, userID, emailAccountID, action)
+	if err != nil {
+		return nil, err
+	}
+
+	s.syncWarmupPoolMembership(ctx, account)
+	s.publishAccountEvent(ctx, pubsub.EventAccountSynced, account)
+	return account, nil
+}
+
 // trackingDomainTarget is the shared host customers point their CNAME at.
 // Keep in sync with the TRACKING_DOMAIN default (Makefile / config).
 const trackingDomainTarget = "t.warmbly.com"

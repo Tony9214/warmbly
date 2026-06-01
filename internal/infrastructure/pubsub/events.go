@@ -37,10 +37,11 @@ const (
 	EventCampaignCompleted EventType = "CAMPAIGN_COMPLETED"
 
 	// Email account events
-	EventAccountConnected    EventType = "ACCOUNT_CONNECTED"
-	EventAccountDisconnected EventType = "ACCOUNT_DISCONNECTED"
-	EventAccountError        EventType = "ACCOUNT_ERROR"
-	EventAccountSynced       EventType = "ACCOUNT_SYNCED"
+	EventAccountConnected     EventType = "ACCOUNT_CONNECTED"
+	EventAccountDisconnected  EventType = "ACCOUNT_DISCONNECTED"
+	EventAccountError         EventType = "ACCOUNT_ERROR"
+	EventAccountSynced        EventType = "ACCOUNT_SYNCED"
+	EventAccountHealthChanged EventType = "ACCOUNT_HEALTH_CHANGED"
 
 	// Bulk operation events
 	EventBulkStarted   EventType = "BULK_STARTED"
@@ -123,6 +124,10 @@ type AccountEvent struct {
 	Status         string `json:"status,omitempty"`
 	ErrorCode      string `json:"error_code,omitempty"`
 	ErrorMessage   string `json:"error_message,omitempty"`
+	// Warmup health transition fields (EventAccountHealthChanged).
+	HealthState   string `json:"health_state,omitempty"`
+	PreviousState string `json:"previous_state,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 // WarmupStatsEvent for warmup statistics updates
@@ -310,6 +315,28 @@ func (p *StreamingPublisher) PublishAccountEvent(ctx context.Context, event *Acc
 	if err := p.client.Publish(ctx, topicID, event, attrs); err != nil {
 		// Log error but don't fail
 	}
+}
+
+// PublishAccountHealth pushes a mailbox warmup-health transition to the
+// owning user's realtime stream. The dashboard treats it as an ACCOUNT event
+// and refreshes account status live; the explicit state fields let consumers
+// react without a refetch.
+func (p *StreamingPublisher) PublishAccountHealth(ctx context.Context, userID, accountID, email, prevState, newState, reason string) {
+	if p == nil || p.client == nil {
+		return
+	}
+	p.PublishAccountEvent(ctx, &AccountEvent{
+		BaseEvent: BaseEvent{
+			EventType: EventAccountHealthChanged,
+			UserID:    userID,
+		},
+		EmailAccountID: accountID,
+		Email:          email,
+		Status:         newState,
+		HealthState:    newState,
+		PreviousState:  prevState,
+		Reason:         reason,
+	})
 }
 
 // PublishToUser publishes a generic event to a user

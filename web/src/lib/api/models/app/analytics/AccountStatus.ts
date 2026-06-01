@@ -28,12 +28,25 @@ export interface AccountDailyUsage {
 
 export interface WarmupStatusInfo {
     enabled: boolean;
+    paused: boolean;
+    paused_at?: string | null;
     started_at: string;
     current_volume: number;
     target_volume: number;
     max_volume: number;
     reply_rate: number;
     days_active: number;
+}
+
+// Warmup-pool reputation for this mailbox. Folded into health.score and also
+// surfaced in detail. Present only when the mailbox is in a warmup pool.
+export interface WarmupHealthInfo {
+    state: "healthy" | "watch" | "throttled" | "quarantined" | "blocked";
+    score: number;
+    reason?: string;
+    spam_score: number;
+    blocked_until?: string | null;
+    evaluated_at?: string | null;
 }
 
 export default interface AccountStatus {
@@ -46,4 +59,8 @@ export default interface AccountStatus {
     errors: AccountError[];
     daily_usage: AccountDailyUsage;
     warmup_status?: WarmupStatusInfo;
+    warmup_health?: WarmupHealthInfo;
+    // True when the mailbox backs a live campaign — a low-volume health-check
+    // warmup keeps running even if the user has warmup paused/off.
+    in_campaign: boolean;
 }

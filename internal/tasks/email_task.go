@@ -28,6 +28,11 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 
 	executionKey := "warmup:" + taskID.String()
 	executionStatus := "failed"
+	// lane distinguishes a normal user-enabled warmup send ("warmup") from a
+	// health-check send kept flowing only because the mailbox backs a live
+	// campaign ("health_check"). Set once the account is loaded; the defer
+	// reads it at completion time.
+	lane := "warmup"
 	if s.advanced != nil {
 		duplicate, xerr := s.advanced.StartTaskExecution(ctx, taskID, executionKey, map[string]interface{}{
 			"task_type": "warmup",
@@ -41,6 +46,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		defer func() {
 			_ = s.advanced.CompleteTaskExecution(ctx, taskID, executionKey, executionStatus, map[string]interface{}{
 				"task_type": "warmup",
+				"lane":      lane,
 			})
 		}()
 	}
@@ -73,7 +79,15 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	if account == nil {
 		return errx.ErrNotFound
 	}
-	if account.Status != "active" || account.Warmup == nil {
+	// Keep the warmup chain alive while the mailbox is actively warming OR
+	// while it backs a live campaign (the low-volume health-check lane). Once
+	// neither holds, the chain is allowed to wind down.
+	activelyWarming := account.IsWarmingActive()
+	inCampaign := false
+	if !activelyWarming {
+		inCampaign = s.accountInActiveCampaign(ctx, account.ID)
+	}
+	if account.Status != "active" || (!activelyWarming && !inCampaign) {
 		if s.warmupHealth != nil {
 			if account.Status == "active" && account.OrganizationID != nil && s.featureGate != nil {
 				canWarmup, _ := s.featureGate.CanUseWarmup(ctx, *account.OrganizationID)
@@ -89,6 +103,13 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		_ = s.taskRepo.UpdateTaskStatus(ctx, taskID, "cancelled")
 		executionStatus = "completed"
 		return nil
+	}
+	if !activelyWarming && inCampaign {
+		lane = "health_check"
+		log.Info().
+			Str("task_id", taskID.String()).
+			Str("email_account_id", account.ID.String()).
+			Msg("warmup health-check send (mailbox in active campaign, warmup off)")
 	}
 
 	// STEP 3.5: Check if organization can use warmup (only paid orgs)
@@ -269,6 +290,21 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 
 	executionStatus = "completed"
 	return nil
+}
+
+// accountInActiveCampaign reports whether the mailbox currently backs at
+// least one active campaign. Failing closed on error keeps the health-check
+// lane conservative — a transient DB error just lets the chain wind down if
+// warmup is otherwise off.
+func (s *tasksService) accountInActiveCampaign(ctx context.Context, accountID uuid.UUID) bool {
+	if s.campaignRepo == nil {
+		return false
+	}
+	count, err := s.campaignRepo.CountActiveCampaignsForAccount(ctx, accountID)
+	if err != nil {
+		return false
+	}
+	return count > 0
 }
 
 // recentPartnerWindow controls how long a partner stays excluded from
@@ -491,6 +527,19 @@ func (s *tasksService) scheduleWarmupRecovery(ctx context.Context, accountID uui
 	}
 }
 
+// EnsureWarmupScheduled makes sure the mailbox has a pending warmup task so
+// its warmup / health-check chain is running. Safe to call repeatedly: the
+// per-mailbox advisory lock in CreateWarmupTaskWithLock means a duplicate
+// pending task is never created. Returns ErrWarmupNotEnabled (benign) when
+// the mailbox is neither warming nor backing a live campaign.
+func (s *tasksService) EnsureWarmupScheduled(ctx context.Context, accountID uuid.UUID) error {
+	nextTime, err := s.scheduler.CalculateNextWarmupTime(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	return s.createWarmupTask(ctx, accountID, nextTime)
+}
+
 // createWarmupTask creates a new warmup task in GCP Cloud Tasks
 func (s *tasksService) createWarmupTask(ctx context.Context, accountID uuid.UUID, scheduleTime time.Time) error {
 	// Create task in database
@@ -553,6 +602,24 @@ func (s *tasksService) ReconcileWarmupTasks(ctx context.Context, limit int) (int
 
 	created := 0
 	for _, accountID := range accountIDs {
+		account, xerr := s.emailRepo.GetByID(ctx, accountID)
+		if xerr != nil {
+			log.Warn().Str("email_account_id", accountID.String()).Msg("Failed to load account during warmup reconciliation")
+			continue
+		}
+		if account == nil || account.Status != "active" || account.Warmup == nil || account.OrganizationID == nil {
+			continue
+		}
+		if s.featureGate != nil {
+			canWarmup, _ := s.featureGate.CanUseWarmup(ctx, *account.OrganizationID)
+			if !canWarmup {
+				if s.warmupHealth != nil {
+					_ = s.warmupHealth.RemovePoolMembership(ctx, account.ID, s.resolveWarmupPoolType(ctx, account))
+				}
+				continue
+			}
+		}
+
 		nextTime, err := s.scheduler.CalculateNextWarmupTime(ctx, accountID)
 		if err != nil {
 			log.Warn().Err(err).Str("email_account_id", accountID.String()).Msg("Failed to calculate reconciled warmup time")

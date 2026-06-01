@@ -96,6 +96,23 @@ type EmailAccountStatus struct {
 	Errors       []AccountError    `json:"errors"`
 	DailyUsage   AccountDailyUsage `json:"daily_usage"`
 	WarmupStatus *WarmupStatusInfo `json:"warmup_status,omitempty"`
+	// WarmupHealth is the mailbox's warmup-pool reputation (spam placement,
+	// complaints, throttle/quarantine state). Folded into Health.Score and
+	// also exposed in detail here. Nil when the mailbox is not in a pool.
+	WarmupHealth *WarmupHealthInfo `json:"warmup_health,omitempty"`
+	// InCampaign reports whether the mailbox currently backs a live campaign.
+	// When true a low-volume health-check warmup keeps running even if the
+	// user has warmup paused/off.
+	InCampaign bool `json:"in_campaign"`
+}
+
+type WarmupHealthInfo struct {
+	State        string     `json:"state"` // healthy/watch/throttled/quarantined/blocked
+	Score        float64    `json:"score"`
+	Reason       string     `json:"reason,omitempty"`
+	SpamScore    int        `json:"spam_score"`
+	BlockedUntil *time.Time `json:"blocked_until,omitempty"`
+	EvaluatedAt  *time.Time `json:"evaluated_at,omitempty"`
 }
 
 type AccountHealth struct {
@@ -123,13 +140,15 @@ type AccountDailyUsage struct {
 }
 
 type WarmupStatusInfo struct {
-	Enabled       bool      `json:"enabled"`
-	StartedAt     time.Time `json:"started_at"`
-	CurrentVolume int       `json:"current_volume"`
-	TargetVolume  int       `json:"target_volume"`
-	MaxVolume     int       `json:"max_volume"`
-	ReplyRate     int       `json:"reply_rate"`
-	DaysActive    int       `json:"days_active"`
+	Enabled       bool       `json:"enabled"`
+	Paused        bool       `json:"paused"`
+	PausedAt      *time.Time `json:"paused_at,omitempty"`
+	StartedAt     time.Time  `json:"started_at"`
+	CurrentVolume int        `json:"current_volume"`
+	TargetVolume  int        `json:"target_volume"`
+	MaxVolume     int        `json:"max_volume"`
+	ReplyRate     int        `json:"reply_rate"`
+	DaysActive    int        `json:"days_active"`
 }
 
 // Usage Overview
