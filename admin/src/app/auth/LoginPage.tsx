@@ -20,12 +20,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Logo } from "@/components/Logo";
-import { EnvPill } from "@/components/layout/EnvPill";
 import { TurnstileModal } from "@/components/captcha/TurnstileModal";
 import { login, loginConfirm } from "@/lib/api/client/auth";
 import { setToken } from "@/lib/auth/storage";
 import { APIError } from "@/lib/api/client";
-import { DASHBOARD_URL } from "@/lib/env";
+import { DASHBOARD_URL, ENV_LABEL } from "@/lib/env";
 import { cn } from "@/lib/utils";
 
 // Admin accent — red-600, the theme's --admin-danger token ("restricted access").
@@ -149,7 +148,7 @@ export default function LoginPage() {
 
     return (
         <div className="flex min-h-dvh flex-col items-center justify-center bg-muted/40 px-4 py-10">
-            <div className="w-full max-w-[400px] animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <div className="w-full max-w-[400px]">
                 {/* Brand */}
                 <div className="mb-6 flex items-center justify-center gap-2.5">
                     <Logo className="h-7 w-7 text-foreground" />
@@ -170,7 +169,17 @@ export default function LoginPage() {
                                 <ShieldCheck className="size-3.5" />
                                 Admin access
                             </span>
-                            <EnvPill />
+                            {/* Env is shown only where it matters — dev stays clean. */}
+                            {ENV_LABEL !== "development" && (
+                                <span
+                                    className={cn(
+                                        "text-[11px] font-semibold uppercase tracking-wide",
+                                        ENV_LABEL === "production" ? "text-red-600" : "text-amber-600",
+                                    )}
+                                >
+                                    {ENV_LABEL === "production" ? "Production" : "Staging"}
+                                </span>
+                            )}
                         </div>
 
                         {/* Fixed-height swap frame so steps slide without a height jump. */}
@@ -263,10 +272,7 @@ export default function LoginPage() {
                                         transition={SWAP_TRANSITION}
                                         className="text-center"
                                     >
-                                        <div
-                                            className="mx-auto mt-1 grid size-12 place-items-center rounded-xl"
-                                            style={{ backgroundColor: "color-mix(in srgb, var(--admin-danger) 12%, transparent)", color: ACCENT }}
-                                        >
+                                        <div className="mx-auto mt-1 grid size-12 place-items-center rounded-xl bg-red-50 text-red-600">
                                             <MailCheck className="size-6" />
                                         </div>
                                         <h1 className="mt-4 text-[20px] font-semibold tracking-tight">Check your email</h1>
