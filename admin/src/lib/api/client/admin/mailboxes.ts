@@ -13,6 +13,7 @@ export function searchMailboxes(
     if (params.q) usp.set("q", params.q);
     if (params.status) usp.set("status", params.status);
     if (params.provider) usp.set("provider", params.provider);
+    if (params.org_id) usp.set("org_id", params.org_id);
     if (params.cursor) usp.set("cursor", params.cursor);
     if (params.limit != null) usp.set("limit", String(params.limit));
     const s = usp.toString();

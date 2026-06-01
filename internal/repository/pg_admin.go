@@ -1964,6 +1964,11 @@ func (r *adminRepository) SearchMailboxesForAdmin(ctx context.Context, search *m
 		args = append(args, search.Provider)
 		argNum++
 	}
+	if search.OrgID != nil {
+		where += " AND ea.organization_id = $" + itoa(argNum)
+		args = append(args, *search.OrgID)
+		argNum++
+	}
 	if search.Cursor != nil {
 		where += " AND ea.id < $" + itoa(argNum)
 		args = append(args, *search.Cursor)

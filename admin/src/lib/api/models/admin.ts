@@ -354,6 +354,7 @@ export interface AdminMailboxSearch {
     q?: string;
     status?: string;
     provider?: string;
+    org_id?: string;
     cursor?: string;
     limit?: number;
 }

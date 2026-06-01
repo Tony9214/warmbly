@@ -351,6 +351,7 @@ type AdminMailboxSearch struct {
 	Query    string     `form:"q"`
 	Status   string     `form:"status"`
 	Provider string     `form:"provider"`
+	OrgID    *uuid.UUID `form:"org_id"` // browse a single org's mailboxes
 	Cursor   *uuid.UUID `form:"cursor"`
 	Limit    int        `form:"limit"`
 }
