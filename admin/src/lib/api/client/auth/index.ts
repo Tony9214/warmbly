@@ -17,6 +17,7 @@ export function login(input: LoginRequest): Promise<LoginStartResponse> {
         method: "POST",
         url: "/auth/login",
         data: input,
+        timeout: 15_000,
     });
 }
 
@@ -26,6 +27,7 @@ export function loginConfirm(input: LoginConfirmRequest): Promise<LoginResponse>
         method: "POST",
         url: "/auth/login/confirm",
         data: input,
+        timeout: 15_000,
     });
 }
 
