@@ -21,6 +21,12 @@ type User struct {
 	MaxOrganizations int  `json:"max_organizations"`
 	FreeTrialUsed    bool `json:"free_trial_used"`
 
+	// Platform admin access, populated on the /auth/me load. AdminPermissions
+	// is the raw bitmask from users.admin_permissions; IsAdmin is the derived
+	// "has any admin permission" flag the admin app gates on.
+	AdminPermissions AdminPermission `json:"admin_permissions"`
+	IsAdmin          bool            `json:"is_admin"`
+
 	// Set when the user has scheduled their own account for deletion.
 	// While these are populated the account is "pending deletion" and
 	// gets hard-deleted at DeletionScheduledFor unless cancelled.
