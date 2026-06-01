@@ -3,12 +3,28 @@
 // in the dashboard app and are not duplicated here.
 
 import { Request } from "@/lib/api/client";
-import type { LoginRequest, LoginResponse, AdminProfile } from "@/lib/api/models/auth";
+import type {
+    LoginRequest,
+    LoginStartResponse,
+    LoginConfirmRequest,
+    LoginResponse,
+    AdminProfile,
+} from "@/lib/api/models/auth";
 
-export function login(input: LoginRequest): Promise<LoginResponse> {
-    return Request<LoginResponse>({
+// Step 1: verify password + captcha. Emails a one-time code, returns a session.
+export function login(input: LoginRequest): Promise<LoginStartResponse> {
+    return Request<LoginStartResponse>({
         method: "POST",
         url: "/auth/login",
+        data: input,
+    });
+}
+
+// Step 2: exchange the session + emailed code for the access/refresh token pair.
+export function loginConfirm(input: LoginConfirmRequest): Promise<LoginResponse> {
+    return Request<LoginResponse>({
+        method: "POST",
+        url: "/auth/login/confirm",
         data: input,
     });
 }

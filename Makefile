@@ -488,6 +488,8 @@ admin:
 	cd admin && \
 	VITE_API_URL=http://$(WEB_HOST):8080 \
 	VITE_DASHBOARD_URL=http://$(WEB_HOST):5173 \
+	VITE_TURNSTILE_KEY=1x00000000000000000000AA \
+	VITE_TURNSTILE_BYPASS_TOKEN=warmbly-local-turnstile-bypass \
 	pnpm dev $(VITE_HOST_FLAG)
 
 site:
