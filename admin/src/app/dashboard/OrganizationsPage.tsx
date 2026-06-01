@@ -1,220 +1,190 @@
-// Organizations list — table view over /admin/organizations. Search
-// covers org name/slug and owner email; status filter splits active from
-// soft-deleted. Per-row counts come inline from the backend so the table
-// can render usage without a fan-out fetch.
+// Organizations browser — left filter rail + server-driven sortable,
+// cursor-paged table. Search name/slug/owner, filter by status, sort by name.
+// The Mailboxes cell links into the Mailboxes browser pre-filtered to the org.
 
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { ErrorState } from "@/components/ErrorState";
+import { Explorer, FilterGroup, SearchFilter, SegmentedFilter } from "@/components/data/Explorer";
+import { DataTable, type Column } from "@/components/data/DataTable";
+import { useCursorPager } from "@/lib/useCursorPager";
 import { listOrganizations } from "@/lib/api/client/admin/organizations";
 import type { AdminOrgListItem } from "@/lib/api/models/admin";
 
 type StatusFilter = "active" | "pending_deletion" | "all";
 
+const ownerName = (o: AdminOrgListItem) =>
+    `${o.owner_first_name} ${o.owner_last_name}`.trim() || o.owner_email;
+
+const columns: Column<AdminOrgListItem>[] = [
+    {
+        id: "name",
+        header: "Name",
+        sortable: true,
+        sortKey: "name",
+        cell: (o) => (
+            <div>
+                <Link
+                    to={`/organizations/${o.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="font-medium text-[var(--admin-accent-strong)] hover:underline"
+                >
+                    {o.name}
+                </Link>
+                {o.slug && <div className="font-mono text-[10px] text-muted-foreground">{o.slug}</div>}
+            </div>
+        ),
+        csv: (o) => o.name,
+    },
+    {
+        id: "owner",
+        header: "Owner",
+        cell: (o) => (
+            <div>
+                <div className="flex items-center gap-1.5">
+                    <span className="text-xs">{ownerName(o)}</span>
+                    {o.owner_banned_at && (
+                        <Badge variant="outline" className="text-[10px] border-red-300 bg-red-50 text-red-700">
+                            banned
+                        </Badge>
+                    )}
+                </div>
+                <div className="text-[10px] text-muted-foreground">{o.owner_email}</div>
+            </div>
+        ),
+        csv: (o) => o.owner_email,
+    },
+    { id: "members", header: "Members", align: "right", cell: (o) => <span className="tabular-nums">{o.member_count}</span>, csv: (o) => o.member_count },
+    {
+        id: "mailboxes",
+        header: "Mailboxes",
+        align: "right",
+        cell: (o) => (
+            <Link
+                to={`/mailboxes?org=${o.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="tabular-nums text-[var(--admin-accent-strong)] hover:underline"
+                title="Browse this org's mailboxes"
+            >
+                {o.email_account_count}
+            </Link>
+        ),
+        csv: (o) => o.email_account_count,
+    },
+    {
+        id: "campaigns",
+        header: "Campaigns",
+        align: "right",
+        cell: (o) => (
+            <span className="tabular-nums">
+                {o.campaign_count}
+                {o.active_campaigns > 0 && <span className="ml-1 text-emerald-600">({o.active_campaigns} active)</span>}
+            </span>
+        ),
+        csv: (o) => o.campaign_count,
+    },
+    {
+        id: "status",
+        header: "Status",
+        cell: (o) =>
+            o.deletion_scheduled_for ? (
+                <Badge variant="outline" className="text-[10px] border-amber-300 bg-amber-50 text-amber-700">
+                    pending deletion
+                </Badge>
+            ) : (
+                <span className="text-xs text-emerald-600">active</span>
+            ),
+        csv: (o) => (o.deletion_scheduled_for ? "pending_deletion" : "active"),
+    },
+    {
+        id: "created",
+        header: "Created",
+        cell: (o) => <span className="text-xs text-muted-foreground">{new Date(o.created_at).toLocaleDateString()}</span>,
+        csv: (o) => o.created_at,
+        defaultHidden: true,
+    },
+];
+
 export default function OrganizationsPage() {
+    const nav = useNavigate();
     const [query, setQuery] = useState("");
     const [status, setStatus] = useState<StatusFilter>("active");
+    const [sort, setSort] = useState<{ by: string; desc: boolean }>({ by: "", desc: true });
+    const pager = useCursorPager();
+    const { reset } = pager;
+
+    useEffect(() => {
+        reset();
+    }, [query, status, sort.by, sort.desc, reset]);
 
     const { data, isLoading, error, refetch } = useQuery({
-        queryKey: ["admin", "organizations", { query, status }],
+        queryKey: ["admin", "organizations", { query, status, sort, cursor: pager.cursor }],
         queryFn: () =>
             listOrganizations({
                 q: query.trim() || undefined,
                 status: status === "all" ? "" : status,
                 limit: 50,
+                cursor: pager.cursor,
+                sort_by: sort.by ? (sort.by as "name") : undefined,
+                sort_desc: sort.by ? sort.desc : undefined,
             }),
-        // Counts move slowly; 30s is plenty for an ops surface.
         staleTime: 30_000,
+        placeholderData: keepPreviousData,
     });
 
     const rows = data?.data ?? [];
-    const total = data?.pagination.total ?? rows.length;
 
     return (
         <div>
-            <PageHeader
-                title="Organizations"
-                description="Every workspace on the platform. Owner, plan, and live resource usage at a glance."
+            <PageHeader title="Organizations" description="Every workspace on the platform. Filter, sort, and drill into owner, usage, members, and mailboxes." />
+            <Explorer
+                filters={
+                    <>
+                        <FilterGroup label="Search">
+                            <SearchFilter value={query} onChange={setQuery} placeholder="Name, slug, or owner…" />
+                        </FilterGroup>
+                        <FilterGroup label="Status">
+                            <SegmentedFilter
+                                value={status}
+                                onChange={setStatus}
+                                options={[
+                                    { value: "active", label: "Active" },
+                                    { value: "pending_deletion", label: "Pending" },
+                                    { value: "all", label: "All" },
+                                ]}
+                            />
+                        </FilterGroup>
+                    </>
+                }
             >
-                <Input
-                    placeholder="Search by name, slug, or owner email…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    className="w-80"
+                <DataTable
+                    columns={columns}
+                    rows={rows}
+                    getRowId={(o) => o.id}
+                    loading={isLoading}
+                    error={error}
+                    onRetry={() => refetch()}
+                    errorTitle="Failed to load organizations"
+                    onRowClick={(o) => nav(`/organizations/${o.id}`)}
+                    sort={sort.by ? sort : undefined}
+                    onSortChange={setSort}
+                    storageKey="admin.organizations"
+                    csvName="warmbly-organizations"
+                    emptyTitle="No organizations"
+                    emptyHint="No organizations match these filters."
+                    pager={{
+                        canPrev: pager.canPrev,
+                        canNext: !!data?.pagination.has_more,
+                        onPrev: pager.prev,
+                        onNext: () => pager.next(data?.pagination.next_cursor),
+                        page: pager.page,
+                        shown: rows.length,
+                        total: data?.pagination.total ?? null,
+                    }}
                 />
-                <StatusToggle value={status} onChange={setStatus} />
-            </PageHeader>
-
-            {isLoading && <SkeletonTable />}
-
-            {error && <ErrorState error={error} title="Failed to load organizations" onRetry={() => refetch()} />}
-
-            {!isLoading && !error && (
-                <>
-                    <div className="border border-border rounded-lg overflow-hidden bg-card">
-                        <table className="w-full text-sm">
-                            <thead className="bg-muted/50 text-muted-foreground text-xs uppercase">
-                                <tr>
-                                    <th className="text-left px-3 py-2 font-medium">Name</th>
-                                    <th className="text-left px-3 py-2 font-medium">Owner</th>
-                                    <th className="text-right px-3 py-2 font-medium">Members</th>
-                                    <th className="text-right px-3 py-2 font-medium">Mailboxes</th>
-                                    <th className="text-right px-3 py-2 font-medium">Campaigns</th>
-                                    <th className="text-left px-3 py-2 font-medium">Status</th>
-                                    <th className="text-left px-3 py-2 font-medium">Created</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows.map((o) => (
-                                    <Row key={o.id} org={o} />
-                                ))}
-                                {rows.length === 0 && (
-                                    <tr>
-                                        <td
-                                            colSpan={7}
-                                            className="text-center text-muted-foreground py-8 text-sm"
-                                        >
-                                            No organizations match this filter.
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                        <span>
-                            Showing {rows.length}
-                            {total != null && total !== rows.length && (
-                                <> of {total.toLocaleString()}</>
-                            )}
-                        </span>
-                        {data?.pagination.has_more && (
-                            <span>
-                                More results available — refine the search to narrow.
-                            </span>
-                        )}
-                    </div>
-                </>
-            )}
-        </div>
-    );
-}
-
-function Row({ org }: { org: AdminOrgListItem }) {
-    const pending = !!org.deletion_scheduled_for;
-    const ownerBanned = !!org.owner_banned_at;
-    const ownerName =
-        `${org.owner_first_name} ${org.owner_last_name}`.trim() ||
-        org.owner_email;
-
-    return (
-        <tr className="border-t border-border hover:bg-muted/30">
-            <td className="px-3 py-2">
-                <Link
-                    to={`/organizations/${org.id}`}
-                    className="text-[var(--admin-accent-strong)] hover:underline font-medium"
-                >
-                    {org.name}
-                </Link>
-                {org.slug && (
-                    <div className="text-[10px] text-muted-foreground font-mono">
-                        {org.slug}
-                    </div>
-                )}
-            </td>
-            <td className="px-3 py-2">
-                <div className="flex items-center gap-1.5">
-                    <span className="text-xs">{ownerName}</span>
-                    {ownerBanned && (
-                        <Badge
-                            variant="outline"
-                            className="text-[10px] border-red-300 text-red-700 bg-red-50"
-                        >
-                            banned
-                        </Badge>
-                    )}
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                    {org.owner_email}
-                </div>
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {org.member_count}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {org.email_account_count}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {org.campaign_count}
-                {org.active_campaigns > 0 && (
-                    <span className="text-emerald-600 ml-1">
-                        ({org.active_campaigns} active)
-                    </span>
-                )}
-            </td>
-            <td className="px-3 py-2">
-                {pending ? (
-                    <Badge
-                        variant="outline"
-                        className="text-[10px] border-amber-300 text-amber-700 bg-amber-50"
-                    >
-                        pending deletion
-                    </Badge>
-                ) : (
-                    <span className="text-xs text-emerald-600">active</span>
-                )}
-            </td>
-            <td className="px-3 py-2 text-xs text-muted-foreground">
-                {new Date(org.created_at).toLocaleDateString()}
-            </td>
-        </tr>
-    );
-}
-
-function StatusToggle({
-    value,
-    onChange,
-}: {
-    value: StatusFilter;
-    onChange: (v: StatusFilter) => void;
-}) {
-    const options: { value: StatusFilter; label: string }[] = [
-        { value: "active", label: "Active" },
-        { value: "pending_deletion", label: "Pending deletion" },
-        { value: "all", label: "All" },
-    ];
-    return (
-        <div className="inline-flex rounded-md border border-border bg-card p-0.5 text-xs">
-            {options.map((opt) => (
-                <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => onChange(opt.value)}
-                    className={`px-2 py-1 rounded ${
-                        value === opt.value
-                            ? "bg-[var(--admin-accent)] text-white"
-                            : "text-muted-foreground hover:text-foreground"
-                    }`}
-                >
-                    {opt.label}
-                </button>
-            ))}
-        </div>
-    );
-}
-
-function SkeletonTable() {
-    return (
-        <div className="border border-border rounded-lg p-4 bg-card space-y-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-7 w-full" />
-            ))}
+            </Explorer>
         </div>
     );
 }
