@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/ErrorState";
 import { listOrganizations } from "@/lib/api/client/admin/organizations";
 import type { AdminOrgListItem } from "@/lib/api/models/admin";
 
@@ -19,7 +20,7 @@ export default function OrganizationsPage() {
     const [query, setQuery] = useState("");
     const [status, setStatus] = useState<StatusFilter>("active");
 
-    const { data, isLoading, error } = useQuery({
+    const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["admin", "organizations", { query, status }],
         queryFn: () =>
             listOrganizations({
@@ -51,12 +52,7 @@ export default function OrganizationsPage() {
 
             {isLoading && <SkeletonTable />}
 
-            {error && (
-                <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-md p-3">
-                    Failed to load organizations. The /admin/organizations
-                    endpoint returned an error.
-                </div>
-            )}
+            {error && <ErrorState error={error} title="Failed to load organizations" onRetry={() => refetch()} />}
 
             {!isLoading && !error && (
                 <>

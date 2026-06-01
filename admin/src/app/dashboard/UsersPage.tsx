@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/ErrorState";
 import { searchUsers } from "@/lib/api/client/admin/users";
 import type { AdminUserDetail } from "@/lib/api/models/admin";
 
@@ -20,7 +21,7 @@ export default function UsersPage() {
     const [status, setStatus] = useState<StatusFilter>("active");
     const [adminOnly, setAdminOnly] = useState(false);
 
-    const { data, isLoading, error } = useQuery({
+    const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["admin", "users", { query, status, adminOnly }],
         queryFn: () =>
             searchUsers({
@@ -61,11 +62,7 @@ export default function UsersPage() {
 
             {isLoading && <SkeletonTable />}
 
-            {error && (
-                <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-md p-3">
-                    Failed to load users. The /admin/users endpoint returned an error.
-                </div>
-            )}
+            {error && <ErrorState error={error} title="Failed to load users" onRetry={() => refetch()} />}
 
             {!isLoading && !error && (
                 <>
