@@ -1,8 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Admin favicon: the Warmbly mark in the admin red (red-600, the theme's
+       admin-danger token) on the app's dark slate. The red marks this as the
+       restricted admin surface and sets the tab apart from the dashboard. -->
   <rect width="64" height="64" rx="14" fill="#0f172a"/>
-  <rect x="6" y="6" width="52" height="52" rx="10" stroke="#f59e0b" stroke-width="3"/>
-  <path d="M32 14 L46 22 V36 C46 43 40 49 32 52 C24 49 18 43 18 36 V22 Z"
-        fill="none" stroke="#f59e0b" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M26 32 L31 37 L40 28" stroke="#f59e0b" stroke-width="3"
-        stroke-linecap="round" stroke-linejoin="round"/>
+  <path transform="translate(3.74 8.09) scale(0.0634)"
+        d="M222.805 644.772L186.274 108.881L704.5 451.158L484.5 451.158L245.5 196.158L444 463.5L222.805 644.772Z"
+        fill="#dc2626"/>
 </svg>
