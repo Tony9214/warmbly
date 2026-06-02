@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
+	"github.com/warmbly/warmbly/internal/repository"
 )
 
 // Internal worker bootstrap + config endpoints. A worker process starts with
@@ -103,7 +104,7 @@ func (h *Handler) InternalWorkerConfig(c *gin.Context) {
 type HeartbeatPayload struct {
 	WorkerID   string `json:"worker_id"`
 	BindIP     string `json:"bind_ip"`
-	Tier       string `json:"tier,omitempty"`        // shared_free | shared_premium | dedicated
+	Tier       string `json:"tier,omitempty"`        // shared_free | shared_premium (dedicated is rejected; allocated by the control plane)
 	EgressKind string `json:"egress_kind,omitempty"` // cold_smtp | oauth_api | warmup_only
 }
 
@@ -125,6 +126,17 @@ func (h *Handler) InternalWorkerHeartbeat(c *gin.Context) {
 	}
 	if p.BindIP == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bind_ip required"})
+		return
+	}
+	// A worker may only register as a shared tier. Dedicated capacity is
+	// allocated by the control plane (by promoting a spare shared worker), so
+	// a worker must never self-designate as dedicated. A blank tier is fine —
+	// it maps to the shared-premium default.
+	if !repository.IsClientRequestableTier(p.Tier) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "dedicated tier cannot be requested by a worker; dedicated capacity is allocated automatically by the control plane",
+			"code":  "tier_not_allowed",
+		})
 		return
 	}
 	if h.WorkerRepo == nil {

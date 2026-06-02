@@ -442,6 +442,13 @@ func (h *Handler) AdminCreateProvisioningTemplate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name, provider, location, server_type and worker_tier are required"})
 		return
 	}
+	if !repository.IsClientRequestableTier(t.Tier) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "dedicated tier templates cannot be created; dedicated workers are allocated automatically by the control plane",
+			"code":  "tier_not_allowed",
+		})
+		return
+	}
 	if err := h.ProvisioningTemplateRepo.Create(c.Request.Context(), t); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -464,6 +471,13 @@ func (h *Handler) AdminUpdateProvisioningTemplate(c *gin.Context) {
 	t.ID = id
 	if t.Name == "" || t.Provider == "" || t.Location == "" || t.ServerType == "" || t.Tier == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name, provider, location, server_type and worker_tier are required"})
+		return
+	}
+	if !repository.IsClientRequestableTier(t.Tier) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "templates cannot be set to the dedicated tier; dedicated workers are allocated automatically by the control plane",
+			"code":  "tier_not_allowed",
+		})
 		return
 	}
 	if err := h.ProvisioningTemplateRepo.Update(c.Request.Context(), t); err != nil {
@@ -626,6 +640,13 @@ func (h *Handler) AdminCreateProvisioningJob(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
 			return
 		}
+		if !repository.IsClientRequestableTier(t.Tier) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "this template targets the dedicated tier, which is allocated automatically by the control plane; pick a shared-tier template",
+				"code":  "tier_not_allowed",
+			})
+			return
+		}
 		// Snapshot the flat template into the job's config column. Its field
 		// names line up with provisioning.JobConfig, so the state machine reads
 		// it directly.
@@ -651,6 +672,13 @@ func (h *Handler) AdminCreateProvisioningJob(c *gin.Context) {
 			return
 		}
 		snap := fromTemplateDTO(&provTemplateDTO{Name: "custom", Config: cfgDTO})
+		if !repository.IsClientRequestableTier(snap.Tier) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "dedicated tier cannot be provisioned directly; dedicated workers are allocated automatically by the control plane",
+				"code":  "tier_not_allowed",
+			})
+			return
+		}
 		b, _ := json.Marshal(snap)
 		config = b
 		provider = cfgDTO.Provider
