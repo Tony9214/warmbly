@@ -336,6 +336,8 @@ export interface AdminMailboxRow {
     org_name?: string | null;
     worker_id?: string | null;
     warmup_enabled: boolean;
+    risk_band: string;
+    warmup_pool_type?: string | null;
     campaign_limit: number;
     last_synced_at?: string | null;
     created_at: string;
@@ -354,9 +356,38 @@ export interface AdminMailboxSearch {
     q?: string;
     status?: string;
     provider?: string;
+    warmup?: "on" | "off" | "";
+    created_within?: number;
     org_id?: string;
+    // Ownership / placement
+    user_id?: string;
+    worker_id?: string;
+    // Classification
+    risk_band?: string;
+    warmup_pool_type?: string;
+    synced_status?: "never" | "stale" | "recent" | "";
+    // Flags
+    warmup_paused?: boolean;
+    tracking_domain_verified?: boolean;
+    has_tracking_domain?: boolean;
+    has_organization?: boolean;
+    signature_sync?: boolean;
+    has_oauth?: boolean;
+    has_smtp_imap?: boolean;
+    // Numeric ranges
+    campaign_limit_min?: number;
+    campaign_limit_max?: number;
+    min_wait_time_min?: number;
+    min_wait_time_max?: number;
+    // Date ranges (YYYY-MM-DD)
+    created_after?: string;
+    created_before?: string;
+    last_synced_after?: string;
+    last_synced_before?: string;
     cursor?: string;
     limit?: number;
+    sort_by?: "email" | "created_at" | "last_synced_at" | "campaign_limit";
+    sort_desc?: boolean;
 }
 
 // /admin/analytics — time-series counters for the platform.
@@ -804,6 +835,40 @@ export interface AdminUserSearchParams {
     q?: string;
     status?: "active" | "banned" | "all" | "";
     is_admin?: boolean;
+    has_overrides?: boolean;
+    free_trial_used?: boolean;
+    created_within?: number;
+    // Plan / subscription
+    plan_id?: string;
+    subscription_status?: string;
+    is_enterprise?: boolean;
+    has_subscription?: boolean;
+    has_active_subscription?: boolean;
+    // Account state
+    onboarding_completed?: boolean;
+    deletion_scheduled?: boolean;
+    has_avatar?: boolean;
+    has_active_campaign?: boolean;
+    has_ban_record?: boolean;
+    has_dedicated_worker?: boolean;
+    // Count ranges
+    org_count_min?: number;
+    org_count_max?: number;
+    email_account_count_min?: number;
+    email_account_count_max?: number;
+    campaign_count_min?: number;
+    campaign_count_max?: number;
+    max_organizations_min?: number;
+    max_organizations_max?: number;
+    // Date ranges (YYYY-MM-DD)
+    created_after?: string;
+    created_before?: string;
+    admin_granted_after?: string;
+    admin_granted_before?: string;
+    banned_after?: string;
+    banned_before?: string;
+    updated_after?: string;
+    updated_before?: string;
     cursor?: string;
     limit?: number;
     sort_by?: "created_at" | "email" | "name";
@@ -902,6 +967,9 @@ export interface AdminOrgListItem {
     email_account_count: number;
     campaign_count: number;
     active_campaigns: number;
+    plan_name?: string | null;
+    plan_public?: boolean | null;
+    is_enterprise: boolean;
 }
 
 export interface OrganizationLimits {
@@ -993,8 +1061,38 @@ export interface AdminOrgMembersResult {
 export interface AdminOrgSearch {
     q?: string;
     status?: "active" | "pending_deletion" | "";
+    plan_id?: string;
+    plan_visibility?: "public" | "private" | "none" | "";
+    created_within?: number; // days; omit for any
+    has_overrides?: boolean;
+    enterprise?: boolean;
+    // Subscription state
+    subscription_status?: string;
+    cancel_at_period_end?: boolean;
+    has_active_subscription?: boolean;
+    no_subscription?: boolean;
+    owner_banned?: boolean;
+    // Relationship existence
+    has_active_campaigns?: boolean;
+    has_email_accounts?: boolean;
+    // Count ranges
+    member_count_min?: number;
+    member_count_max?: number;
+    email_account_count_min?: number;
+    email_account_count_max?: number;
+    campaign_count_min?: number;
+    campaign_count_max?: number;
+    // Date ranges (YYYY-MM-DD)
+    created_after?: string;
+    created_before?: string;
+    trial_end_after?: string;
+    trial_end_before?: string;
+    current_period_end_after?: string;
+    current_period_end_before?: string;
+    updated_after?: string;
+    updated_before?: string;
     cursor?: string;
     limit?: number;
-    sort_by?: "created_at" | "name";
+    sort_by?: "created_at" | "name" | "owner_email" | "member_count" | "email_account_count" | "campaign_count";
     sort_desc?: boolean;
 }
