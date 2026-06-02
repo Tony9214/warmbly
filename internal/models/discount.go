@@ -142,12 +142,43 @@ type UpdateDiscountCodeRequest struct {
 	ExpiresAt          *time.Time          `json:"expires_at,omitempty"`
 }
 
-// AdminDiscountSearch filters the admin discount list.
+// AdminDiscountSearch filters the admin discount list. Note the free-text key
+// is "search" (not "q") to preserve the existing endpoint contract.
 type AdminDiscountSearch struct {
-	Status string     `form:"status"`
-	Search string     `form:"search"`
-	Cursor *uuid.UUID `form:"cursor"`
-	Limit  int        `form:"limit"`
+	Search   string `form:"search"`
+	Status   string `form:"status"`   // active|disabled|expired|all
+	Type     string `form:"type"`     // percent|fixed|trial_extension
+	Duration string `form:"duration"` // once|repeating|forever
+
+	// Plan eligibility
+	PlanScope string     `form:"plan_scope"` // all|specific
+	PlanID    *uuid.UUID `form:"plan_id"`
+
+	// Flag / relationship existence
+	HasRedemptions    bool `form:"has_redemptions"`
+	HasMaxRedemptions bool `form:"has_max_redemptions"`
+	Exhausted         bool `form:"exhausted"`
+	HasExpiry         bool `form:"has_expiry"`
+
+	// Count ranges
+	TimesRedeemedMin *int `form:"times_redeemed_min"`
+	TimesRedeemedMax *int `form:"times_redeemed_max"`
+	PercentOffMin    *int `form:"percent_off_min"`
+	PercentOffMax    *int `form:"percent_off_max"`
+
+	// Date ranges (YYYY-MM-DD, UTC)
+	CreatedWithin int        `form:"created_within"` // days; 0 = any
+	CreatedAfter  *time.Time `form:"created_after" time_format:"2006-01-02" time_utc:"true"`
+	CreatedBefore *time.Time `form:"created_before" time_format:"2006-01-02" time_utc:"true"`
+	StartsAfter   *time.Time `form:"starts_after" time_format:"2006-01-02" time_utc:"true"`
+	StartsBefore  *time.Time `form:"starts_before" time_format:"2006-01-02" time_utc:"true"`
+	ExpiresAfter  *time.Time `form:"expires_after" time_format:"2006-01-02" time_utc:"true"`
+	ExpiresBefore *time.Time `form:"expires_before" time_format:"2006-01-02" time_utc:"true"`
+
+	Cursor   *uuid.UUID `form:"cursor"`
+	Limit    int        `form:"limit"`
+	SortBy   string     `form:"sort_by"` // created_at|code|status|times_redeemed|expires_at|starts_at|updated_at
+	SortDesc bool       `form:"sort_desc"`
 }
 
 // AdminDiscountsResult is the paginated admin discount list envelope.

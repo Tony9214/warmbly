@@ -19,7 +19,7 @@ import (
 
 type Service interface {
 	Send(ctx context.Context, adminID uuid.UUID, req *models.SendAdminOutreachRequest) (*models.AdminOutreachMessage, *errx.Error)
-	List(ctx context.Context, limit int) ([]models.AdminOutreachMessage, *errx.Error)
+	Search(ctx context.Context, search *models.AdminOutreachSearch) (*models.AdminOutreachResult, *errx.Error)
 }
 
 type service struct {
@@ -87,13 +87,13 @@ func (s *service) Send(ctx context.Context, adminID uuid.UUID, req *models.SendA
 	return m, nil
 }
 
-func (s *service) List(ctx context.Context, limit int) ([]models.AdminOutreachMessage, *errx.Error) {
-	rows, err := s.repo.List(ctx, limit)
+func (s *service) Search(ctx context.Context, search *models.AdminOutreachSearch) (*models.AdminOutreachResult, *errx.Error) {
+	result, err := s.repo.Search(ctx, search)
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to load outreach log")
 	}
-	return rows, nil
+	return result, nil
 }
 
 func (s *service) resolveRecipient(ctx context.Context, req *models.SendAdminOutreachRequest) (string, *errx.Error) {

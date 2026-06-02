@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -19,7 +20,7 @@ type AdminOutreachRepository interface {
 	Insert(ctx context.Context, m *models.AdminOutreachMessage) error
 	MarkSent(ctx context.Context, id uuid.UUID) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
-	List(ctx context.Context, limit int) ([]models.AdminOutreachMessage, error)
+	Search(ctx context.Context, search *models.AdminOutreachSearch) (*models.AdminOutreachResult, error)
 }
 
 type adminOutreachRepository struct {
@@ -51,11 +52,106 @@ func (r *adminOutreachRepository) MarkFailed(ctx context.Context, id uuid.UUID, 
 	return err
 }
 
-func (r *adminOutreachRepository) List(ctx context.Context, limit int) ([]models.AdminOutreachMessage, error) {
-	if limit <= 0 || limit > 200 {
+// Search is the faceted + cursor-paginated admin outreach log query. Mirrors
+// SearchOrganizationsForAdmin (incremental WHERE builder, id keyset, LIMIT+1
+// has_more, separate COUNT).
+func (r *adminOutreachRepository) Search(ctx context.Context, search *models.AdminOutreachSearch) (*models.AdminOutreachResult, error) {
+	limit := search.Limit
+	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	const q = `
+
+	args := []interface{}{}
+	argNum := 1
+	where := "WHERE 1=1"
+
+	if search.Query != "" {
+		where += ` AND (m.to_email ILIKE $` + itoa(argNum) + ` OR m.subject ILIKE $` + itoa(argNum) + ` OR m.reply_to ILIKE $` + itoa(argNum) + `)`
+		args = append(args, "%"+search.Query+"%")
+		argNum++
+	}
+	switch search.Status {
+	case "queued", "sent", "failed":
+		where += ` AND m.status::text = $` + itoa(argNum)
+		args = append(args, search.Status)
+		argNum++
+	}
+	switch search.RecipientType {
+	case "user":
+		where += ` AND m.to_user_id IS NOT NULL`
+	case "org":
+		where += ` AND m.to_org_id IS NOT NULL`
+	case "email":
+		where += ` AND m.to_user_id IS NULL AND m.to_org_id IS NULL`
+	}
+	if search.SentByQuery != "" {
+		where += ` AND (s.email ILIKE $` + itoa(argNum) + ` OR s.first_name ILIKE $` + itoa(argNum) + ` OR s.last_name ILIKE $` + itoa(argNum) + `)`
+		args = append(args, "%"+search.SentByQuery+"%")
+		argNum++
+	}
+	if search.HasReplyTo {
+		where += ` AND m.reply_to IS NOT NULL AND m.reply_to <> ''`
+	}
+	if search.HasError {
+		where += ` AND m.error IS NOT NULL AND m.error <> ''`
+	}
+	if search.HasUser {
+		where += ` AND m.to_user_id IS NOT NULL`
+	}
+	if search.HasOrg {
+		where += ` AND m.to_org_id IS NOT NULL`
+	}
+
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	if search.CreatedWithin > 0 {
+		where += ` AND m.created_at >= NOW() - ($` + itoa(argNum) + `::int * INTERVAL '1 day')`
+		args = append(args, search.CreatedWithin)
+		argNum++
+	}
+	addAfter("m.created_at", search.CreatedAfter)
+	addBefore("m.created_at", search.CreatedBefore)
+	addAfter("m.sent_at", search.SentAtAfter)
+	addBefore("m.sent_at", search.SentAtBefore)
+
+	if search.Cursor != nil {
+		where += ` AND m.id < $` + itoa(argNum)
+		args = append(args, *search.Cursor)
+		argNum++
+	}
+
+	orderCol := "m.created_at"
+	switch search.SortBy {
+	case "sent_at":
+		orderCol = "m.sent_at"
+	case "status":
+		orderCol = "m.status::text"
+	case "to_email":
+		orderCol = "m.to_email"
+	case "subject":
+		orderCol = "m.subject"
+	}
+	orderDir := "DESC"
+	if search.SortBy != "" && !search.SortDesc {
+		orderDir = "ASC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir + ", m.id DESC"
+
+	args = append(args, limit+1)
+
+	query := `
 		SELECT m.id, m.sent_by, m.to_user_id, m.to_org_id, m.to_email, m.reply_to,
 			m.subject, m.body, m.status, m.error, m.sent_at, m.created_at,
 			s.id, s.first_name, s.last_name, s.email,
@@ -64,15 +160,16 @@ func (r *adminOutreachRepository) List(ctx context.Context, limit int) ([]models
 		FROM admin_outreach_messages m
 		JOIN users s ON s.id = m.sent_by
 		LEFT JOIN users u ON u.id = m.to_user_id
-		ORDER BY m.created_at DESC
-		LIMIT $1`
+		` + where + `
+		` + orderBy + `
+		LIMIT $` + itoa(argNum)
 
-	rows, err := r.db.Query(ctx, q, limit)
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []models.AdminOutreachMessage{}
+	items := []models.AdminOutreachMessage{}
 	for rows.Next() {
 		var m models.AdminOutreachMessage
 		var sender models.AdminUserSummary
@@ -92,9 +189,26 @@ func (r *adminOutreachRepository) List(ctx context.Context, limit int) ([]models
 				ID: toUserID, FirstName: toFN, LastName: toLN, Email: toEmail,
 			}
 		}
-		out = append(out, m)
+		items = append(items, m)
 	}
-	return out, nil
+
+	result := &models.AdminOutreachResult{
+		Data:       items,
+		Pagination: models.Pagination{HasMore: len(items) > limit},
+	}
+	if len(items) > limit {
+		result.Data = items[:limit]
+		last := items[limit-1].ID
+		result.Pagination.NextCursor = &last
+	}
+
+	countQuery := `SELECT COUNT(*) FROM admin_outreach_messages m JOIN users s ON s.id = m.sent_by LEFT JOIN users u ON u.id = m.to_user_id ` + where
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
+	}
+
+	return result, nil
 }
 
 // compile-time check

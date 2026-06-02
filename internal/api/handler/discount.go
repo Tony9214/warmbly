@@ -12,16 +12,15 @@ import (
 
 // --- Admin discount-code management ---
 
-// AdminListDiscounts lists discount codes with optional status/search filters.
+// AdminListDiscounts lists discount codes with the shared faceted query params.
 func (h *Handler) AdminListDiscounts(c *gin.Context) {
-	search := &models.AdminDiscountSearch{
-		Status: c.Query("status"),
-		Search: c.Query("search"),
-		Cursor: parseCursor(c.Query("cursor")),
-		Limit:  parseLimit(c.Query("limit"), 50),
+	var search models.AdminDiscountSearch
+	if err := c.ShouldBindQuery(&search); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid query parameters"))
+		return
 	}
 
-	result, xerr := h.DiscountService.List(c.Request.Context(), search)
+	result, xerr := h.DiscountService.List(c.Request.Context(), &search)
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return

@@ -175,16 +175,23 @@ type AdminUpdateWorker struct {
 	WorkerType *WorkerType `json:"worker_type,omitempty"`
 }
 
-// AdminWorkerEmail represents an email account connected to a worker
+// AdminWorkerEmail represents an email account connected to a worker, including
+// the per-mailbox health signals (risk band + worst warmup health state) so the
+// admin worker view can show how healthy the inboxes on a worker are.
 type AdminWorkerEmail struct {
-	ID             uuid.UUID  `json:"id"`
-	Email          string     `json:"email"`
-	UserID         uuid.UUID  `json:"user_id"`
-	OrganizationID *uuid.UUID `json:"organization_id,omitempty"`
-	Status         string     `json:"status"`
-	Provider       string     `json:"provider"`
-	WarmupEnabled  bool       `json:"warmup_enabled"`
-	LastSyncedAt   time.Time  `json:"last_synced_at"`
+	ID              uuid.UUID  `json:"id"`
+	Email           string     `json:"email"`
+	UserID          uuid.UUID  `json:"user_id"`
+	OrganizationID  *uuid.UUID `json:"organization_id,omitempty"`
+	Status          string     `json:"status"`
+	Provider        string     `json:"provider"`
+	WarmupEnabled   bool       `json:"warmup_enabled"`
+	LastSyncedAt    time.Time  `json:"last_synced_at"`
+	RiskBand        string     `json:"risk_band"` // clean | risky | quarantine
+	RiskEvaluatedAt *time.Time `json:"risk_evaluated_at,omitempty"`
+	WarmupHealth    string     `json:"warmup_health,omitempty"` // worst warmup health_state, "" if not in a pool
+	SpamScore       *int       `json:"spam_score,omitempty"`
+	BlockedUntil    *time.Time `json:"blocked_until,omitempty"`
 }
 
 // ReassignEmailsRequest represents the request to reassign emails
@@ -288,12 +295,43 @@ type AdminCampaignsResult struct {
 	Pagination Pagination            `json:"pagination"`
 }
 
-// AdminCampaignSearch represents search parameters for campaigns
+// AdminCampaignSearch represents search parameters for campaigns. form tags
+// must stay byte-identical to the TS AdminCampaignSearch keys; date facets are
+// *time.Time with time_format/time_utc, mirroring AdminOrgSearch.
 type AdminCampaignSearch struct {
-	Query    string     `form:"q"`
-	UserID   *uuid.UUID `form:"user_id"`
-	OrgID    *uuid.UUID `form:"org_id"`
-	Status   string     `form:"status"` // active, paused, completed, all
+	Query  string     `form:"q"`
+	UserID *uuid.UUID `form:"user_id"`
+	OrgID  *uuid.UUID `form:"org_id"`
+	Status string     `form:"status"` // draft, active, paused, completed, paused_trial_expired, paused_no_accounts
+
+	// Boolean flags
+	OpenTracking      bool `form:"open_tracking"`
+	LinkTracking      bool `form:"link_tracking"`
+	StopOnReply       bool `form:"stop_on_reply"`
+	TextOnly          bool `form:"text_only"`
+	UnsubscribeHeader bool `form:"unsubscribe_header"`
+
+	// Relationship existence
+	HasContacts bool `form:"has_contacts"`
+	HasBounces  bool `form:"has_bounces"`
+
+	// Count ranges
+	DailyLimitMin   *int `form:"daily_limit_min"`
+	DailyLimitMax   *int `form:"daily_limit_max"`
+	ContactCountMin *int `form:"contact_count_min"`
+	ContactCountMax *int `form:"contact_count_max"`
+	SentCountMin    *int `form:"sent_count_min"`
+	SentCountMax    *int `form:"sent_count_max"`
+
+	// Date ranges (YYYY-MM-DD, UTC)
+	CreatedWithin   int        `form:"created_within"` // days; 0 = any
+	CreatedAfter    *time.Time `form:"created_after" time_format:"2006-01-02" time_utc:"true"`
+	CreatedBefore   *time.Time `form:"created_before" time_format:"2006-01-02" time_utc:"true"`
+	StartDateAfter  *time.Time `form:"start_date_after" time_format:"2006-01-02" time_utc:"true"`
+	StartDateBefore *time.Time `form:"start_date_before" time_format:"2006-01-02" time_utc:"true"`
+	UpdatedAfter    *time.Time `form:"updated_after" time_format:"2006-01-02" time_utc:"true"`
+	UpdatedBefore   *time.Time `form:"updated_before" time_format:"2006-01-02" time_utc:"true"`
+
 	Cursor   *uuid.UUID `form:"cursor"`
 	Limit    int        `form:"limit"`
 	SortBy   string     `form:"sort_by"`
@@ -522,6 +560,7 @@ type AdminEnterpriseInquiry struct {
 	ContactEmail       string     `json:"contact_email"`
 	Phone              *string    `json:"phone,omitempty"`
 	TeamSize           *string    `json:"team_size,omitempty"`
+	EstimatedVolume    *int       `json:"estimated_volume,omitempty"`
 	MonthlyEmailVolume *string    `json:"monthly_email_volume,omitempty"`
 	Message            *string    `json:"message,omitempty"`
 	Status             string     `json:"status"`
@@ -539,6 +578,37 @@ type AdminEnterpriseInquiry struct {
 type AdminEnterpriseInquiriesResult struct {
 	Data       []AdminEnterpriseInquiry `json:"data"`
 	Pagination Pagination               `json:"pagination"`
+}
+
+// AdminEnterpriseInquirySearch are the query params for the enterprise inquiry
+// queue. Mirrors AdminOrgSearch tag conventions.
+type AdminEnterpriseInquirySearch struct {
+	Query      string `form:"q"`
+	Status     string `form:"status"`     // pending, contacted, converted, declined, all
+	Assignment string `form:"assignment"` // assigned, unassigned
+	Linkage    string `form:"linkage"`    // linked, anonymous
+
+	HasNotes  bool `form:"has_notes"`
+	HasPhone  bool `form:"has_phone"`
+	Processed bool `form:"processed"`
+
+	// Count ranges
+	TeamSizeMin        *int `form:"team_size_min"`
+	TeamSizeMax        *int `form:"team_size_max"`
+	EstimatedVolumeMin *int `form:"estimated_volume_min"`
+	EstimatedVolumeMax *int `form:"estimated_volume_max"`
+
+	// Date ranges (YYYY-MM-DD, UTC)
+	CreatedWithin int        `form:"created_within"`
+	CreatedAfter  *time.Time `form:"created_after" time_format:"2006-01-02" time_utc:"true"`
+	CreatedBefore *time.Time `form:"created_before" time_format:"2006-01-02" time_utc:"true"`
+	UpdatedAfter  *time.Time `form:"updated_after" time_format:"2006-01-02" time_utc:"true"`
+	UpdatedBefore *time.Time `form:"updated_before" time_format:"2006-01-02" time_utc:"true"`
+
+	Cursor   *uuid.UUID `form:"cursor"`
+	Limit    int        `form:"limit"`
+	SortBy   string     `form:"sort_by"` // created_at, updated_at, company_name, contact_email, status, team_size, estimated_volume
+	SortDesc bool       `form:"sort_desc"`
 }
 
 // UpdateEnterpriseInquiryRequest represents the request to update an inquiry
@@ -729,6 +799,84 @@ type AdminOrgListItem struct {
 type AdminOrgsResult struct {
 	Data       []AdminOrgListItem `json:"data"`
 	Pagination Pagination         `json:"pagination"`
+}
+
+// AdminLimitRequestSearch are the query params for the admin limit-request
+// queue. Mirrors AdminOrgSearch: *time.Time date facets, *int range bounds,
+// *uuid.UUID for cursor/org/submitter. The form tags must stay byte-identical
+// to the frontend param keys and the TS AdminLimitRequestSearch interface.
+type AdminLimitRequestSearch struct {
+	Query  string `form:"q"`
+	Status string `form:"status"` // pending, approved, rejected, cancelled, all
+	Field  string `form:"field"`  // app-validated: max_email_accounts ... daily_campaign_limit
+
+	OrgID       *uuid.UUID `form:"org_id"`
+	SubmittedBy *uuid.UUID `form:"submitted_by"`
+
+	// Flags
+	Reviewed   bool `form:"reviewed"`   // reviewed_at IS NOT NULL
+	Unreviewed bool `form:"unreviewed"` // reviewed_at IS NULL
+
+	// Numeric ranges
+	RequestedMin        *int `form:"requested_min"`
+	RequestedMax        *int `form:"requested_max"`
+	CurrentEffectiveMin *int `form:"current_effective_min"`
+	CurrentEffectiveMax *int `form:"current_effective_max"`
+
+	// Date ranges
+	SubmittedWithin int        `form:"submitted_within"` // days; 0 = any
+	SubmittedAfter  *time.Time `form:"submitted_after" time_format:"2006-01-02" time_utc:"true"`
+	SubmittedBefore *time.Time `form:"submitted_before" time_format:"2006-01-02" time_utc:"true"`
+	ReviewedAfter   *time.Time `form:"reviewed_after" time_format:"2006-01-02" time_utc:"true"`
+	ReviewedBefore  *time.Time `form:"reviewed_before" time_format:"2006-01-02" time_utc:"true"`
+
+	Cursor   *uuid.UUID `form:"cursor"`
+	Limit    int        `form:"limit"`
+	SortBy   string     `form:"sort_by"` // submitted_at, requested, current_effective, reviewed_at, status, field, org_name
+	SortDesc bool       `form:"sort_desc"`
+}
+
+// AdminLimitRequestsResult is the paginated admin limit-request response.
+type AdminLimitRequestsResult struct {
+	Data       []LimitIncreaseRequest `json:"data"`
+	Pagination Pagination             `json:"pagination"`
+}
+
+// AdminPlanSearch are the query params for the admin plan catalog listing.
+// Mirrors AdminOrgSearch tag conventions. price_* bind to *int (whole-dollar
+// filtering against the numeric price column).
+type AdminPlanSearch struct {
+	Query      string `form:"q"`
+	Visibility string `form:"visibility"` // public, private, "" = any
+	Duration   string `form:"duration"`   // month, year, "" = any (durations.title)
+
+	AIGeneration   bool `form:"ai_generation"`
+	HasStripe      bool `form:"has_stripe"`
+	HasSubscribers bool `form:"has_subscribers"`
+
+	// Numeric ranges
+	PriceMin        *int `form:"price_min"`
+	PriceMax        *int `form:"price_max"`
+	DailyEmailsMin  *int `form:"daily_emails_min"`
+	DailyEmailsMax  *int `form:"daily_emails_max"`
+	AccountLimitMin *int `form:"account_limit_min"`
+	AccountLimitMax *int `form:"account_limit_max"`
+
+	// Date range
+	CreatedWithin int        `form:"created_within"` // days; 0 = any
+	CreatedAfter  *time.Time `form:"created_after" time_format:"2006-01-02" time_utc:"true"`
+	CreatedBefore *time.Time `form:"created_before" time_format:"2006-01-02" time_utc:"true"`
+
+	Cursor   *uuid.UUID `form:"cursor"`
+	Limit    int        `form:"limit"`
+	SortBy   string     `form:"sort_by"` // price, name, daily_emails, account_limit, created_at
+	SortDesc bool       `form:"sort_desc"`
+}
+
+// AdminPlansResult is the paginated response for the admin plan listing.
+type AdminPlansResult struct {
+	Data       []Plan     `json:"data"`
+	Pagination Pagination `json:"pagination"`
 }
 
 // AdminOrgDetail is the full payload for the org detail page. Carries

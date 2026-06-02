@@ -83,7 +83,7 @@ type OrganizationRepository interface {
 	CreateLimitRequest(ctx context.Context, req *models.LimitIncreaseRequest) error
 	GetLimitRequest(ctx context.Context, id uuid.UUID) (*models.LimitIncreaseRequest, error)
 	ListLimitRequestsForOrg(ctx context.Context, orgID uuid.UUID) ([]models.LimitIncreaseRequest, error)
-	ListLimitRequestsForAdmin(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, error)
+	ListLimitRequestsForAdmin(ctx context.Context, search *models.AdminLimitRequestSearch) (*models.AdminLimitRequestsResult, error)
 	UpdateLimitRequestStatus(ctx context.Context, id uuid.UUID, status models.LimitRequestStatus, reviewedBy uuid.UUID, notes string) error
 }
 
@@ -1095,20 +1095,118 @@ func (r *organizationRepository) ListLimitRequestsForOrg(ctx context.Context, or
 	return out, nil
 }
 
-// ListLimitRequestsForAdmin joins org + submitter so the admin queue can
-// show context per row without an extra fan-out fetch.
-func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, error) {
-	if limit <= 0 || limit > 200 {
+// ListLimitRequestsForAdmin joins org + submitter so the admin queue can show
+// context per row without an extra fan-out fetch. Faceted + cursor paginated,
+// mirroring SearchOrganizationsForAdmin (incremental WHERE builder, id keyset,
+// LIMIT+1 has_more, separate COUNT).
+func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, search *models.AdminLimitRequestSearch) (*models.AdminLimitRequestsResult, error) {
+	limit := search.Limit
+	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+
 	args := []interface{}{}
+	argNum := 1
 	where := "WHERE 1=1"
-	if status != "" && status != "all" {
-		where += " AND lr.status = $1"
-		args = append(args, status)
+
+	if search.Query != "" {
+		where += ` AND (o.name ILIKE $` + itoa(argNum) + ` OR o.slug ILIKE $` + itoa(argNum) + ` OR u.email ILIKE $` + itoa(argNum) + ` OR lr.reason ILIKE $` + itoa(argNum) + `)`
+		args = append(args, "%"+search.Query+"%")
+		argNum++
 	}
-	args = append(args, limit)
-	limitParam := "$" + itoa(len(args))
+	if search.Status != "" && search.Status != "all" {
+		where += " AND lr.status = $" + itoa(argNum)
+		args = append(args, search.Status)
+		argNum++
+	}
+	if search.Field != "" {
+		where += " AND lr.field = $" + itoa(argNum)
+		args = append(args, search.Field)
+		argNum++
+	}
+	if search.OrgID != nil {
+		where += " AND lr.organization_id = $" + itoa(argNum)
+		args = append(args, *search.OrgID)
+		argNum++
+	}
+	if search.SubmittedBy != nil {
+		where += " AND lr.submitted_by = $" + itoa(argNum)
+		args = append(args, *search.SubmittedBy)
+		argNum++
+	}
+	if search.Reviewed {
+		where += " AND lr.reviewed_at IS NOT NULL"
+	}
+	if search.Unreviewed {
+		where += " AND lr.reviewed_at IS NULL"
+	}
+
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			where += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	addInt(`lr.requested >= $%d`, search.RequestedMin)
+	addInt(`lr.requested <= $%d`, search.RequestedMax)
+	addInt(`lr.current_effective >= $%d`, search.CurrentEffectiveMin)
+	addInt(`lr.current_effective <= $%d`, search.CurrentEffectiveMax)
+
+	if search.SubmittedWithin > 0 {
+		where += ` AND lr.submitted_at >= NOW() - ($` + itoa(argNum) + `::int * INTERVAL '1 day')`
+		args = append(args, search.SubmittedWithin)
+		argNum++
+	}
+	addAfter("lr.submitted_at", search.SubmittedAfter)
+	addBefore("lr.submitted_at", search.SubmittedBefore)
+	addAfter("lr.reviewed_at", search.ReviewedAfter)
+	addBefore("lr.reviewed_at", search.ReviewedBefore)
+
+	// Keyset on id (mirrors the org explorer; default sort is submitted_at).
+	if search.Cursor != nil {
+		where += " AND lr.id < $" + itoa(argNum)
+		args = append(args, *search.Cursor)
+		argNum++
+	}
+
+	orderCol := "lr.submitted_at"
+	switch search.SortBy {
+	case "requested":
+		orderCol = "lr.requested"
+	case "current_effective":
+		orderCol = "lr.current_effective"
+	case "reviewed_at":
+		orderCol = "lr.reviewed_at"
+	case "status":
+		orderCol = "lr.status::text"
+	case "field":
+		orderCol = "lr.field"
+	case "org_name":
+		orderCol = "o.name"
+	}
+	orderDir := "DESC"
+	if search.SortBy != "" && !search.SortDesc {
+		orderDir = "ASC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir + ", lr.id DESC"
+
+	args = append(args, limit+1)
 
 	query := `
 		SELECT lr.id, lr.organization_id, lr.field, lr.current_effective, lr.requested,
@@ -1120,14 +1218,15 @@ func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, 
 		JOIN organizations o ON o.id = lr.organization_id
 		JOIN users u ON u.id = lr.submitted_by
 		` + where + `
-		ORDER BY lr.submitted_at DESC
-		LIMIT ` + limitParam
+		` + orderBy + `
+		LIMIT $` + itoa(argNum)
+
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []models.LimitIncreaseRequest{}
+	items := []models.LimitIncreaseRequest{}
 	for rows.Next() {
 		var lr models.LimitIncreaseRequest
 		var org models.Organization
@@ -1143,9 +1242,27 @@ func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, 
 		}
 		lr.Organization = &org
 		lr.SubmittedByUser = &user
-		out = append(out, lr)
+		items = append(items, lr)
 	}
-	return out, nil
+
+	result := &models.AdminLimitRequestsResult{
+		Data:       items,
+		Pagination: models.Pagination{HasMore: len(items) > limit},
+	}
+	if len(items) > limit {
+		result.Data = items[:limit]
+		last := items[limit-1].ID
+		result.Pagination.NextCursor = &last
+	}
+
+	// Total count for the same filter — drop the trailing LIMIT arg.
+	countQuery := `SELECT COUNT(*) FROM limit_increase_requests lr JOIN organizations o ON o.id = lr.organization_id JOIN users u ON u.id = lr.submitted_by ` + where
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
+	}
+
+	return result, nil
 }
 
 func (r *organizationRepository) UpdateLimitRequestStatus(ctx context.Context, id uuid.UUID, status models.LimitRequestStatus, reviewedBy uuid.UUID, notes string) error {

@@ -707,15 +707,27 @@ func (h *Handler) AdminGetUserGrowthStats(c *gin.Context) {
 
 // Plan Management Handlers
 
-// AdminListPlans lists all plans
+// AdminListPlans lists the plan catalog with the shared faceted query params;
+// returns the standard {data, pagination} envelope.
 func (h *Handler) AdminListPlans(c *gin.Context) {
-	plans, xerr := h.AdminService.ListPlans(c.Request.Context(), true)
+	var search models.AdminPlanSearch
+	if err := c.ShouldBindQuery(&search); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid query parameters"))
+		return
+	}
+	// duration is durations.title (free text, no DB enum) — validate app-side.
+	if search.Duration != "" && search.Duration != "month" && search.Duration != "year" {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid duration"))
+		return
+	}
+
+	result, xerr := h.AdminService.SearchPlansForAdmin(c.Request.Context(), &search)
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"plans": plans})
+	c.JSON(http.StatusOK, result)
 }
 
 // AdminCreatePlan creates a new plan
@@ -812,13 +824,16 @@ func (h *Handler) AdminDeletePlan(c *gin.Context) {
 
 // Enterprise Inquiry Handlers
 
-// AdminListEnterpriseInquiries lists enterprise inquiries
+// AdminListEnterpriseInquiries lists enterprise inquiries with the shared
+// faceted query params; returns the standard {data, pagination} envelope.
 func (h *Handler) AdminListEnterpriseInquiries(c *gin.Context) {
-	status := c.Query("status")
-	cursor := parseCursor(c.Query("cursor"))
-	limit := parseLimit(c.Query("limit"), 50)
+	var search models.AdminEnterpriseInquirySearch
+	if err := c.ShouldBindQuery(&search); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid query parameters"))
+		return
+	}
 
-	result, xerr := h.AdminService.ListEnterpriseInquiries(c.Request.Context(), status, cursor, limit)
+	result, xerr := h.AdminService.ListEnterpriseInquiries(c.Request.Context(), &search)
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return

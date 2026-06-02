@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/warmbly/warmbly/internal/api/middleware"
@@ -53,17 +52,22 @@ func (h *Handler) AdminSendOutreach(c *gin.Context) {
 	c.JSON(http.StatusCreated, msg)
 }
 
-// AdminListOutreach is GET /admin/outreach?limit=50.
+// AdminListOutreach is GET /admin/outreach with the shared faceted query
+// params; returns the standard {data, pagination} envelope.
 func (h *Handler) AdminListOutreach(c *gin.Context) {
 	if h.AdminOutreachService == nil {
 		errx.JSON(c, errx.New(errx.Internal, "admin outreach service not available"))
 		return
 	}
-	limit, _ := strconv.Atoi(c.Query("limit"))
-	rows, xerr := h.AdminOutreachService.List(c.Request.Context(), limit)
+	var search models.AdminOutreachSearch
+	if err := c.ShouldBindQuery(&search); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid query parameters"))
+		return
+	}
+	result, xerr := h.AdminOutreachService.Search(c.Request.Context(), &search)
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": rows})
+	c.JSON(http.StatusOK, result)
 }
