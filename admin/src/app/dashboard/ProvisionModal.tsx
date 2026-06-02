@@ -6,9 +6,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
     CheckCircle2,
+    Cloud,
     Loader2,
     Rocket,
     Send,
@@ -40,11 +42,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
     createProvisioningJob,
+    createProvisioningTemplate,
     getProvisioningJob,
     listProvisioningTemplates,
 } from "@/lib/api/client/admin/provisioning";
 import {
+    listCloudCredentials,
     listHetznerServerTypes,
+    serverTypeMonthlyEUR,
 } from "@/lib/api/client/admin/cloud";
 import type {
     ProvisioningJob,
@@ -97,29 +102,52 @@ export function ProvisionModal({ open, onOpenChange, onJobCreated }: Props) {
         retry: false,
     });
 
+    // Cloud-first gate: a cloud provider must be connected before a worker can
+    // be provisioned (otherwise the job can never reach a provider API).
+    const cloudsQ = useQuery({
+        queryKey: ["admin", "cloud-credentials"],
+        queryFn: listCloudCredentials,
+        enabled: open,
+        retry: false,
+    });
+    const hasCloud = (cloudsQ.data ?? []).length > 0;
+
     const selectedTpl: ProvisioningTemplate | undefined = useMemo(
         () => templatesQ.data?.find((t) => t.id === selectedTplId),
         [templatesQ.data, selectedTplId],
     );
 
+    const customReady =
+        !!customForm.config.location && !!customForm.config.server_type;
+
     const submitMut = useMutation({
-        mutationFn: () => {
+        mutationFn: async () => {
             if (tab === "template") {
                 if (!selectedTplId) {
                     throw new Error("Pick a template first");
                 }
                 return createProvisioningJob({ template_id: selectedTplId });
             }
-            return createProvisioningJob({
-                config: customForm.config,
-                save_as_template:
-                    saveAsTemplate && saveTemplateName.trim()
-                        ? {
-                            name: saveTemplateName.trim(),
-                            description: customForm.description || undefined,
-                        }
-                        : undefined,
-            });
+            if (!customReady) {
+                throw new Error("Pick a location and server type first");
+            }
+            // "Save as template" persists the config first, then launches the
+            // job from its id — keeping the create-job contract to a single
+            // {template_id | custom} shape the backend understands.
+            if (saveAsTemplate && saveTemplateName.trim()) {
+                const tpl = await createProvisioningTemplate({
+                    name: saveTemplateName.trim(),
+                    description: customForm.description || undefined,
+                    config: customForm.config,
+                    auto_provision_tier:
+                        customForm.auto_provision_tier === ""
+                            ? undefined
+                            : customForm.auto_provision_tier,
+                    is_draft: false,
+                });
+                return createProvisioningJob({ template_id: tpl.id });
+            }
+            return createProvisioningJob({ custom: customForm.config });
         },
         onSuccess: (job) => {
             toast.success("Provisioning job created");
@@ -148,6 +176,29 @@ export function ProvisionModal({ open, onOpenChange, onJobCreated }: Props) {
                                 template or hand-roll a one-off.
                             </DialogDescription>
                         </DialogHeader>
+
+                        {!cloudsQ.isLoading && !hasCloud && (
+                            <div className="rounded-md border border-amber-300 bg-amber-50 p-4 flex items-start gap-3">
+                                <Cloud className="size-5 text-amber-600 shrink-0 mt-0.5" />
+                                <div className="text-sm">
+                                    <div className="font-medium text-amber-900">
+                                        Connect a cloud first
+                                    </div>
+                                    <p className="text-xs text-amber-800 mt-0.5">
+                                        Provisioning needs a cloud provider to create machines
+                                        against. Add a Hetzner token under{" "}
+                                        <Link
+                                            to="/settings/cloud-providers"
+                                            className="underline font-medium"
+                                            onClick={() => onOpenChange(false)}
+                                        >
+                                            Settings → Cloud Providers
+                                        </Link>
+                                        , then come back here.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         <Tabs
                             value={tab}
@@ -239,7 +290,10 @@ export function ProvisionModal({ open, onOpenChange, onJobCreated }: Props) {
                                 onClick={() => submitMut.mutate()}
                                 disabled={
                                     submitMut.isPending ||
-                                    (tab === "template" && !selectedTplId)
+                                    !hasCloud ||
+                                    (tab === "template" && !selectedTplId) ||
+                                    (tab === "custom" && !customReady) ||
+                                    (saveAsTemplate && !saveTemplateName.trim())
                                 }
                                 className="bg-[var(--admin-accent)] hover:bg-[var(--admin-accent-strong)] text-white"
                             >
@@ -274,8 +328,8 @@ function TemplateSummary({ tpl }: { tpl: ProvisioningTemplate }) {
     const st = serverTypesQ.data?.find(
         (s) => s.name === tpl.config.server_type,
     );
-    const sp = st?.price_monthly_eur ?? 0;
-    const ipPrice = st?.price_ipv4_monthly_eur ?? 0.5;
+    const sp = serverTypeMonthlyEUR(st, tpl.config.location);
+    const ipPrice = st?.price_ipv4_monthly_eur ?? 0.6;
     const extraIps =
         Math.max(0, tpl.config.ipv4_per_server - 1) * tpl.config.server_count;
     const cost = sp * tpl.config.server_count + ipPrice * extraIps;

@@ -1,8 +1,11 @@
 // /admin/outreach — platform mailer composer + audit log.
 
 import { Request } from "@/lib/api/client";
+import { buildSearchQuery } from "@/lib/api/client/admin/query";
 import type {
     AdminOutreachMessage,
+    AdminOutreachResult,
+    AdminOutreachSearch,
     SendAdminOutreachRequest,
 } from "@/lib/api/models/admin";
 
@@ -17,12 +20,16 @@ export function sendOutreach(
     });
 }
 
+function toQuery(params: AdminOutreachSearch): string {
+    return buildSearchQuery(params as Record<string, unknown>);
+}
+
 export function listOutreach(
-    limit = 50,
-): Promise<{ data: AdminOutreachMessage[] }> {
+    params: AdminOutreachSearch = {},
+): Promise<AdminOutreachResult> {
     return Request({
         method: "GET",
-        url: `/admin/outreach?limit=${limit}`,
+        url: `/admin/outreach${toQuery(params)}`,
         authorization: true,
     });
 }

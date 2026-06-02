@@ -1,10 +1,10 @@
-// Plan catalog admin. Lists every plan with public/private status,
-// price, the four limit columns, and a click-to-edit dialog for the
-// limit + price fields. Stripe IDs are surfaced but read-only — those
-// must be edited in Stripe and synced back, never the other way around.
+// Plan catalog admin — left filter rail + server-driven sortable, cursor-paged
+// table (mirrors OrganizationsPage). Click-to-edit dialog for the limit + price
+// fields is preserved. Stripe IDs are surfaced but read-only — those must be
+// edited in Stripe and synced back, never the other way around.
 
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Eye, EyeOff, Pencil } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
     Dialog,
     DialogContent,
@@ -21,134 +20,283 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { listPlans, updatePlan } from "@/lib/api/client/admin/plans";
-import type { Plan, UpdatePlanRequest } from "@/lib/api/models/admin";
+import {
+    Explorer,
+    FilterGroup,
+    SearchFilter,
+    SegmentedFilter,
+    SelectFilter,
+    ToggleFilter,
+    DateRangeFilter,
+    NumberRangeFilter,
+} from "@/components/data/Explorer";
+import { DataTable, type Column } from "@/components/data/DataTable";
+import { useCursorPager } from "@/lib/useCursorPager";
+import {
+    emptyRange,
+    rangeActive,
+    rangeWithin,
+    rangeAfter,
+    rangeBefore,
+    type DateRange,
+} from "@/lib/dateRange";
+import { searchPlans, updatePlan } from "@/lib/api/client/admin/plans";
+import type { AdminPlanSearch, Plan, UpdatePlanRequest } from "@/lib/api/models/admin";
+
+const planInterval = (p: Plan): string =>
+    typeof p.duration === "string" ? p.duration : p.duration?.title ?? "";
 
 export default function PlansPage() {
-    const { data, isLoading, error } = useQuery({
-        queryKey: ["admin", "plans"],
-        queryFn: listPlans,
-        staleTime: 60_000,
-    });
+    const [query, setQuery] = useState("");
+    const [visibility, setVisibility] = useState<"" | "public" | "private">("");
+    const [duration, setDuration] = useState("");
+    const [aiGen, setAiGen] = useState(false);
+    const [hasStripe, setHasStripe] = useState(false);
+    const [hasSubs, setHasSubs] = useState(false);
+    const [priceMin, setPriceMin] = useState<number | undefined>();
+    const [priceMax, setPriceMax] = useState<number | undefined>();
+    const [dailyMin, setDailyMin] = useState<number | undefined>();
+    const [dailyMax, setDailyMax] = useState<number | undefined>();
+    const [accMin, setAccMin] = useState<number | undefined>();
+    const [accMax, setAccMax] = useState<number | undefined>();
+    const [created, setCreated] = useState<DateRange>(emptyRange);
+    const [sort, setSort] = useState<{ by: string; desc: boolean }>({ by: "", desc: false });
+    const pager = useCursorPager();
+    const { reset } = pager;
 
     const [editing, setEditing] = useState<Plan | null>(null);
-    const plans = data?.data ?? [];
+
+    const filterKey = JSON.stringify({
+        query, visibility, duration, aiGen, hasStripe, hasSubs,
+        priceMin, priceMax, dailyMin, dailyMax, accMin, accMax, created, sort,
+    });
+
+    useEffect(() => {
+        reset();
+    }, [filterKey, reset]);
+
+    const { data, isLoading, error, refetch } = useQuery({
+        queryKey: ["admin", "plans", filterKey, pager.cursor],
+        queryFn: () =>
+            searchPlans({
+                q: query.trim() || undefined,
+                visibility: visibility || undefined,
+                duration: duration || undefined,
+                ai_generation: aiGen || undefined,
+                has_stripe: hasStripe || undefined,
+                has_subscribers: hasSubs || undefined,
+                price_min: priceMin,
+                price_max: priceMax,
+                daily_emails_min: dailyMin,
+                daily_emails_max: dailyMax,
+                account_limit_min: accMin,
+                account_limit_max: accMax,
+                created_within: rangeWithin(created),
+                created_after: rangeAfter(created),
+                created_before: rangeBefore(created),
+                limit: 50,
+                cursor: pager.cursor,
+                sort_by: sort.by ? (sort.by as AdminPlanSearch["sort_by"]) : undefined,
+                sort_desc: sort.by ? sort.desc : undefined,
+            }),
+        staleTime: 30_000,
+        placeholderData: keepPreviousData,
+    });
+
+    const rows = data?.data ?? [];
+
+    const bools = [aiGen, hasStripe, hasSubs];
+    const ranges = [[priceMin, priceMax], [dailyMin, dailyMax], [accMin, accMax]];
+    const activeCount =
+        (query ? 1 : 0) +
+        (visibility ? 1 : 0) +
+        (duration ? 1 : 0) +
+        bools.filter(Boolean).length +
+        ranges.filter(([a, b]) => a !== undefined || b !== undefined).length +
+        [created].filter(rangeActive).length +
+        (sort.by ? 1 : 0);
+
+    function resetAll() {
+        setQuery("");
+        setVisibility("");
+        setDuration("");
+        setAiGen(false);
+        setHasStripe(false);
+        setHasSubs(false);
+        setPriceMin(undefined);
+        setPriceMax(undefined);
+        setDailyMin(undefined);
+        setDailyMax(undefined);
+        setAccMin(undefined);
+        setAccMax(undefined);
+        setCreated(emptyRange);
+        setSort({ by: "", desc: false });
+    }
+
+    const columns: Column<Plan>[] = [
+        {
+            id: "name",
+            header: "Name",
+            sortable: true,
+            sortKey: "name",
+            cell: (p) => (
+                <div>
+                    <div className="font-medium">{p.name ?? "(unnamed)"}</div>
+                    {p.stripe_price_id && (
+                        <div className="font-mono text-[10px] text-muted-foreground">{p.stripe_price_id}</div>
+                    )}
+                </div>
+            ),
+            csv: (p) => p.name ?? "",
+        },
+        {
+            id: "visibility",
+            header: "Visibility",
+            cell: (p) =>
+                p.public ? (
+                    <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-700 bg-emerald-50">
+                        <Eye className="size-2.5" /> public
+                    </Badge>
+                ) : (
+                    <Badge variant="outline" className="text-[10px] border-purple-300 text-purple-700 bg-purple-50">
+                        <EyeOff className="size-2.5" /> private
+                    </Badge>
+                ),
+            csv: (p) => (p.public ? "public" : "private"),
+        },
+        {
+            id: "price",
+            header: "Price",
+            align: "right",
+            sortable: true,
+            sortKey: "price",
+            cell: (p) => (
+                <span className="tabular-nums">
+                    ${p.discounted_price.toFixed(2)}
+                    {p.price !== p.discounted_price && (
+                        <span className="text-muted-foreground line-through ml-1 text-[10px]">${p.price.toFixed(2)}</span>
+                    )}
+                </span>
+            ),
+            csv: (p) => p.discounted_price,
+        },
+        { id: "daily", header: "Daily", align: "right", sortable: true, sortKey: "daily_emails", cell: (p) => <span className="tabular-nums">{p.daily_emails}</span>, csv: (p) => p.daily_emails },
+        { id: "accounts", header: "Accounts", align: "right", sortable: true, sortKey: "account_limit", cell: (p) => <span className="tabular-nums">{p.account_limit}</span>, csv: (p) => p.account_limit },
+        { id: "mailboxes", header: "Mailboxes", align: "right", cell: (p) => <span className="tabular-nums">{p.max_email_accounts ?? "∞"}</span>, csv: (p) => p.max_email_accounts ?? "" },
+        { id: "campaigns", header: "Campaigns", align: "right", cell: (p) => <span className="tabular-nums">{p.max_campaigns ?? "∞"}</span>, csv: (p) => p.max_campaigns ?? "" },
+        { id: "contacts", header: "Contacts", align: "right", cell: (p) => <span className="tabular-nums">{p.max_contacts.toLocaleString()}</span>, csv: (p) => p.max_contacts },
+        { id: "interval", header: "Interval", cell: (p) => <span className="text-xs text-muted-foreground">{planInterval(p) || "—"}</span>, csv: (p) => planInterval(p) },
+        { id: "created", header: "Created", sortable: true, sortKey: "created_at", defaultHidden: true, cell: (p) => <span className="text-xs text-muted-foreground">{new Date(p.created_at).toLocaleDateString()}</span>, csv: (p) => p.created_at },
+        {
+            id: "actions",
+            header: "",
+            align: "right",
+            cell: (p) => (
+                <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setEditing(p);
+                    }}
+                    className="text-xs"
+                >
+                    <Pencil className="size-3" /> Edit
+                </Button>
+            ),
+        },
+    ];
 
     return (
         <div>
             <PageHeader
                 title="Plans & Billing"
-                description="Catalog of pricing tiers. Public plans appear on the marketing site; private plans are reserved for enterprise contracts."
+                description="Catalog of pricing tiers. Filter by visibility, interval, capability, price, and usage; public plans appear on the marketing site, private plans are reserved for enterprise contracts."
             />
-
-            {isLoading && <Skeleton className="h-48 w-full" />}
-            {error && (
-                <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-md p-3">
-                    Failed to load plans.
-                </div>
-            )}
-
-            {!isLoading && !error && (
-                <div className="border border-border rounded-lg overflow-hidden bg-card">
-                    <table className="w-full text-sm">
-                        <thead className="bg-muted/50 text-muted-foreground text-xs uppercase">
-                            <tr>
-                                <th className="text-left px-3 py-2 font-medium">Name</th>
-                                <th className="text-left px-3 py-2 font-medium">Visibility</th>
-                                <th className="text-right px-3 py-2 font-medium">Price</th>
-                                <th className="text-right px-3 py-2 font-medium">Mailboxes</th>
-                                <th className="text-right px-3 py-2 font-medium">Campaigns</th>
-                                <th className="text-right px-3 py-2 font-medium">Members</th>
-                                <th className="text-right px-3 py-2 font-medium">Contacts</th>
-                                <th className="text-right px-3 py-2 font-medium">Daily</th>
-                                <th className="text-right px-3 py-2 font-medium">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {plans.map((p) => (
-                                <PlanRow key={p.id} plan={p} onEdit={() => setEditing(p)} />
-                            ))}
-                            {plans.length === 0 && (
-                                <tr>
-                                    <td colSpan={9} className="text-center text-muted-foreground py-8 text-sm">
-                                        No plans configured.
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            )}
+            <Explorer
+                activeCount={activeCount}
+                onReset={resetAll}
+                filters={
+                    <>
+                        <FilterGroup label="Search">
+                            <SearchFilter value={query} onChange={setQuery} placeholder="Name or Stripe ID…" />
+                        </FilterGroup>
+                        <FilterGroup label="Visibility">
+                            <SegmentedFilter
+                                value={visibility}
+                                onChange={setVisibility}
+                                options={[
+                                    { value: "", label: "Any" },
+                                    { value: "public", label: "Public" },
+                                    { value: "private", label: "Private" },
+                                ]}
+                            />
+                        </FilterGroup>
+                        <FilterGroup label="Interval">
+                            <SelectFilter
+                                value={duration || "any"}
+                                onChange={(v) => setDuration(v === "any" ? "" : v)}
+                                options={[
+                                    { value: "any", label: "Any interval" },
+                                    { value: "month", label: "Monthly" },
+                                    { value: "year", label: "Yearly" },
+                                ]}
+                                placeholder="Any interval"
+                            />
+                        </FilterGroup>
+                        <FilterGroup label="Capability">
+                            <div className="flex flex-col gap-2">
+                                <ToggleFilter checked={aiGen} onChange={setAiGen} label="AI generation" />
+                                <ToggleFilter checked={hasStripe} onChange={setHasStripe} label="Has Stripe price" />
+                                <ToggleFilter checked={hasSubs} onChange={setHasSubs} label="Has subscribers" />
+                            </div>
+                        </FilterGroup>
+                        <FilterGroup label="Price">
+                            <NumberRangeFilter min={priceMin} max={priceMax} onMinChange={setPriceMin} onMaxChange={setPriceMax} />
+                        </FilterGroup>
+                        <FilterGroup label="Daily emails">
+                            <NumberRangeFilter min={dailyMin} max={dailyMax} onMinChange={setDailyMin} onMaxChange={setDailyMax} />
+                        </FilterGroup>
+                        <FilterGroup label="Account limit">
+                            <NumberRangeFilter min={accMin} max={accMax} onMinChange={setAccMin} onMaxChange={setAccMax} />
+                        </FilterGroup>
+                        <FilterGroup label="Created">
+                            <DateRangeFilter value={created} onChange={setCreated} />
+                        </FilterGroup>
+                    </>
+                }
+            >
+                <DataTable
+                    columns={columns}
+                    rows={rows}
+                    getRowId={(p) => p.id}
+                    loading={isLoading}
+                    error={error}
+                    onRetry={() => refetch()}
+                    errorTitle="Failed to load plans"
+                    sort={sort.by ? sort : undefined}
+                    onSortChange={setSort}
+                    storageKey="admin.plans"
+                    csvName="warmbly-plans"
+                    noun="plans"
+                    emptyTitle="No plans"
+                    emptyHint="No plans match these filters."
+                    pager={{
+                        canPrev: pager.canPrev,
+                        canNext: !!data?.pagination?.has_more,
+                        onPrev: pager.prev,
+                        onNext: () => pager.next(data?.pagination?.next_cursor),
+                        page: pager.page,
+                        shown: rows.length,
+                        total: data?.pagination?.total ?? null,
+                    }}
+                />
+            </Explorer>
 
             {editing && (
-                <PlanEditDialog
-                    plan={editing}
-                    open
-                    onOpenChange={(v) => !v && setEditing(null)}
-                />
+                <PlanEditDialog plan={editing} open onOpenChange={(v) => !v && setEditing(null)} />
             )}
         </div>
-    );
-}
-
-function PlanRow({ plan, onEdit }: { plan: Plan; onEdit: () => void }) {
-    return (
-        <tr className="border-t border-border hover:bg-muted/30">
-            <td className="px-3 py-2">
-                <div className="font-medium">{plan.name ?? "(unnamed)"}</div>
-                {plan.stripe_price_id && (
-                    <div className="text-[10px] text-muted-foreground font-mono">
-                        {plan.stripe_price_id}
-                    </div>
-                )}
-            </td>
-            <td className="px-3 py-2">
-                {plan.public ? (
-                    <Badge
-                        variant="outline"
-                        className="text-[10px] border-emerald-300 text-emerald-700 bg-emerald-50"
-                    >
-                        <Eye className="size-2.5" /> public
-                    </Badge>
-                ) : (
-                    <Badge
-                        variant="outline"
-                        className="text-[10px] border-purple-300 text-purple-700 bg-purple-50"
-                    >
-                        <EyeOff className="size-2.5" /> private
-                    </Badge>
-                )}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                ${plan.discounted_price.toFixed(2)}
-                {plan.price !== plan.discounted_price && (
-                    <span className="text-muted-foreground line-through ml-1 text-[10px]">
-                        ${plan.price.toFixed(2)}
-                    </span>
-                )}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {plan.max_email_accounts ?? "∞"}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {plan.max_campaigns ?? "∞"}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {plan.max_team_members ?? "∞"}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {plan.max_contacts.toLocaleString()}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {plan.daily_emails}
-            </td>
-            <td className="px-3 py-2 text-right">
-                <Button size="sm" variant="outline" onClick={onEdit} className="text-xs">
-                    <Pencil className="size-3" />
-                    Edit
-                </Button>
-            </td>
-        </tr>
     );
 }
 

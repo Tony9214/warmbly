@@ -1,12 +1,32 @@
 // /admin/plans — plan catalog.
 
 import { Request } from "@/lib/api/client";
-import type { Plan, UpdatePlanRequest } from "@/lib/api/models/admin";
+import { buildSearchQuery } from "@/lib/api/client/admin/query";
+import type {
+    AdminPlanSearch,
+    AdminPlansResult,
+    Plan,
+    UpdatePlanRequest,
+} from "@/lib/api/models/admin";
 
-export function listPlans(): Promise<{ data: Plan[] }> {
+// listPlans is the no-arg variant used as a facet-dropdown source (it is passed
+// directly as a react-query queryFn, so it must NOT accept the query context as
+// params). It returns the first page; callers read `.data`.
+export function listPlans(): Promise<AdminPlansResult> {
     return Request({
         method: "GET",
         url: "/admin/plans",
+        authorization: true,
+    });
+}
+
+// searchPlans is the faceted variant for the Plans explorer page.
+export function searchPlans(
+    params: AdminPlanSearch = {},
+): Promise<AdminPlansResult> {
+    return Request({
+        method: "GET",
+        url: `/admin/plans${buildSearchQuery(params as Record<string, unknown>)}`,
         authorization: true,
     });
 }

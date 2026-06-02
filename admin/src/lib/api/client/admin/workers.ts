@@ -1,7 +1,26 @@
 // /admin/workers/* — the SSH-managed-worker control plane.
 
 import { Request } from "@/lib/api/client";
-import type { ManagedWorker, WorkerLiveStatus } from "@/lib/api/models/admin";
+import type {
+    AdminWorkerEmailsResult,
+    ManagedWorker,
+    WorkerLiveStatus,
+} from "@/lib/api/models/admin";
+
+// getWorkerEmails returns the mailboxes assigned to a worker (paginated), with
+// per-mailbox risk band + warmup health so the detail page can show how healthy
+// the inboxes on this worker are.
+export function getWorkerEmails(
+    id: string,
+    cursor?: string,
+): Promise<AdminWorkerEmailsResult> {
+    const q = cursor ? `?cursor=${cursor}` : "";
+    return Request({
+        method: "GET",
+        url: `/admin/workers/${id}/emails${q}`,
+        authorization: true,
+    });
+}
 
 export function listManagedWorkers(): Promise<{ data: ManagedWorker[] }> {
     return Request({

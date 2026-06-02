@@ -10,6 +10,7 @@ import type {
     CloudCredential,
     CloudCredentialCreate,
     CloudCredentialTestResult,
+    HetznerImage,
     HetznerLocation,
     HetznerServerType,
 } from "@/lib/api/models/admin";
@@ -71,13 +72,12 @@ export function deleteCloudCredential(id: string): Promise<{ ok: boolean }> {
 }
 
 export async function testHetznerCredential(
-    credentialId?: string,
+    credentialId: string,
 ): Promise<CloudCredentialTestResult> {
     try {
         return await Request<CloudCredentialTestResult>({
             method: "POST",
-            url: "/admin/cloud-providers/hetzner/test",
-            data: credentialId ? { credential_id: credentialId } : undefined,
+            url: `/admin/cloud-credentials/${credentialId}/test`,
             authorization: true,
         });
     } catch (err) {
@@ -92,6 +92,22 @@ export async function testHetznerCredential(
         }
         throw err;
     }
+}
+
+/**
+ * Monthly EUR price for a server type, preferring the per-location price for
+ * the selected location and falling back to the headline (cheapest) price.
+ */
+export function serverTypeMonthlyEUR(
+    st: HetznerServerType | undefined,
+    location?: string,
+): number {
+    if (!st) return 0;
+    if (location && st.prices?.length) {
+        const loc = st.prices.find((p) => p.location === location);
+        if (loc) return loc.price_monthly_eur;
+    }
+    return st.price_monthly_eur ?? 0;
 }
 
 // --------------------------------------------------------------------
@@ -119,6 +135,20 @@ export async function listHetznerServerTypes(): Promise<HetznerServerType[]> {
         >({
             method: "GET",
             url: "/admin/cloud-providers/hetzner/server-types",
+            authorization: true,
+        });
+        return Array.isArray(res) ? res : res.data ?? [];
+    } catch (err) {
+        if (isNotReady(err)) return [];
+        throw err;
+    }
+}
+
+export async function listHetznerImages(): Promise<HetznerImage[]> {
+    try {
+        const res = await Request<{ data: HetznerImage[] } | HetznerImage[]>({
+            method: "GET",
+            url: "/admin/cloud-providers/hetzner/images",
             authorization: true,
         });
         return Array.isArray(res) ? res : res.data ?? [];

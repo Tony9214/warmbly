@@ -1,8 +1,10 @@
 // /admin/discounts — discount / promo code management.
 
 import { Request } from "@/lib/api/client";
+import { buildSearchQuery } from "@/lib/api/client/admin/query";
 import type {
     AdminDiscountRedemptionsResult,
+    AdminDiscountSearch,
     AdminDiscountsResult,
     CreateDiscountRequest,
     Discount,
@@ -10,25 +12,12 @@ import type {
     UpdateDiscountRequest,
 } from "@/lib/api/models/admin";
 
-export interface ListDiscountsParams {
-    status?: string;
-    search?: string;
-    cursor?: string;
-    limit?: number;
-}
-
-function toQuery(params: ListDiscountsParams): string {
-    const q = new URLSearchParams();
-    if (params.status && params.status !== "all") q.set("status", params.status);
-    if (params.search) q.set("search", params.search);
-    if (params.cursor) q.set("cursor", params.cursor);
-    if (params.limit) q.set("limit", String(params.limit));
-    const s = q.toString();
-    return s ? `?${s}` : "";
+function toQuery(params: AdminDiscountSearch): string {
+    return buildSearchQuery(params as Record<string, unknown>);
 }
 
 export function listDiscounts(
-    params: ListDiscountsParams = {},
+    params: AdminDiscountSearch = {},
 ): Promise<AdminDiscountsResult> {
     return Request({
         method: "GET",

@@ -95,9 +95,7 @@ export default function CloudProvidersPage() {
                         </div>
                         <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
                             Connect a Hetzner Cloud project to enable provisioning of new
-                            worker machines. The backend endpoints
-                            <code className="px-1">/admin/cloud-credentials</code>
-                            need to be wired before this works end-to-end.
+                            worker machines. Paste a project API token to get started.
                         </p>
                         <div className="mt-4 flex justify-center">
                             <AddCredentialDialog onSaved={invalidate} />

@@ -12,6 +12,13 @@ export type WorkerInstallState =
 export type WorkerType = "shared" | "dedicated";
 
 export type WorkerRiskPool = "clean" | "risky" | "quarantine";
+export type WorkerEgressKind = "cold_smtp" | "oauth_api" | "warmup_only";
+export type WorkerHealthState =
+    | "healthy"
+    | "watch"
+    | "throttled"
+    | "quarantined"
+    | "blocked";
 
 export interface ManagedWorker {
     id: string;
@@ -23,6 +30,9 @@ export interface ManagedWorker {
     worker_type: WorkerType;
     account_count: number;
     risk_pool: WorkerRiskPool;
+    egress_kind: WorkerEgressKind;
+    health_state: WorkerHealthState;
+    load_score: number;
 
     ssh_host?: string;
     ssh_port?: number;
@@ -40,6 +50,33 @@ export interface ManagedWorker {
 
     created_at: string;
     updated_at: string;
+}
+
+// A mailbox assigned to a worker, with its per-mailbox health signals, returned
+// by GET /admin/workers/:id/emails.
+export interface AdminWorkerEmail {
+    id: string;
+    email: string;
+    user_id: string;
+    organization_id?: string | null;
+    status: string;
+    provider: string;
+    warmup_enabled: boolean;
+    last_synced_at: string;
+    risk_band: string; // clean | risky | quarantine
+    risk_evaluated_at?: string | null;
+    warmup_health?: string; // worst warmup health_state, "" if not in a pool
+    spam_score?: number | null;
+    blocked_until?: string | null;
+}
+
+export interface AdminWorkerEmailsResult {
+    data: AdminWorkerEmail[];
+    pagination: {
+        total?: number | null;
+        next_cursor?: string | null;
+        has_more: boolean;
+    };
 }
 
 export interface WorkerLiveStatus {
@@ -107,15 +144,15 @@ export interface PlatformOverview {
     [k: string]: unknown;
 }
 
-// Settings → Storage backends. The backend exposes a typed kind union
-// (kms, blob, encrypted_keys, eventbus, cache, transport) but the
-// payload shape varies per provider; we render the JSON blob raw.
+// Settings → Infrastructure backends. The backend exposes a typed kind union
+// (kms, blob, encrypted_keys, eventbus, transport) but the payload shape varies
+// per provider; we render the JSON blob raw. ("cache" is a real backend kind
+// server-side but is intentionally not surfaced in the admin UI.)
 export type StorageBackendKind =
     | "kms"
     | "blob"
     | "encrypted_keys"
     | "eventbus"
-    | "cache"
     | "transport";
 
 export interface StorageBackend {
@@ -173,6 +210,20 @@ export interface HetznerLocation {
     network_zone?: string;
 }
 
+export interface HetznerImage {
+    /** e.g. "ubuntu-22.04" */
+    name: string;
+    description: string;
+    os_flavor?: string;
+    os_version?: string;
+}
+
+export interface HetznerServerTypePrice {
+    location: string;
+    price_monthly_eur: number;
+    price_hourly_eur?: number;
+}
+
 export interface HetznerServerType {
     /** e.g. "cx22" */
     name: string;
@@ -181,12 +232,14 @@ export interface HetznerServerType {
     memory_gb: number;
     disk_gb: number;
     cpu_type?: string;
-    /** Monthly cost in EUR (gross). */
+    /** Headline (cheapest-location) gross monthly cost in EUR. */
     price_monthly_eur: number;
-    /** Hourly cost in EUR (gross). */
+    /** Headline hourly cost in EUR (gross). */
     price_hourly_eur?: number;
-    /** Extra IPv4 price per month in EUR (informational; spec says +1 free). */
+    /** Extra IPv4 price per month in EUR (Hetzner includes +1 free per box). */
     price_ipv4_monthly_eur?: number;
+    /** Per-location price breakdown; prefer this keyed by the selected location. */
+    prices?: HetznerServerTypePrice[];
     architecture?: string;
 }
 
@@ -316,11 +369,14 @@ export interface ProvisioningJob {
 
 export interface ProvisioningJobCreate {
     template_id?: string;
-    config?: ProvisioningConfig;
-    save_as_template?: {
-        name: string;
-        description?: string;
-    };
+    /**
+     * One-off custom config. The backend normalizes this nested shape into the
+     * flat snapshot the provisioning state machine reads. Mutually exclusive
+     * with template_id. To "save as template", create the template first then
+     * launch a job from its id.
+     */
+    custom?: ProvisioningConfig;
+    triggered_by?: string;
 }
 
 // /admin/mailboxes — cross-org mailbox admin.
@@ -461,6 +517,36 @@ export interface SendAdminOutreachRequest {
     body: string;
 }
 
+export interface AdminOutreachSearch {
+    q?: string;
+    status?: AdminOutreachStatus | "";
+    recipient_type?: "user" | "org" | "email" | "";
+    sent_by_q?: string;
+    has_reply_to?: boolean;
+    has_error?: boolean;
+    has_user?: boolean;
+    has_org?: boolean;
+    // Date ranges
+    created_within?: number; // days; omit for any
+    created_after?: string; // YYYY-MM-DD
+    created_before?: string; // YYYY-MM-DD
+    sent_at_after?: string; // YYYY-MM-DD
+    sent_at_before?: string; // YYYY-MM-DD
+    cursor?: string;
+    limit?: number;
+    sort_by?: "created_at" | "sent_at" | "status" | "to_email" | "subject";
+    sort_desc?: boolean;
+}
+
+export interface AdminOutreachResult {
+    data: AdminOutreachMessage[];
+    pagination: {
+        total?: number | null;
+        next_cursor?: string | null;
+        has_more: boolean;
+    };
+}
+
 // /admin/limit-requests — limit-increase request queue.
 
 export type LimitRequestStatus =
@@ -493,6 +579,48 @@ export interface LimitIncreaseRequest {
         last_name: string;
         email: string;
     };
+}
+
+export interface AdminLimitRequestsResult {
+    data: LimitIncreaseRequest[];
+    pagination: {
+        total?: number | null;
+        next_cursor?: string | null;
+        has_more: boolean;
+    };
+}
+
+export interface AdminLimitRequestSearch {
+    q?: string;
+    status?: LimitRequestStatus | "all" | "";
+    field?: string; // one of the 6 app-validated field keys, or "" for any
+    org_id?: string;
+    submitted_by?: string;
+    // Flags
+    reviewed?: boolean;
+    unreviewed?: boolean;
+    // Numeric ranges
+    requested_min?: number;
+    requested_max?: number;
+    current_effective_min?: number;
+    current_effective_max?: number;
+    // Date ranges
+    submitted_within?: number; // days; omit for any
+    submitted_after?: string; // YYYY-MM-DD
+    submitted_before?: string; // YYYY-MM-DD
+    reviewed_after?: string; // YYYY-MM-DD
+    reviewed_before?: string; // YYYY-MM-DD
+    cursor?: string;
+    limit?: number;
+    sort_by?:
+        | "submitted_at"
+        | "requested"
+        | "current_effective"
+        | "reviewed_at"
+        | "status"
+        | "field"
+        | "org_name";
+    sort_desc?: boolean;
 }
 
 // /admin/plans — plan catalog and custom-plan management.
@@ -536,6 +664,39 @@ export interface UpdatePlanRequest {
     max_team_members?: number;
     max_email_accounts?: number;
     public?: boolean;
+}
+
+export interface AdminPlanSearch {
+    q?: string;
+    visibility?: "public" | "private" | "";
+    duration?: string; // "month" | "year"; "" = any
+    ai_generation?: boolean;
+    has_stripe?: boolean;
+    has_subscribers?: boolean;
+    // Numeric ranges
+    price_min?: number;
+    price_max?: number;
+    daily_emails_min?: number;
+    daily_emails_max?: number;
+    account_limit_min?: number;
+    account_limit_max?: number;
+    // Date range
+    created_within?: number;
+    created_after?: string;
+    created_before?: string;
+    cursor?: string;
+    limit?: number;
+    sort_by?: "price" | "name" | "daily_emails" | "account_limit" | "created_at";
+    sort_desc?: boolean;
+}
+
+export interface AdminPlansResult {
+    data: Plan[];
+    pagination: {
+        total?: number | null;
+        next_cursor?: string | null;
+        has_more: boolean;
+    };
 }
 
 // /admin/discounts — discount / promo code management.
@@ -614,6 +775,44 @@ export interface AdminDiscountsResult {
     };
 }
 
+export interface AdminDiscountSearch {
+    search?: string;
+    status?: "active" | "disabled" | "expired" | "all" | "";
+    type?: "percent" | "fixed" | "trial_extension" | "";
+    duration?: "once" | "repeating" | "forever" | "";
+    plan_scope?: "all" | "specific" | "";
+    plan_id?: string;
+    // Relationship / flag existence
+    has_redemptions?: boolean;
+    has_max_redemptions?: boolean;
+    exhausted?: boolean;
+    has_expiry?: boolean;
+    // Count ranges
+    times_redeemed_min?: number;
+    times_redeemed_max?: number;
+    percent_off_min?: number;
+    percent_off_max?: number;
+    // Date ranges
+    created_within?: number; // days; omit for any
+    created_after?: string; // YYYY-MM-DD
+    created_before?: string; // YYYY-MM-DD
+    starts_after?: string;
+    starts_before?: string;
+    expires_after?: string;
+    expires_before?: string;
+    cursor?: string;
+    limit?: number;
+    sort_by?:
+        | "created_at"
+        | "code"
+        | "status"
+        | "times_redeemed"
+        | "expires_at"
+        | "starts_at"
+        | "updated_at";
+    sort_desc?: boolean;
+}
+
 export interface DiscountRedemption {
     id: string;
     discount_code_id: string;
@@ -670,6 +869,69 @@ export interface UpdateEnterpriseInquiryRequest {
     notes?: string;
 }
 
+// AdminEnterpriseInquiry is the richer admin list row (with submitter + assigned
+// admin joins) returned by GET /admin/enterprise/inquiries.
+export interface AdminEnterpriseInquiry {
+    id: string;
+    user_id?: string | null;
+    company_name: string;
+    contact_name: string;
+    contact_email: string;
+    phone?: string | null;
+    team_size?: string | null; // integer column surfaced as string by the DTO
+    estimated_volume?: number | null;
+    monthly_email_volume?: string | null;
+    message?: string | null;
+    status: EnterpriseInquiryStatus;
+    assigned_to?: string | null;
+    notes?: string | null;
+    created_at: string;
+    updated_at: string;
+    user?: AdminUserSummary;
+    assigned_admin?: AdminUserSummary;
+}
+
+export interface AdminEnterpriseInquiriesResult {
+    data: AdminEnterpriseInquiry[];
+    pagination: {
+        total?: number | null;
+        next_cursor?: string | null;
+        has_more: boolean;
+    };
+}
+
+export interface AdminEnterpriseInquirySearch {
+    q?: string;
+    status?: EnterpriseInquiryStatus | "all" | "";
+    assignment?: "assigned" | "unassigned" | "";
+    linkage?: "linked" | "anonymous" | "";
+    has_notes?: boolean;
+    has_phone?: boolean;
+    processed?: boolean;
+    // Count ranges
+    team_size_min?: number;
+    team_size_max?: number;
+    estimated_volume_min?: number;
+    estimated_volume_max?: number;
+    // Date ranges
+    created_within?: number; // days; omit for any
+    created_after?: string; // YYYY-MM-DD
+    created_before?: string; // YYYY-MM-DD
+    updated_after?: string; // YYYY-MM-DD
+    updated_before?: string; // YYYY-MM-DD
+    cursor?: string;
+    limit?: number;
+    sort_by?:
+        | "created_at"
+        | "updated_at"
+        | "company_name"
+        | "contact_email"
+        | "status"
+        | "team_size"
+        | "estimated_volume";
+    sort_desc?: boolean;
+}
+
 // /admin/campaigns/* — platform-wide campaign admin (force-stop runaway
 // campaigns, inspect engagement counters per campaign).
 
@@ -709,10 +971,43 @@ export interface AdminCampaignSearch {
     q?: string;
     user_id?: string;
     org_id?: string;
-    status?: string;
+    status?: string; // "" | draft | active | paused | completed | paused_trial_expired | paused_no_accounts
+    // Boolean flags
+    open_tracking?: boolean;
+    link_tracking?: boolean;
+    stop_on_reply?: boolean;
+    text_only?: boolean;
+    unsubscribe_header?: boolean;
+    // Relationship existence
+    has_contacts?: boolean;
+    has_bounces?: boolean;
+    // Count ranges
+    daily_limit_min?: number;
+    daily_limit_max?: number;
+    contact_count_min?: number;
+    contact_count_max?: number;
+    sent_count_min?: number;
+    sent_count_max?: number;
+    // Date ranges
+    created_within?: number;
+    created_after?: string;
+    created_before?: string;
+    start_date_after?: string;
+    start_date_before?: string;
+    updated_after?: string;
+    updated_before?: string;
+    // Pagination + sort
     cursor?: string;
     limit?: number;
-    sort_by?: string;
+    sort_by?:
+        | "created_at"
+        | "name"
+        | "status"
+        | "updated_at"
+        | "daily_limit"
+        | "owner_email"
+        | "contact_count"
+        | "sent_count";
     sort_desc?: boolean;
 }
 

@@ -116,9 +116,8 @@ export default function ProvisioningTemplatesPage() {
                         <div className="text-sm font-medium">No templates yet</div>
                         <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
                             Templates let operators provision a new worker box with one
-                            click instead of refilling the form each time. The backend
-                            endpoint <code>/admin/provisioning-templates</code> needs to be
-                            wired before this works end-to-end.
+                            click instead of refilling the form each time. Create one to
+                            get started.
                         </p>
                         <div className="mt-4 flex justify-center">
                             <Button
