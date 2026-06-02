@@ -12,6 +12,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import type { DateRange } from "@/lib/dateRange";
 import { cn } from "@/lib/utils";
 
 export function Explorer({
@@ -169,5 +170,121 @@ export function ToggleFilter({
             />
             {label}
         </label>
+    );
+}
+
+// Timeline / date-range facet: a preset dropdown (Any / Last 24h / 7d / 30d /
+// 90d / Custom) that reveals two themed date inputs when "Custom" is chosen.
+// mode="custom" drops the day-presets (for timestamps where "last N days" is
+// meaningless, e.g. a trial-end or scheduled-deletion date).
+export function DateRangeFilter({
+    value,
+    onChange,
+    mode = "preset",
+}: {
+    value: DateRange;
+    onChange: (v: DateRange) => void;
+    mode?: "preset" | "custom";
+}) {
+    const options =
+        mode === "preset"
+            ? [
+                  { value: "any", label: "Any time" },
+                  { value: "1", label: "Last 24 hours" },
+                  { value: "7", label: "Last 7 days" },
+                  { value: "30", label: "Last 30 days" },
+                  { value: "90", label: "Last 90 days" },
+                  { value: "custom", label: "Custom range" },
+              ]
+            : [
+                  { value: "any", label: "Any time" },
+                  { value: "custom", label: "Custom range" },
+              ];
+
+    return (
+        <div className="space-y-2">
+            <SelectFilter
+                value={value.preset || "any"}
+                onChange={(p) =>
+                    onChange(
+                        p === "any"
+                            ? { preset: "", after: "", before: "" }
+                            : p === "custom"
+                              ? { ...value, preset: "custom" }
+                              : { preset: p, after: "", before: "" },
+                    )
+                }
+                options={options}
+                placeholder="Any time"
+            />
+            {value.preset === "custom" && (
+                <div className="space-y-1.5">
+                    <label className="block">
+                        <span className="mb-0.5 block text-[10px] text-muted-foreground">From</span>
+                        <Input
+                            type="date"
+                            value={value.after}
+                            max={value.before || undefined}
+                            onChange={(e) => onChange({ ...value, after: e.target.value })}
+                            className="h-8 text-[12.5px]"
+                        />
+                    </label>
+                    <label className="block">
+                        <span className="mb-0.5 block text-[10px] text-muted-foreground">To</span>
+                        <Input
+                            type="date"
+                            value={value.before}
+                            min={value.after || undefined}
+                            onChange={(e) => onChange({ ...value, before: e.target.value })}
+                            className="h-8 text-[12.5px]"
+                        />
+                    </label>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Numeric min/max facet: two side-by-side themed inputs. Empty string => no
+// bound on that side. Per CLAUDE.md we never ship a native number spinner, so
+// these use inputMode=numeric on the shared text Input.
+export function NumberRangeFilter({
+    min,
+    max,
+    onMinChange,
+    onMaxChange,
+    minPlaceholder = "Min",
+    maxPlaceholder = "Max",
+}: {
+    min: number | undefined;
+    max: number | undefined;
+    onMinChange: (v: number | undefined) => void;
+    onMaxChange: (v: number | undefined) => void;
+    minPlaceholder?: string;
+    maxPlaceholder?: string;
+}) {
+    const parse = (s: string) => {
+        if (s.trim() === "") return undefined;
+        const n = Number(s);
+        return Number.isFinite(n) ? n : undefined;
+    };
+    return (
+        <div className="flex items-center gap-1.5">
+            <Input
+                inputMode="numeric"
+                value={min ?? ""}
+                onChange={(e) => onMinChange(parse(e.target.value))}
+                placeholder={minPlaceholder}
+                className="h-8 text-[12.5px] tabular-nums"
+            />
+            <span className="text-[11px] text-muted-foreground">–</span>
+            <Input
+                inputMode="numeric"
+                value={max ?? ""}
+                onChange={(e) => onMaxChange(parse(e.target.value))}
+                placeholder={maxPlaceholder}
+                className="h-8 text-[12.5px] tabular-nums"
+            />
+        </div>
     );
 }
