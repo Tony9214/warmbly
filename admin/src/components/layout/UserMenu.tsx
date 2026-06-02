@@ -66,7 +66,7 @@ export function UserMenu() {
                     </a>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                    <a href="/settings/encryption">
+                    <a href="/settings/cloud-providers">
                         <UserIcon className="size-4" />
                         Admin settings
                     </a>
