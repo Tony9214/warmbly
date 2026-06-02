@@ -23,5 +23,8 @@ func New(location string) (*Client, error) {
 }
 
 func (c *Client) Close() {
+	if c == nil || c.r == nil {
+		return
+	}
 	_ = c.r.Close()
 }

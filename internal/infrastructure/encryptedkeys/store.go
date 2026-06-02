@@ -9,8 +9,8 @@
 // Durability matters absolutely. Losing an encrypted DEK is unrecoverable —
 // every encrypted mailbox credential, OAuth refresh token, and stored message
 // for that user becomes permanently unreadable. Implementations must therefore
-// be backed by storage with strong durability guarantees (Postgres, DynamoDB,
-// or equivalent). NATS JetStream KV is intentionally not offered here.
+// be backed by storage with strong durability guarantees (Postgres or
+// equivalent). NATS JetStream KV is intentionally not offered here.
 //
 // Workers MUST NOT connect to Postgres directly (per CLAUDE.md), so the worker
 // process uses the HTTP implementation, which calls a backend endpoint that
@@ -47,7 +47,7 @@ type Store interface {
 	// unrecoverability.
 	Delete(ctx context.Context, userID uuid.UUID) error
 
-	// Name returns a short identifier ("postgres", "dynamodb", "http") for
-	// admin UI display and audit logs.
+	// Name returns a short identifier ("postgres", "http") for admin UI
+	// display and audit logs.
 	Name() string
 }

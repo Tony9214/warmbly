@@ -34,7 +34,7 @@ import (
 // platformCipherUser is the UUID under which the cipher service stores the
 // DEK that encrypts platform-level secrets (worker SSH keys). The zero UUID
 // is not used by any real user, so it cleanly partitions platform secrets
-// from user secrets in DynamoDB.
+// from user secrets in the encrypted-keys store.
 var platformCipherUser = uuid.Nil
 
 // WorkerEnvConfig is the set of env vars the worker container needs at run

@@ -3,9 +3,7 @@
 #
 # Idempotent — re-running is safe. Each step:
 #   1. KMS key + alias/master-key-dev for envelope encryption
-#   2. DynamoDB table UserEncryptedKeys
-#   3. DynamoDB table EmailMessageData
-#   4. S3 bucket "main"
+#   2. S3 bucket "main"
 
 set -eu
 
@@ -30,36 +28,6 @@ if ! $AWS kms describe-key --key-id alias/master-key-dev >/dev/null 2>&1; then
   log "created alias alias/master-key-dev"
 else
   log "alias/master-key-dev already exists"
-fi
-
-# DynamoDB: UserEncryptedKeys
-log "ensuring DynamoDB table UserEncryptedKeys"
-if ! $AWS dynamodb describe-table --table-name UserEncryptedKeys >/dev/null 2>&1; then
-  $AWS dynamodb create-table \
-    --table-name UserEncryptedKeys \
-    --attribute-definitions AttributeName=userId,AttributeType=S \
-    --key-schema AttributeName=userId,KeyType=HASH \
-    --billing-mode PAY_PER_REQUEST >/dev/null
-  log "created UserEncryptedKeys"
-else
-  log "UserEncryptedKeys already exists"
-fi
-
-# DynamoDB: EmailMessageData
-log "ensuring DynamoDB table EmailMessageData"
-if ! $AWS dynamodb describe-table --table-name EmailMessageData >/dev/null 2>&1; then
-  $AWS dynamodb create-table \
-    --table-name EmailMessageData \
-    --attribute-definitions \
-      AttributeName=userId,AttributeType=S \
-      AttributeName=messageId,AttributeType=S \
-    --key-schema \
-      AttributeName=userId,KeyType=HASH \
-      AttributeName=messageId,KeyType=RANGE \
-    --billing-mode PAY_PER_REQUEST >/dev/null
-  log "created EmailMessageData"
-else
-  log "EmailMessageData already exists"
 fi
 
 # S3

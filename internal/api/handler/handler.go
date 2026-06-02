@@ -131,6 +131,11 @@ type Handler struct {
 	// HTTP-proxy implementation.
 	EncryptedKeys encryptedkeys.Store
 
+	// Worker messageId -> internal email map, served to workers over HTTPS at
+	// /api/v1/internal/email-message-map for the same no-direct-Postgres reason
+	// as EncryptedKeys. Backed by Postgres in the backend.
+	EmailMessageMap repository.EmailMessageMapRepository
+
 	// Direct repositories used by handlers that don't yet have a
 	// service layer (avatars, etc.). Keep narrow and add a service
 	// only when business logic accumulates.

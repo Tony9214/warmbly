@@ -22,7 +22,6 @@ import (
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/codec"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
-	"github.com/warmbly/warmbly/internal/infrastructure/dynamo"
 	"github.com/warmbly/warmbly/internal/infrastructure/encryptedkeys"
 	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
@@ -48,7 +47,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// AWS config for services that need it (KMS, S3, DynamoDB)
+	// AWS config for services that need it (KMS, S3)
 	awscfg, err := awsconf.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Fatal(err)
@@ -74,7 +73,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// KMS + DynamoDB → CipherService
+	// KMS → CipherService
 	var masterKey string = "alias/master-key"
 	if cfg.Env != "prod" {
 		masterKey += "-dev"
@@ -85,13 +84,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	dynamoDB, err := dynamo.NewClient(ctx, awscfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	encryptedKeys, err := encryptedkeys.FromEnv(
-		encryptedkeys.Deps{DB: primaryDB, Dynamo: dynamoDB},
+		encryptedkeys.Deps{DB: primaryDB},
 		"postgres",
 	)
 	if err != nil {
@@ -172,7 +166,7 @@ func main() {
 	emailRepo := repository.NewEmailRepostory(primaryDB)
 	uniboxRepo := repository.NewUniboxRepository(primaryDB)
 	mailboxRepo := repository.NewMailboxRepository(primaryDB)
-	emailHistoryIDRepo := repository.NewEmailHistoryIDRepository(dynamoDB)
+	emailHistoryIDRepo := repository.NewEmailHistoryIDRepository(primaryDB)
 	emailAccountErrorRepo := repository.NewEmailAccountErrorRepository(primaryDB)
 	warmupRepo := repository.NewWarmupRepository(primaryDB.Pool)
 	warmupService := warmupapp.NewService(warmupRepo)

@@ -198,7 +198,7 @@ services:
     ports:
       - "4566:4566"
     environment:
-      SERVICES: kms,dynamodb,s3
+      SERVICES: kms,s3
       DEBUG: "0"
       AWS_DEFAULT_REGION: us-east-1
       PERSISTENCE: "0"

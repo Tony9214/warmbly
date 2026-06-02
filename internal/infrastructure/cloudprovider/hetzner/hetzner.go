@@ -22,6 +22,13 @@ import (
 const (
 	defaultBaseURL = "https://api.hetzner.cloud/v1"
 	defaultTimeout = 30 * time.Second
+
+	// primaryIPv4MonthlyEUR is the gross monthly list price of one Hetzner
+	// Primary IPv4 (~€0.50 net + VAT). It's uniform across server types and
+	// locations, so we surface it as a documented constant rather than a
+	// per-type field. Refine via GET /pricing (primary_ips) if exactness ever
+	// matters for billing; today it's an informational estimate only.
+	primaryIPv4MonthlyEUR = 0.60
 )
 
 // Client is the Hetzner Cloud API client implementing cloudprovider.Provider.
@@ -155,7 +162,11 @@ func (c *Client) Locations(ctx context.Context) ([]cloudprovider.Location, error
 }
 
 type apiPrice struct {
-	Location     string `json:"location"`
+	Location    string `json:"location"`
+	PriceHourly struct {
+		Gross string `json:"gross"`
+		Net   string `json:"net"`
+	} `json:"price_hourly"`
 	PriceMonthly struct {
 		Gross string `json:"gross"`
 		Net   string `json:"net"`
@@ -185,20 +196,30 @@ func (c *Client) ServerTypes(ctx context.Context) ([]cloudprovider.ServerType, e
 	types := make([]cloudprovider.ServerType, 0, len(out.ServerTypes))
 	for _, t := range out.ServerTypes {
 		st := cloudprovider.ServerType{
-			Name:         t.Name,
-			Description:  t.Description,
-			Cores:        t.Cores,
-			Memory:       t.Memory,
-			Disk:         t.Disk,
-			StorageType:  t.StorageType,
-			CPUType:      t.CPUType,
-			Architecture: t.Architecture,
+			Name:                t.Name,
+			Description:         t.Description,
+			Cores:               t.Cores,
+			Memory:              t.Memory,
+			Disk:                t.Disk,
+			StorageType:         t.StorageType,
+			CPUType:             t.CPUType,
+			Architecture:        t.Architecture,
+			PriceIPv4MonthlyEUR: primaryIPv4MonthlyEUR,
 		}
-		// Use the cheapest available location price for the headline.
+		// Hetzner returns prices as decimal strings, per location. Carry the
+		// full per-location breakdown and use the cheapest location for the
+		// headline price (the UI shows the price for the selected location).
 		for _, p := range t.Prices {
 			gross, _ := strconv.ParseFloat(p.PriceMonthly.Gross, 64)
+			hourly, _ := strconv.ParseFloat(p.PriceHourly.Gross, 64)
+			st.Prices = append(st.Prices, cloudprovider.ServerTypeLocationPrice{
+				Location:        p.Location,
+				PriceMonthlyEUR: gross,
+				PriceHourlyEUR:  hourly,
+			})
 			if st.PriceMonthlyEUR == 0 || gross < st.PriceMonthlyEUR {
 				st.PriceMonthlyEUR = gross
+				st.PriceHourlyEUR = hourly
 			}
 		}
 		types = append(types, st)

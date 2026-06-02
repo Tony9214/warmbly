@@ -68,7 +68,12 @@ type JobConfig struct {
 type Service struct {
 	Jobs      repository.ProvisioningJobRepository
 	Providers map[string]cloudprovider.Provider // keyed by provider name
-	Installer Installer
+	// ProviderResolver, when set, resolves the provider client for a job
+	// (e.g. building a Hetzner client from the job's stored credential).
+	// Takes precedence over the static Providers map; the map is the
+	// test/fallback path.
+	ProviderResolver func(ctx context.Context, job *repository.ProvisioningJob) (cloudprovider.Provider, error)
+	Installer        Installer
 	// VerifyTimeout is how long Run waits for expected workers to heartbeat
 	// before failing the job. Default 5 min.
 	VerifyTimeout time.Duration
@@ -89,9 +94,9 @@ func (s *Service) Run(ctx context.Context, jobID uuid.UUID) error {
 		return fmt.Errorf("provisioning: job %s not found", jobID)
 	}
 
-	provider, ok := s.Providers[job.Provider]
-	if !ok {
-		return s.fail(ctx, jobID, fmt.Errorf("no provider client for %q", job.Provider))
+	provider, err := s.resolveProvider(ctx, job)
+	if err != nil {
+		return s.fail(ctx, jobID, err)
 	}
 
 	var cfg JobConfig
@@ -265,6 +270,16 @@ func (s *Service) Run(ctx context.Context, jobID uuid.UUID) error {
 			return s.fail(ctx, jobID, fmt.Errorf("unknown state %q", state))
 		}
 	}
+}
+
+func (s *Service) resolveProvider(ctx context.Context, job *repository.ProvisioningJob) (cloudprovider.Provider, error) {
+	if s.ProviderResolver != nil {
+		return s.ProviderResolver(ctx, job)
+	}
+	if p, ok := s.Providers[job.Provider]; ok {
+		return p, nil
+	}
+	return nil, fmt.Errorf("no provider client for %q", job.Provider)
 }
 
 func (s *Service) createServer(ctx context.Context, p cloudprovider.Provider, cfg JobConfig, jobID uuid.UUID) (*cloudprovider.Server, error) {
