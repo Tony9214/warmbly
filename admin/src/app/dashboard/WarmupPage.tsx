@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ErrorState";
 import {
     Dialog,
     DialogContent,
@@ -78,7 +79,7 @@ export default function WarmupPage() {
 }
 
 function HealthSummary() {
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["admin", "warmup", "health"],
         queryFn: getWarmupHealthSummary,
         refetchInterval: 30_000,
@@ -93,32 +94,43 @@ function HealthSummary() {
             </div>
         );
     }
+    if (error) {
+        return (
+            <ErrorState
+                error={error}
+                title="Failed to load warmup health"
+                onRetry={() => refetch()}
+                className="mb-6"
+            />
+        );
+    }
     if (!data) return null;
 
-    const spamPct = (data.avg_spam_placement_rate * 100).toFixed(1);
+    // Guard every field: a partial response must degrade gracefully, never
+    // throw and blank the whole tab.
+    const placement = data.avg_spam_placement_rate ?? 0;
+    const spamPct = (placement * 100).toFixed(1);
     const placementTone =
-        data.avg_spam_placement_rate >= 0.2
-            ? "text-red-700"
-            : data.avg_spam_placement_rate >= 0.1
-            ? "text-amber-700"
-            : "text-emerald-600";
+        placement >= 0.2 ? "text-red-700" : placement >= 0.1 ? "text-amber-700" : "text-emerald-600";
+    const atRisk = data.at_risk_count ?? 0;
+    const blocked = data.blocked_count ?? 0;
 
     return (
         <div className="grid gap-3 md:grid-cols-4 mb-6">
             <HealthCard
                 icon={<Activity className="size-4" />}
                 title="Total participants"
-                value={data.total_participants.toLocaleString()}
-                hint={Object.entries(data.by_state)
+                value={(data.total_participants ?? 0).toLocaleString()}
+                hint={Object.entries(data.by_state ?? {})
                     .map(([k, v]) => `${k}: ${v}`)
                     .join(" · ")}
             />
             <HealthCard
                 icon={<AlertTriangle className="size-4" />}
                 title="At risk"
-                value={data.at_risk_count.toLocaleString()}
-                hint={`avg spam score ${data.avg_spam_score.toFixed(1)}`}
-                tone={data.at_risk_count > 0 ? "text-amber-700" : undefined}
+                value={atRisk.toLocaleString()}
+                hint={`avg spam score ${(data.avg_spam_score ?? 0).toFixed(1)}`}
+                tone={atRisk > 0 ? "text-amber-700" : undefined}
             />
             <HealthCard
                 icon={<Flame className="size-4" />}
@@ -130,9 +142,9 @@ function HealthSummary() {
             <HealthCard
                 icon={<ShieldOff className="size-4" />}
                 title="Blocked"
-                value={data.blocked_count.toLocaleString()}
+                value={blocked.toLocaleString()}
                 hint="quarantined or hard-blocked"
-                tone={data.blocked_count > 0 ? "text-red-700" : undefined}
+                tone={blocked > 0 ? "text-red-700" : undefined}
             />
         </div>
     );
@@ -174,7 +186,7 @@ function HealthCard({
 }
 
 function PoolsList() {
-    const { data, isLoading, error } = useQuery({
+    const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["admin", "warmup", "pools"],
         queryFn: listWarmupPools,
         refetchInterval: 60_000,
@@ -182,11 +194,7 @@ function PoolsList() {
 
     if (isLoading) return <Skeleton className="h-24" />;
     if (error) {
-        return (
-            <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-md p-3">
-                Failed to load pools.
-            </div>
-        );
+        return <ErrorState error={error} title="Failed to load pools" onRetry={() => refetch()} />;
     }
     const pools = data ?? [];
 
@@ -251,7 +259,7 @@ function PoolsList() {
 
 function BlockedAccounts() {
     const qc = useQueryClient();
-    const { data, isLoading, error } = useQuery({
+    const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["admin", "warmup", "blocked"],
         queryFn: () => listBlockedWarmupAccounts(),
         refetchInterval: 30_000,
@@ -268,11 +276,7 @@ function BlockedAccounts() {
 
     if (isLoading) return <Skeleton className="h-32" />;
     if (error) {
-        return (
-            <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-md p-3">
-                Failed to load blocked mailboxes.
-            </div>
-        );
+        return <ErrorState error={error} title="Failed to load blocked mailboxes" onRetry={() => refetch()} />;
     }
     const rows = data?.data ?? [];
 
@@ -358,7 +362,7 @@ function AppealsQueue() {
         mode: "approve" | "reject";
     } | null>(null);
 
-    const { data, isLoading, error } = useQuery({
+    const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["admin", "warmup", "appeals", "pending"],
         queryFn: () => listWarmupAppeals("pending"),
         refetchInterval: 30_000,
@@ -366,11 +370,7 @@ function AppealsQueue() {
 
     if (isLoading) return <Skeleton className="h-32" />;
     if (error) {
-        return (
-            <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-md p-3">
-                Failed to load appeals.
-            </div>
-        );
+        return <ErrorState error={error} title="Failed to load appeals" onRetry={() => refetch()} />;
     }
     const rows = data?.data ?? [];
 

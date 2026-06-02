@@ -103,7 +103,7 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 
 	q := fmt.Sprintf(
 		`SELECT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.referral_source, u.onboarding_completed_at,
-		   u.max_organizations, u.free_trial_used,
+		   u.max_organizations, u.free_trial_used, u.admin_permissions,
 		   u.deletion_scheduled_at, u.deletion_scheduled_for,
 		   u.updated_at, u.created_at,
 		   COALESCE(array_agg(ur.role_id) FILTER (WHERE ur.role_id IS NOT NULL), '{}') AS role_ids
@@ -118,12 +118,13 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 		value,
 	}
 
+	var adminPerm uint32
 	err := r.DB.QueryRow(
 		ctx,
 		q,
 		params...,
 	).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.AvatarURL, &u.ReferralSource, &u.OnboardingCompletedAt,
-		&u.MaxOrganizations, &u.FreeTrialUsed,
+		&u.MaxOrganizations, &u.FreeTrialUsed, &adminPerm,
 		&u.DeletionScheduledAt, &u.DeletionScheduledFor,
 		&u.UpdatedAt, &u.CreatedAt, &u.Roles)
 	if err != nil {
@@ -133,6 +134,11 @@ func (r *userRepository) getUser(ctx context.Context, key string, value any) (*m
 		db.CaptureError(err, q, params, "queryrow")
 		return nil, err
 	}
+
+	// Expose platform-admin status so the admin app's auth guard can gate on it.
+	u.AdminPermissions = models.AdminPermission(adminPerm)
+	u.IsAdmin = adminPerm != 0
+
 	return &u, nil
 }
 

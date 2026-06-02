@@ -48,3 +48,36 @@ type SendAdminOutreachRequest struct {
 	Subject  string     `json:"subject" binding:"required,min=1,max=998"`
 	Body     string     `json:"body" binding:"required,min=1"`
 }
+
+// AdminOutreachSearch are the query params for the admin outreach log listing.
+// Mirrors AdminOrgSearch form-tag conventions; date facets are *time.Time with
+// time_format/time_utc so gin's ShouldBindQuery parses YYYY-MM-DD.
+type AdminOutreachSearch struct {
+	Query         string `form:"q"`
+	Status        string `form:"status"`         // queued, sent, failed
+	RecipientType string `form:"recipient_type"` // user, org, email
+	SentByQuery   string `form:"sent_by_q"`
+
+	HasReplyTo bool `form:"has_reply_to"`
+	HasError   bool `form:"has_error"`
+	HasUser    bool `form:"has_user"`
+	HasOrg     bool `form:"has_org"`
+
+	// Date ranges (YYYY-MM-DD, UTC)
+	CreatedWithin int        `form:"created_within"` // days; 0 = any
+	CreatedAfter  *time.Time `form:"created_after" time_format:"2006-01-02" time_utc:"true"`
+	CreatedBefore *time.Time `form:"created_before" time_format:"2006-01-02" time_utc:"true"`
+	SentAtAfter   *time.Time `form:"sent_at_after" time_format:"2006-01-02" time_utc:"true"`
+	SentAtBefore  *time.Time `form:"sent_at_before" time_format:"2006-01-02" time_utc:"true"`
+
+	Cursor   *uuid.UUID `form:"cursor"`
+	Limit    int        `form:"limit"`
+	SortBy   string     `form:"sort_by"` // created_at, sent_at, status, to_email, subject
+	SortDesc bool       `form:"sort_desc"`
+}
+
+// AdminOutreachResult is the paginated response for the admin outreach log.
+type AdminOutreachResult struct {
+	Data       []AdminOutreachMessage `json:"data"`
+	Pagination Pagination             `json:"pagination"`
+}

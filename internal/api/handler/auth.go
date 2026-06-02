@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -9,6 +11,8 @@ import (
 	"github.com/warmbly/warmbly/internal/app/auth"
 	"github.com/warmbly/warmbly/internal/errx"
 )
+
+const authRequestTimeout = 15 * time.Second
 
 func (h *Handler) LoginStart(c *gin.Context) {
 	var data auth.AuthData
@@ -18,7 +22,10 @@ func (h *Handler) LoginStart(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.AuthService.LoginStart(c.Request.Context(), &data, c.ClientIP())
+	ctx, cancel := context.WithTimeout(c.Request.Context(), authRequestTimeout)
+	defer cancel()
+
+	resp, err := h.AuthService.LoginStart(ctx, &data, c.ClientIP())
 	if err != nil {
 		errx.Handle(c, err)
 		return
@@ -35,7 +42,10 @@ func (h *Handler) LoginConfirm(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.AuthService.LoginConfirm(c.Request.Context(), &data, data.Session, c.ClientIP(), c.Request.UserAgent())
+	ctx, cancel := context.WithTimeout(c.Request.Context(), authRequestTimeout)
+	defer cancel()
+
+	resp, err := h.AuthService.LoginConfirm(ctx, &data, data.Session, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
 		errx.Handle(c, err)
 		return
@@ -52,7 +62,10 @@ func (h *Handler) RegistrationStart(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.AuthService.RegistrationStart(c.Request.Context(), &data, c.ClientIP())
+	ctx, cancel := context.WithTimeout(c.Request.Context(), authRequestTimeout)
+	defer cancel()
+
+	resp, err := h.AuthService.RegistrationStart(ctx, &data, c.ClientIP())
 	if err != nil {
 		errx.Handle(c, err)
 		return
@@ -69,7 +82,10 @@ func (h *Handler) RegistrationConfirm(c *gin.Context) {
 		return
 	}
 
-	if err := h.AuthService.RegistrationConfirm(c.Request.Context(), &data, data.Session, c.ClientIP()); err != nil {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), authRequestTimeout)
+	defer cancel()
+
+	if err := h.AuthService.RegistrationConfirm(ctx, &data, data.Session, c.ClientIP()); err != nil {
 		errx.Handle(c, err)
 		return
 	}
@@ -161,7 +177,10 @@ func (h *Handler) ResetPasswordStart(c *gin.Context) {
 		return
 	}
 
-	if err := h.AuthService.ResetPasswordStart(c.Request.Context(), &data, c.ClientIP()); err != nil {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), authRequestTimeout)
+	defer cancel()
+
+	if err := h.AuthService.ResetPasswordStart(ctx, &data, c.ClientIP()); err != nil {
 		errx.Handle(c, err)
 		return
 	}
@@ -177,7 +196,10 @@ func (h *Handler) ResetPasswordConfirm(c *gin.Context) {
 		return
 	}
 
-	if err := h.AuthService.ResetPasswordConfirm(c.Request.Context(), &data, data.Session, c.ClientIP()); err != nil {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), authRequestTimeout)
+	defer cancel()
+
+	if err := h.AuthService.ResetPasswordConfirm(ctx, &data, data.Session, c.ClientIP()); err != nil {
 		errx.Handle(c, err)
 		return
 	}

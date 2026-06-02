@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,7 +83,7 @@ type OrganizationRepository interface {
 	CreateLimitRequest(ctx context.Context, req *models.LimitIncreaseRequest) error
 	GetLimitRequest(ctx context.Context, id uuid.UUID) (*models.LimitIncreaseRequest, error)
 	ListLimitRequestsForOrg(ctx context.Context, orgID uuid.UUID) ([]models.LimitIncreaseRequest, error)
-	ListLimitRequestsForAdmin(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, error)
+	ListLimitRequestsForAdmin(ctx context.Context, search *models.AdminLimitRequestSearch) (*models.AdminLimitRequestsResult, error)
 	UpdateLimitRequestStatus(ctx context.Context, id uuid.UUID, status models.LimitRequestStatus, reviewedBy uuid.UUID, notes string) error
 }
 
@@ -651,18 +652,9 @@ const adminOrgListColumns = `
 	u.email, u.first_name, u.last_name, u.banned_at,
 	o.created_at, o.deletion_scheduled_for,
 	(SELECT COUNT(*) FROM organization_members om WHERE om.organization_id = o.id) AS member_count,
-	(SELECT COUNT(*) FROM email_accounts ea WHERE ea.organization_id = o.id::text) AS email_account_count,
+	(SELECT COUNT(*) FROM email_accounts ea WHERE ea.organization_id = o.id) AS email_account_count,
 	(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id) AS campaign_count,
 	(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id AND c.status = 'active') AS active_campaigns`
-
-func scanAdminOrgListItem(row pgx.Row, item *models.AdminOrgListItem) error {
-	return row.Scan(
-		&item.ID, &item.Name, &item.Slug, &item.OwnerUserID,
-		&item.OwnerEmail, &item.OwnerFirstName, &item.OwnerLastName, &item.OwnerBannedAt,
-		&item.CreatedAt, &item.DeletionScheduledFor,
-		&item.MemberCount, &item.EmailAccountCount, &item.CampaignCount, &item.ActiveCampaigns,
-	)
-}
 
 // SearchOrganizationsForAdmin lists orgs for the admin panel with cursor
 // pagination. The cursor is the last seen org id; rows are returned in
@@ -693,26 +685,133 @@ func (r *organizationRepository) SearchOrganizationsForAdmin(ctx context.Context
 		where += ` AND o.deletion_scheduled_for IS NULL`
 	}
 
+	if search.PlanID != nil {
+		where += ` AND s.plan_id = $` + itoa(argNum)
+		args = append(args, *search.PlanID)
+		argNum++
+	}
+	switch search.PlanVisibility {
+	case "public":
+		where += ` AND p.public = TRUE`
+	case "private":
+		where += ` AND p.public = FALSE`
+	case "none":
+		where += ` AND s.id IS NULL`
+	}
+	if search.Enterprise {
+		where += ` AND s.is_enterprise = TRUE`
+	}
+	if search.CreatedWithin > 0 {
+		where += ` AND o.created_at >= NOW() - ($` + itoa(argNum) + `::int * INTERVAL '1 day')`
+		args = append(args, search.CreatedWithin)
+		argNum++
+	}
+	if search.HasOverrides {
+		where += ` AND EXISTS (SELECT 1 FROM organization_limit_overrides olo WHERE olo.organization_id = o.id)`
+	}
+
+	// Local helpers, same style as the rest of this builder.
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			where += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	// Subscription state
+	if search.SubscriptionStatus != "" {
+		where += ` AND s.status::text = $` + itoa(argNum)
+		args = append(args, search.SubscriptionStatus)
+		argNum++
+	}
+	if search.CancelAtPeriodEnd {
+		where += ` AND s.cancel_at_period_end = TRUE`
+	}
+	if search.HasActiveSubscription {
+		where += ` AND EXISTS (SELECT 1 FROM subscriptions s2 WHERE s2.organization_id = o.id AND s2.status IN ('active','trialing'))`
+	}
+	if search.NoSubscription {
+		where += ` AND NOT EXISTS (SELECT 1 FROM subscriptions s2 WHERE s2.organization_id = o.id)`
+	}
+	if search.OwnerBanned {
+		where += ` AND u.banned_at IS NOT NULL`
+	}
+
+	// Relationship existence
+	if search.HasActiveCampaigns {
+		where += ` AND EXISTS (SELECT 1 FROM campaigns c WHERE c.organization_id = o.id AND c.status = 'active')`
+	}
+	if search.HasEmailAccounts {
+		where += ` AND EXISTS (SELECT 1 FROM email_accounts ea WHERE ea.organization_id = o.id)`
+	}
+
+	// Count ranges
+	addInt(`(SELECT COUNT(*) FROM organization_members om WHERE om.organization_id = o.id) >= $%d`, search.MemberCountMin)
+	addInt(`(SELECT COUNT(*) FROM organization_members om WHERE om.organization_id = o.id) <= $%d`, search.MemberCountMax)
+	addInt(`(SELECT COUNT(*) FROM email_accounts ea WHERE ea.organization_id = o.id) >= $%d`, search.EmailAccountCountMin)
+	addInt(`(SELECT COUNT(*) FROM email_accounts ea WHERE ea.organization_id = o.id) <= $%d`, search.EmailAccountCountMax)
+	addInt(`(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id) >= $%d`, search.CampaignCountMin)
+	addInt(`(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id) <= $%d`, search.CampaignCountMax)
+
+	// Date ranges
+	addAfter("o.created_at", search.CreatedAfter)
+	addBefore("o.created_at", search.CreatedBefore)
+	addAfter("s.trial_end", search.TrialEndAfter)
+	addBefore("s.trial_end", search.TrialEndBefore)
+	addAfter("s.current_period_end", search.CurrentPeriodEndAfter)
+	addBefore("s.current_period_end", search.CurrentPeriodEndBefore)
+	addAfter("o.updated_at", search.UpdatedAfter)
+	addBefore("o.updated_at", search.UpdatedBefore)
+
 	if search.Cursor != nil {
 		where += ` AND o.id < $` + itoa(argNum)
 		args = append(args, *search.Cursor)
 		argNum++
 	}
 
-	orderBy := "ORDER BY o.created_at DESC"
-	if search.SortBy == "name" {
-		orderBy = "ORDER BY o.name"
-		if search.SortDesc {
-			orderBy += " DESC"
-		}
+	orderCol := "o.created_at"
+	switch search.SortBy {
+	case "name":
+		orderCol = "o.name"
+	case "owner_email":
+		orderCol = "u.email"
+	case "member_count":
+		orderCol = "(SELECT COUNT(*) FROM organization_members om WHERE om.organization_id = o.id)"
+	case "email_account_count":
+		orderCol = "(SELECT COUNT(*) FROM email_accounts ea WHERE ea.organization_id = o.id)"
+	case "campaign_count":
+		orderCol = "(SELECT COUNT(*) FROM campaigns c WHERE c.organization_id = o.id)"
 	}
+	orderDir := "DESC"
+	if search.SortBy != "" && !search.SortDesc {
+		orderDir = "ASC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir
 
 	args = append(args, limit+1)
 
 	query := `
-		SELECT ` + adminOrgListColumns + `
+		SELECT ` + adminOrgListColumns + `,
+			p.name, p.public, COALESCE(s.is_enterprise, FALSE)
 		FROM organizations o
 		JOIN users u ON u.id = o.owner_user_id
+		LEFT JOIN subscriptions s ON s.organization_id = o.id
+		LEFT JOIN plans p ON p.id = s.plan_id
 		` + where + `
 		` + orderBy + `
 		LIMIT $` + itoa(argNum)
@@ -726,9 +825,21 @@ func (r *organizationRepository) SearchOrganizationsForAdmin(ctx context.Context
 	items := []models.AdminOrgListItem{}
 	for rows.Next() {
 		var item models.AdminOrgListItem
-		if err := scanAdminOrgListItem(rows, &item); err != nil {
+		var planName *string
+		var planPublic *bool
+		var isEnterprise bool
+		if err := rows.Scan(
+			&item.ID, &item.Name, &item.Slug, &item.OwnerUserID,
+			&item.OwnerEmail, &item.OwnerFirstName, &item.OwnerLastName, &item.OwnerBannedAt,
+			&item.CreatedAt, &item.DeletionScheduledFor,
+			&item.MemberCount, &item.EmailAccountCount, &item.CampaignCount, &item.ActiveCampaigns,
+			&planName, &planPublic, &isEnterprise,
+		); err != nil {
 			return nil, err
 		}
+		item.PlanName = planName
+		item.PlanPublic = planPublic
+		item.IsEnterprise = isEnterprise
 		items = append(items, item)
 	}
 
@@ -743,7 +854,7 @@ func (r *organizationRepository) SearchOrganizationsForAdmin(ctx context.Context
 	}
 
 	// Total count for the same filter — drop the trailing LIMIT arg.
-	countQuery := `SELECT COUNT(*) FROM organizations o JOIN users u ON u.id = o.owner_user_id ` + where
+	countQuery := `SELECT COUNT(*) FROM organizations o JOIN users u ON u.id = o.owner_user_id LEFT JOIN subscriptions s ON s.organization_id = o.id LEFT JOIN plans p ON p.id = s.plan_id ` + where
 	var total int64
 	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
 		result.Pagination.Total = &total
@@ -984,20 +1095,118 @@ func (r *organizationRepository) ListLimitRequestsForOrg(ctx context.Context, or
 	return out, nil
 }
 
-// ListLimitRequestsForAdmin joins org + submitter so the admin queue can
-// show context per row without an extra fan-out fetch.
-func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, error) {
-	if limit <= 0 || limit > 200 {
+// ListLimitRequestsForAdmin joins org + submitter so the admin queue can show
+// context per row without an extra fan-out fetch. Faceted + cursor paginated,
+// mirroring SearchOrganizationsForAdmin (incremental WHERE builder, id keyset,
+// LIMIT+1 has_more, separate COUNT).
+func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, search *models.AdminLimitRequestSearch) (*models.AdminLimitRequestsResult, error) {
+	limit := search.Limit
+	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+
 	args := []interface{}{}
+	argNum := 1
 	where := "WHERE 1=1"
-	if status != "" && status != "all" {
-		where += " AND lr.status = $1"
-		args = append(args, status)
+
+	if search.Query != "" {
+		where += ` AND (o.name ILIKE $` + itoa(argNum) + ` OR o.slug ILIKE $` + itoa(argNum) + ` OR u.email ILIKE $` + itoa(argNum) + ` OR lr.reason ILIKE $` + itoa(argNum) + `)`
+		args = append(args, "%"+search.Query+"%")
+		argNum++
 	}
-	args = append(args, limit)
-	limitParam := "$" + itoa(len(args))
+	if search.Status != "" && search.Status != "all" {
+		where += " AND lr.status = $" + itoa(argNum)
+		args = append(args, search.Status)
+		argNum++
+	}
+	if search.Field != "" {
+		where += " AND lr.field = $" + itoa(argNum)
+		args = append(args, search.Field)
+		argNum++
+	}
+	if search.OrgID != nil {
+		where += " AND lr.organization_id = $" + itoa(argNum)
+		args = append(args, *search.OrgID)
+		argNum++
+	}
+	if search.SubmittedBy != nil {
+		where += " AND lr.submitted_by = $" + itoa(argNum)
+		args = append(args, *search.SubmittedBy)
+		argNum++
+	}
+	if search.Reviewed {
+		where += " AND lr.reviewed_at IS NOT NULL"
+	}
+	if search.Unreviewed {
+		where += " AND lr.reviewed_at IS NULL"
+	}
+
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			where += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	addInt(`lr.requested >= $%d`, search.RequestedMin)
+	addInt(`lr.requested <= $%d`, search.RequestedMax)
+	addInt(`lr.current_effective >= $%d`, search.CurrentEffectiveMin)
+	addInt(`lr.current_effective <= $%d`, search.CurrentEffectiveMax)
+
+	if search.SubmittedWithin > 0 {
+		where += ` AND lr.submitted_at >= NOW() - ($` + itoa(argNum) + `::int * INTERVAL '1 day')`
+		args = append(args, search.SubmittedWithin)
+		argNum++
+	}
+	addAfter("lr.submitted_at", search.SubmittedAfter)
+	addBefore("lr.submitted_at", search.SubmittedBefore)
+	addAfter("lr.reviewed_at", search.ReviewedAfter)
+	addBefore("lr.reviewed_at", search.ReviewedBefore)
+
+	// Keyset on id (mirrors the org explorer; default sort is submitted_at).
+	if search.Cursor != nil {
+		where += " AND lr.id < $" + itoa(argNum)
+		args = append(args, *search.Cursor)
+		argNum++
+	}
+
+	orderCol := "lr.submitted_at"
+	switch search.SortBy {
+	case "requested":
+		orderCol = "lr.requested"
+	case "current_effective":
+		orderCol = "lr.current_effective"
+	case "reviewed_at":
+		orderCol = "lr.reviewed_at"
+	case "status":
+		orderCol = "lr.status::text"
+	case "field":
+		orderCol = "lr.field"
+	case "org_name":
+		orderCol = "o.name"
+	}
+	orderDir := "DESC"
+	if search.SortBy != "" && !search.SortDesc {
+		orderDir = "ASC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir + ", lr.id DESC"
+
+	args = append(args, limit+1)
 
 	query := `
 		SELECT lr.id, lr.organization_id, lr.field, lr.current_effective, lr.requested,
@@ -1009,14 +1218,15 @@ func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, 
 		JOIN organizations o ON o.id = lr.organization_id
 		JOIN users u ON u.id = lr.submitted_by
 		` + where + `
-		ORDER BY lr.submitted_at DESC
-		LIMIT ` + limitParam
+		` + orderBy + `
+		LIMIT $` + itoa(argNum)
+
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []models.LimitIncreaseRequest{}
+	items := []models.LimitIncreaseRequest{}
 	for rows.Next() {
 		var lr models.LimitIncreaseRequest
 		var org models.Organization
@@ -1032,9 +1242,27 @@ func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, 
 		}
 		lr.Organization = &org
 		lr.SubmittedByUser = &user
-		out = append(out, lr)
+		items = append(items, lr)
 	}
-	return out, nil
+
+	result := &models.AdminLimitRequestsResult{
+		Data:       items,
+		Pagination: models.Pagination{HasMore: len(items) > limit},
+	}
+	if len(items) > limit {
+		result.Data = items[:limit]
+		last := items[limit-1].ID
+		result.Pagination.NextCursor = &last
+	}
+
+	// Total count for the same filter — drop the trailing LIMIT arg.
+	countQuery := `SELECT COUNT(*) FROM limit_increase_requests lr JOIN organizations o ON o.id = lr.organization_id JOIN users u ON u.id = lr.submitted_by ` + where
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
+	}
+
+	return result, nil
 }
 
 func (r *organizationRepository) UpdateLimitRequestStatus(ctx context.Context, id uuid.UUID, status models.LimitRequestStatus, reviewedBy uuid.UUID, notes string) error {

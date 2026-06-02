@@ -38,9 +38,26 @@ func (r *workerRepository) UpsertOnHeartbeat(ctx context.Context, id uuid.UUID, 
 	return err
 }
 
+// TierDedicated is the reserved tier the control plane allocates on its own
+// (see worker.AssignDedicatedWorker, which promotes a spare shared worker to
+// dedicated on demand). It must never be requested by a worker heartbeat or
+// an admin provisioning template/job — clients only pick a shared tier.
+const TierDedicated = "dedicated"
+
+// IsClientRequestableTier reports whether a tier string may be supplied by a
+// client: a worker heartbeat or an admin provisioning request. Everything
+// except the reserved "dedicated" tier is allowed; a blank tier is treated as
+// the shared-premium default by tierToColumns, so existing workers that don't
+// set WORKER_TIER keep auto-registering normally.
+func IsClientRequestableTier(tier string) bool {
+	return tier != TierDedicated
+}
+
 // tierToColumns converts the higher-level tier name used by templates and
 // the heartbeat API into the (worker_type, free_tier) tuple stored on the
-// workers row.
+// workers row. The "dedicated" case stays for defensive completeness, but the
+// request paths now reject that tier before it reaches here (dedicated workers
+// are created by promoting a shared worker, not by self-designation).
 func tierToColumns(tier string) (workerType string, freeTier bool) {
 	switch tier {
 	case "dedicated":

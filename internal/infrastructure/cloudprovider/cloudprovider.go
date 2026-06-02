@@ -35,36 +35,58 @@ type Provider interface {
 	SetReverseDNS(ctx context.Context, ipID, hostname string) error
 }
 
-// Location is a region / datacenter where servers can be created.
+// Location is a region / datacenter where servers can be created. JSON tags
+// match the admin UI's HetznerLocation type so the catalog endpoints serialize
+// straight through without a translation layer.
 type Location struct {
-	Name        string // "fsn1", "hil", etc.
-	Description string // "Falkenstein DC Park 1"
-	City        string
-	Country     string // ISO-3166 alpha-2
-	Network     string // continent or "EU"/"US" grouping for UI
+	Name        string `json:"name"`        // "fsn1", "hil", etc.
+	Description string `json:"description"` // "Falkenstein DC Park 1"
+	City        string `json:"city"`
+	Country     string `json:"country"`      // ISO-3166 alpha-2
+	Network     string `json:"network_zone"` // continent or "EU"/"US" grouping for UI
 }
 
-// ServerType is one purchasable VPS shape.
+// ServerTypeLocationPrice is the price of one ServerType in one location.
+// Hetzner prices vary per location (US regions carry a premium), so the UI
+// keys the displayed price off the selected location rather than one flat
+// number.
+type ServerTypeLocationPrice struct {
+	Location        string  `json:"location"`
+	PriceMonthlyEUR float64 `json:"price_monthly_eur"`
+	PriceHourlyEUR  float64 `json:"price_hourly_eur"`
+}
+
+// ServerType is one purchasable VPS shape. JSON tags are snake_case to match
+// the admin UI's HetznerServerType type — without them encoding/json would
+// emit PascalCase and the UI would read every field as undefined.
 type ServerType struct {
-	Name              string // "cx22", "cpx11"
-	Description       string
-	Cores             int
-	Memory            float64 // GiB
-	Disk              int     // GiB
-	StorageType       string  // "local" / "network"
-	CPUType           string  // "shared" / "dedicated"
-	Architecture      string  // "x86" / "arm"
-	PriceMonthlyEUR   float64
-	PriceMonthlyUSD   float64
-	IncludedTrafficTB float64
+	Name         string  `json:"name"` // "cx22", "cpx11"
+	Description  string  `json:"description"`
+	Cores        int     `json:"cores"`
+	Memory       float64 `json:"memory_gb"`              // GiB
+	Disk         int     `json:"disk_gb"`                // GiB
+	StorageType  string  `json:"storage_type,omitempty"` // "local" / "network"
+	CPUType      string  `json:"cpu_type,omitempty"`     // "shared" / "dedicated"
+	Architecture string  `json:"architecture,omitempty"` // "x86" / "arm"
+	// PriceMonthlyEUR is the headline (cheapest-location) gross monthly price.
+	// Prices carries the full per-location breakdown the UI prefers.
+	PriceMonthlyEUR float64 `json:"price_monthly_eur"`
+	PriceHourlyEUR  float64 `json:"price_hourly_eur,omitempty"`
+	PriceMonthlyUSD float64 `json:"price_monthly_usd,omitempty"`
+	// PriceIPv4MonthlyEUR is the gross monthly cost of one extra Primary IPv4.
+	// Uniform across server types (it's an IP, not a machine attribute) so it's
+	// populated from a documented provider constant.
+	PriceIPv4MonthlyEUR float64                   `json:"price_ipv4_monthly_eur,omitempty"`
+	IncludedTrafficTB   float64                   `json:"included_traffic_tb,omitempty"`
+	Prices              []ServerTypeLocationPrice `json:"prices,omitempty"`
 }
 
 // Image is an OS image available for new servers.
 type Image struct {
-	Name        string // "ubuntu-22.04"
-	Description string
-	OSFlavor    string
-	OSVersion   string
+	Name        string `json:"name"` // "ubuntu-22.04"
+	Description string `json:"description"`
+	OSFlavor    string `json:"os_flavor"`
+	OSVersion   string `json:"os_version"`
 }
 
 // CreateServerRequest is what the state machine passes to CreateServer.

@@ -149,6 +149,7 @@ type ProvisioningTemplate struct {
 	PlacementGroup  string            `json:"placement_group,omitempty"`
 	PrivateNetwork  string            `json:"private_network,omitempty"`
 	Firewall        string            `json:"firewall,omitempty"`
+	IsDraft         bool              `json:"is_draft"`
 	IsAutoTemplate  bool              `json:"is_auto_template"`
 	EstMonthlyCost  *float64          `json:"est_monthly_cost,omitempty"`
 	EstCostCurrency string            `json:"est_cost_currency,omitempty"`
@@ -174,7 +175,7 @@ func NewProvisioningTemplateRepository(d *db.DB) ProvisioningTemplateRepository 
 const tplCols = `id, name, description, provider, location, datacenter, server_type,
                  image, server_count, ipv4_per_server, ipv6_per_server, worker_profile_id,
                  tier, egress_kind, labels, placement_group, private_network, firewall,
-                 is_auto_template, est_monthly_cost, est_cost_currency, created_at, updated_at`
+                 is_auto_template, is_draft, est_monthly_cost, est_cost_currency, created_at, updated_at`
 
 func scanTpl(row pgx.Row) (*ProvisioningTemplate, error) {
 	var t ProvisioningTemplate
@@ -184,7 +185,7 @@ func scanTpl(row pgx.Row) (*ProvisioningTemplate, error) {
 		&t.ID, &t.Name, &desc, &t.Provider, &t.Location, &dc, &t.ServerType,
 		&t.Image, &t.ServerCount, &t.IPv4PerServer, &t.IPv6PerServer, &t.WorkerProfileID,
 		&t.Tier, &t.EgressKind, &labels, &pg, &pn, &fw,
-		&t.IsAutoTemplate, &t.EstMonthlyCost, &ccur, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.IsAutoTemplate, &t.IsDraft, &t.EstMonthlyCost, &ccur, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return nil, err
 	}
 	t.Labels = map[string]string{}
@@ -255,8 +256,8 @@ func (r *provisioningTemplateRepository) Create(ctx context.Context, t *Provisio
 		  (name, description, provider, location, datacenter, server_type, image,
 		   server_count, ipv4_per_server, ipv6_per_server, worker_profile_id, tier,
 		   egress_kind, labels, placement_group, private_network, firewall,
-		   is_auto_template, est_monthly_cost, est_cost_currency)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+		   is_auto_template, est_monthly_cost, est_cost_currency, is_draft)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 		RETURNING id, created_at, updated_at
 	`
 	return r.db.QueryRow(ctx, q,
@@ -264,7 +265,7 @@ func (r *provisioningTemplateRepository) Create(ctx context.Context, t *Provisio
 		t.ServerType, t.Image, t.ServerCount, t.IPv4PerServer, t.IPv6PerServer,
 		t.WorkerProfileID, t.Tier, t.EgressKind, labels, nullIfEmpty(t.PlacementGroup),
 		nullIfEmpty(t.PrivateNetwork), nullIfEmpty(t.Firewall),
-		t.IsAutoTemplate, t.EstMonthlyCost, nullIfEmpty(t.EstCostCurrency)).
+		t.IsAutoTemplate, t.EstMonthlyCost, nullIfEmpty(t.EstCostCurrency), t.IsDraft).
 		Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 }
 
@@ -277,7 +278,7 @@ func (r *provisioningTemplateRepository) Update(ctx context.Context, t *Provisio
 		  ipv6_per_server=$11, worker_profile_id=$12, tier=$13, egress_kind=$14,
 		  labels=$15, placement_group=$16, private_network=$17, firewall=$18,
 		  is_auto_template=$19, est_monthly_cost=$20, est_cost_currency=$21,
-		  updated_at=now()
+		  is_draft=$22, updated_at=now()
 		WHERE id=$1
 	`
 	tag, err := r.db.Exec(ctx, q,
@@ -285,7 +286,7 @@ func (r *provisioningTemplateRepository) Update(ctx context.Context, t *Provisio
 		t.ServerType, t.Image, t.ServerCount, t.IPv4PerServer, t.IPv6PerServer,
 		t.WorkerProfileID, t.Tier, t.EgressKind, labels, nullIfEmpty(t.PlacementGroup),
 		nullIfEmpty(t.PrivateNetwork), nullIfEmpty(t.Firewall),
-		t.IsAutoTemplate, t.EstMonthlyCost, nullIfEmpty(t.EstCostCurrency))
+		t.IsAutoTemplate, t.EstMonthlyCost, nullIfEmpty(t.EstCostCurrency), t.IsDraft)
 	if err != nil {
 		return err
 	}
@@ -335,6 +336,7 @@ type ProvisioningJobRepository interface {
 	AppendWorkerIDs(ctx context.Context, id uuid.UUID, workerIDs []uuid.UUID) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 	MarkCompleted(ctx context.Context, id uuid.UUID) error
+	Retry(ctx context.Context, id uuid.UUID) error
 }
 
 type provisioningJobRepository struct{ db *db.DB }
@@ -486,6 +488,17 @@ func (r *provisioningJobRepository) MarkCompleted(ctx context.Context, id uuid.U
 	_, err := r.db.Exec(ctx,
 		`UPDATE provisioning_jobs
 		 SET state='completed', completed_at=now(), updated_at=now()
+		 WHERE id=$1`, id)
+	return err
+}
+
+// Retry resets a job back to pending so the runner picks it up again, clearing
+// the prior error/completion and attempt count.
+func (r *provisioningJobRepository) Retry(ctx context.Context, id uuid.UUID) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE provisioning_jobs
+		 SET state='pending', error=NULL, completed_at=NULL, last_step_at=NULL,
+		     attempts=0, updated_at=now()
 		 WHERE id=$1`, id)
 	return err
 }

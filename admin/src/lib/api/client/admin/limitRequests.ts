@@ -2,21 +2,23 @@
 // increase requests.
 
 import { Request } from "@/lib/api/client";
+import { buildSearchQuery } from "@/lib/api/client/admin/query";
 import type {
+    AdminLimitRequestSearch,
+    AdminLimitRequestsResult,
     LimitIncreaseRequest,
-    LimitRequestStatus,
 } from "@/lib/api/models/admin";
 
+function toQuery(params: AdminLimitRequestSearch): string {
+    return buildSearchQuery(params as Record<string, unknown>);
+}
+
 export function listLimitRequests(
-    status: LimitRequestStatus | "all" = "pending",
-    limit = 50,
-): Promise<{ data: LimitIncreaseRequest[] }> {
-    const usp = new URLSearchParams();
-    if (status !== "all") usp.set("status", status);
-    usp.set("limit", String(limit));
+    params: AdminLimitRequestSearch = {},
+): Promise<AdminLimitRequestsResult> {
     return Request({
         method: "GET",
-        url: `/admin/limit-requests?${usp.toString()}`,
+        url: `/admin/limit-requests${toQuery(params)}`,
         authorization: true,
     });
 }

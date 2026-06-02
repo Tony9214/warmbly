@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -197,26 +198,134 @@ func (r *discountCodeRepository) List(ctx context.Context, search *models.AdminD
 		limit = 50
 	}
 
-	args := []interface{}{limit + 1}
-	argNum := 2
+	// Aliased column list so EXISTS subqueries can reference dc.id cleanly
+	// (discountCodeColumns is bare/unaliased and still used by GetByID/GetByCode).
+	const dcCols = `dc.id, dc.code, dc.description, dc.type, dc.percent_off, dc.amount_off, dc.currency, dc.trial_extension_days,
+		dc.duration, dc.duration_in_months, dc.max_redemptions, dc.times_redeemed, dc.per_account_limit,
+		dc.applies_to_all_plans, dc.status, dc.starts_at, dc.expires_at, dc.created_by, dc.created_at, dc.updated_at`
+
+	args := []interface{}{}
+	argNum := 1
 	whereClause := "WHERE 1=1"
 
-	if search.Status != "" && search.Status != "all" {
-		whereClause += " AND status = $" + itoa(argNum)
-		args = append(args, search.Status)
-		argNum++
-	}
 	if search.Search != "" {
-		whereClause += " AND (code ILIKE $" + itoa(argNum) + " OR description ILIKE $" + itoa(argNum) + ")"
+		whereClause += " AND (dc.code ILIKE $" + itoa(argNum) + " OR dc.description ILIKE $" + itoa(argNum) + ")"
 		args = append(args, "%"+search.Search+"%")
 		argNum++
 	}
-	if search.Cursor != nil {
-		whereClause += " AND id < $" + itoa(argNum)
-		args = append(args, *search.Cursor)
+	// Enum facets: allowlist known values so a bogus value yields no clause
+	// (returns all) rather than a Postgres enum-cast 500.
+	switch search.Status {
+	case "active", "disabled", "expired":
+		whereClause += " AND dc.status = $" + itoa(argNum)
+		args = append(args, search.Status)
+		argNum++
+	}
+	switch search.Type {
+	case "percent", "fixed", "trial_extension":
+		whereClause += " AND dc.type = $" + itoa(argNum)
+		args = append(args, search.Type)
+		argNum++
+	}
+	switch search.Duration {
+	case "once", "repeating", "forever":
+		whereClause += " AND dc.duration = $" + itoa(argNum)
+		args = append(args, search.Duration)
+		argNum++
+	}
+	switch search.PlanScope {
+	case "all":
+		whereClause += " AND dc.applies_to_all_plans = TRUE"
+	case "specific":
+		whereClause += " AND dc.applies_to_all_plans = FALSE"
+	}
+	if search.PlanID != nil {
+		whereClause += " AND EXISTS (SELECT 1 FROM discount_code_plans dcp WHERE dcp.discount_code_id = dc.id AND dcp.plan_id = $" + itoa(argNum) + ")"
+		args = append(args, *search.PlanID)
+		argNum++
+	}
+	if search.HasRedemptions {
+		whereClause += " AND EXISTS (SELECT 1 FROM discount_redemptions dr WHERE dr.discount_code_id = dc.id AND dr.status IN ('pending','applied'))"
+	}
+	if search.HasMaxRedemptions {
+		whereClause += " AND dc.max_redemptions IS NOT NULL"
+	}
+	if search.Exhausted {
+		whereClause += " AND dc.max_redemptions IS NOT NULL AND dc.times_redeemed >= dc.max_redemptions"
+	}
+	if search.HasExpiry {
+		whereClause += " AND dc.expires_at IS NOT NULL"
 	}
 
-	query := `SELECT ` + discountCodeColumns + ` FROM discount_codes ` + whereClause + ` ORDER BY created_at DESC LIMIT $1`
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			whereClause += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			whereClause += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			whereClause += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	addInt(`dc.times_redeemed >= $%d`, search.TimesRedeemedMin)
+	addInt(`dc.times_redeemed <= $%d`, search.TimesRedeemedMax)
+	addInt(`dc.percent_off >= $%d`, search.PercentOffMin)
+	addInt(`dc.percent_off <= $%d`, search.PercentOffMax)
+
+	if search.CreatedWithin > 0 {
+		whereClause += " AND dc.created_at >= NOW() - ($" + itoa(argNum) + "::int * INTERVAL '1 day')"
+		args = append(args, search.CreatedWithin)
+		argNum++
+	}
+	addAfter("dc.created_at", search.CreatedAfter)
+	addBefore("dc.created_at", search.CreatedBefore)
+	addAfter("dc.starts_at", search.StartsAfter)
+	addBefore("dc.starts_at", search.StartsBefore)
+	addAfter("dc.expires_at", search.ExpiresAfter)
+	addBefore("dc.expires_at", search.ExpiresBefore)
+
+	if search.Cursor != nil {
+		whereClause += " AND dc.id < $" + itoa(argNum)
+		args = append(args, *search.Cursor)
+		argNum++
+	}
+
+	orderCol := "dc.created_at"
+	switch search.SortBy {
+	case "code":
+		orderCol = "dc.code"
+	case "status":
+		orderCol = "dc.status::text"
+	case "times_redeemed":
+		orderCol = "dc.times_redeemed"
+	case "expires_at":
+		orderCol = "dc.expires_at"
+	case "starts_at":
+		orderCol = "dc.starts_at"
+	case "updated_at":
+		orderCol = "dc.updated_at"
+	}
+	orderDir := "DESC"
+	if search.SortBy != "" && !search.SortDesc {
+		orderDir = "ASC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir + ", dc.id DESC"
+
+	args = append(args, limit+1)
+
+	query := `SELECT ` + dcCols + ` FROM discount_codes dc ` + whereClause + ` ` + orderBy + ` LIMIT $` + itoa(argNum)
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -281,6 +390,13 @@ func (r *discountCodeRepository) List(ctx context.Context, search *models.AdminD
 				result.Data[i].PlanIDs = pl
 			}
 		}
+	}
+
+	// Total count for the same filter — drop the trailing LIMIT arg.
+	countQuery := `SELECT COUNT(*) FROM discount_codes dc ` + whereClause
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
 	}
 
 	return result, nil

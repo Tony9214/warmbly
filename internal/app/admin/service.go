@@ -64,13 +64,14 @@ type AdminService interface {
 
 	// Plans
 	ListPlans(ctx context.Context, includePrivate bool) ([]models.Plan, *errx.Error)
+	SearchPlansForAdmin(ctx context.Context, search *models.AdminPlanSearch) (*models.AdminPlansResult, *errx.Error)
 	CreatePlan(ctx context.Context, adminID uuid.UUID, req *models.CreatePlanRequest, ipAddress, userAgent string) (*models.Plan, *errx.Error)
 	GetPlan(ctx context.Context, planID uuid.UUID) (*models.Plan, *errx.Error)
 	UpdatePlan(ctx context.Context, adminID, planID uuid.UUID, req *models.UpdatePlanRequest, ipAddress, userAgent string) (*models.Plan, *errx.Error)
 	DeletePlan(ctx context.Context, adminID, planID uuid.UUID, ipAddress, userAgent string) *errx.Error
 
 	// Enterprise Inquiries
-	ListEnterpriseInquiries(ctx context.Context, status string, cursor *uuid.UUID, limit int) (*models.AdminEnterpriseInquiriesResult, *errx.Error)
+	ListEnterpriseInquiries(ctx context.Context, search *models.AdminEnterpriseInquirySearch) (*models.AdminEnterpriseInquiriesResult, *errx.Error)
 	GetEnterpriseInquiry(ctx context.Context, id uuid.UUID) (*models.AdminEnterpriseInquiry, *errx.Error)
 	UpdateEnterpriseInquiry(ctx context.Context, adminID, inquiryID uuid.UUID, update *models.UpdateEnterpriseInquiryRequest, ipAddress, userAgent string) *errx.Error
 
@@ -565,6 +566,15 @@ func (s *adminService) ListPlans(ctx context.Context, includePrivate bool) ([]mo
 	return plans, nil
 }
 
+func (s *adminService) SearchPlansForAdmin(ctx context.Context, search *models.AdminPlanSearch) (*models.AdminPlansResult, *errx.Error) {
+	result, err := s.repo.SearchPlansForAdmin(ctx, search)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to search plans")
+	}
+	return result, nil
+}
+
 func (s *adminService) CreatePlan(ctx context.Context, adminID uuid.UUID, req *models.CreatePlanRequest, ipAddress, userAgent string) (*models.Plan, *errx.Error) {
 	plan := &models.Plan{
 		ID:                 uuid.New(),
@@ -694,8 +704,8 @@ func (s *adminService) DeletePlan(ctx context.Context, adminID, planID uuid.UUID
 
 // Enterprise Inquiries
 
-func (s *adminService) ListEnterpriseInquiries(ctx context.Context, status string, cursor *uuid.UUID, limit int) (*models.AdminEnterpriseInquiriesResult, *errx.Error) {
-	result, err := s.repo.ListEnterpriseInquiries(ctx, status, cursor, limit)
+func (s *adminService) ListEnterpriseInquiries(ctx context.Context, search *models.AdminEnterpriseInquirySearch) (*models.AdminEnterpriseInquiriesResult, *errx.Error) {
+	result, err := s.repo.ListEnterpriseInquiries(ctx, search)
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to list enterprise inquiries")

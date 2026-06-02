@@ -50,7 +50,7 @@ func TestIdempotencyMiddlewareStoresResponse(t *testing.T) {
 		},
 	)
 
-	req := httptest.NewRequest(http.MethodPost, "/contacts", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/contacts", nil)
 	req.Header.Set(IdempotencyKeyHeader, "idem_123")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -91,7 +91,7 @@ func TestIdempotencyMiddlewareReplaysResponse(t *testing.T) {
 		},
 	)
 
-	req := httptest.NewRequest(http.MethodPost, "/contacts", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/contacts", nil)
 	req.Header.Set(IdempotencyKeyHeader, "idem_123")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)

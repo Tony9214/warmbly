@@ -40,7 +40,7 @@ fmt:
 	gofmt -w ./cmd ./internal
 
 lint:
-	golangci-lint run --timeout=5m
+	$(GO_BIN)/golangci-lint run --timeout=5m
 
 proto:
 	@command -v protoc >/dev/null || (echo "protoc not found in PATH"; exit 1)
@@ -71,12 +71,14 @@ up:
 sim:
 	$(COMPOSE) --profile sim up
 
-# Load rich fixture data. Requires backend up (via `make backend`,
-# `make app`, or `make up`) so migrations have run. `-T` disables TTY
-# allocation (Make's shell isn't a tty; without -T compose can silently
-# swallow the seed's stdout).
+# Load rich fixture data. Runs natively like the other dev services — the
+# seeder only needs Postgres, so it does not depend on a (re)built docker
+# backend image, just `make infra` plus migrations applied (`make migrate`,
+# `make backend`, or `make run`). SEED_RICH/SEED_FULL match the old docker
+# seed profile: baseline + 3 orgs/workers/mailboxes + plans, team users
+# (incl. the admin@warmbly.local super-admin), CRM, and an API key.
 seed:
-	$(COMPOSE) --profile seed run --rm -T seed
+	$(GO_DEV_ENV) SEED_RICH=true SEED_FULL=true go run ./cmd/seed
 
 # Switch the seeded dev workspace between trial/paid plans without going
 # through Stripe. Run after `make seed`.
@@ -202,10 +204,10 @@ restart-all:
 DEV_COMPOSE := $(COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml
 
 # Stateful infrastructure. Brought up once and left running.
-# localstack-init is a one-shot that (re)creates the KMS alias, DynamoDB
-# tables, and S3 bucket. localstack runs with PERSISTENCE=0, so those are
-# wiped on every restart and must be recreated before any service (incl.
-# the natively-run backend) touches KMS/Dynamo/S3.
+# localstack-init is a one-shot that (re)creates the KMS alias and S3
+# bucket. localstack runs with PERSISTENCE=0, so those are wiped on every
+# restart and must be recreated before any service (incl. the natively-run
+# backend) touches KMS/S3.
 INFRA_SVCS  := postgres redis zookeeper kafka kafka-init schema-registry \
                mailpit localstack localstack-init stripe-mock cloud-tasks-emulator
 
@@ -486,6 +488,8 @@ admin:
 	cd admin && \
 	VITE_API_URL=http://$(WEB_HOST):8080 \
 	VITE_DASHBOARD_URL=http://$(WEB_HOST):5173 \
+	VITE_TURNSTILE_KEY=1x00000000000000000000AA \
+	VITE_TURNSTILE_BYPASS_TOKEN=warmbly-local-turnstile-bypass \
 	pnpm dev $(VITE_HOST_FLAG)
 
 site:

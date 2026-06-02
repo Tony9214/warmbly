@@ -21,7 +21,10 @@ func (c *Client) Lookup(ip netip.Addr) (*Info, error) {
 		return info, nil
 	}
 
-	if c.r != nil {
+	// A nil client (geo disabled, or the MaxMind DB was missing at boot) or a
+	// nil reader degrades to "Unknown" rather than panicking — geo enrichment is
+	// best-effort and must never fail session creation.
+	if c != nil && c.r != nil {
 		cityRecord, err := c.r.City(ip)
 		if err == nil && cityRecord != nil {
 			info.City = cityRecord.City.Names.English

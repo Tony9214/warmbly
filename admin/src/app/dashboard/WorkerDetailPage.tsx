@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import {
     getManagedWorker,
+    getWorkerEmails,
     getWorkerLogs,
     getWorkerLiveStatus,
     installWorker,
@@ -30,6 +31,21 @@ import {
     testWorker,
     uninstallWorker,
 } from "@/lib/api/client/admin/workers";
+
+// Risk band (mailbox reputation tier) + health state (warmup/worker) tones.
+const RISK_TONE: Record<string, string> = {
+    clean: "border-emerald-300 bg-emerald-50 text-emerald-700",
+    risky: "border-amber-300 bg-amber-50 text-amber-700",
+    quarantine: "border-red-300 bg-red-50 text-red-700",
+};
+
+const HEALTH_TONE: Record<string, string> = {
+    healthy: "border-emerald-300 bg-emerald-50 text-emerald-700",
+    watch: "border-amber-300 bg-amber-50 text-amber-700",
+    throttled: "border-orange-300 bg-orange-50 text-orange-700",
+    quarantined: "border-red-300 bg-red-50 text-red-700",
+    blocked: "border-red-300 bg-red-50 text-red-700",
+};
 
 export default function WorkerDetailPage() {
     const { id = "" } = useParams<{ id: string }>();
@@ -55,6 +71,13 @@ export default function WorkerDetailPage() {
         queryFn: () => getWorkerLogs(id, 200),
         enabled: !!id,
         retry: false,
+    });
+
+    const emailsQ = useQuery({
+        queryKey: ["admin", "worker", id, "emails"],
+        queryFn: () => getWorkerEmails(id),
+        enabled: !!id,
+        staleTime: 30_000,
     });
 
     const invalidate = () => {
@@ -266,7 +289,30 @@ export default function WorkerDetailPage() {
                     <CardContent className="pt-0 text-sm space-y-2">
                         <KV label="Type" value={w.worker_type} />
                         <KV label="Free tier" value={w.free_tier ? "yes" : "no"} />
-                        <KV label="Risk pool" value={w.risk_pool} />
+                        <KV
+                            label="Health"
+                            value={
+                                <Badge
+                                    variant="outline"
+                                    className={`text-[10px] ${HEALTH_TONE[w.health_state] ?? "border-zinc-300 text-zinc-600"}`}
+                                >
+                                    {w.health_state}
+                                </Badge>
+                            }
+                        />
+                        <KV
+                            label="Risk pool"
+                            value={
+                                <Badge
+                                    variant="outline"
+                                    className={`text-[10px] ${RISK_TONE[w.risk_pool] ?? "border-zinc-300 text-zinc-600"}`}
+                                >
+                                    {w.risk_pool}
+                                </Badge>
+                            }
+                        />
+                        <KV label="Egress" value={w.egress_kind} />
+                        <KV label="Load score" value={w.load_score.toFixed(2)} />
                         <KV label="Mailboxes" value={String(w.account_count)} />
                         <KV label="Image" value={w.image_version || "—"} mono />
                         {w.tags && w.tags.length > 0 && (
@@ -281,6 +327,97 @@ export default function WorkerDetailPage() {
                     </CardContent>
                 </Card>
             </div>
+
+            <Card className="mt-4">
+                <CardHeader>
+                    <CardTitle>Mailboxes</CardTitle>
+                    <CardDescription>
+                        Inboxes assigned to this worker and their health. Risk band drives which
+                        workers a mailbox may share — low-health inboxes are kept off trusted workers.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                    {emailsQ.isLoading && <Skeleton className="h-32 w-full" />}
+                    {emailsQ.isError && (
+                        <div className="text-xs text-muted-foreground">Could not load mailboxes.</div>
+                    )}
+                    {emailsQ.data &&
+                        ((emailsQ.data.data ?? []).length === 0 ? (
+                            <div className="text-sm text-muted-foreground">
+                                No mailboxes assigned to this worker.
+                            </div>
+                        ) : (
+                            <>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead className="text-muted-foreground text-xs uppercase">
+                                            <tr>
+                                                <th className="text-left px-2 py-1.5 font-medium">Mailbox</th>
+                                                <th className="text-left px-2 py-1.5 font-medium">Provider</th>
+                                                <th className="text-left px-2 py-1.5 font-medium">Status</th>
+                                                <th className="text-left px-2 py-1.5 font-medium">Risk band</th>
+                                                <th className="text-left px-2 py-1.5 font-medium">Warmup health</th>
+                                                <th className="text-right px-2 py-1.5 font-medium">Spam</th>
+                                                <th className="text-left px-2 py-1.5 font-medium">Synced</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {(emailsQ.data.data ?? []).map((m) => (
+                                                <tr key={m.id} className="border-t border-border">
+                                                    <td className="px-2 py-1.5 font-mono text-xs">{m.email}</td>
+                                                    <td className="px-2 py-1.5 text-xs">
+                                                        {m.provider}
+                                                        {m.warmup_enabled && (
+                                                            <span className="ml-1 text-[10px] text-sky-600">warming</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-2 py-1.5 text-xs">{m.status}</td>
+                                                    <td className="px-2 py-1.5">
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-[10px] ${RISK_TONE[m.risk_band] ?? "border-zinc-300 text-zinc-600"}`}
+                                                        >
+                                                            {m.risk_band}
+                                                        </Badge>
+                                                    </td>
+                                                    <td className="px-2 py-1.5">
+                                                        {m.warmup_health ? (
+                                                            <Badge
+                                                                variant="outline"
+                                                                className={`text-[10px] ${HEALTH_TONE[m.warmup_health] ?? "border-zinc-300 text-zinc-600"}`}
+                                                            >
+                                                                {m.warmup_health}
+                                                            </Badge>
+                                                        ) : (
+                                                            <span className="text-xs text-muted-foreground">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-2 py-1.5 text-right tabular-nums text-xs">
+                                                        {m.spam_score ?? "—"}
+                                                    </td>
+                                                    <td className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                        {m.last_synced_at
+                                                            ? new Date(m.last_synced_at).toLocaleDateString()
+                                                            : "—"}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {emailsQ.data.pagination?.has_more && (
+                                    <div className="mt-2 text-xs text-muted-foreground">
+                                        Showing the first {(emailsQ.data.data ?? []).length}
+                                        {emailsQ.data.pagination.total != null
+                                            ? ` of ${emailsQ.data.pagination.total}`
+                                            : ""}{" "}
+                                        — use the Mailboxes explorer for the full list.
+                                    </div>
+                                )}
+                            </>
+                        ))}
+                </CardContent>
+            </Card>
 
             <Card className="mt-4">
                 <CardHeader>

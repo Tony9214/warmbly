@@ -28,8 +28,10 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+    listHetznerImages,
     listHetznerLocations,
     listHetznerServerTypes,
+    serverTypeMonthlyEUR,
 } from "@/lib/api/client/admin/cloud";
 import {
     listProvisioningTemplates,
@@ -38,7 +40,6 @@ import {
 import type {
     HetznerServerType,
     ProvisioningConfig,
-    ProvisioningEgressKind,
     ProvisioningTemplate,
     ProvisioningWorkerTier,
 } from "@/lib/api/models/admin";
@@ -63,14 +64,17 @@ interface Props {
 
 const DEFAULT_CONFIG: ProvisioningConfig = {
     provider: "hetzner",
-    location: "fsn1",
-    server_type: "cx22",
+    // Location / server type / image are chosen from the live provider catalog.
+    // No hard-coded defaults — they go stale against real Hetzner pricing and
+    // were the source of the "wrong price" the catalog now provides for real.
+    location: "",
+    server_type: "",
     server_count: 1,
     ipv4_per_server: 1,
     ipv6_per_server: 1,
     worker_tier: "shared_premium",
     egress_kind: "cold_smtp",
-    image: "ubuntu-22.04",
+    image: "",
     firewall: "warmbly-worker",
     labels: [],
 };
@@ -95,17 +99,20 @@ export function templateToFormValue(t: ProvisioningTemplate): TemplateFormValue 
     };
 }
 
+// Only the shared tiers are selectable when provisioning. Dedicated capacity is
+// allocated automatically by the control plane (a spare shared-premium worker is
+// promoted to dedicated when a paying org needs one), never hand-picked here.
 const TIERS: { value: ProvisioningWorkerTier; label: string }[] = [
     { value: "shared_free", label: "Shared - free" },
     { value: "shared_premium", label: "Shared - premium" },
-    { value: "dedicated", label: "Dedicated" },
 ];
 
-const EGRESS: { value: ProvisioningEgressKind; label: string }[] = [
-    { value: "cold_smtp", label: "Cold SMTP" },
-    { value: "oauth_api", label: "OAuth API" },
-    { value: "warmup_only", label: "Warmup only" },
-];
+// egress_kind is intentionally not editable here. It is load-bearing for
+// worker capacity/placement (worker_capacity_view.base_capacity) and is
+// driven from infrastructure — the worker self-reports it on heartbeat and
+// receives it via WORKER_EGRESS_KIND at enrollment. Templates keep the field
+// (DEFAULT_CONFIG.egress_kind = "cold_smtp") so the value is still submitted;
+// we just don't expose an admin control that could silently fight the box.
 
 export function ProvisioningTemplateForm({
     editing,
@@ -124,6 +131,12 @@ export function ProvisioningTemplateForm({
     const serverTypesQ = useQuery({
         queryKey: ["admin", "hetzner-server-types"],
         queryFn: listHetznerServerTypes,
+        retry: false,
+        staleTime: 5 * 60_000,
+    });
+    const imagesQ = useQuery({
+        queryKey: ["admin", "hetzner-images"],
+        queryFn: listHetznerImages,
         retry: false,
         staleTime: 5 * 60_000,
     });
@@ -146,8 +159,8 @@ export function ProvisioningTemplateForm({
     // Live cost preview. Server price * count, plus the cost of any IPs
     // beyond the one Hetzner includes free with each box.
     const cost = useMemo(() => {
-        const sp = selectedServerType?.price_monthly_eur ?? 0;
-        const ipPrice = selectedServerType?.price_ipv4_monthly_eur ?? 0.5;
+        const sp = serverTypeMonthlyEUR(selectedServerType, value.config.location);
+        const ipPrice = selectedServerType?.price_ipv4_monthly_eur ?? 0.6;
         const extraIps =
             Math.max(0, value.config.ipv4_per_server - 1) * value.config.server_count;
         const serverTotal = sp * value.config.server_count;
@@ -233,14 +246,14 @@ export function ProvisioningTemplateForm({
                             <Skeleton className="h-9 w-full" />
                         ) : (
                             <Select
-                                value={value.config.location}
+                                value={value.config.location || undefined}
                                 onValueChange={(v) => setConfig({ location: v })}
                             >
                                 <SelectTrigger id="t-loc">
-                                    <SelectValue />
+                                    <SelectValue placeholder="Pick a location…" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {(locationsQ.data ?? FALLBACK_LOCATIONS).map((l) => (
+                                    {(locationsQ.data ?? []).map((l) => (
                                         <SelectItem key={l.name} value={l.name}>
                                             <span className="font-mono text-xs mr-2">
                                                 {l.name}
@@ -251,9 +264,9 @@ export function ProvisioningTemplateForm({
                                 </SelectContent>
                             </Select>
                         )}
-                        {locationsQ.data && locationsQ.data.length === 0 && (
+                        {!locationsQ.isLoading && (locationsQ.data?.length ?? 0) === 0 && (
                             <p className="text-[11px] text-amber-700">
-                                Backend endpoint not yet available - using built-in fallback list.
+                                No locations available — connect a cloud provider under Settings → Cloud Providers.
                             </p>
                         )}
                     </div>
@@ -264,20 +277,21 @@ export function ProvisioningTemplateForm({
                             <Skeleton className="h-9 w-full" />
                         ) : (
                             <Select
-                                value={value.config.server_type}
+                                value={value.config.server_type || undefined}
                                 onValueChange={(v) => setConfig({ server_type: v })}
                             >
                                 <SelectTrigger id="t-stype">
-                                    <SelectValue />
+                                    <SelectValue placeholder="Pick a server type…" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {(serverTypesQ.data ?? FALLBACK_SERVER_TYPES).map((s) => (
+                                    {(serverTypesQ.data ?? []).map((s) => (
                                         <SelectItem key={s.name} value={s.name}>
                                             <span className="font-mono text-xs mr-2">
                                                 {s.name}
                                             </span>
                                             {s.cores} CPU, {s.memory_gb} GB RAM,{" "}
-                                            {s.disk_gb} GB - €{s.price_monthly_eur.toFixed(2)}/mo
+                                            {s.disk_gb} GB — €
+                                            {serverTypeMonthlyEUR(s, value.config.location).toFixed(2)}/mo
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -289,9 +303,9 @@ export function ProvisioningTemplateForm({
                                     `${selectedServerType.cores} cores, ${selectedServerType.memory_gb} GB RAM, ${selectedServerType.disk_gb} GB disk`}
                             </p>
                         )}
-                        {serverTypesQ.data && serverTypesQ.data.length === 0 && (
+                        {!serverTypesQ.isLoading && (serverTypesQ.data?.length ?? 0) === 0 && (
                             <p className="text-[11px] text-amber-700">
-                                Backend endpoint not yet available - using built-in fallback list.
+                                No server types available — connect a cloud provider first.
                             </p>
                         )}
                     </div>
@@ -331,7 +345,7 @@ export function ProvisioningTemplateForm({
             </Section>
 
             <Section title="Worker config">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                         <Label htmlFor="t-tier">Worker tier</Label>
                         <Select
@@ -382,26 +396,6 @@ export function ProvisioningTemplateForm({
                         )}
                     </div>
 
-                    <div className="space-y-1.5">
-                        <Label htmlFor="t-egress">Egress kind</Label>
-                        <Select
-                            value={value.config.egress_kind}
-                            onValueChange={(v) =>
-                                setConfig({ egress_kind: v as ProvisioningEgressKind })
-                            }
-                        >
-                            <SelectTrigger id="t-egress">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {EGRESS.map((e) => (
-                                    <SelectItem key={e.value} value={e.value}>
-                                        {e.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
                 </div>
             </Section>
 
@@ -421,13 +415,32 @@ export function ProvisioningTemplateForm({
                 {showAdvanced && (
                     <div className="mt-3 space-y-3 border-l-2 border-[var(--admin-accent)] pl-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <TextField
-                                id="t-image"
-                                label="Image"
-                                value={value.config.image}
-                                onChange={(s) => setConfig({ image: s })}
-                                hint="OS image slug, e.g. ubuntu-22.04"
-                            />
+                            <div className="space-y-1.5">
+                                <Label htmlFor="t-image">Image</Label>
+                                <Select
+                                    value={value.config.image || undefined}
+                                    onValueChange={(v) => setConfig({ image: v })}
+                                >
+                                    <SelectTrigger id="t-image">
+                                        <SelectValue placeholder="Pick an OS image…" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {(imagesQ.data ?? []).map((img) => (
+                                            <SelectItem key={img.name} value={img.name}>
+                                                <span className="font-mono text-xs mr-2">
+                                                    {img.name}
+                                                </span>
+                                                {img.description}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {!imagesQ.isLoading && (imagesQ.data?.length ?? 0) === 0 && (
+                                    <p className="text-[11px] text-amber-700">
+                                        No images available — connect a cloud provider first.
+                                    </p>
+                                )}
+                            </div>
                             <TextField
                                 id="t-dc"
                                 label="Datacenter override"
@@ -567,8 +580,7 @@ function NumberField({
             <Label htmlFor={id}>{label}</Label>
             <Input
                 id={id}
-                type="number"
-                min={min}
+                inputMode="numeric"
                 value={value}
                 onChange={(e) => {
                     const n = Number(e.target.value);
@@ -751,61 +763,3 @@ function fmt(n: number): string {
     });
 }
 
-// --------------------------------------------------------------------
-// Fallback catalog used while the backend endpoints aren't wired yet.
-// Kept conservative - the operator can still produce a valid template
-// against these defaults; the backend will reject anything stale at
-// job-create time.
-// --------------------------------------------------------------------
-
-const FALLBACK_LOCATIONS = [
-    { name: "fsn1", description: "Falkenstein (DE)", city: "Falkenstein", country: "DE" },
-    { name: "nbg1", description: "Nuremberg (DE)", city: "Nuremberg", country: "DE" },
-    { name: "hel1", description: "Helsinki (FI)", city: "Helsinki", country: "FI" },
-    { name: "ash", description: "Ashburn (US Virginia)", city: "Ashburn", country: "US" },
-    { name: "hil", description: "Hillsboro (US Oregon)", city: "Hillsboro", country: "US" },
-    { name: "sin", description: "Singapore (SG)", city: "Singapore", country: "SG" },
-];
-
-const FALLBACK_SERVER_TYPES: HetznerServerType[] = [
-    {
-        name: "cx22",
-        description: "2 vCPU shared, 4 GB RAM",
-        cores: 2,
-        memory_gb: 4,
-        disk_gb: 40,
-        cpu_type: "shared",
-        price_monthly_eur: 4.59,
-        price_ipv4_monthly_eur: 0.6,
-    },
-    {
-        name: "cx32",
-        description: "4 vCPU shared, 8 GB RAM",
-        cores: 4,
-        memory_gb: 8,
-        disk_gb: 80,
-        cpu_type: "shared",
-        price_monthly_eur: 7.59,
-        price_ipv4_monthly_eur: 0.6,
-    },
-    {
-        name: "cpx21",
-        description: "3 vCPU AMD, 4 GB RAM",
-        cores: 3,
-        memory_gb: 4,
-        disk_gb: 80,
-        cpu_type: "shared",
-        price_monthly_eur: 8.46,
-        price_ipv4_monthly_eur: 0.6,
-    },
-    {
-        name: "ccx13",
-        description: "2 vCPU dedicated, 8 GB RAM",
-        cores: 2,
-        memory_gb: 8,
-        disk_gb: 80,
-        cpu_type: "dedicated",
-        price_monthly_eur: 14.86,
-        price_ipv4_monthly_eur: 0.6,
-    },
-];

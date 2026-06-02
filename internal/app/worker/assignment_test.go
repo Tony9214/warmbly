@@ -14,6 +14,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -37,6 +38,17 @@ type stubWorkerRepo struct {
 	lastEmailPoolTypeSet    string
 	incrementedWorkerCounts map[uuid.UUID]int
 	loadScoreDeltas         map[uuid.UUID]float64
+
+	// Dedicated auto-promotion knobs.
+	availableDedicated     *models.Worker                  // GetAvailableDedicatedWorker result
+	promotableDedicated    *models.Worker                  // PromoteIdlePremiumWorkerToDedicated result
+	dedicatedAssignCreated bool                            // CreateDedicatedAssignmentIfNotExists result
+	setWorkerTypeCalls     map[uuid.UUID]models.WorkerType // records SetWorkerType calls
+
+	// Risk-band placement knobs.
+	riskBand       models.EmailRiskBand                      // GetEmailAccountRiskBand result ("" → clean)
+	sharedByPool   map[models.WorkerRiskPool][]models.Worker // GetSharedWorkersByTierAndPool result
+	promotedToPool *models.Worker                            // PromoteWorkerToPool result
 }
 
 func (r *stubWorkerRepo) GetDedicatedWorkerByUserID(_ context.Context, _ uuid.UUID) (*models.Worker, error) {
@@ -93,6 +105,50 @@ func (r *stubWorkerRepo) AddLoadScore(_ context.Context, workerID uuid.UUID, del
 	}
 	r.loadScoreDeltas[workerID] += delta
 	return nil
+}
+
+func (r *stubWorkerRepo) GetEmailAccountRiskBand(_ context.Context, _ uuid.UUID) (models.EmailRiskBand, error) {
+	if r.riskBand == "" {
+		return models.EmailRiskBandClean, nil
+	}
+	return r.riskBand, nil
+}
+
+func (r *stubWorkerRepo) GetAvailableDedicatedWorker(_ context.Context) (*models.Worker, error) {
+	return r.availableDedicated, nil
+}
+
+func (r *stubWorkerRepo) PromoteIdlePremiumWorkerToDedicated(_ context.Context) (*models.Worker, error) {
+	if r.promotableDedicated == nil {
+		return nil, nil
+	}
+	w := *r.promotableDedicated
+	w.WorkerType = models.WorkerTypeDedicated
+	return &w, nil
+}
+
+func (r *stubWorkerRepo) CreateDedicatedAssignmentIfNotExists(_ context.Context, a *models.DedicatedWorkerAssignment) (bool, error) {
+	if r.dedicatedAssignCreated {
+		// Bind it so the post-assign re-fetch in AssignWorkerToEmail finds it.
+		r.dedicatedForOrg = &models.Worker{ID: a.WorkerID, WorkerType: models.WorkerTypeDedicated, Active: true}
+	}
+	return r.dedicatedAssignCreated, nil
+}
+
+func (r *stubWorkerRepo) SetWorkerType(_ context.Context, id uuid.UUID, t models.WorkerType) error {
+	if r.setWorkerTypeCalls == nil {
+		r.setWorkerTypeCalls = map[uuid.UUID]models.WorkerType{}
+	}
+	r.setWorkerTypeCalls[id] = t
+	return nil
+}
+
+func (r *stubWorkerRepo) GetSharedWorkersByTierAndPool(_ context.Context, _ bool, pool models.WorkerRiskPool) ([]models.Worker, error) {
+	return r.sharedByPool[pool], nil
+}
+
+func (r *stubWorkerRepo) PromoteWorkerToPool(_ context.Context, _ bool, _ models.WorkerRiskPool) (*models.Worker, error) {
+	return r.promotedToPool, nil
 }
 
 type stubSubRepo struct {
@@ -189,10 +245,15 @@ func TestAssign_PaidOrgWithDedicatedPlan_LandsOnDedicatedWorker(t *testing.T) {
 }
 
 func TestAssign_PaidOrgWithDedicatedPlanButNoAssignment_FallsBackToPremium(t *testing.T) {
+	// Dedicated plan, no bound worker, no free dedicated worker, AND nothing
+	// to promote (no idle premium spare). The add must still succeed by
+	// falling back to a premium shared worker rather than failing.
 	premium := newWorker(uuid.New(), false, models.WorkerTypeShared)
 	wr := &stubWorkerRepo{
-		dedicatedForOrg: nil, // org has the plan but no worker assigned yet
-		sharedPremium:   []models.Worker{premium},
+		dedicatedForOrg:     nil, // org has the plan but no worker assigned yet
+		availableDedicated:  nil, // dedicated pool is empty
+		promotableDedicated: nil, // and there's no idle premium spare to promote
+		sharedPremium:       []models.Worker{premium},
 	}
 	sub := paidSub()
 	plan := &models.Plan{ID: sub.PlanID, DedicatedWorkers: 1}
@@ -203,7 +264,122 @@ func TestAssign_PaidOrgWithDedicatedPlanButNoAssignment_FallsBackToPremium(t *te
 		t.Fatalf("AssignWorkerToEmail: %v", err)
 	}
 	if *got != premium.ID {
-		t.Errorf("org with dedicated plan but no assignment should fall back to premium, got %s", got)
+		t.Errorf("org with dedicated plan but nothing to promote should fall back to premium, got %s", got)
+	}
+}
+
+func TestAssign_PaidOrgWithDedicatedPlanButNoAssignment_PromotesSpareWorker(t *testing.T) {
+	// Dedicated plan, no bound worker, dedicated pool empty — but an idle
+	// premium shared worker is available to promote. The mailbox must land on
+	// the promoted (now dedicated) worker, not on the shared pool.
+	spare := newWorker(uuid.New(), false, models.WorkerTypeShared)
+	wr := &stubWorkerRepo{
+		dedicatedForOrg:        nil,
+		availableDedicated:     nil,
+		promotableDedicated:    &spare,
+		dedicatedAssignCreated: true, // bind succeeds
+		sharedPremium:          []models.Worker{newWorker(uuid.New(), false, models.WorkerTypeShared)},
+	}
+	sub := paidSub()
+	plan := &models.Plan{ID: sub.PlanID, DedicatedWorkers: 1}
+	svc := NewAssignmentService(wr, &stubSubRepo{sub: sub}, &stubPlanRepo{plan: plan})
+
+	got, err := svc.AssignWorkerToEmail(context.Background(), uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatalf("AssignWorkerToEmail: %v", err)
+	}
+	if *got != spare.ID {
+		t.Errorf("org with dedicated plan should land on the promoted spare worker %s, got %s", spare.ID, got)
+	}
+}
+
+func TestAssignDedicatedWorker_PromoteThenLoseBind_RevertsToShared(t *testing.T) {
+	// Promotion succeeds but the bind race is lost (a concurrent add bound the
+	// org first). The just-promoted worker must be reverted to shared so it
+	// isn't stranded as an unbound dedicated box.
+	spare := newWorker(uuid.New(), false, models.WorkerTypeShared)
+	wr := &stubWorkerRepo{
+		availableDedicated:     nil, // dedicated pool empty → promote
+		promotableDedicated:    &spare,
+		dedicatedAssignCreated: false, // lose the bind race
+	}
+	svc := NewAssignmentService(wr, &stubSubRepo{}, &stubPlanRepo{})
+
+	err := svc.AssignDedicatedWorker(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, ErrOrgAlreadyAssigned) {
+		t.Fatalf("expected ErrOrgAlreadyAssigned on lost bind race, got %v", err)
+	}
+	if got, ok := wr.setWorkerTypeCalls[spare.ID]; !ok || got != models.WorkerTypeShared {
+		t.Errorf("promoted worker must be reverted to shared after losing the bind race, got %v (called=%v)", got, ok)
+	}
+}
+
+func TestAssign_RiskyMailbox_LandsOnRiskyPoolWorker(t *testing.T) {
+	// A risky mailbox must land on a worker in the risky pool, never on a
+	// clean-pool worker, so it can't damage the reputation of trusted inboxes.
+	riskyWorker := newWorker(uuid.New(), false, models.WorkerTypeShared)
+	riskyWorker.RiskPool = models.WorkerRiskPoolRisky
+	cleanWorker := newWorker(uuid.New(), false, models.WorkerTypeShared)
+
+	wr := &stubWorkerRepo{
+		riskBand: models.EmailRiskBandRisky,
+		sharedByPool: map[models.WorkerRiskPool][]models.Worker{
+			models.WorkerRiskPoolRisky: {riskyWorker},
+			models.WorkerRiskPoolClean: {cleanWorker},
+		},
+	}
+	sub := paidSub()
+	plan := &models.Plan{ID: sub.PlanID, DedicatedWorkers: 0}
+	svc := NewAssignmentService(wr, &stubSubRepo{sub: sub}, &stubPlanRepo{plan: plan})
+
+	got, err := svc.AssignWorkerToEmail(context.Background(), uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatalf("AssignWorkerToEmail: %v", err)
+	}
+	if *got != riskyWorker.ID {
+		t.Errorf("risky mailbox must land on a risky-pool worker %s, got %s", riskyWorker.ID, got)
+	}
+}
+
+func TestAssign_RiskyMailbox_NoRiskyWorker_PromotesCleanWorker(t *testing.T) {
+	// When no risky-pool worker exists, we promote an idle clean worker into
+	// the risky pool rather than co-locating with trusted inboxes.
+	promoted := newWorker(uuid.New(), false, models.WorkerTypeShared)
+	promoted.RiskPool = models.WorkerRiskPoolRisky
+
+	wr := &stubWorkerRepo{
+		riskBand:       models.EmailRiskBandRisky,
+		sharedByPool:   map[models.WorkerRiskPool][]models.Worker{}, // risky pool empty
+		promotedToPool: &promoted,
+	}
+	sub := paidSub()
+	plan := &models.Plan{ID: sub.PlanID, DedicatedWorkers: 0}
+	svc := NewAssignmentService(wr, &stubSubRepo{sub: sub}, &stubPlanRepo{plan: plan})
+
+	got, err := svc.AssignWorkerToEmail(context.Background(), uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatalf("AssignWorkerToEmail: %v", err)
+	}
+	if *got != promoted.ID {
+		t.Errorf("risky mailbox with empty pool should land on the promoted worker %s, got %s", promoted.ID, got)
+	}
+}
+
+func TestAssign_RiskyMailbox_NoWorkerNoPromotion_Refuses(t *testing.T) {
+	// Strict invariant: if there's no risky-pool worker and nothing to
+	// promote, refuse rather than place a risky inbox next to trusted ones.
+	wr := &stubWorkerRepo{
+		riskBand:       models.EmailRiskBandQuarantine,
+		sharedByPool:   map[models.WorkerRiskPool][]models.Worker{},
+		promotedToPool: nil,
+	}
+	sub := paidSub()
+	plan := &models.Plan{ID: sub.PlanID, DedicatedWorkers: 0}
+	svc := NewAssignmentService(wr, &stubSubRepo{sub: sub}, &stubPlanRepo{plan: plan})
+
+	_, err := svc.AssignWorkerToEmail(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, ErrNoAvailableWorkers) {
+		t.Errorf("strict placement should refuse with ErrNoAvailableWorkers, got %v", err)
 	}
 }
 

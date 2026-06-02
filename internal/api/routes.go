@@ -56,14 +56,20 @@ func Run(
 	r.GET("/integrations/oauth/callback", h.IntegrationOAuthCallback)
 
 	// Internal backend-to-backend endpoints. Workers call these instead of
-	// touching Postgres / DynamoDB directly, per the no-direct-data-services
-	// rule in CLAUDE.md. Auth: shared bearer token (INTERNAL_API_TOKEN).
+	// touching Postgres directly, per the no-direct-data-services rule in
+	// CLAUDE.md. Auth: shared bearer token (INTERNAL_API_TOKEN).
 	internal := r.Group("/api/v1/internal")
 	internal.Use(m.InternalAuthMiddleware())
 	{
 		internal.GET("/dek/:userID", h.InternalGetDEK)
 		internal.PUT("/dek/:userID", h.InternalPutDEK)
 		internal.DELETE("/dek/:userID", h.InternalDeleteDEK)
+
+		// Worker mailbox-sync messageId -> internal email map (replaces the
+		// former DynamoDB EmailMessageData table). Workers read/write it here.
+		internal.GET("/email-message-map", h.InternalGetEmailMessageMap)
+		internal.PUT("/email-message-map", h.InternalPutEmailMessageMap)
+		internal.DELETE("/email-message-map", h.InternalDeleteEmailMessageMap)
 
 		// Worker bootstrap config + heartbeat. Workers POST their identity
 		// on boot (worker_id + bind_ip + tag) and pull their runtime config
@@ -100,6 +106,8 @@ func Run(
 			"http://127.0.0.1:4173",
 			"http://localhost:5173",
 			"http://127.0.0.1:5173",
+			"http://localhost:5174",
+			"http://127.0.0.1:5174",
 		}
 		corsConfig.AllowCredentials = true
 	case len(allowedOrigins) == 1 && allowedOrigins[0] == "*":
@@ -108,6 +116,17 @@ func Run(
 	default:
 		corsConfig.AllowOrigins = allowedOrigins
 		corsConfig.AllowCredentials = true
+	}
+
+	// In non-production builds, also accept the loopback / LAN / Tailscale
+	// origins a developer might serve the dashboards from (e.g. reaching the API
+	// over a Tailscale IP from another device) without enumerating every
+	// host:port. AllowOriginFunc is only consulted when the explicit AllowOrigins
+	// list above doesn't already match, and the middleware reflects the specific
+	// origin back, so AllowCredentials keeps working. Release mode never sets it
+	// and stays restricted to the explicit allowlist.
+	if ginMode != gin.ReleaseMode && !corsConfig.AllowAllOrigins {
+		corsConfig.AllowOriginFunc = devOriginAllowed
 	}
 
 	r.Use(cors.New(corsConfig))
@@ -589,6 +608,7 @@ func Run(
 		adminRoutes.GET("/provisioning-jobs", middleware.RequireAdminPermission(models.AdminPermManageWorkers), h.AdminListProvisioningJobs)
 		adminRoutes.GET("/provisioning-jobs/:id", middleware.RequireAdminPermission(models.AdminPermManageWorkers), h.AdminGetProvisioningJob)
 		adminRoutes.POST("/provisioning-jobs", middleware.RequireAdminPermission(models.AdminPermManageWorkers), h.AdminCreateProvisioningJob)
+		adminRoutes.POST("/provisioning-jobs/:id/retry", middleware.RequireAdminPermission(models.AdminPermManageWorkers), h.AdminRetryProvisioningJob)
 
 		// Provisioning policy (per-provider budget caps + auto-provision toggle)
 		adminRoutes.GET("/provisioning-policy", middleware.RequireAdminPermission(models.AdminPermManageSettings), h.AdminListProvisioningPolicy)

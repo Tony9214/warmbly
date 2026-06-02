@@ -1,6 +1,7 @@
 // /admin/campaigns/* — platform-wide campaign admin.
 
 import { Request } from "@/lib/api/client";
+import { buildSearchQuery } from "@/lib/api/client/admin/query";
 import type {
     AdminCampaignDetail,
     AdminCampaignSearch,
@@ -8,17 +9,7 @@ import type {
 } from "@/lib/api/models/admin";
 
 function toQuery(params: AdminCampaignSearch): string {
-    const usp = new URLSearchParams();
-    if (params.q) usp.set("q", params.q);
-    if (params.user_id) usp.set("user_id", params.user_id);
-    if (params.org_id) usp.set("org_id", params.org_id);
-    if (params.status) usp.set("status", params.status);
-    if (params.cursor) usp.set("cursor", params.cursor);
-    if (params.limit != null) usp.set("limit", String(params.limit));
-    if (params.sort_by) usp.set("sort_by", params.sort_by);
-    if (params.sort_desc) usp.set("sort_desc", "true");
-    const s = usp.toString();
-    return s ? `?${s}` : "";
+    return buildSearchQuery(params as Record<string, unknown>);
 }
 
 export function searchCampaigns(

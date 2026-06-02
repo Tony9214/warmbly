@@ -1,11 +1,16 @@
-// Discount / promo code management. Lists every code with its type, value,
-// plan eligibility, usage, status, and expiry; supports create, edit,
+// Discount / promo code management — left filter rail + server-driven sortable,
+// cursor-paged table (mirrors OrganizationsPage). Supports create, edit,
 // enable/disable, delete, and a per-code redemptions viewer. Codes are
 // validated and stored in our database; the billing layer mints a one-off
 // Stripe coupon (or trial extension) at redemption time.
 
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import {
+    keepPreviousData,
+    useMutation,
+    useQuery,
+    useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Pencil, Plus, Receipt, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -30,6 +35,25 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import {
+    Explorer,
+    FilterGroup,
+    SearchFilter,
+    SelectFilter,
+    ToggleFilter,
+    DateRangeFilter,
+    NumberRangeFilter,
+} from "@/components/data/Explorer";
+import { DataTable, type Column } from "@/components/data/DataTable";
+import { useCursorPager } from "@/lib/useCursorPager";
+import {
+    emptyRange,
+    rangeActive,
+    rangeWithin,
+    rangeAfter,
+    rangeBefore,
+    type DateRange,
+} from "@/lib/dateRange";
+import {
     createDiscount,
     deleteDiscount,
     listDiscountRedemptions,
@@ -37,7 +61,9 @@ import {
     listPlansForEligibility,
     updateDiscount,
 } from "@/lib/api/client/admin/discounts";
+import { listPlans } from "@/lib/api/client/admin/plans";
 import type {
+    AdminDiscountSearch,
     CreateDiscountRequest,
     Discount,
     DiscountCodeStatus,
@@ -47,52 +73,249 @@ import type {
     UpdateDiscountRequest,
 } from "@/lib/api/models/admin";
 
-const STATUS_FILTERS: { value: string; label: string }[] = [
-    { value: "all", label: "All statuses" },
+const TYPE_OPTIONS = [
+    { value: "any", label: "Any type" },
+    { value: "percent", label: "Percentage off" },
+    { value: "fixed", label: "Fixed amount off" },
+    { value: "trial_extension", label: "Trial extension" },
+];
+
+const DURATION_OPTIONS = [
+    { value: "any", label: "Any duration" },
+    { value: "once", label: "Once" },
+    { value: "repeating", label: "Repeating" },
+    { value: "forever", label: "Forever" },
+];
+
+const STATUS_OPTIONS = [
+    { value: "all", label: "Any status" },
     { value: "active", label: "Active" },
     { value: "disabled", label: "Disabled" },
     { value: "expired", label: "Expired" },
 ];
 
+const PLAN_SCOPE_OPTIONS = [
+    { value: "any", label: "Any scope" },
+    { value: "all", label: "All plans" },
+    { value: "specific", label: "Specific plans" },
+];
+
 export default function DiscountsPage() {
-    const [status, setStatus] = useState("all");
     const [search, setSearch] = useState("");
+    const [status, setStatus] = useState<"all" | "active" | "disabled" | "expired">("all");
+    const [type, setType] = useState("");
+    const [duration, setDuration] = useState("");
+    const [planScope, setPlanScope] = useState("");
+    const [planId, setPlanId] = useState("");
+    const [hasRedemptions, setHasRedemptions] = useState(false);
+    const [hasMaxRedemptions, setHasMaxRedemptions] = useState(false);
+    const [exhausted, setExhausted] = useState(false);
+    const [hasExpiry, setHasExpiry] = useState(false);
+    const [redMin, setRedMin] = useState<number | undefined>();
+    const [redMax, setRedMax] = useState<number | undefined>();
+    const [pctMin, setPctMin] = useState<number | undefined>();
+    const [pctMax, setPctMax] = useState<number | undefined>();
+    const [created, setCreated] = useState<DateRange>(emptyRange);
+    const [starts, setStarts] = useState<DateRange>(emptyRange);
+    const [expires, setExpires] = useState<DateRange>(emptyRange);
+    const [sort, setSort] = useState<{ by: string; desc: boolean }>({ by: "", desc: true });
+    const pager = useCursorPager();
+    const { reset } = pager;
+
     const [creating, setCreating] = useState(false);
     const [editing, setEditing] = useState<Discount | null>(null);
     const [viewing, setViewing] = useState<Discount | null>(null);
 
-    const { data, isLoading, error } = useQuery({
-        queryKey: ["admin", "discounts", { status, search }],
-        queryFn: () => listDiscounts({ status, search }),
-        staleTime: 60_000,
+    const { data: plansData } = useQuery({ queryKey: ["admin", "plans", "facet"], queryFn: listPlans, staleTime: 5 * 60_000 });
+    const planOptions = [
+        { value: "any", label: "Any plan" },
+        ...(plansData?.data ?? []).map((p) => ({ value: p.id, label: p.name || "Untitled plan" })),
+    ];
+
+    const filterKey = JSON.stringify({
+        search, status, type, duration, planScope, planId, hasRedemptions, hasMaxRedemptions,
+        exhausted, hasExpiry, redMin, redMax, pctMin, pctMax, created, starts, expires, sort,
     });
 
-    const discounts = data?.data ?? [];
+    useEffect(() => {
+        reset();
+    }, [filterKey, reset]);
+
+    const { data, isLoading, error, refetch } = useQuery({
+        queryKey: ["admin", "discounts", filterKey, pager.cursor],
+        queryFn: () =>
+            listDiscounts({
+                search: search.trim() || undefined,
+                status: status === "all" ? "" : status,
+                type: (type || undefined) as AdminDiscountSearch["type"],
+                duration: (duration || undefined) as AdminDiscountSearch["duration"],
+                plan_scope: (planScope || undefined) as AdminDiscountSearch["plan_scope"],
+                plan_id: planId || undefined,
+                has_redemptions: hasRedemptions || undefined,
+                has_max_redemptions: hasMaxRedemptions || undefined,
+                exhausted: exhausted || undefined,
+                has_expiry: hasExpiry || undefined,
+                times_redeemed_min: redMin,
+                times_redeemed_max: redMax,
+                percent_off_min: pctMin,
+                percent_off_max: pctMax,
+                created_within: rangeWithin(created),
+                created_after: rangeAfter(created),
+                created_before: rangeBefore(created),
+                starts_after: rangeAfter(starts),
+                starts_before: rangeBefore(starts),
+                expires_after: rangeAfter(expires),
+                expires_before: rangeBefore(expires),
+                limit: 50,
+                cursor: pager.cursor,
+                sort_by: sort.by ? (sort.by as AdminDiscountSearch["sort_by"]) : undefined,
+                sort_desc: sort.by ? sort.desc : undefined,
+            }),
+        staleTime: 30_000,
+        placeholderData: keepPreviousData,
+    });
+
+    const rows = data?.data ?? [];
+
+    const bools = [hasRedemptions, hasMaxRedemptions, exhausted, hasExpiry];
+    const ranges = [[redMin, redMax], [pctMin, pctMax]];
+    const activeCount =
+        (search ? 1 : 0) +
+        (status !== "all" ? 1 : 0) +
+        (type ? 1 : 0) +
+        (duration ? 1 : 0) +
+        (planScope ? 1 : 0) +
+        (planId ? 1 : 0) +
+        bools.filter(Boolean).length +
+        ranges.filter(([a, b]) => a !== undefined || b !== undefined).length +
+        [created, starts, expires].filter(rangeActive).length +
+        (sort.by ? 1 : 0);
+
+    function resetAll() {
+        setSearch("");
+        setStatus("all");
+        setType("");
+        setDuration("");
+        setPlanScope("");
+        setPlanId("");
+        setHasRedemptions(false);
+        setHasMaxRedemptions(false);
+        setExhausted(false);
+        setHasExpiry(false);
+        setRedMin(undefined);
+        setRedMax(undefined);
+        setPctMin(undefined);
+        setPctMax(undefined);
+        setCreated(emptyRange);
+        setStarts(emptyRange);
+        setExpires(emptyRange);
+        setSort({ by: "", desc: true });
+    }
+
+    const columns: Column<Discount>[] = [
+        {
+            id: "code",
+            header: "Code",
+            sortable: true,
+            sortKey: "code",
+            cell: (d) => (
+                <div>
+                    <div className="font-mono font-medium">{d.code}</div>
+                    {d.description && (
+                        <div className="text-[11px] text-muted-foreground max-w-xs truncate">{d.description}</div>
+                    )}
+                </div>
+            ),
+            csv: (d) => d.code,
+        },
+        {
+            id: "discount",
+            header: "Discount",
+            cell: (d) => {
+                const dur = durationLabel(d);
+                return (
+                    <span className="tabular-nums">
+                        {formatValue(d)}
+                        {dur && <span className="ml-1.5 text-[10px] text-muted-foreground uppercase">{dur}</span>}
+                    </span>
+                );
+            },
+            csv: (d) => formatValue(d),
+        },
+        {
+            id: "plans",
+            header: "Plans",
+            cell: (d) =>
+                d.applies_to_all_plans ? (
+                    <span className="text-xs text-muted-foreground">All plans</span>
+                ) : (
+                    <span className="text-xs">{d.plan_ids.length} plan{d.plan_ids.length === 1 ? "" : "s"}</span>
+                ),
+            csv: (d) => (d.applies_to_all_plans ? "all" : String(d.plan_ids.length)),
+        },
+        {
+            id: "used",
+            header: "Used",
+            align: "right",
+            sortable: true,
+            sortKey: "times_redeemed",
+            cell: (d) => (
+                <span className="tabular-nums">
+                    {d.times_redeemed}
+                    {d.max_redemptions != null && <span className="text-muted-foreground"> / {d.max_redemptions}</span>}
+                </span>
+            ),
+            csv: (d) => d.times_redeemed,
+        },
+        {
+            id: "status",
+            header: "Status",
+            sortable: true,
+            sortKey: "status",
+            cell: (d) => (
+                <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[d.status]}`}>
+                    {d.status}
+                </Badge>
+            ),
+            csv: (d) => d.status,
+        },
+        {
+            id: "expires",
+            header: "Expires",
+            sortable: true,
+            sortKey: "expires_at",
+            cell: (d) => (
+                <span className="text-xs text-muted-foreground">
+                    {d.expires_at ? new Date(d.expires_at).toLocaleDateString() : "Never"}
+                </span>
+            ),
+            csv: (d) => d.expires_at ?? "",
+        },
+        {
+            id: "created",
+            header: "Created",
+            sortable: true,
+            sortKey: "created_at",
+            defaultHidden: true,
+            cell: (d) => <span className="text-xs text-muted-foreground">{new Date(d.created_at).toLocaleDateString()}</span>,
+            csv: (d) => d.created_at,
+        },
+        {
+            id: "actions",
+            header: "",
+            align: "right",
+            cell: (d) => (
+                <ActionsCell discount={d} onEdit={() => setEditing(d)} onViewRedemptions={() => setViewing(d)} />
+            ),
+        },
+    ];
 
     return (
         <div>
             <PageHeader
                 title="Discounts"
-                description="Generate and manage promo codes. Restrict a code to specific plans, set usage limits and expiry, and track redemptions."
+                description="Generate and manage promo codes. Filter by type, duration, plan eligibility, usage, and timeline; restrict to specific plans, set limits and expiry, and track redemptions."
             >
-                <Input
-                    placeholder="Search codes…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="h-8 w-44 text-sm"
-                />
-                <Select value={status} onValueChange={setStatus}>
-                    <SelectTrigger className="h-8 w-36 text-sm">
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {STATUS_FILTERS.map((s) => (
-                            <SelectItem key={s.value} value={s.value}>
-                                {s.label}
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
                 <Button
                     size="sm"
                     onClick={() => setCreating(true)}
@@ -102,72 +325,114 @@ export default function DiscountsPage() {
                 </Button>
             </PageHeader>
 
-            {isLoading && <Skeleton className="h-48 w-full" />}
-            {error && (
-                <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-md p-3">
-                    Failed to load discount codes.
-                </div>
-            )}
-
-            {!isLoading && !error && (
-                <div className="border border-border rounded-lg overflow-hidden bg-card">
-                    <table className="w-full text-sm">
-                        <thead className="bg-muted/50 text-muted-foreground text-xs uppercase">
-                            <tr>
-                                <th className="text-left px-3 py-2 font-medium">Code</th>
-                                <th className="text-left px-3 py-2 font-medium">Discount</th>
-                                <th className="text-left px-3 py-2 font-medium">Plans</th>
-                                <th className="text-right px-3 py-2 font-medium">Used</th>
-                                <th className="text-left px-3 py-2 font-medium">Status</th>
-                                <th className="text-left px-3 py-2 font-medium">Expires</th>
-                                <th className="text-right px-3 py-2 font-medium">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {discounts.map((d) => (
-                                <DiscountRow
-                                    key={d.id}
-                                    discount={d}
-                                    onEdit={() => setEditing(d)}
-                                    onViewRedemptions={() => setViewing(d)}
-                                />
-                            ))}
-                            {discounts.length === 0 && (
-                                <tr>
-                                    <td
-                                        colSpan={7}
-                                        className="text-center text-muted-foreground py-8 text-sm"
-                                    >
-                                        No discount codes yet. Create one to get started.
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            )}
+            <Explorer
+                activeCount={activeCount}
+                onReset={resetAll}
+                filters={
+                    <>
+                        <FilterGroup label="Search">
+                            <SearchFilter value={search} onChange={setSearch} placeholder="Code or description…" />
+                        </FilterGroup>
+                        <FilterGroup label="Status">
+                            <SelectFilter
+                                value={status}
+                                onChange={(v) => setStatus(v as typeof status)}
+                                options={STATUS_OPTIONS}
+                            />
+                        </FilterGroup>
+                        <FilterGroup label="Type">
+                            <SelectFilter
+                                value={type || "any"}
+                                onChange={(v) => setType(v === "any" ? "" : v)}
+                                options={TYPE_OPTIONS}
+                                placeholder="Any type"
+                            />
+                        </FilterGroup>
+                        <FilterGroup label="Duration">
+                            <SelectFilter
+                                value={duration || "any"}
+                                onChange={(v) => setDuration(v === "any" ? "" : v)}
+                                options={DURATION_OPTIONS}
+                                placeholder="Any duration"
+                            />
+                        </FilterGroup>
+                        <FilterGroup label="Plan eligibility">
+                            <SelectFilter
+                                value={planScope || "any"}
+                                onChange={(v) => setPlanScope(v === "any" ? "" : v)}
+                                options={PLAN_SCOPE_OPTIONS}
+                                placeholder="Any scope"
+                            />
+                        </FilterGroup>
+                        <FilterGroup label="Eligible plan">
+                            <SelectFilter
+                                value={planId || "any"}
+                                onChange={(v) => setPlanId(v === "any" ? "" : v)}
+                                options={planOptions}
+                                placeholder="Any plan"
+                            />
+                        </FilterGroup>
+                        <FilterGroup label="Flags">
+                            <div className="flex flex-col gap-2">
+                                <ToggleFilter checked={hasRedemptions} onChange={setHasRedemptions} label="Has redemptions" />
+                                <ToggleFilter checked={hasMaxRedemptions} onChange={setHasMaxRedemptions} label="Has cap" />
+                                <ToggleFilter checked={exhausted} onChange={setExhausted} label="Exhausted" />
+                                <ToggleFilter checked={hasExpiry} onChange={setHasExpiry} label="Has expiry" />
+                            </div>
+                        </FilterGroup>
+                        <FilterGroup label="Times redeemed">
+                            <NumberRangeFilter min={redMin} max={redMax} onMinChange={setRedMin} onMaxChange={setRedMax} />
+                        </FilterGroup>
+                        <FilterGroup label="Percent off">
+                            <NumberRangeFilter min={pctMin} max={pctMax} onMinChange={setPctMin} onMaxChange={setPctMax} />
+                        </FilterGroup>
+                        <FilterGroup label="Created">
+                            <DateRangeFilter value={created} onChange={setCreated} />
+                        </FilterGroup>
+                        <FilterGroup label="Starts">
+                            <DateRangeFilter value={starts} onChange={setStarts} mode="custom" />
+                        </FilterGroup>
+                        <FilterGroup label="Expires">
+                            <DateRangeFilter value={expires} onChange={setExpires} mode="custom" />
+                        </FilterGroup>
+                    </>
+                }
+            >
+                <DataTable
+                    columns={columns}
+                    rows={rows}
+                    getRowId={(d) => d.id}
+                    loading={isLoading}
+                    error={error}
+                    onRetry={() => refetch()}
+                    errorTitle="Failed to load discount codes"
+                    sort={sort.by ? sort : undefined}
+                    onSortChange={setSort}
+                    storageKey="admin.discounts"
+                    csvName="warmbly-discounts"
+                    noun="discounts"
+                    emptyTitle="No discount codes"
+                    emptyHint="No codes match these filters."
+                    pager={{
+                        canPrev: pager.canPrev,
+                        canNext: !!data?.pagination?.has_more,
+                        onPrev: pager.prev,
+                        onNext: () => pager.next(data?.pagination?.next_cursor),
+                        page: pager.page,
+                        shown: rows.length,
+                        total: data?.pagination?.total ?? null,
+                    }}
+                />
+            </Explorer>
 
             {creating && (
-                <DiscountDialog
-                    mode="create"
-                    open
-                    onOpenChange={(v) => !v && setCreating(false)}
-                />
+                <DiscountDialog mode="create" open onOpenChange={(v) => !v && setCreating(false)} />
             )}
             {editing && (
-                <DiscountDialog
-                    mode="edit"
-                    discount={editing}
-                    open
-                    onOpenChange={(v) => !v && setEditing(null)}
-                />
+                <DiscountDialog mode="edit" discount={editing} open onOpenChange={(v) => !v && setEditing(null)} />
             )}
             {viewing && (
-                <RedemptionsDialog
-                    discount={viewing}
-                    open
-                    onOpenChange={(v) => !v && setViewing(null)}
-                />
+                <RedemptionsDialog discount={viewing} open onOpenChange={(v) => !v && setViewing(null)} />
             )}
         </div>
     );
@@ -194,7 +459,7 @@ const STATUS_STYLES: Record<DiscountCodeStatus, string> = {
     expired: "border-red-300 text-red-700 bg-red-50",
 };
 
-function DiscountRow({
+function ActionsCell({
     discount: d,
     onEdit,
     onViewRedemptions,
@@ -215,80 +480,49 @@ function DiscountRow({
         onError: (e: Error) => toast.error(e.message || "Delete failed"),
     });
 
-    const dur = durationLabel(d);
-
     return (
-        <tr className="border-t border-border hover:bg-muted/30 align-middle">
-            <td className="px-3 py-2">
-                <div className="font-mono font-medium">{d.code}</div>
-                {d.description && (
-                    <div className="text-[11px] text-muted-foreground max-w-xs truncate">
-                        {d.description}
-                    </div>
-                )}
-            </td>
-            <td className="px-3 py-2">
-                <span className="tabular-nums">{formatValue(d)}</span>
-                {dur && (
-                    <span className="ml-1.5 text-[10px] text-muted-foreground uppercase">
-                        {dur}
-                    </span>
-                )}
-            </td>
-            <td className="px-3 py-2">
-                {d.applies_to_all_plans ? (
-                    <span className="text-muted-foreground">All plans</span>
-                ) : (
-                    <span>{d.plan_ids.length} plan{d.plan_ids.length === 1 ? "" : "s"}</span>
-                )}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {d.times_redeemed}
-                {d.max_redemptions != null && (
-                    <span className="text-muted-foreground"> / {d.max_redemptions}</span>
-                )}
-            </td>
-            <td className="px-3 py-2">
-                <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[d.status]}`}>
-                    {d.status}
-                </Badge>
-            </td>
-            <td className="px-3 py-2 text-muted-foreground text-xs">
-                {d.expires_at ? new Date(d.expires_at).toLocaleDateString() : "Never"}
-            </td>
-            <td className="px-3 py-2">
-                <div className="flex items-center justify-end gap-1.5">
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={onViewRedemptions}
-                        className="text-xs"
-                    >
-                        <Receipt className="size-3" /> Redemptions
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={onEdit} className="text-xs">
-                        <Pencil className="size-3" /> Edit
-                    </Button>
-                    <Button
-                        size="sm"
-                        variant={confirmDelete ? "destructive" : "outline"}
-                        disabled={del.isPending}
-                        onClick={() => {
-                            if (confirmDelete) {
-                                del.mutate();
-                            } else {
-                                setConfirmDelete(true);
-                                setTimeout(() => setConfirmDelete(false), 4000);
-                            }
-                        }}
-                        className="text-xs"
-                    >
-                        <Trash2 className="size-3" />
-                        {confirmDelete ? "Confirm" : ""}
-                    </Button>
-                </div>
-            </td>
-        </tr>
+        <div className="flex items-center justify-end gap-1.5">
+            <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onViewRedemptions();
+                }}
+                className="text-xs"
+            >
+                <Receipt className="size-3" /> Redemptions
+            </Button>
+            <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit();
+                }}
+                className="text-xs"
+            >
+                <Pencil className="size-3" /> Edit
+            </Button>
+            <Button
+                size="sm"
+                variant={confirmDelete ? "destructive" : "outline"}
+                disabled={del.isPending}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirmDelete) {
+                        del.mutate();
+                    } else {
+                        setConfirmDelete(true);
+                        setTimeout(() => setConfirmDelete(false), 4000);
+                    }
+                }}
+                className="text-xs"
+            >
+                <Trash2 className="size-3" />
+                {confirmDelete ? "Confirm" : ""}
+            </Button>
+        </div>
     );
 }
 

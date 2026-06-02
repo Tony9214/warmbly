@@ -19,7 +19,6 @@ import (
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/codec"
-	"github.com/warmbly/warmbly/internal/infrastructure/dynamo"
 	"github.com/warmbly/warmbly/internal/infrastructure/encryptedkeys"
 	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
 	"github.com/warmbly/warmbly/internal/infrastructure/kafka"
@@ -53,7 +52,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// AWS config for services that need it (KMS, S3, DynamoDB)
+	// AWS config for services that need it (KMS, S3)
 	awscfg, err := awsconf.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Fatal(err)
@@ -69,7 +68,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// KMS + DynamoDB → CipherService
+	// KMS → CipherService
 	var masterKey string = "alias/master-key"
 	if cfg.Env != "prod" {
 		masterKey += "-dev"
@@ -80,20 +79,24 @@ func main() {
 		log.Fatal(err)
 	}
 
-	dynamoDB, err := dynamo.NewClient(ctx, awscfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	encryptedKeys, err := encryptedkeys.FromEnv(
-		encryptedkeys.Deps{Dynamo: dynamoDB},
+		encryptedkeys.Deps{},
 		"http",
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 	cipherService := cipher.NewService(kmsClient, redisCache, encryptedKeys)
-	emailMessageMapRepo := repository.NewEmailMessageMapRepository(dynamoDB)
+
+	// The worker reaches the messageId -> internal email map over the internal
+	// backend API (same base URL + token as the DEK store) rather than touching
+	// Postgres directly, per the worker no-direct-SQL rule in CLAUDE.md.
+	internalBaseURL := strings.TrimRight(os.Getenv("ENCRYPTED_KEYS_BACKEND_URL"), "/")
+	internalToken := os.Getenv("ENCRYPTED_KEYS_WORKER_TOKEN")
+	emailMessageMapRepo, err := repository.NewHTTPEmailMessageMapRepository(internalBaseURL, internalToken)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// S3
 	s3Client, err := storage.NewClient(ctx, awscfg, "main")

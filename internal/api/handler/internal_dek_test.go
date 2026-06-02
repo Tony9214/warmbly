@@ -57,7 +57,7 @@ func TestInternalGetDEK_Found(t *testing.T) {
 	r := newDEKRouter(t, store)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/dek/"+id.String(), nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dek/"+id.String(), nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -80,7 +80,7 @@ func TestInternalGetDEK_NotFoundReturns404(t *testing.T) {
 	}
 	r := newDEKRouter(t, store)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/dek/"+uuid.New().String(), nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dek/"+uuid.New().String(), nil)
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
@@ -90,7 +90,7 @@ func TestInternalGetDEK_NotFoundReturns404(t *testing.T) {
 func TestInternalGetDEK_BadUUID(t *testing.T) {
 	r := newDEKRouter(t, &mockEKStore{})
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/dek/not-a-uuid", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dek/not-a-uuid", nil)
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -105,7 +105,7 @@ func TestInternalGetDEK_StoreError(t *testing.T) {
 	}
 	r := newDEKRouter(t, store)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/dek/"+uuid.New().String(), nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dek/"+uuid.New().String(), nil)
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", w.Code)
@@ -128,7 +128,7 @@ func TestInternalPutDEK_Created(t *testing.T) {
 	r := newDEKRouter(t, store)
 	body, _ := json.Marshal(dekPayload{EncryptedDataKey: "blob"})
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("PUT", "/dek/"+id.String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "PUT", "/dek/"+id.String(), bytes.NewReader(body))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", w.Code)
@@ -144,7 +144,7 @@ func TestInternalPutDEK_ConflictReturns409(t *testing.T) {
 	r := newDEKRouter(t, store)
 	body, _ := json.Marshal(dekPayload{EncryptedDataKey: "blob"})
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("PUT", "/dek/"+uuid.New().String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "PUT", "/dek/"+uuid.New().String(), bytes.NewReader(body))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", w.Code)
@@ -154,7 +154,7 @@ func TestInternalPutDEK_ConflictReturns409(t *testing.T) {
 func TestInternalPutDEK_RejectsEmptyBody(t *testing.T) {
 	r := newDEKRouter(t, &mockEKStore{})
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("PUT", "/dek/"+uuid.New().String(), strings.NewReader(`{}`))
+	req := httptest.NewRequestWithContext(context.Background(), "PUT", "/dek/"+uuid.New().String(), strings.NewReader(`{}`))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty key, got %d", w.Code)
@@ -167,7 +167,7 @@ func TestInternalDeleteDEK_NoContent(t *testing.T) {
 	}
 	r := newDEKRouter(t, store)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("DELETE", "/dek/"+uuid.New().String(), nil)
+	req := httptest.NewRequestWithContext(context.Background(), "DELETE", "/dek/"+uuid.New().String(), nil)
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", w.Code)

@@ -1,10 +1,16 @@
-// Platform-wide campaign admin. Use case is finding runaway sends and
-// stopping them — search by name, filter by status, force-stop with a
-// reason that lands in the audit log.
+// Platform-wide campaign admin — left filter rail + server-driven sortable,
+// cursor-paged table (mirrors OrganizationsPage). Use case is finding runaway
+// sends and stopping them: filter by status/tracking/behavior/usage/timeline,
+// then force-stop with a reason that lands in the audit log.
 
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import {
+    keepPreviousData,
+    useMutation,
+    useQuery,
+    useQueryClient,
+} from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Octagon } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -12,7 +18,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
     Dialog,
     DialogContent,
@@ -21,110 +26,345 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    Explorer,
+    FilterGroup,
+    SearchFilter,
+    SelectFilter,
+    ToggleFilter,
+    DateRangeFilter,
+    NumberRangeFilter,
+} from "@/components/data/Explorer";
+import { DataTable, type Column } from "@/components/data/DataTable";
+import { useCursorPager } from "@/lib/useCursorPager";
+import {
+    emptyRange,
+    rangeActive,
+    rangeWithin,
+    rangeAfter,
+    rangeBefore,
+    type DateRange,
+} from "@/lib/dateRange";
 import { searchCampaigns, stopCampaign } from "@/lib/api/client/admin/campaigns";
-import type { AdminCampaignDetail } from "@/lib/api/models/admin";
-
-type StatusFilter = "active" | "paused" | "completed" | "all";
+import type { AdminCampaignDetail, AdminCampaignSearch } from "@/lib/api/models/admin";
 
 const STATUS_TONE: Record<string, string> = {
     active: "border-emerald-300 text-emerald-700 bg-emerald-50",
     paused: "border-amber-300 text-amber-700 bg-amber-50",
     completed: "border-zinc-300 text-zinc-700 bg-zinc-50",
     draft: "border-zinc-300 text-zinc-500",
+    paused_trial_expired: "border-orange-300 text-orange-700 bg-orange-50",
+    paused_no_accounts: "border-orange-300 text-orange-700 bg-orange-50",
 };
 
+const STATUS_OPTIONS = [
+    { value: "any", label: "Any status" },
+    { value: "draft", label: "Draft" },
+    { value: "active", label: "Active" },
+    { value: "paused", label: "Paused" },
+    { value: "completed", label: "Completed" },
+    { value: "paused_trial_expired", label: "Paused — trial expired" },
+    { value: "paused_no_accounts", label: "Paused — no accounts" },
+];
+
+const pct = (n: number, d: number) => (d ? ((n / d) * 100).toFixed(1) : "—");
+
 export default function CampaignsPage() {
+    const nav = useNavigate();
     const [query, setQuery] = useState("");
-    const [status, setStatus] = useState<StatusFilter>("active");
+    const [status, setStatus] = useState("");
+    const [openTracking, setOpenTracking] = useState(false);
+    const [linkTracking, setLinkTracking] = useState(false);
+    const [stopOnReply, setStopOnReply] = useState(false);
+    const [textOnly, setTextOnly] = useState(false);
+    const [unsubscribeHeader, setUnsubscribeHeader] = useState(false);
+    const [hasContacts, setHasContacts] = useState(false);
+    const [hasBounces, setHasBounces] = useState(false);
+    const [dailyMin, setDailyMin] = useState<number | undefined>();
+    const [dailyMax, setDailyMax] = useState<number | undefined>();
+    const [contactMin, setContactMin] = useState<number | undefined>();
+    const [contactMax, setContactMax] = useState<number | undefined>();
+    const [sentMin, setSentMin] = useState<number | undefined>();
+    const [sentMax, setSentMax] = useState<number | undefined>();
+    const [created, setCreated] = useState<DateRange>(emptyRange);
+    const [startDate, setStartDate] = useState<DateRange>(emptyRange);
+    const [updated, setUpdated] = useState<DateRange>(emptyRange);
+
+    const [sort, setSort] = useState<{ by: string; desc: boolean }>({ by: "", desc: true });
+    const pager = useCursorPager();
+    const { reset } = pager;
+
     const [stopping, setStopping] = useState<AdminCampaignDetail | null>(null);
 
-    const { data, isLoading, error } = useQuery({
-        queryKey: ["admin", "campaigns", { query, status }],
+    const filterKey = JSON.stringify({
+        query, status, openTracking, linkTracking, stopOnReply, textOnly, unsubscribeHeader,
+        hasContacts, hasBounces, dailyMin, dailyMax, contactMin, contactMax, sentMin, sentMax,
+        created, startDate, updated, sort,
+    });
+
+    useEffect(() => {
+        reset();
+    }, [filterKey, reset]);
+
+    const { data, isLoading, error, refetch } = useQuery({
+        queryKey: ["admin", "campaigns", filterKey, pager.cursor],
         queryFn: () =>
             searchCampaigns({
                 q: query.trim() || undefined,
-                status: status === "all" ? undefined : status,
+                status: status || undefined,
+                open_tracking: openTracking || undefined,
+                link_tracking: linkTracking || undefined,
+                stop_on_reply: stopOnReply || undefined,
+                text_only: textOnly || undefined,
+                unsubscribe_header: unsubscribeHeader || undefined,
+                has_contacts: hasContacts || undefined,
+                has_bounces: hasBounces || undefined,
+                daily_limit_min: dailyMin,
+                daily_limit_max: dailyMax,
+                contact_count_min: contactMin,
+                contact_count_max: contactMax,
+                sent_count_min: sentMin,
+                sent_count_max: sentMax,
+                created_within: rangeWithin(created),
+                created_after: rangeAfter(created),
+                created_before: rangeBefore(created),
+                start_date_after: rangeAfter(startDate),
+                start_date_before: rangeBefore(startDate),
+                updated_after: rangeAfter(updated),
+                updated_before: rangeBefore(updated),
                 limit: 50,
+                cursor: pager.cursor,
+                sort_by: sort.by ? (sort.by as AdminCampaignSearch["sort_by"]) : undefined,
+                sort_desc: sort.by ? sort.desc : undefined,
             }),
         staleTime: 30_000,
+        placeholderData: keepPreviousData,
     });
 
     const rows = data?.data ?? [];
-    const total = data?.pagination.total ?? rows.length;
+
+    const bools = [openTracking, linkTracking, stopOnReply, textOnly, unsubscribeHeader, hasContacts, hasBounces];
+    const ranges = [[dailyMin, dailyMax], [contactMin, contactMax], [sentMin, sentMax]];
+    const activeCount =
+        (query ? 1 : 0) +
+        (status ? 1 : 0) +
+        bools.filter(Boolean).length +
+        ranges.filter(([a, b]) => a !== undefined || b !== undefined).length +
+        [created, startDate, updated].filter(rangeActive).length +
+        (sort.by ? 1 : 0);
+
+    function resetAll() {
+        setQuery("");
+        setStatus("");
+        setOpenTracking(false);
+        setLinkTracking(false);
+        setStopOnReply(false);
+        setTextOnly(false);
+        setUnsubscribeHeader(false);
+        setHasContacts(false);
+        setHasBounces(false);
+        setDailyMin(undefined);
+        setDailyMax(undefined);
+        setContactMin(undefined);
+        setContactMax(undefined);
+        setSentMin(undefined);
+        setSentMax(undefined);
+        setCreated(emptyRange);
+        setStartDate(emptyRange);
+        setUpdated(emptyRange);
+        setSort({ by: "", desc: true });
+    }
+
+    const columns: Column<AdminCampaignDetail>[] = [
+        {
+            id: "name",
+            header: "Name",
+            sortable: true,
+            sortKey: "name",
+            cell: (c) => (
+                <div>
+                    <Link
+                        to={`/campaigns/${c.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-medium text-[var(--admin-accent-strong)] hover:underline"
+                    >
+                        {c.name}
+                    </Link>
+                    <div className="font-mono text-[10px] text-muted-foreground">{c.id.slice(0, 8)}</div>
+                </div>
+            ),
+            csv: (c) => c.name,
+        },
+        {
+            id: "owner",
+            header: "Owner",
+            sortable: true,
+            sortKey: "owner_email",
+            cell: (c) => (
+                <span className="text-xs">{c.user?.email ?? c.user_id.slice(0, 8)}</span>
+            ),
+            csv: (c) => c.user?.email ?? c.user_id,
+        },
+        {
+            id: "organization",
+            header: "Organization",
+            cell: (c) =>
+                c.organization ? (
+                    <Link
+                        to={`/organizations/${c.organization_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xs text-[var(--admin-accent-strong)] hover:underline"
+                    >
+                        {c.organization.name}
+                    </Link>
+                ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                ),
+            csv: (c) => c.organization?.name ?? "",
+        },
+        {
+            id: "status",
+            header: "Status",
+            sortable: true,
+            sortKey: "status",
+            cell: (c) => (
+                <Badge variant="outline" className={`text-[10px] ${STATUS_TONE[c.status] ?? "border-zinc-300 text-zinc-600"}`}>
+                    {c.status}
+                </Badge>
+            ),
+            csv: (c) => c.status,
+        },
+        { id: "contacts", header: "Contacts", align: "right", sortable: true, sortKey: "contact_count", cell: (c) => <span className="tabular-nums">{c.total_contacts.toLocaleString()}</span>, csv: (c) => c.total_contacts },
+        { id: "sent", header: "Sent", align: "right", sortable: true, sortKey: "sent_count", cell: (c) => <span className="tabular-nums">{c.emails_sent.toLocaleString()}</span>, csv: (c) => c.emails_sent },
+        { id: "open", header: "Open", align: "right", cell: (c) => <span className="tabular-nums text-muted-foreground">{c.emails_opened.toLocaleString()}</span>, csv: (c) => c.emails_opened },
+        { id: "reply", header: "Reply", align: "right", cell: (c) => <span className="tabular-nums text-muted-foreground">{pct(c.emails_replied, c.emails_sent)}%</span>, csv: (c) => pct(c.emails_replied, c.emails_sent) },
+        {
+            id: "bounce",
+            header: "Bounce",
+            align: "right",
+            cell: (c) => {
+                const rate = pct(c.emails_bounced, c.emails_sent);
+                return (
+                    <span className={`tabular-nums ${Number(rate) > 5 ? "text-red-700" : "text-muted-foreground"}`}>{rate}%</span>
+                );
+            },
+            csv: (c) => pct(c.emails_bounced, c.emails_sent),
+        },
+        { id: "created", header: "Created", sortable: true, sortKey: "created_at", defaultHidden: true, cell: (c) => <span className="text-xs text-muted-foreground">{new Date(c.created_at).toLocaleDateString()}</span>, csv: (c) => c.created_at },
+        {
+            id: "actions",
+            header: "",
+            align: "right",
+            cell: (c) => {
+                const canStop = c.status === "active" || c.status === "paused";
+                return (
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!canStop}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setStopping(c);
+                        }}
+                        className="text-xs"
+                        title={canStop ? "Force-stop this campaign" : "Not running"}
+                    >
+                        <Octagon className="size-3" /> Stop
+                    </Button>
+                );
+            },
+        },
+    ];
 
     return (
         <div>
             <PageHeader
                 title="Campaigns"
-                description="Every campaign on the platform. Find runaway sends, inspect engagement, force-stop with a reason."
+                description="Every campaign on the platform. Filter by status, tracking, behavior, usage, and timeline; inspect engagement and force-stop runaway sends."
+            />
+            <Explorer
+                activeCount={activeCount}
+                onReset={resetAll}
+                filters={
+                    <>
+                        <FilterGroup label="Search">
+                            <SearchFilter value={query} onChange={setQuery} placeholder="Name or owner email…" />
+                        </FilterGroup>
+                        <FilterGroup label="Status">
+                            <SelectFilter
+                                value={status || "any"}
+                                onChange={(v) => setStatus(v === "any" ? "" : v)}
+                                options={STATUS_OPTIONS}
+                                placeholder="Any status"
+                            />
+                        </FilterGroup>
+                        <FilterGroup label="Created">
+                            <DateRangeFilter value={created} onChange={setCreated} />
+                        </FilterGroup>
+                        <FilterGroup label="Tracking">
+                            <div className="flex flex-col gap-2">
+                                <ToggleFilter checked={openTracking} onChange={setOpenTracking} label="Open tracking" />
+                                <ToggleFilter checked={linkTracking} onChange={setLinkTracking} label="Link tracking" />
+                            </div>
+                        </FilterGroup>
+                        <FilterGroup label="Behavior">
+                            <div className="flex flex-col gap-2">
+                                <ToggleFilter checked={stopOnReply} onChange={setStopOnReply} label="Stop on reply" />
+                                <ToggleFilter checked={textOnly} onChange={setTextOnly} label="Text only" />
+                                <ToggleFilter checked={unsubscribeHeader} onChange={setUnsubscribeHeader} label="Unsubscribe header" />
+                            </div>
+                        </FilterGroup>
+                        <FilterGroup label="Flags">
+                            <div className="flex flex-col gap-2">
+                                <ToggleFilter checked={hasContacts} onChange={setHasContacts} label="Has contacts" />
+                                <ToggleFilter checked={hasBounces} onChange={setHasBounces} label="Has bounces" />
+                            </div>
+                        </FilterGroup>
+                        <FilterGroup label="Daily limit">
+                            <NumberRangeFilter min={dailyMin} max={dailyMax} onMinChange={setDailyMin} onMaxChange={setDailyMax} />
+                        </FilterGroup>
+                        <FilterGroup label="Contacts">
+                            <NumberRangeFilter min={contactMin} max={contactMax} onMinChange={setContactMin} onMaxChange={setContactMax} />
+                        </FilterGroup>
+                        <FilterGroup label="Emails sent">
+                            <NumberRangeFilter min={sentMin} max={sentMax} onMinChange={setSentMin} onMaxChange={setSentMax} />
+                        </FilterGroup>
+                        <FilterGroup label="Starts">
+                            <DateRangeFilter value={startDate} onChange={setStartDate} mode="custom" />
+                        </FilterGroup>
+                        <FilterGroup label="Last updated">
+                            <DateRangeFilter value={updated} onChange={setUpdated} mode="custom" />
+                        </FilterGroup>
+                    </>
+                }
             >
-                <Input
-                    placeholder="Search by name…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    className="w-72"
+                <DataTable
+                    columns={columns}
+                    rows={rows}
+                    getRowId={(c) => c.id}
+                    loading={isLoading}
+                    error={error}
+                    onRetry={() => refetch()}
+                    errorTitle="Failed to load campaigns"
+                    onRowClick={(c) => nav(`/campaigns/${c.id}`)}
+                    sort={sort.by ? sort : undefined}
+                    onSortChange={setSort}
+                    storageKey="admin.campaigns"
+                    csvName="warmbly-campaigns"
+                    noun="campaigns"
+                    emptyTitle="No campaigns"
+                    emptyHint="No campaigns match these filters."
+                    pager={{
+                        canPrev: pager.canPrev,
+                        canNext: !!data?.pagination?.has_more,
+                        onPrev: pager.prev,
+                        onNext: () => pager.next(data?.pagination?.next_cursor),
+                        page: pager.page,
+                        shown: rows.length,
+                        total: data?.pagination?.total ?? null,
+                    }}
                 />
-                <StatusToggle value={status} onChange={setStatus} />
-            </PageHeader>
-
-            {isLoading && <SkeletonTable />}
-            {error && (
-                <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-md p-3">
-                    Failed to load campaigns.
-                </div>
-            )}
-
-            {!isLoading && !error && (
-                <>
-                    <div className="border border-border rounded-lg overflow-hidden bg-card">
-                        <table className="w-full text-sm">
-                            <thead className="bg-muted/50 text-muted-foreground text-xs uppercase">
-                                <tr>
-                                    <th className="text-left px-3 py-2 font-medium">Name</th>
-                                    <th className="text-left px-3 py-2 font-medium">Org / owner</th>
-                                    <th className="text-left px-3 py-2 font-medium">Status</th>
-                                    <th className="text-right px-3 py-2 font-medium">Contacts</th>
-                                    <th className="text-right px-3 py-2 font-medium">Sent</th>
-                                    <th className="text-right px-3 py-2 font-medium">Open</th>
-                                    <th className="text-right px-3 py-2 font-medium">Reply</th>
-                                    <th className="text-right px-3 py-2 font-medium">Bounce</th>
-                                    <th className="text-right px-3 py-2 font-medium">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows.map((c) => (
-                                    <CampaignRow
-                                        key={c.id}
-                                        campaign={c}
-                                        onStop={() => setStopping(c)}
-                                    />
-                                ))}
-                                {rows.length === 0 && (
-                                    <tr>
-                                        <td
-                                            colSpan={9}
-                                            className="text-center text-muted-foreground py-8 text-sm"
-                                        >
-                                            No campaigns match this filter.
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                        <span>
-                            Showing {rows.length}
-                            {total != null && total !== rows.length && (
-                                <> of {total.toLocaleString()}</>
-                            )}
-                        </span>
-                        {data?.pagination.has_more && (
-                            <span>More results available — refine the search.</span>
-                        )}
-                    </div>
-                </>
-            )}
+            </Explorer>
 
             {stopping && (
                 <StopCampaignDialog
@@ -133,117 +373,6 @@ export default function CampaignsPage() {
                     onOpenChange={(v) => !v && setStopping(null)}
                 />
             )}
-        </div>
-    );
-}
-
-function CampaignRow({
-    campaign,
-    onStop,
-}: {
-    campaign: AdminCampaignDetail;
-    onStop: () => void;
-}) {
-    const tone = STATUS_TONE[campaign.status] ?? "border-zinc-300 text-zinc-600";
-    const canStop = campaign.status === "active" || campaign.status === "paused";
-    const replyRate = campaign.emails_sent
-        ? ((campaign.emails_replied / campaign.emails_sent) * 100).toFixed(1)
-        : "—";
-    const bounceRate = campaign.emails_sent
-        ? ((campaign.emails_bounced / campaign.emails_sent) * 100).toFixed(1)
-        : "—";
-
-    return (
-        <tr className="border-t border-border hover:bg-muted/30">
-            <td className="px-3 py-2">
-                <div className="font-medium">{campaign.name}</div>
-                <div className="text-[10px] text-muted-foreground font-mono">
-                    {campaign.id.slice(0, 8)}
-                </div>
-            </td>
-            <td className="px-3 py-2 text-xs">
-                {campaign.organization && (
-                    <Link
-                        to={`/organizations/${campaign.organization_id}`}
-                        className="text-[var(--admin-accent-strong)] hover:underline"
-                    >
-                        {campaign.organization.name}
-                    </Link>
-                )}
-                <div className="text-[10px] text-muted-foreground">
-                    {campaign.user?.email ?? campaign.user_id.slice(0, 8)}
-                </div>
-            </td>
-            <td className="px-3 py-2">
-                <Badge variant="outline" className={`text-[10px] ${tone}`}>
-                    {campaign.status}
-                </Badge>
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {campaign.total_contacts.toLocaleString()}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-                {campaign.emails_sent.toLocaleString()}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                {campaign.emails_opened.toLocaleString()}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                {replyRate}%
-            </td>
-            <td
-                className={`px-3 py-2 text-right tabular-nums ${
-                    Number(bounceRate) > 5 ? "text-red-700" : "text-muted-foreground"
-                }`}
-            >
-                {bounceRate}%
-            </td>
-            <td className="px-3 py-2 text-right">
-                <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={onStop}
-                    disabled={!canStop}
-                    className="text-xs"
-                    title={canStop ? "Force-stop this campaign" : "Already stopped"}
-                >
-                    <Octagon className="size-3" />
-                    Stop
-                </Button>
-            </td>
-        </tr>
-    );
-}
-
-function StatusToggle({
-    value,
-    onChange,
-}: {
-    value: StatusFilter;
-    onChange: (v: StatusFilter) => void;
-}) {
-    const options: { value: StatusFilter; label: string }[] = [
-        { value: "active", label: "Active" },
-        { value: "paused", label: "Paused" },
-        { value: "completed", label: "Done" },
-        { value: "all", label: "All" },
-    ];
-    return (
-        <div className="inline-flex rounded-md border border-border bg-card p-0.5 text-xs">
-            {options.map((opt) => (
-                <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => onChange(opt.value)}
-                    className={`px-2 py-1 rounded ${
-                        value === opt.value
-                            ? "bg-[var(--admin-accent)] text-white"
-                            : "text-muted-foreground hover:text-foreground"
-                    }`}
-                >
-                    {opt.label}
-                </button>
-            ))}
         </div>
     );
 }
@@ -312,15 +441,5 @@ function StopCampaignDialog({
                 </DialogFooter>
             </DialogContent>
         </Dialog>
-    );
-}
-
-function SkeletonTable() {
-    return (
-        <div className="border border-border rounded-lg p-4 bg-card space-y-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-7 w-full" />
-            ))}
-        </div>
     );
 }

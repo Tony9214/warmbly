@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -40,6 +41,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/integration"
 	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/passkey"
+	"github.com/warmbly/warmbly/internal/app/provisioning"
 	"github.com/warmbly/warmbly/internal/app/ratelimit"
 	"github.com/warmbly/warmbly/internal/app/releases"
 	"github.com/warmbly/warmbly/internal/app/sequence"
@@ -60,9 +62,10 @@ import (
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/events"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
+	"github.com/warmbly/warmbly/internal/infrastructure/cloudprovider"
+	"github.com/warmbly/warmbly/internal/infrastructure/cloudprovider/hetzner"
 	"github.com/warmbly/warmbly/internal/infrastructure/codec"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
-	"github.com/warmbly/warmbly/internal/infrastructure/dynamo"
 	"github.com/warmbly/warmbly/internal/infrastructure/encryptedkeys"
 	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
@@ -164,6 +167,7 @@ func main() {
 	// repository / object-storage needs. Declared up here so they
 	// survive the config block where they're initialized.
 	var s3ForHandler *storage.Client
+	var emailMessageMapForHandler repository.EmailMessageMapRepository
 	var userRepoForHandler repository.UserRepository
 	var organizationRepoForHandler repository.OrganizationRepository
 	var warmupRoutingRepoForHandler repository.WarmupRoutingRepository
@@ -208,7 +212,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		// AWS config for services that need it (KMS, S3, DynamoDB)
+		// AWS config for services that need it (KMS, S3)
 		awscfg, err := awsconf.LoadDefaultConfig(ctx)
 		if err != nil {
 			sentry.CaptureException(err)
@@ -237,6 +241,9 @@ func main() {
 		if err != nil {
 			if cfg.Env == "dev" {
 				log.Printf("Warning: GeoIP database not found at %s, geo lookups disabled", geoPath)
+				// geo.New returns a nil client on error; fall back to a usable,
+				// geo-disabled client so downstream callers never deref nil.
+				geoloc, _ = geo.New("")
 			} else {
 				sentry.CaptureException(err)
 				log.Fatal(err)
@@ -269,12 +276,6 @@ func main() {
 			log.Fatal("Failed to run migrations: ", err)
 		}
 		log.Println("Database migrations completed")
-
-		dynamoDB, err := dynamo.NewClient(ctx, awscfg)
-		if err != nil {
-			sentry.CaptureException(err)
-			log.Fatal(err)
-		}
 
 		primaryRedis, err := cfg.LoadPrimaryRedisEndpoint(ctx)
 		if err != nil {
@@ -436,9 +437,10 @@ func main() {
 		contactRepostory := repository.NewContactRepostory(primaryDB)
 		uniboxRepository := repository.NewUniboxRepository(primaryDB)
 		encryptedKeys, err = encryptedkeys.FromEnv(
-			encryptedkeys.Deps{DB: primaryDB, Dynamo: dynamoDB},
+			encryptedkeys.Deps{DB: primaryDB},
 			"postgres",
 		)
+		emailMessageMapForHandler = repository.NewEmailMessageMapRepository(primaryDB)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -618,6 +620,54 @@ func main() {
 			WorkerRepo: workerRepository,
 			Decisions:  decisionLogRepo,
 		}).Run(ctx)
+
+		// Provisioning runner. Drives provisioning_jobs rows to completion —
+		// without it a job created from the admin UI sits in "pending" forever.
+		//
+		// Real Hetzner calls only happen when PROVISIONING_DRY_RUN=false. A real
+		// SSH installer adapter (over worker_orchestrator) is not wired yet, so
+		// until it is we force dry-run: real-mode would otherwise create servers
+		// it could not provision, leaving orphaned, billed machines. Dry-run runs
+		// the full state machine against a simulated provider so the admin flow
+		// works end-to-end in dev without spending money.
+		if getenvDefault("PROVISIONING_RUNNER_ENABLED", "true") == "true" {
+			provDryRun := getenvDefault("PROVISIONING_DRY_RUN", "true") != "false"
+			if !provDryRun {
+				log.Printf("PROVISIONING_DRY_RUN=false but no real installer is wired; forcing dry-run to avoid orphaned servers")
+				provDryRun = true
+			}
+			credRepoForResolver := cloudCredentialRepo
+			provService := &provisioning.Service{
+				Jobs:      provisioningJobRepo,
+				Installer: &provisioning.StubInstaller{},
+				ProviderResolver: func(rctx context.Context, job *repository.ProvisioningJob) (cloudprovider.Provider, error) {
+					if provDryRun {
+						return provisioning.DryRunProvider{}, nil
+					}
+					if credRepoForResolver == nil {
+						return nil, fmt.Errorf("no cloud credential repo configured")
+					}
+					cred, err := credRepoForResolver.GetByProvider(rctx, job.Provider)
+					if err != nil {
+						return nil, err
+					}
+					if cred == nil {
+						return nil, fmt.Errorf("no cloud credential for provider %q", job.Provider)
+					}
+					switch cred.Provider {
+					case "hetzner":
+						return hetzner.New(cred.EncryptedToken)
+					default:
+						return nil, fmt.Errorf("unsupported provider %q", cred.Provider)
+					}
+				},
+			}
+			go (&provisioning.Runner{
+				Jobs:   provisioningJobRepo,
+				Svc:    provService,
+				DryRun: provDryRun,
+			}).Run(ctx)
+		}
 
 		// Worker orchestrator. The env config below is the FALLBACK that gets
 		// written into /etc/warmbly/worker.env when a worker has no profile
@@ -887,6 +937,7 @@ func main() {
 		// without a dedicated service layer (avatars, etc.).
 		Storage:                  s3ForHandler,
 		EncryptedKeys:            encryptedKeys,
+		EmailMessageMap:          emailMessageMapForHandler,
 		UserRepo:                 userRepoForHandler,
 		OrgRepo:                  organizationRepoForHandler,
 		StorageBackendRepo:       storageBackendRepo,

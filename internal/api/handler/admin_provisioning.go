@@ -34,12 +34,13 @@ type CloudCredentialResponse struct {
 	ID            uuid.UUID  `json:"id"`
 	Provider      string     `json:"provider"`
 	Name          string     `json:"name"`
-	TokenMasked   string     `json:"token_masked"`
+	TokenRedacted string     `json:"token_redacted"`
 	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
 	LastTestAt    *time.Time `json:"last_test_at,omitempty"`
 	LastTestOK    *bool      `json:"last_test_ok,omitempty"`
 	LastTestError *string    `json:"last_test_error,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func toCredResponse(c *repository.CloudCredential) CloudCredentialResponse {
@@ -47,12 +48,13 @@ func toCredResponse(c *repository.CloudCredential) CloudCredentialResponse {
 		ID:            c.ID,
 		Provider:      c.Provider,
 		Name:          c.Name,
-		TokenMasked:   maskToken(c.EncryptedToken),
+		TokenRedacted: maskToken(c.EncryptedToken),
 		LastUsedAt:    c.LastUsedAt,
 		LastTestAt:    c.LastTestAt,
 		LastTestOK:    c.LastTestOK,
 		LastTestError: c.LastTestError,
 		CreatedAt:     c.CreatedAt,
+		UpdatedAt:     c.UpdatedAt,
 	}
 }
 
@@ -65,7 +67,7 @@ func maskToken(t string) string {
 
 func (h *Handler) AdminListCloudCredentials(c *gin.Context) {
 	if h.CloudCredentialRepo == nil {
-		c.JSON(http.StatusOK, gin.H{"credentials": []any{}})
+		c.JSON(http.StatusOK, gin.H{"data": []any{}})
 		return
 	}
 	rows, err := h.CloudCredentialRepo.List(c.Request.Context())
@@ -77,7 +79,7 @@ func (h *Handler) AdminListCloudCredentials(c *gin.Context) {
 	for _, r := range rows {
 		out = append(out, toCredResponse(&r))
 	}
-	c.JSON(http.StatusOK, gin.H{"credentials": out})
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 type CreateCloudCredentialRequest struct {
@@ -195,7 +197,7 @@ func (h *Handler) AdminListProviderLocations(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"locations": locs})
+	c.JSON(http.StatusOK, gin.H{"data": locs})
 }
 
 func (h *Handler) AdminListProviderServerTypes(c *gin.Context) {
@@ -211,7 +213,7 @@ func (h *Handler) AdminListProviderServerTypes(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"server_types": types})
+	c.JSON(http.StatusOK, gin.H{"data": types})
 }
 
 func (h *Handler) AdminListProviderImages(c *gin.Context) {
@@ -227,7 +229,7 @@ func (h *Handler) AdminListProviderImages(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"images": images})
+	c.JSON(http.StatusOK, gin.H{"data": images})
 }
 
 // providerByName resolves a provider name to a Provider client, looking up
@@ -252,11 +254,147 @@ func (h *Handler) providerByName(c *gin.Context) (cloudprovider.Provider, error)
 
 // ---------------------------------------------------------------------------
 // Provisioning templates
+//
+// The admin UI works in a nested {name, description, config:{...},
+// auto_provision_tier, is_draft} shape; the repository row is flat. The DTO
+// helpers below translate between the two so the two sides agree on the wire
+// format (they did not previously, which silently 400'd every template save).
 // ---------------------------------------------------------------------------
+
+type provLabelDTO struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type provTemplateConfigDTO struct {
+	Provider        string         `json:"provider"`
+	CredentialID    *uuid.UUID     `json:"credential_id,omitempty"`
+	Location        string         `json:"location"`
+	ServerType      string         `json:"server_type"`
+	ServerCount     int            `json:"server_count"`
+	IPv4PerServer   int            `json:"ipv4_per_server"`
+	IPv6PerServer   int            `json:"ipv6_per_server"`
+	WorkerTier      string         `json:"worker_tier"`
+	WorkerProfileID *uuid.UUID     `json:"worker_profile_id,omitempty"`
+	EgressKind      string         `json:"egress_kind"`
+	Image           string         `json:"image"`
+	Datacenter      string         `json:"datacenter,omitempty"`
+	PlacementGroup  string         `json:"placement_group,omitempty"`
+	PrivateNetwork  string         `json:"private_network,omitempty"`
+	Firewall        string         `json:"firewall"`
+	Labels          []provLabelDTO `json:"labels"`
+}
+
+type provTemplateDTO struct {
+	ID                uuid.UUID             `json:"id,omitempty"`
+	Name              string                `json:"name"`
+	Description       string                `json:"description,omitempty"`
+	Config            provTemplateConfigDTO `json:"config"`
+	AutoProvisionTier string                `json:"auto_provision_tier,omitempty"`
+	IsDraft           bool                  `json:"is_draft"`
+	CreatedAt         time.Time             `json:"created_at,omitempty"`
+	UpdatedAt         time.Time             `json:"updated_at,omitempty"`
+}
+
+func labelsToDTO(m map[string]string) []provLabelDTO {
+	out := make([]provLabelDTO, 0, len(m))
+	for k, v := range m {
+		out = append(out, provLabelDTO{Key: k, Value: v})
+	}
+	return out
+}
+
+func labelsFromDTO(in []provLabelDTO) map[string]string {
+	m := map[string]string{}
+	for _, l := range in {
+		if l.Key != "" {
+			m[l.Key] = l.Value
+		}
+	}
+	return m
+}
+
+func toTemplateDTO(t *repository.ProvisioningTemplate) provTemplateDTO {
+	auto := ""
+	if t.IsAutoTemplate {
+		auto = t.Tier
+	}
+	return provTemplateDTO{
+		ID:          t.ID,
+		Name:        t.Name,
+		Description: t.Description,
+		Config: provTemplateConfigDTO{
+			Provider:        t.Provider,
+			Location:        t.Location,
+			ServerType:      t.ServerType,
+			ServerCount:     t.ServerCount,
+			IPv4PerServer:   t.IPv4PerServer,
+			IPv6PerServer:   t.IPv6PerServer,
+			WorkerTier:      t.Tier,
+			WorkerProfileID: t.WorkerProfileID,
+			EgressKind:      t.EgressKind,
+			Image:           t.Image,
+			Datacenter:      t.Datacenter,
+			PlacementGroup:  t.PlacementGroup,
+			PrivateNetwork:  t.PrivateNetwork,
+			Firewall:        t.Firewall,
+			Labels:          labelsToDTO(t.Labels),
+		},
+		AutoProvisionTier: auto,
+		IsDraft:           t.IsDraft,
+		CreatedAt:         t.CreatedAt,
+		UpdatedAt:         t.UpdatedAt,
+	}
+}
+
+// fromTemplateDTO maps the UI shape onto the flat repo model and applies the
+// field defaults the create path used to apply inline.
+func fromTemplateDTO(d *provTemplateDTO) *repository.ProvisioningTemplate {
+	cfg := d.Config
+	t := &repository.ProvisioningTemplate{
+		ID:              d.ID,
+		Name:            d.Name,
+		Description:     d.Description,
+		Provider:        cfg.Provider,
+		Location:        cfg.Location,
+		Datacenter:      cfg.Datacenter,
+		ServerType:      cfg.ServerType,
+		Image:           cfg.Image,
+		ServerCount:     cfg.ServerCount,
+		IPv4PerServer:   cfg.IPv4PerServer,
+		IPv6PerServer:   cfg.IPv6PerServer,
+		WorkerProfileID: cfg.WorkerProfileID,
+		Tier:            cfg.WorkerTier,
+		EgressKind:      cfg.EgressKind,
+		Labels:          labelsFromDTO(cfg.Labels),
+		PlacementGroup:  cfg.PlacementGroup,
+		PrivateNetwork:  cfg.PrivateNetwork,
+		Firewall:        cfg.Firewall,
+		IsDraft:         d.IsDraft,
+		// A draft is never eligible as the tier's auto-provision template.
+		IsAutoTemplate: !d.IsDraft && d.AutoProvisionTier != "",
+	}
+	if t.Image == "" {
+		t.Image = "ubuntu-22.04"
+	}
+	if t.ServerCount == 0 {
+		t.ServerCount = 1
+	}
+	if t.IPv4PerServer == 0 {
+		t.IPv4PerServer = 1
+	}
+	if t.IPv6PerServer == 0 {
+		t.IPv6PerServer = 1
+	}
+	if t.EgressKind == "" {
+		t.EgressKind = "cold_smtp"
+	}
+	return t
+}
 
 func (h *Handler) AdminListProvisioningTemplates(c *gin.Context) {
 	if h.ProvisioningTemplateRepo == nil {
-		c.JSON(http.StatusOK, gin.H{"templates": []any{}})
+		c.JSON(http.StatusOK, gin.H{"data": []any{}})
 		return
 	}
 	rows, err := h.ProvisioningTemplateRepo.List(c.Request.Context())
@@ -264,7 +402,11 @@ func (h *Handler) AdminListProvisioningTemplates(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"templates": rows})
+	out := make([]provTemplateDTO, 0, len(rows))
+	for i := range rows {
+		out = append(out, toTemplateDTO(&rows[i]))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 func (h *Handler) AdminGetProvisioningTemplate(c *gin.Context) {
@@ -282,7 +424,7 @@ func (h *Handler) AdminGetProvisioningTemplate(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	c.JSON(http.StatusOK, row)
+	c.JSON(http.StatusOK, toTemplateDTO(row))
 }
 
 func (h *Handler) AdminCreateProvisioningTemplate(c *gin.Context) {
@@ -290,38 +432,28 @@ func (h *Handler) AdminCreateProvisioningTemplate(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "template repo not configured"})
 		return
 	}
-	var t repository.ProvisioningTemplate
-	if err := c.ShouldBindJSON(&t); err != nil {
+	var d provTemplateDTO
+	if err := c.ShouldBindJSON(&d); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + err.Error()})
 		return
 	}
+	t := fromTemplateDTO(&d)
 	if t.Name == "" || t.Provider == "" || t.Location == "" || t.ServerType == "" || t.Tier == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name, provider, location, server_type, tier required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name, provider, location, server_type and worker_tier are required"})
 		return
 	}
-	if t.Image == "" {
-		t.Image = "ubuntu-22.04"
+	if !repository.IsClientRequestableTier(t.Tier) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "dedicated tier templates cannot be created; dedicated workers are allocated automatically by the control plane",
+			"code":  "tier_not_allowed",
+		})
+		return
 	}
-	if t.ServerCount == 0 {
-		t.ServerCount = 1
-	}
-	if t.IPv4PerServer == 0 {
-		t.IPv4PerServer = 1
-	}
-	if t.IPv6PerServer == 0 {
-		t.IPv6PerServer = 1
-	}
-	if t.EgressKind == "" {
-		t.EgressKind = "cold_smtp"
-	}
-	if t.Labels == nil {
-		t.Labels = map[string]string{}
-	}
-	if err := h.ProvisioningTemplateRepo.Create(c.Request.Context(), &t); err != nil {
+	if err := h.ProvisioningTemplateRepo.Create(c.Request.Context(), t); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, t)
+	c.JSON(http.StatusCreated, toTemplateDTO(t))
 }
 
 func (h *Handler) AdminUpdateProvisioningTemplate(c *gin.Context) {
@@ -330,17 +462,29 @@ func (h *Handler) AdminUpdateProvisioningTemplate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	var t repository.ProvisioningTemplate
-	if err := c.ShouldBindJSON(&t); err != nil {
+	var d provTemplateDTO
+	if err := c.ShouldBindJSON(&d); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
+	t := fromTemplateDTO(&d)
 	t.ID = id
-	if err := h.ProvisioningTemplateRepo.Update(c.Request.Context(), &t); err != nil {
+	if t.Name == "" || t.Provider == "" || t.Location == "" || t.ServerType == "" || t.Tier == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name, provider, location, server_type and worker_tier are required"})
+		return
+	}
+	if !repository.IsClientRequestableTier(t.Tier) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "templates cannot be set to the dedicated tier; dedicated workers are allocated automatically by the control plane",
+			"code":  "tier_not_allowed",
+		})
+		return
+	}
+	if err := h.ProvisioningTemplateRepo.Update(c.Request.Context(), t); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, t)
+	c.JSON(http.StatusOK, toTemplateDTO(t))
 }
 
 func (h *Handler) AdminDeleteProvisioningTemplate(c *gin.Context) {
@@ -366,9 +510,76 @@ type CreateProvisioningJobRequest struct {
 	TriggeredBy string          `json:"triggered_by,omitempty"`
 }
 
+// Job rows are flat in the repo and the UI works in a nested {config:{...}}
+// shape with snake_case keys — the same translation problem the templates have.
+// toJobDTO maps the row (and decodes the stored flat config snapshot back into
+// the nested ProvisioningConfig) so the jobs list / detail / progress panel get
+// the fields they read.
+type provJobStepDTO struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Done  int    `json:"done"`
+	Total int    `json:"total"`
+}
+
+type provJobTimelineDTO struct {
+	State string    `json:"state"`
+	At    time.Time `json:"at"`
+	Note  string    `json:"note,omitempty"`
+}
+
+type provJobDTO struct {
+	ID               uuid.UUID             `json:"id"`
+	State            string                `json:"state"`
+	TriggeredBy      string                `json:"triggered_by,omitempty"`
+	Provider         string                `json:"provider"`
+	TemplateID       *uuid.UUID            `json:"template_id,omitempty"`
+	TemplateName     string                `json:"template_name,omitempty"`
+	Config           provTemplateConfigDTO `json:"config"`
+	Progress         []provJobStepDTO      `json:"progress"`
+	Timeline         []provJobTimelineDTO  `json:"timeline"`
+	CreatedWorkerIDs []uuid.UUID           `json:"created_worker_ids,omitempty"`
+	LastError        *string               `json:"last_error,omitempty"`
+	CompletedAt      *time.Time            `json:"completed_at,omitempty"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+}
+
+func toJobDTO(j *repository.ProvisioningJob) provJobDTO {
+	cfg := provTemplateConfigDTO{Labels: []provLabelDTO{}}
+	templateName := ""
+	if len(j.Config) > 0 {
+		var flat repository.ProvisioningTemplate
+		if err := json.Unmarshal(j.Config, &flat); err == nil {
+			cfg = toTemplateDTO(&flat).Config
+			// The snapshot carries the template name for template-launched jobs
+			// (custom jobs snapshot under the placeholder name "custom").
+			if j.TemplateID != nil {
+				templateName = flat.Name
+			}
+		}
+	}
+	return provJobDTO{
+		ID:               j.ID,
+		State:            string(j.State),
+		TriggeredBy:      j.TriggeredBy,
+		Provider:         j.Provider,
+		TemplateID:       j.TemplateID,
+		TemplateName:     templateName,
+		Config:           cfg,
+		Progress:         []provJobStepDTO{},
+		Timeline:         []provJobTimelineDTO{},
+		CreatedWorkerIDs: j.WorkerIDs,
+		LastError:        j.Error,
+		CompletedAt:      j.CompletedAt,
+		CreatedAt:        j.CreatedAt,
+		UpdatedAt:        j.UpdatedAt,
+	}
+}
+
 func (h *Handler) AdminListProvisioningJobs(c *gin.Context) {
 	if h.ProvisioningJobRepo == nil {
-		c.JSON(http.StatusOK, gin.H{"jobs": []any{}})
+		c.JSON(http.StatusOK, gin.H{"data": []any{}})
 		return
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
@@ -377,7 +588,11 @@ func (h *Handler) AdminListProvisioningJobs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"jobs": rows})
+	out := make([]provJobDTO, 0, len(rows))
+	for i := range rows {
+		out = append(out, toJobDTO(&rows[i]))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 func (h *Handler) AdminGetProvisioningJob(c *gin.Context) {
@@ -395,7 +610,7 @@ func (h *Handler) AdminGetProvisioningJob(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	c.JSON(http.StatusOK, row)
+	c.JSON(http.StatusOK, toJobDTO(row))
 }
 
 func (h *Handler) AdminCreateProvisioningJob(c *gin.Context) {
@@ -425,7 +640,16 @@ func (h *Handler) AdminCreateProvisioningJob(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
 			return
 		}
-		// Snapshot the template into the job's config column.
+		if !repository.IsClientRequestableTier(t.Tier) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "this template targets the dedicated tier, which is allocated automatically by the control plane; pick a shared-tier template",
+				"code":  "tier_not_allowed",
+			})
+			return
+		}
+		// Snapshot the flat template into the job's config column. Its field
+		// names line up with provisioning.JobConfig, so the state machine reads
+		// it directly.
 		b, _ := json.Marshal(t)
 		config = b
 		templateID = &t.ID
@@ -435,17 +659,54 @@ func (h *Handler) AdminCreateProvisioningJob(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "either template_id or custom config required"})
 			return
 		}
-		config = req.Custom
-		var stub struct {
-			Provider string `json:"provider"`
+		// The UI sends the nested config shape (worker_tier, {key,value} label
+		// rows). Normalize it through the same mapping templates use so the
+		// snapshot matches provisioning.JobConfig.
+		var cfgDTO provTemplateConfigDTO
+		if err := json.Unmarshal(req.Custom, &cfgDTO); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid custom config: " + err.Error()})
+			return
 		}
-		_ = json.Unmarshal(req.Custom, &stub)
-		provider = stub.Provider
+		if cfgDTO.Provider == "" || cfgDTO.Location == "" || cfgDTO.ServerType == "" || cfgDTO.WorkerTier == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "custom config requires provider, location, server_type and worker_tier"})
+			return
+		}
+		snap := fromTemplateDTO(&provTemplateDTO{Name: "custom", Config: cfgDTO})
+		if !repository.IsClientRequestableTier(snap.Tier) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "dedicated tier cannot be provisioned directly; dedicated workers are allocated automatically by the control plane",
+				"code":  "tier_not_allowed",
+			})
+			return
+		}
+		b, _ := json.Marshal(snap)
+		config = b
+		provider = cfgDTO.Provider
 	}
 
 	if provider == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "provider missing from config"})
 		return
+	}
+
+	// Cloud-first gate: a provisioning job for a provider can only be created
+	// once a cloud credential for that provider exists — otherwise the job
+	// would sit in 'pending' forever with no way to reach the provider API.
+	var credentialID *uuid.UUID
+	if h.CloudCredentialRepo != nil {
+		cred, err := h.CloudCredentialRepo.GetByProvider(c.Request.Context(), provider)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if cred == nil {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "no cloud provider connected for " + provider + " — add one under Settings → Cloud Providers first",
+				"code":  "cloud_provider_required",
+			})
+			return
+		}
+		credentialID = &cred.ID
 	}
 
 	triggeredBy := req.TriggeredBy
@@ -454,23 +715,64 @@ func (h *Handler) AdminCreateProvisioningJob(c *gin.Context) {
 	}
 
 	job := &repository.ProvisioningJob{
-		State:       models.ProvJobPending,
-		TriggeredBy: triggeredBy,
-		Provider:    provider,
-		TemplateID:  templateID,
-		Config:      config,
+		State:        models.ProvJobPending,
+		TriggeredBy:  triggeredBy,
+		Provider:     provider,
+		CredentialID: credentialID,
+		TemplateID:   templateID,
+		Config:       config,
 	}
 	if err := h.ProvisioningJobRepo.Create(c.Request.Context(), job); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// The state machine pickup is asynchronous: a background worker on the
-	// backend (see internal/app/provisioning Service.Run) processes jobs in
-	// state != completed/failed. The admin UI polls GET /admin/provisioning-jobs/:id
+	// The state machine pickup is asynchronous: the provisioning runner
+	// (internal/app/provisioning Runner) processes jobs in state !=
+	// completed/failed. The admin UI polls GET /admin/provisioning-jobs/:id
 	// for live status.
 
-	c.JSON(http.StatusAccepted, job)
+	c.JSON(http.StatusAccepted, toJobDTO(job))
+}
+
+// AdminRetryProvisioningJob resets a failed job back to pending so the runner
+// re-attempts it.
+func (h *Handler) AdminRetryProvisioningJob(c *gin.Context) {
+	if h.ProvisioningJobRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provisioning jobs repo not configured"})
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	job, err := h.ProvisioningJobRepo.Get(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if job == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	if job.State != models.ProvJobFailed {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "only failed jobs can be retried",
+			"code":  "job_not_retryable",
+		})
+		return
+	}
+	if err := h.ProvisioningJobRepo.Retry(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	job, err = h.ProvisioningJobRepo.Get(c.Request.Context(), id)
+	if err != nil || job == nil {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+	c.JSON(http.StatusOK, toJobDTO(job))
 }
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
 )
@@ -32,10 +33,11 @@ type WorkerAssignmentService interface {
 	// SelectSharedWorker selects the least loaded shared worker for the given tier
 	SelectSharedWorker(ctx context.Context, freeTier bool) (*models.Worker, error)
 
-	// SelectSharedWorkerForBand selects the least-loaded shared worker whose
-	// risk_pool matches the mailbox's risk band. Falls back to the clean
-	// pool if no worker exists in the target pool, and to any worker of the
-	// tier as a last resort.
+	// SelectSharedWorkerForBand selects the shared worker whose risk_pool
+	// matches the mailbox's risk band. Strict: a risky/quarantine mailbox is
+	// never placed in the clean pool — if the matching pool is empty an idle
+	// clean worker is promoted into it, and if there's nothing to promote the
+	// call refuses rather than co-locating risky traffic with trusted inboxes.
 	SelectSharedWorkerForBand(ctx context.Context, freeTier bool, band models.EmailRiskBand) (*models.Worker, error)
 
 	// Dedicated worker management
@@ -98,6 +100,26 @@ func (s *workerAssignmentService) AssignWorkerToEmail(ctx context.Context, email
 			if err != nil {
 				return nil, err
 			}
+			// No dedicated worker bound yet — e.g. this mailbox was added
+			// before the subscription-upgrade migration ran, or that
+			// migration found no free dedicated box. Allocate one on demand:
+			// AssignDedicatedWorker promotes a spare premium shared worker to
+			// dedicated when the dedicated pool is empty. If there's nothing
+			// to promote (ErrNoDedicatedWorkers) we fall through to shared
+			// placement rather than failing the add — the rebalancer/next
+			// onboarding will retry.
+			if dedicatedWorker == nil {
+				aerr := s.AssignDedicatedWorker(ctx, orgID, sub.ID)
+				if aerr != nil && !errors.Is(aerr, ErrNoDedicatedWorkers) && !errors.Is(aerr, ErrOrgAlreadyAssigned) {
+					return nil, aerr
+				}
+				if aerr == nil || errors.Is(aerr, ErrOrgAlreadyAssigned) {
+					dedicatedWorker, err = s.workerRepo.GetDedicatedWorkerByUserID(ctx, orgID)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
 			if dedicatedWorker != nil {
 				// Assign to dedicated worker
 				if err := s.workerRepo.UpdateEmailAccountWorker(ctx, emailAccountID, dedicatedWorker.ID); err != nil {
@@ -111,14 +133,33 @@ func (s *workerAssignmentService) AssignWorkerToEmail(ctx context.Context, email
 				// worker), but keeping the column accurate makes the
 				// capacity view useful for ops dashboards.
 				_ = s.workerRepo.AddLoadScore(ctx, dedicatedWorker.ID, weight)
+				// Dedicated workers are paid-org only, so the mailbox belongs
+				// to the premium warmup pool. Set it explicitly to match the
+				// shared-premium path and MigrateOrgToDedicated — otherwise the
+				// account keeps the schema default 'free' and reporting/
+				// filtering misclassifies it. Non-fatal.
+				if err := s.workerRepo.UpdateEmailAccountWarmupPoolType(ctx, emailAccountID, "premium"); err != nil {
+					// Log but don't fail
+				}
 				return &dedicatedWorker.ID, nil
 			}
 		}
 	}
 
-	// 5. Assign to shared worker (strict tier separation)
-	freeTier := !isPaidOrg // Free trial = free workers, Paid = premium workers
-	worker, err := s.selectSharedWorkerForWeight(ctx, freeTier, weight)
+	// 5. Assign to a shared worker, strict on BOTH axes:
+	//   - tier separation: free trial → free workers, paid → premium workers
+	//   - risk segregation: the mailbox's risk_band must match the worker's
+	//     risk_pool, so a risky/quarantine inbox never lands on a clean
+	//     worker next to trusted ones. A fresh mailbox is 'clean' (the
+	//     column default until the warmup health sweep classifies it), so
+	//     onboarding takes the capacity-aware clean path; only already
+	//     degraded mailboxes hit the strict risky/quarantine branch.
+	freeTier := !isPaidOrg
+	band, err := s.workerRepo.GetEmailAccountRiskBand(ctx, emailAccountID)
+	if err != nil {
+		return nil, err
+	}
+	worker, err := s.selectSharedWorkerForBandWeight(ctx, freeTier, band, weight)
 	if err != nil {
 		return nil, err
 	}
@@ -289,21 +330,34 @@ func (s *workerAssignmentService) selectSharedWorkerLegacy(ctx context.Context, 
 	return &workers[0], nil
 }
 
-// SelectSharedWorkerForBand picks the least-loaded shared worker whose
-// risk_pool matches band.MatchingRiskPool(). Fallback chain:
-//
-//  1. Worker in the matching pool of the right tier
-//  2. Worker in the clean pool of the right tier (better to land risky
-//     mailboxes on clean workers than to refuse, but log + audit this
-//     since it dilutes the clean pool — operator should provision a
-//     risky/quarantine worker)
-//  3. Any worker of the right tier (existing SelectSharedWorker behavior)
-//
-// Step 3 maintains backwards compatibility with installations that don't
-// run risk pools yet — they leave everything in risk_pool='clean' and
-// behavior is unchanged.
+// SelectSharedWorkerForBand picks the shared worker that should host a mailbox
+// of the given risk band. It is strict: a risky/quarantine mailbox is NEVER
+// placed in the clean pool. Used by the risk rebalancer (which has no per-
+// mailbox weight) — it delegates to selectSharedWorkerForBandWeight with the
+// default weight so initial placement and rebalancing share identical logic
+// and can't fight each other.
 func (s *workerAssignmentService) SelectSharedWorkerForBand(ctx context.Context, freeTier bool, band models.EmailRiskBand) (*models.Worker, error) {
+	return s.selectSharedWorkerForBandWeight(ctx, freeTier, band, defaultMailboxWeight)
+}
+
+// selectSharedWorkerForBandWeight is the strict, capacity-aware band selector
+// shared by initial placement and the rebalancer.
+//
+//   - clean band: route through the capacity-aware path
+//     (selectSharedWorkerForWeight), which honours per-mailbox weight and
+//     worker headroom. This is the unchanged behaviour for the common case
+//     and for installs that never enable risk pools (everything stays clean).
+//   - risky / quarantine band: place ONLY on a worker whose risk_pool matches.
+//     If the matching pool is empty, promote an idle clean worker into it
+//     rather than diluting the clean pool. If there's nothing to promote,
+//     refuse (ErrNoAvailableWorkers) — never co-locate a risky/quarantine
+//     inbox with trusted ones. The caller (onboarding) treats this as
+//     non-fatal and the rebalancer retries on the next tick.
+func (s *workerAssignmentService) selectSharedWorkerForBandWeight(ctx context.Context, freeTier bool, band models.EmailRiskBand, weight float64) (*models.Worker, error) {
 	target := band.MatchingRiskPool()
+	if target == models.WorkerRiskPoolClean {
+		return s.selectSharedWorkerForWeight(ctx, freeTier, weight)
+	}
 
 	workers, err := s.workerRepo.GetSharedWorkersByTierAndPool(ctx, freeTier, target)
 	if err != nil {
@@ -313,23 +367,34 @@ func (s *workerAssignmentService) SelectSharedWorkerForBand(ctx context.Context,
 		return &workers[0], nil
 	}
 
-	// Step 2: fall back to the clean pool. Only kicks in for risky/quarantine
-	// bands when no matching-pool worker exists.
-	if target != models.WorkerRiskPoolClean {
-		workers, err = s.workerRepo.GetSharedWorkersByTierAndPool(ctx, freeTier, models.WorkerRiskPoolClean)
-		if err != nil {
-			return nil, err
-		}
-		if len(workers) > 0 {
-			return &workers[0], nil
-		}
+	// No worker in the matching pool. Promote an idle clean worker into it so
+	// we keep risky/quarantine traffic strictly segregated from trusted
+	// inboxes instead of falling back onto the clean pool.
+	promoted, err := s.workerRepo.PromoteWorkerToPool(ctx, freeTier, target)
+	if err != nil {
+		return nil, err
+	}
+	if promoted != nil {
+		log.Info().
+			Str("worker_id", promoted.ID.String()).
+			Bool("free_tier", freeTier).
+			Str("risk_pool", string(target)).
+			Msg("assignment: promoted idle clean worker into risk pool")
+		return promoted, nil
 	}
 
-	// Step 3: last-resort, any tier worker. Same as legacy SelectSharedWorker.
-	return s.SelectSharedWorker(ctx, freeTier)
+	// Nothing to promote. Refuse rather than dilute the clean pool.
+	return nil, ErrNoAvailableWorkers
 }
 
-// AssignDedicatedWorker assigns a dedicated worker to an organization
+// AssignDedicatedWorker assigns a dedicated worker to an organization.
+//
+// Dedicated capacity is allocated automatically: admins/customers only ever
+// pick free or premium, and the control plane creates dedicated workers as
+// needed. If the dedicated pool has no free worker, we promote a spare idle
+// premium shared worker to dedicated (the same SetWorkerType + bind sequence
+// the admin "convert to dedicated" action uses). Only when there's nothing to
+// promote do we surface ErrNoDedicatedWorkers.
 func (s *workerAssignmentService) AssignDedicatedWorker(ctx context.Context, orgID, subscriptionID uuid.UUID) error {
 	// Use atomic insert with conflict check to prevent race conditions.
 	// Two concurrent requests could both pass the "check if exists" step and
@@ -338,8 +403,24 @@ func (s *workerAssignmentService) AssignDedicatedWorker(ctx context.Context, org
 	if err != nil {
 		return err
 	}
+
+	// promoted tracks whether we flipped a shared worker to dedicated in this
+	// call, so we can undo it if we then lose the bind race below.
+	promoted := false
 	if worker == nil {
-		return ErrNoDedicatedWorkers
+		spare, perr := s.workerRepo.PromoteIdlePremiumWorkerToDedicated(ctx)
+		if perr != nil {
+			return perr
+		}
+		if spare == nil {
+			return ErrNoDedicatedWorkers
+		}
+		log.Info().
+			Str("worker_id", spare.ID.String()).
+			Str("org_id", orgID.String()).
+			Msg("assignment: promoted idle premium shared worker to dedicated")
+		worker = spare
+		promoted = true
 	}
 
 	assignment := &models.DedicatedWorkerAssignment{
@@ -355,6 +436,23 @@ func (s *workerAssignmentService) AssignDedicatedWorker(ctx context.Context, org
 		return err
 	}
 	if !created {
+		// Lost the bind race: the org already has a dedicated worker. If we
+		// promoted a worker just now, revert it to the shared pool so it
+		// isn't stranded as an unbound dedicated box. A pre-existing
+		// dedicated worker (promoted == false) is left untouched.
+		if promoted {
+			if rerr := s.workerRepo.SetWorkerType(ctx, worker.ID, models.WorkerTypeShared); rerr != nil {
+				// The promotion couldn't be undone: the worker stays marked
+				// dedicated with no binding, so GetAvailableDedicatedWorker
+				// will keep re-selecting it. Log loudly so ops can reconcile.
+				// Still return ErrOrgAlreadyAssigned — the org IS bound (by the
+				// race winner), so failing the assignment here would be wrong.
+				log.Error().Err(rerr).
+					Str("worker_id", worker.ID.String()).
+					Str("org_id", orgID.String()).
+					Msg("assignment: failed to revert promoted worker to shared after losing dedicated bind race; worker stranded as dedicated")
+			}
+		}
 		return ErrOrgAlreadyAssigned
 	}
 	return nil

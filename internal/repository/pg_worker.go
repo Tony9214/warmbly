@@ -34,6 +34,7 @@ type WorkerRepository interface {
 	GetSharedWorkersByTier(ctx context.Context, freeTier bool) ([]models.Worker, error)
 	GetAllActiveWorkers(ctx context.Context) ([]models.Worker, error)
 	GetAvailableDedicatedWorker(ctx context.Context) (*models.Worker, error)
+	PromoteIdlePremiumWorkerToDedicated(ctx context.Context) (*models.Worker, error)
 	IncrementAccountCount(ctx context.Context, workerID uuid.UUID) error
 	DecrementAccountCount(ctx context.Context, workerID uuid.UUID) error
 	SetWorkerType(ctx context.Context, workerID uuid.UUID, workerType models.WorkerType) error
@@ -74,7 +75,9 @@ type WorkerRepository interface {
 	// Threat-level segregation
 	SetWorkerRiskPool(ctx context.Context, workerID uuid.UUID, pool models.WorkerRiskPool) error
 	SetEmailAccountRiskBand(ctx context.Context, emailAccountID uuid.UUID, band models.EmailRiskBand) error
+	GetEmailAccountRiskBand(ctx context.Context, emailAccountID uuid.UUID) (models.EmailRiskBand, error)
 	GetSharedWorkersByTierAndPool(ctx context.Context, freeTier bool, pool models.WorkerRiskPool) ([]models.Worker, error)
+	PromoteWorkerToPool(ctx context.Context, freeTier bool, target models.WorkerRiskPool) (*models.Worker, error)
 	ListRiskCandidates(ctx context.Context, limit int) ([]RiskCandidate, error)
 
 	// Tags
@@ -206,6 +209,47 @@ func (r *workerRepository) GetAvailableDedicatedWorker(ctx context.Context) (*mo
 	var w models.Worker
 	err := r.db.QueryRow(ctx, query).Scan(
 		&w.ID, &w.IPAddr, &w.Active, &w.FreeTier, &w.WorkerType, &w.AccountCount,
+		&w.CreatedAt, &w.UpdatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+// PromoteIdlePremiumWorkerToDedicated flips the oldest idle premium shared
+// worker to dedicated and returns it, so the control plane can seed dedicated
+// capacity on demand when GetAvailableDedicatedWorker finds none free. Only
+// premium (free_tier = false), shared, active workers with account_count = 0
+// are eligible — promoting a loaded worker would strand its mailboxes on a box
+// that suddenly belongs to one org. Returns nil if no idle premium worker
+// exists.
+//
+// The candidate is selected and flipped in a single statement
+// (UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)), so two
+// concurrent promotions never pick the same row. free/premium capacity
+// separation is preserved: free-tier workers are never promoted.
+func (r *workerRepository) PromoteIdlePremiumWorkerToDedicated(ctx context.Context) (*models.Worker, error) {
+	query := `
+		UPDATE workers SET worker_type = 'dedicated', updated_at = NOW()
+		WHERE id = (
+			SELECT id FROM workers
+			WHERE worker_type = 'shared'
+			  AND active = true
+			  AND free_tier = false
+			  AND account_count = 0
+			ORDER BY created_at ASC
+			LIMIT 1
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING id, ip_addr, active, free_tier, worker_type, account_count, risk_pool, created_at, updated_at
+	`
+	var w models.Worker
+	err := r.db.QueryRow(ctx, query).Scan(
+		&w.ID, &w.IPAddr, &w.Active, &w.FreeTier, &w.WorkerType, &w.AccountCount, &w.RiskPool,
 		&w.CreatedAt, &w.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {

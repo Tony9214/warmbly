@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -66,6 +67,7 @@ type AdminRepository interface {
 
 	// Plans
 	ListPlans(ctx context.Context, includePrivate bool) ([]models.Plan, error)
+	SearchPlansForAdmin(ctx context.Context, search *models.AdminPlanSearch) (*models.AdminPlansResult, error)
 	CreatePlan(ctx context.Context, plan *models.Plan) error
 	GetPlan(ctx context.Context, planID uuid.UUID) (*models.Plan, error)
 	UpdatePlan(ctx context.Context, plan *models.Plan) error
@@ -73,7 +75,7 @@ type AdminRepository interface {
 	IsPlanInUse(ctx context.Context, planID uuid.UUID) (bool, error)
 
 	// Enterprise Inquiries
-	ListEnterpriseInquiries(ctx context.Context, status string, cursor *uuid.UUID, limit int) (*models.AdminEnterpriseInquiriesResult, error)
+	ListEnterpriseInquiries(ctx context.Context, search *models.AdminEnterpriseInquirySearch) (*models.AdminEnterpriseInquiriesResult, error)
 	GetEnterpriseInquiry(ctx context.Context, id uuid.UUID) (*models.AdminEnterpriseInquiry, error)
 	UpdateEnterpriseInquiry(ctx context.Context, id uuid.UUID, update *models.UpdateEnterpriseInquiryRequest) error
 
@@ -123,6 +125,107 @@ func (r *adminRepository) SearchUsers(ctx context.Context, search *models.AdminU
 		whereClause += ` AND u.admin_permissions > 0`
 	}
 
+	if search.HasOverrides {
+		whereClause += ` AND EXISTS (SELECT 1 FROM user_rate_limits url WHERE url.user_id = u.id)`
+	}
+
+	if search.FreeTrialUsed {
+		whereClause += ` AND u.free_trial_used = TRUE`
+	}
+
+	if search.CreatedWithin > 0 {
+		whereClause += ` AND u.created_at >= NOW() - ($` + itoa(argNum) + `::int * INTERVAL '1 day')`
+		args = append(args, search.CreatedWithin)
+		argNum++
+	}
+
+	// Local helpers keep the many optional clauses in the established
+	// whereClause/argNum/itoa style. `frag` carries a single %d placeholder
+	// for the bind position; date "before" bounds are made inclusive of the
+	// whole day by comparing against the next midnight.
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			whereClause += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			whereClause += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			whereClause += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	// Plan / subscription
+	if search.PlanID != nil {
+		whereClause += ` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.plan_id = $` + itoa(argNum) + `)`
+		args = append(args, *search.PlanID)
+		argNum++
+	}
+	if search.SubscriptionStatus != "" {
+		whereClause += ` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.status = $` + itoa(argNum) + `)`
+		args = append(args, search.SubscriptionStatus)
+		argNum++
+	}
+	if search.IsEnterprise {
+		whereClause += ` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.is_enterprise = TRUE)`
+	}
+	if search.HasSubscription {
+		whereClause += ` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id)`
+	}
+	if search.HasActiveSubscription {
+		whereClause += ` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.status IN ('active','trialing'))`
+	}
+
+	// Account state
+	if search.OnboardingCompleted {
+		whereClause += ` AND u.onboarding_completed_at IS NOT NULL`
+	}
+	if search.DeletionScheduled {
+		whereClause += ` AND u.deletion_scheduled_at IS NOT NULL`
+	}
+	if search.HasAvatar {
+		whereClause += ` AND u.avatar_url IS NOT NULL`
+	}
+	if search.HasActiveCampaign {
+		whereClause += ` AND EXISTS (SELECT 1 FROM campaigns c WHERE c.user_id = u.id AND c.status = 'active')`
+	}
+	if search.HasBanRecord {
+		whereClause += ` AND EXISTS (SELECT 1 FROM user_bans ub WHERE ub.user_id = u.id)`
+	}
+	if search.HasDedicatedWorker {
+		whereClause += ` AND EXISTS (SELECT 1 FROM dedicated_worker_assignments dwa WHERE dwa.user_id = u.id AND dwa.released_at IS NULL)`
+	}
+
+	// Count / numeric ranges
+	addInt(`(SELECT COUNT(*) FROM organization_members om WHERE om.user_id = u.id) >= $%d`, search.OrgCountMin)
+	addInt(`(SELECT COUNT(*) FROM organization_members om WHERE om.user_id = u.id) <= $%d`, search.OrgCountMax)
+	addInt(`(SELECT COUNT(*) FROM email_accounts ea WHERE ea.user_id = u.id) >= $%d`, search.EmailAccountCountMin)
+	addInt(`(SELECT COUNT(*) FROM email_accounts ea WHERE ea.user_id = u.id) <= $%d`, search.EmailAccountCountMax)
+	addInt(`(SELECT COUNT(*) FROM campaigns c WHERE c.user_id = u.id) >= $%d`, search.CampaignCountMin)
+	addInt(`(SELECT COUNT(*) FROM campaigns c WHERE c.user_id = u.id) <= $%d`, search.CampaignCountMax)
+	addInt(`u.max_organizations >= $%d`, search.MaxOrganizationsMin)
+	addInt(`u.max_organizations <= $%d`, search.MaxOrganizationsMax)
+
+	// Date ranges
+	addAfter("u.created_at", search.CreatedAfter)
+	addBefore("u.created_at", search.CreatedBefore)
+	addAfter("u.admin_granted_at", search.AdminGrantedAfter)
+	addBefore("u.admin_granted_at", search.AdminGrantedBefore)
+	addAfter("u.banned_at", search.BannedAfter)
+	addBefore("u.banned_at", search.BannedBefore)
+	addAfter("u.updated_at", search.UpdatedAfter)
+	addBefore("u.updated_at", search.UpdatedBefore)
+
 	if search.Cursor != nil {
 		whereClause += ` AND u.id < $` + itoa(argNum)
 		args = append(args, *search.Cursor)
@@ -150,7 +253,7 @@ func (r *adminRepository) SearchUsers(ctx context.Context, search *models.AdminU
 			u.admin_permissions, u.admin_granted_at, u.admin_granted_by, u.banned_at,
 			u.created_at, u.updated_at,
 			(SELECT COUNT(*) FROM organization_members om WHERE om.user_id = u.id) as org_count,
-			(SELECT COUNT(*) FROM email_accounts ea WHERE ea.user_id = u.id::text) as email_count,
+			(SELECT COUNT(*) FROM email_accounts ea WHERE ea.user_id = u.id) as email_count,
 			(SELECT COUNT(*) FROM campaigns c WHERE c.user_id = u.id) as campaign_count
 		FROM users u
 		` + whereClause + `
@@ -209,7 +312,7 @@ func (r *adminRepository) GetUserDetail(ctx context.Context, userID uuid.UUID) (
 			u.admin_permissions, u.admin_granted_at, u.admin_granted_by, u.banned_at,
 			u.created_at, u.updated_at,
 			(SELECT COUNT(*) FROM organization_members om WHERE om.user_id = u.id) as org_count,
-			(SELECT COUNT(*) FROM email_accounts ea WHERE ea.user_id = u.id::text) as email_count,
+			(SELECT COUNT(*) FROM email_accounts ea WHERE ea.user_id = u.id) as email_count,
 			(SELECT COUNT(*) FROM campaigns c WHERE c.user_id = u.id) as campaign_count
 		FROM users u
 		WHERE u.id = $1
@@ -717,10 +820,32 @@ func (r *adminRepository) GetWorkerEmails(ctx context.Context, workerID uuid.UUI
 		args = append(args, *cursor)
 	}
 
+	// Health lives on warmup_pool_participants; an account can be in more than
+	// one pool, so we pick its WORST state via a CASE rank (same ordering as the
+	// risk rebalancer). risk_band is the mailbox's resolved reputation tier.
 	query := `
 		SELECT ea.id, ea.email, ea.user_id::uuid, ea.organization_id,
-			ea.status, ea.provider, ea.warmup IS NOT NULL, ea.last_synced_at
+			ea.status, ea.provider, ea.warmup IS NOT NULL, ea.last_synced_at,
+			COALESCE(ea.risk_band, 'clean'::email_risk_band)::text,
+			ea.risk_evaluated_at,
+			COALESCE(wh.health_state, '')::text,
+			wh.spam_score,
+			wh.blocked_until
 		FROM email_accounts ea
+		LEFT JOIN LATERAL (
+			SELECT health_state, spam_score, blocked_until
+			FROM warmup_pool_participants
+			WHERE email_account_id = ea.id
+			ORDER BY CASE health_state
+				WHEN 'blocked' THEN 0
+				WHEN 'quarantined' THEN 1
+				WHEN 'throttled' THEN 2
+				WHEN 'watch' THEN 3
+				WHEN 'healthy' THEN 4
+				ELSE 5
+			END
+			LIMIT 1
+		) wh ON true
 		` + whereClause + `
 		ORDER BY ea.created_at DESC
 		LIMIT $2
@@ -738,6 +863,7 @@ func (r *adminRepository) GetWorkerEmails(ctx context.Context, workerID uuid.UUI
 		err := rows.Scan(
 			&e.ID, &e.Email, &e.UserID, &e.OrganizationID,
 			&e.Status, &e.Provider, &e.WarmupEnabled, &e.LastSyncedAt,
+			&e.RiskBand, &e.RiskEvaluatedAt, &e.WarmupHealth, &e.SpamScore, &e.BlockedUntil,
 		)
 		if err != nil {
 			return nil, nil, err
@@ -1195,7 +1321,7 @@ func (r *adminRepository) SearchCampaigns(ctx context.Context, search *models.Ad
 	whereClause := "WHERE 1=1"
 
 	if search.Query != "" {
-		whereClause += " AND c.name ILIKE $" + itoa(argNum)
+		whereClause += " AND (c.name ILIKE $" + itoa(argNum) + " OR u.email ILIKE $" + itoa(argNum) + ")"
 		args = append(args, "%"+search.Query+"%")
 		argNum++
 	}
@@ -1213,10 +1339,76 @@ func (r *adminRepository) SearchCampaigns(ctx context.Context, search *models.Ad
 	}
 
 	if search.Status != "" && search.Status != "all" {
-		whereClause += " AND c.status = $" + itoa(argNum)
+		whereClause += " AND c.status::text = $" + itoa(argNum)
 		args = append(args, search.Status)
 		argNum++
 	}
+
+	// Boolean flags.
+	if search.OpenTracking {
+		whereClause += " AND c.open_tracking = TRUE"
+	}
+	if search.LinkTracking {
+		whereClause += " AND c.link_tracking = TRUE"
+	}
+	if search.StopOnReply {
+		whereClause += " AND c.stop_on_reply = TRUE"
+	}
+	if search.TextOnly {
+		whereClause += " AND c.text_only = TRUE"
+	}
+	if search.UnsubscribeHeader {
+		whereClause += " AND c.unsubscribe_header = TRUE"
+	}
+
+	// Relationship existence.
+	if search.HasContacts {
+		whereClause += " AND EXISTS (SELECT 1 FROM campaign_leads cl WHERE cl.campaign_id = c.id)"
+	}
+	if search.HasBounces {
+		whereClause += " AND EXISTS (SELECT 1 FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.bounced_at IS NOT NULL)"
+	}
+
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			whereClause += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			whereClause += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			whereClause += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	addInt(`c.daily_limit >= $%d`, search.DailyLimitMin)
+	addInt(`c.daily_limit <= $%d`, search.DailyLimitMax)
+	addInt(`(SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id) >= $%d`, search.ContactCountMin)
+	addInt(`(SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id) <= $%d`, search.ContactCountMax)
+	addInt(`(SELECT COUNT(*) FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.sent_at IS NOT NULL) >= $%d`, search.SentCountMin)
+	addInt(`(SELECT COUNT(*) FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.sent_at IS NOT NULL) <= $%d`, search.SentCountMax)
+
+	if search.CreatedWithin > 0 {
+		whereClause += " AND c.created_at >= NOW() - ($" + itoa(argNum) + "::int * INTERVAL '1 day')"
+		args = append(args, search.CreatedWithin)
+		argNum++
+	}
+	addAfter("c.created_at", search.CreatedAfter)
+	addBefore("c.created_at", search.CreatedBefore)
+	addAfter("c.start_date", search.StartDateAfter)
+	addBefore("c.start_date", search.StartDateBefore)
+	addAfter("c.updated_at", search.UpdatedAfter)
+	addBefore("c.updated_at", search.UpdatedBefore)
 
 	if search.Cursor != nil {
 		whereClause += " AND c.id < $" + itoa(argNum)
@@ -1224,16 +1416,47 @@ func (r *adminRepository) SearchCampaigns(ctx context.Context, search *models.Ad
 		argNum++
 	}
 
+	orderCol := "c.created_at"
+	switch search.SortBy {
+	case "name":
+		orderCol = "c.name"
+	case "status":
+		orderCol = "c.status::text"
+	case "updated_at":
+		orderCol = "c.updated_at"
+	case "daily_limit":
+		orderCol = "c.daily_limit"
+	case "owner_email":
+		orderCol = "u.email"
+	case "contact_count":
+		orderCol = "(SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id)"
+	case "sent_count":
+		orderCol = "(SELECT COUNT(*) FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.sent_at IS NOT NULL)"
+	}
+	orderDir := "DESC"
+	if search.SortBy != "" && !search.SortDesc {
+		orderDir = "ASC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir + ", c.id DESC"
+
 	args = append(args, limit+1)
 
 	query := `
 		SELECT c.id, c.name, c.user_id, c.organization_id, c.status, c.created_at,
-			c.started_at, c.stopped_at,
-			u.id, u.first_name, u.last_name, u.email
+			c.start_date, c.end_date,
+			u.id, u.first_name, u.last_name, u.email,
+			o.id, o.name, o.slug,
+			(SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id),
+			(SELECT COUNT(*) FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.sent_at IS NOT NULL),
+			(SELECT COUNT(*) FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.opened_at IS NOT NULL),
+			(SELECT COUNT(*) FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.clicked_at IS NOT NULL),
+			(SELECT COUNT(*) FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.replied_at IS NOT NULL),
+			(SELECT COUNT(*) FROM campaign_contact_progress ccp WHERE ccp.campaign_id = c.id AND ccp.bounced_at IS NOT NULL)
 		FROM campaigns c
 		JOIN users u ON u.id = c.user_id
+		LEFT JOIN organizations o ON o.id = c.organization_id
 		` + whereClause + `
-		ORDER BY c.created_at DESC
+		` + orderBy + `
 		LIMIT $` + itoa(argNum)
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -1246,17 +1469,29 @@ func (r *adminRepository) SearchCampaigns(ctx context.Context, search *models.Ad
 	for rows.Next() {
 		var c models.AdminCampaignDetail
 		var user models.AdminUserSummary
+		var orgID *uuid.UUID
+		var orgName *string
+		var orgSlug *string
 
 		err := rows.Scan(
 			&c.ID, &c.Name, &c.UserID, &c.OrganizationID, &c.Status, &c.CreatedAt,
 			&c.StartedAt, &c.StoppedAt,
 			&user.ID, &user.FirstName, &user.LastName, &user.Email,
+			&orgID, &orgName, &orgSlug,
+			&c.TotalContacts, &c.EmailsSent, &c.EmailsOpened, &c.EmailsClicked, &c.EmailsReplied, &c.EmailsBounced,
 		)
 		if err != nil {
 			return nil, err
 		}
 
 		c.User = &user
+		if orgID != nil {
+			c.Organization = &models.Organization{ID: *orgID}
+			if orgName != nil {
+				c.Organization.Name = *orgName
+			}
+			c.Organization.Slug = orgSlug
+		}
 		campaigns = append(campaigns, c)
 	}
 
@@ -1273,6 +1508,13 @@ func (r *adminRepository) SearchCampaigns(ctx context.Context, search *models.Ad
 		result.Pagination.NextCursor = &lastID
 	}
 
+	// Total count for the same filter — drop the trailing LIMIT arg.
+	countQuery := `SELECT COUNT(*) FROM campaigns c JOIN users u ON u.id = c.user_id LEFT JOIN organizations o ON o.id = c.organization_id ` + whereClause
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
+	}
+
 	return result, nil
 }
 
@@ -1280,7 +1522,7 @@ func (r *adminRepository) SearchCampaigns(ctx context.Context, search *models.Ad
 func (r *adminRepository) GetCampaignDetail(ctx context.Context, campaignID uuid.UUID) (*models.AdminCampaignDetail, error) {
 	query := `
 		SELECT c.id, c.name, c.user_id, c.organization_id, c.status, c.created_at,
-			c.started_at, c.stopped_at,
+			c.start_date, c.end_date,
 			u.id, u.first_name, u.last_name, u.email
 		FROM campaigns c
 		JOIN users u ON u.id = c.user_id
@@ -1609,18 +1851,19 @@ func (r *adminRepository) GetEmailDistribution(ctx context.Context) ([]models.Em
 func (r *adminRepository) ListPlans(ctx context.Context, includePrivate bool) ([]models.Plan, error) {
 	whereClause := ""
 	if !includePrivate {
-		whereClause = "WHERE public = true"
+		whereClause = "WHERE p.public = true"
 	}
 
 	query := `
-		SELECT id, name, max_contacts, daily_emails, ai_generation, account_limit,
-			price, discounted_price, duration, savings, public,
-			stripe_price_id, stripe_product_id, dedicated_workers, daily_campaign_limit,
-			max_campaigns, max_active_campaigns, max_team_members, max_email_accounts,
-			updated_at, created_at
-		FROM plans
+		SELECT p.id, p.name, p.max_contacts, p.daily_emails, p.ai_generation, p.account_limit,
+			p.price, p.discounted_price, d.title, p.savings, p.public,
+			p.stripe_price_id, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
+			p.max_campaigns, p.max_active_campaigns, p.max_team_members, p.max_email_accounts,
+			p.updated_at, p.created_at
+		FROM plans p
+		LEFT JOIN durations d ON d.id = p.duration_id
 		` + whereClause + `
-		ORDER BY price ASC
+		ORDER BY p.price ASC
 	`
 
 	rows, err := r.db.Query(ctx, query)
@@ -1632,9 +1875,10 @@ func (r *adminRepository) ListPlans(ctx context.Context, includePrivate bool) ([
 	var plans []models.Plan
 	for rows.Next() {
 		var p models.Plan
+		var duration *string
 		err := rows.Scan(
 			&p.ID, &p.Name, &p.MaxContacts, &p.DailyEmails, &p.AIGeneration, &p.AccountLimit,
-			&p.Price, &p.DiscountedPrice, &p.Duration, &p.Savings, &p.Public,
+			&p.Price, &p.DiscountedPrice, &duration, &p.Savings, &p.Public,
 			&p.StripePriceID, &p.StripeProductID, &p.DedicatedWorkers, &p.DailyCampaignLimit,
 			&p.MaxCampaigns, &p.MaxActiveCampaigns, &p.MaxTeamMembers, &p.MaxEmailAccounts,
 			&p.UpdatedAt, &p.CreatedAt,
@@ -1642,10 +1886,172 @@ func (r *adminRepository) ListPlans(ctx context.Context, includePrivate bool) ([
 		if err != nil {
 			return nil, err
 		}
+		if duration != nil {
+			p.Duration = models.Duration(*duration)
+		}
 		plans = append(plans, p)
 	}
 
 	return plans, nil
+}
+
+// SearchPlansForAdmin is the faceted + cursor-paginated plan catalog query.
+// Mirrors SearchOrganizationsForAdmin. Plans is a small table so the pager is
+// usually inert, but the {data,pagination} envelope keeps the Explorer stack
+// uniform.
+func (r *adminRepository) SearchPlansForAdmin(ctx context.Context, search *models.AdminPlanSearch) (*models.AdminPlansResult, error) {
+	limit := search.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	args := []interface{}{}
+	argNum := 1
+	where := "WHERE 1=1"
+
+	if search.Query != "" {
+		where += ` AND (p.name ILIKE $` + itoa(argNum) + ` OR p.stripe_price_id ILIKE $` + itoa(argNum) + ` OR p.stripe_product_id ILIKE $` + itoa(argNum) + `)`
+		args = append(args, "%"+search.Query+"%")
+		argNum++
+	}
+	switch search.Visibility {
+	case "public":
+		where += ` AND p.public = TRUE`
+	case "private":
+		where += ` AND p.public = FALSE`
+	}
+	if search.Duration != "" {
+		where += ` AND d.title = $` + itoa(argNum)
+		args = append(args, search.Duration)
+		argNum++
+	}
+	if search.AIGeneration {
+		where += ` AND p.ai_generation = TRUE`
+	}
+	if search.HasStripe {
+		where += ` AND p.stripe_price_id IS NOT NULL AND p.stripe_price_id <> ''`
+	}
+	if search.HasSubscribers {
+		where += ` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.plan_id = p.id)`
+	}
+
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			where += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	addInt(`p.price >= $%d`, search.PriceMin)
+	addInt(`p.price <= $%d`, search.PriceMax)
+	addInt(`p.daily_emails >= $%d`, search.DailyEmailsMin)
+	addInt(`p.daily_emails <= $%d`, search.DailyEmailsMax)
+	addInt(`p.account_limit >= $%d`, search.AccountLimitMin)
+	addInt(`p.account_limit <= $%d`, search.AccountLimitMax)
+
+	if search.CreatedWithin > 0 {
+		where += ` AND p.created_at >= NOW() - ($` + itoa(argNum) + `::int * INTERVAL '1 day')`
+		args = append(args, search.CreatedWithin)
+		argNum++
+	}
+	addAfter("p.created_at", search.CreatedAfter)
+	addBefore("p.created_at", search.CreatedBefore)
+
+	if search.Cursor != nil {
+		where += ` AND p.id < $` + itoa(argNum)
+		args = append(args, *search.Cursor)
+		argNum++
+	}
+
+	orderCol := "p.price"
+	switch search.SortBy {
+	case "name":
+		orderCol = "p.name"
+	case "daily_emails":
+		orderCol = "p.daily_emails"
+	case "account_limit":
+		orderCol = "p.account_limit"
+	case "created_at":
+		orderCol = "p.created_at"
+	}
+	// Catalog defaults to cheapest-first (ASC); explicit sorts honor sort_desc.
+	orderDir := "ASC"
+	if search.SortBy != "" && search.SortDesc {
+		orderDir = "DESC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir + ", p.id DESC"
+
+	args = append(args, limit+1)
+
+	query := `
+		SELECT p.id, p.name, p.max_contacts, p.daily_emails, p.ai_generation, p.account_limit,
+			p.price, p.discounted_price, d.title, p.savings, p.public,
+			p.stripe_price_id, p.stripe_product_id, p.dedicated_workers, p.daily_campaign_limit,
+			p.max_campaigns, p.max_active_campaigns, p.max_team_members, p.max_email_accounts,
+			p.updated_at, p.created_at
+		FROM plans p
+		LEFT JOIN durations d ON d.id = p.duration_id
+		` + where + `
+		` + orderBy + `
+		LIMIT $` + itoa(argNum)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	plans := []models.Plan{}
+	for rows.Next() {
+		var p models.Plan
+		var duration *string
+		if err := rows.Scan(
+			&p.ID, &p.Name, &p.MaxContacts, &p.DailyEmails, &p.AIGeneration, &p.AccountLimit,
+			&p.Price, &p.DiscountedPrice, &duration, &p.Savings, &p.Public,
+			&p.StripePriceID, &p.StripeProductID, &p.DedicatedWorkers, &p.DailyCampaignLimit,
+			&p.MaxCampaigns, &p.MaxActiveCampaigns, &p.MaxTeamMembers, &p.MaxEmailAccounts,
+			&p.UpdatedAt, &p.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if duration != nil {
+			p.Duration = models.Duration(*duration)
+		}
+		plans = append(plans, p)
+	}
+
+	result := &models.AdminPlansResult{
+		Data:       plans,
+		Pagination: models.Pagination{HasMore: len(plans) > limit},
+	}
+	if len(plans) > limit {
+		result.Data = plans[:limit]
+		last := plans[limit-1].ID
+		result.Pagination.NextCursor = &last
+	}
+
+	countQuery := `SELECT COUNT(*) FROM plans p LEFT JOIN durations d ON d.id = p.duration_id ` + where
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
+	}
+
+	return result, nil
 }
 
 // CreatePlan creates a new plan
@@ -1729,30 +2135,121 @@ func (r *adminRepository) IsPlanInUse(ctx context.Context, planID uuid.UUID) (bo
 	return count > 0, err
 }
 
-// ListEnterpriseInquiries lists enterprise inquiries
-func (r *adminRepository) ListEnterpriseInquiries(ctx context.Context, status string, cursor *uuid.UUID, limit int) (*models.AdminEnterpriseInquiriesResult, error) {
+// ListEnterpriseInquiries lists enterprise inquiries with the shared faceted
+// search params; mirrors SearchOrganizationsForAdmin (incremental WHERE builder,
+// id keyset, LIMIT+1 has_more, separate COUNT).
+func (r *adminRepository) ListEnterpriseInquiries(ctx context.Context, search *models.AdminEnterpriseInquirySearch) (*models.AdminEnterpriseInquiriesResult, error) {
+	limit := search.Limit
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 
-	args := []interface{}{limit + 1}
-	argNum := 2
+	args := []interface{}{}
+	argNum := 1
 	whereClause := "WHERE 1=1"
 
-	if status != "" && status != "all" {
+	if search.Query != "" {
+		whereClause += " AND (ei.company_name ILIKE $" + itoa(argNum) + " OR ei.contact_name ILIKE $" + itoa(argNum) + " OR ei.contact_email ILIKE $" + itoa(argNum) + " OR COALESCE(u.email,'') ILIKE $" + itoa(argNum) + ")"
+		args = append(args, "%"+search.Query+"%")
+		argNum++
+	}
+	if search.Status != "" && search.Status != "all" {
 		whereClause += " AND ei.status = $" + itoa(argNum)
-		args = append(args, status)
+		args = append(args, search.Status)
+		argNum++
+	}
+	switch search.Assignment {
+	case "assigned":
+		whereClause += " AND ei.assigned_to IS NOT NULL"
+	case "unassigned":
+		whereClause += " AND ei.assigned_to IS NULL"
+	}
+	switch search.Linkage {
+	case "linked":
+		whereClause += " AND ei.user_id IS NOT NULL"
+	case "anonymous":
+		whereClause += " AND ei.user_id IS NULL"
+	}
+	if search.HasNotes {
+		whereClause += " AND ei.notes IS NOT NULL AND ei.notes <> ''"
+	}
+	if search.HasPhone {
+		whereClause += " AND ei.phone IS NOT NULL AND ei.phone <> ''"
+	}
+	if search.Processed {
+		whereClause += " AND ei.processed_at IS NOT NULL"
+	}
+
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			whereClause += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			whereClause += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			whereClause += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	addInt(`ei.team_size >= $%d`, search.TeamSizeMin)
+	addInt(`ei.team_size <= $%d`, search.TeamSizeMax)
+	addInt(`ei.estimated_volume >= $%d`, search.EstimatedVolumeMin)
+	addInt(`ei.estimated_volume <= $%d`, search.EstimatedVolumeMax)
+
+	if search.CreatedWithin > 0 {
+		whereClause += " AND ei.created_at >= NOW() - ($" + itoa(argNum) + "::int * INTERVAL '1 day')"
+		args = append(args, search.CreatedWithin)
+		argNum++
+	}
+	addAfter("ei.created_at", search.CreatedAfter)
+	addBefore("ei.created_at", search.CreatedBefore)
+	addAfter("COALESCE(ei.updated_at, ei.created_at)", search.UpdatedAfter)
+	addBefore("COALESCE(ei.updated_at, ei.created_at)", search.UpdatedBefore)
+
+	if search.Cursor != nil {
+		whereClause += " AND ei.id < $" + itoa(argNum)
+		args = append(args, *search.Cursor)
 		argNum++
 	}
 
-	if cursor != nil {
-		whereClause += " AND ei.id < $" + itoa(argNum)
-		args = append(args, *cursor)
+	orderCol := "ei.created_at"
+	switch search.SortBy {
+	case "updated_at":
+		orderCol = "COALESCE(ei.updated_at, ei.created_at)"
+	case "company_name":
+		orderCol = "ei.company_name"
+	case "contact_email":
+		orderCol = "ei.contact_email"
+	case "status":
+		orderCol = "ei.status"
+	case "team_size":
+		orderCol = "ei.team_size"
+	case "estimated_volume":
+		orderCol = "ei.estimated_volume"
 	}
+	orderDir := "DESC"
+	if search.SortBy != "" && !search.SortDesc {
+		orderDir = "ASC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir + ", ei.id DESC"
+
+	args = append(args, limit+1)
 
 	query := `
 		SELECT ei.id, ei.user_id, ei.company_name, ei.contact_name, ei.contact_email,
-			ei.phone, ei.team_size, ei.notes, ei.status, ei.assigned_to,
+			ei.phone, ei.team_size, ei.estimated_volume, ei.monthly_email_volume, ei.message,
+			ei.notes, ei.status, ei.assigned_to,
 			ei.created_at, COALESCE(ei.updated_at, ei.created_at) as updated_at,
 			u.id, u.first_name, u.last_name, u.email,
 			au.id, au.first_name, au.last_name, au.email
@@ -1760,9 +2257,8 @@ func (r *adminRepository) ListEnterpriseInquiries(ctx context.Context, status st
 		LEFT JOIN users u ON u.id = ei.user_id
 		LEFT JOIN users au ON au.id = ei.assigned_to
 		` + whereClause + `
-		ORDER BY ei.created_at DESC
-		LIMIT $1
-	`
+		` + orderBy + `
+		LIMIT $` + itoa(argNum)
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -1773,19 +2269,26 @@ func (r *adminRepository) ListEnterpriseInquiries(ctx context.Context, status st
 	var inquiries []models.AdminEnterpriseInquiry
 	for rows.Next() {
 		var inq models.AdminEnterpriseInquiry
+		var teamSize *int // team_size is an integer column; the DTO exposes it as a string
 		var userID, assignedUserID *uuid.UUID
 		var userFirstName, userLastName, userEmail *string
 		var assignedFirstName, assignedLastName, assignedEmail *string
 
 		err := rows.Scan(
 			&inq.ID, &inq.UserID, &inq.CompanyName, &inq.ContactName, &inq.ContactEmail,
-			&inq.Phone, &inq.TeamSize, &inq.Notes, &inq.Status, &inq.AssignedTo,
+			&inq.Phone, &teamSize, &inq.EstimatedVolume, &inq.MonthlyEmailVolume, &inq.Message,
+			&inq.Notes, &inq.Status, &inq.AssignedTo,
 			&inq.CreatedAt, &inq.UpdatedAt,
 			&userID, &userFirstName, &userLastName, &userEmail,
 			&assignedUserID, &assignedFirstName, &assignedLastName, &assignedEmail,
 		)
 		if err != nil {
 			return nil, err
+		}
+
+		if teamSize != nil {
+			s := fmt.Sprintf("%d", *teamSize)
+			inq.TeamSize = &s
 		}
 
 		if userID != nil {
@@ -1820,6 +2323,13 @@ func (r *adminRepository) ListEnterpriseInquiries(ctx context.Context, status st
 		result.Data = inquiries[:limit]
 		lastID := inquiries[limit-1].ID
 		result.Pagination.NextCursor = &lastID
+	}
+
+	// Total count for the same filter — drop the trailing LIMIT arg.
+	countQuery := `SELECT COUNT(*) FROM enterprise_inquiries ei LEFT JOIN users u ON u.id = ei.user_id LEFT JOIN users au ON au.id = ei.assigned_to ` + whereClause
+	var total int64
+	if err := r.db.QueryRow(ctx, countQuery, args[:len(args)-1]...).Scan(&total); err == nil {
+		result.Pagination.Total = &total
 	}
 
 	return result, nil
@@ -1959,10 +2469,137 @@ func (r *adminRepository) SearchMailboxesForAdmin(ctx context.Context, search *m
 		args = append(args, search.Provider)
 		argNum++
 	}
+	switch search.Warmup {
+	case "on":
+		where += " AND ea.warmup IS NOT NULL"
+	case "off":
+		where += " AND ea.warmup IS NULL"
+	}
+	if search.CreatedWithin > 0 {
+		where += " AND ea.created_at >= NOW() - ($" + itoa(argNum) + "::int * INTERVAL '1 day')"
+		args = append(args, search.CreatedWithin)
+		argNum++
+	}
+	if search.OrgID != nil {
+		where += " AND ea.organization_id = $" + itoa(argNum)
+		args = append(args, *search.OrgID)
+		argNum++
+	}
+
+	// Local clause helpers in the established argNum/itoa style.
+	addInt := func(frag string, v *int) {
+		if v != nil {
+			where += " AND " + fmt.Sprintf(frag, argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addAfter := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " >= $" + itoa(argNum)
+			args = append(args, *v)
+			argNum++
+		}
+	}
+	addBefore := func(col string, v *time.Time) {
+		if v != nil {
+			where += " AND " + col + " < ($" + itoa(argNum) + " + INTERVAL '1 day')"
+			args = append(args, *v)
+			argNum++
+		}
+	}
+
+	// Ownership / placement
+	if search.UserID != nil {
+		where += " AND ea.user_id = $" + itoa(argNum)
+		args = append(args, *search.UserID)
+		argNum++
+	}
+	if search.WorkerID != nil {
+		where += " AND ea.worker_id = $" + itoa(argNum)
+		args = append(args, *search.WorkerID)
+		argNum++
+	}
+
+	// Classification
+	if search.RiskBand != "" {
+		where += " AND ea.risk_band::text = $" + itoa(argNum)
+		args = append(args, search.RiskBand)
+		argNum++
+	}
+	if search.WarmupPoolType != "" {
+		where += " AND ea.warmup_pool_type = $" + itoa(argNum)
+		args = append(args, search.WarmupPoolType)
+		argNum++
+	}
+	switch search.SyncedStatus {
+	case "never":
+		where += " AND ea.last_synced_at IS NULL"
+	case "stale":
+		where += " AND ea.last_synced_at IS NOT NULL AND NOW() - ea.last_synced_at > INTERVAL '24 hours'"
+	case "recent":
+		where += " AND ea.last_synced_at IS NOT NULL AND NOW() - ea.last_synced_at <= INTERVAL '24 hours'"
+	}
+
+	// Flags
+	if search.WarmupPaused {
+		where += " AND ea.warmup_paused_at IS NOT NULL"
+	}
+	if search.TrackingDomainVerified {
+		where += " AND ea.tracking_domain_verified = TRUE"
+	}
+	if search.HasTrackingDomain {
+		where += " AND ea.tracking_domain IS NOT NULL AND ea.tracking_domain <> ''"
+	}
+	if search.HasOrganization {
+		where += " AND ea.organization_id IS NOT NULL"
+	}
+	if search.SignatureSync {
+		where += " AND ea.signature_sync = TRUE"
+	}
+	if search.HasOAuth {
+		where += " AND EXISTS (SELECT 1 FROM email_accounts_oauth eao WHERE eao.email_account_id = ea.id)"
+	}
+	if search.HasSMTPImap {
+		where += " AND EXISTS (SELECT 1 FROM email_accounts_smtp_imap easi WHERE easi.email_account_id = ea.id)"
+	}
+
+	// Numeric ranges
+	addInt("ea.campaign_limit >= $%d", search.CampaignLimitMin)
+	addInt("ea.campaign_limit <= $%d", search.CampaignLimitMax)
+	addInt("ea.min_wait_time >= $%d", search.MinWaitTimeMin)
+	addInt("ea.min_wait_time <= $%d", search.MinWaitTimeMax)
+
+	// Date ranges
+	addAfter("ea.created_at", search.CreatedAfter)
+	addBefore("ea.created_at", search.CreatedBefore)
+	addAfter("ea.last_synced_at", search.LastSyncedAfter)
+	addBefore("ea.last_synced_at", search.LastSyncedBefore)
+
 	if search.Cursor != nil {
 		where += " AND ea.id < $" + itoa(argNum)
 		args = append(args, *search.Cursor)
 		argNum++
+	}
+
+	orderCol := "ea.id"
+	switch search.SortBy {
+	case "email":
+		orderCol = "ea.email"
+	case "created_at":
+		orderCol = "ea.created_at"
+	case "last_synced_at":
+		orderCol = "ea.last_synced_at"
+	case "campaign_limit":
+		orderCol = "ea.campaign_limit"
+	}
+	orderDir := "DESC"
+	if search.SortBy != "" && !search.SortDesc {
+		orderDir = "ASC"
+	}
+	orderBy := "ORDER BY " + orderCol + " " + orderDir
+	if orderCol != "ea.id" {
+		orderBy += ", ea.id DESC"
 	}
 
 	args = append(args, limit+1)
@@ -1974,12 +2611,13 @@ func (r *adminRepository) SearchMailboxesForAdmin(ctx context.Context, search *m
 			ea.organization_id, o.name,
 			ea.worker_id,
 			(ea.warmup IS NOT NULL) AS warmup_enabled,
+			ea.risk_band::text, ea.warmup_pool_type,
 			ea.campaign_limit, ea.last_synced_at, ea.created_at
 		FROM email_accounts ea
 		JOIN users u ON u.id = ea.user_id
 		LEFT JOIN organizations o ON o.id = ea.organization_id
 		` + where + `
-		ORDER BY ea.id DESC
+		` + orderBy + `
 		LIMIT ` + limitParam
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -1997,6 +2635,7 @@ func (r *adminRepository) SearchMailboxesForAdmin(ctx context.Context, search *m
 			&m.OrganizationID, &m.OrgName,
 			&m.WorkerID,
 			&m.WarmupEnabled,
+			&m.RiskBand, &m.WarmupPoolType,
 			&m.CampaignLimit, &m.LastSyncedAt, &m.CreatedAt,
 		); err != nil {
 			return nil, err

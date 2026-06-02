@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,7 +36,7 @@ func TestInternalAuth_RejectsMissingHeader(t *testing.T) {
 	r := newRouterWithInternalAuth(t)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/internal/ping", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/internal/ping", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusUnauthorized {
@@ -48,7 +49,7 @@ func TestInternalAuth_RejectsWrongScheme(t *testing.T) {
 	r := newRouterWithInternalAuth(t)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/internal/ping", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/internal/ping", nil)
 	req.Header.Set("Authorization", "Basic secret")
 	r.ServeHTTP(w, req)
 
@@ -62,7 +63,7 @@ func TestInternalAuth_RejectsWrongToken(t *testing.T) {
 	r := newRouterWithInternalAuth(t)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/internal/ping", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/internal/ping", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
 	r.ServeHTTP(w, req)
 
@@ -76,7 +77,7 @@ func TestInternalAuth_AcceptsCorrectToken(t *testing.T) {
 	r := newRouterWithInternalAuth(t)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/internal/ping", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/internal/ping", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	r.ServeHTTP(w, req)
 
@@ -92,7 +93,7 @@ func TestInternalAuth_FailsClosedWhenTokenUnset(t *testing.T) {
 	r := newRouterWithInternalAuth(t)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/internal/ping", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/internal/ping", nil)
 	req.Header.Set("Authorization", "Bearer anything")
 	r.ServeHTTP(w, req)
 

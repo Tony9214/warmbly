@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -48,7 +49,7 @@ func TestRequireAPIKeyEmailAccountParam(t *testing.T) {
 				},
 			)
 
-			req := httptest.NewRequest(http.MethodGet, "/emails/"+tt.pathID.String(), nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/emails/"+tt.pathID.String(), nil)
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
 
@@ -91,7 +92,7 @@ func TestRequireAPIPermission(t *testing.T) {
 			})
 
 			w := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/x", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil)
 			r.ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
@@ -129,7 +130,7 @@ func TestRequireAccessAPIKeyPath(t *testing.T) {
 			})
 
 			w := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/x", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil)
 			r.ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {

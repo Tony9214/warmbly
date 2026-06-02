@@ -1,21 +1,24 @@
 // /admin/enterprise/inquiries — sales-pipeline triage.
 
 import { Request } from "@/lib/api/client";
+import { buildSearchQuery } from "@/lib/api/client/admin/query";
 import type {
+    AdminEnterpriseInquiriesResult,
+    AdminEnterpriseInquirySearch,
     EnterpriseInquiry,
     UpdateEnterpriseInquiryRequest,
 } from "@/lib/api/models/admin";
 
+function toQuery(params: AdminEnterpriseInquirySearch): string {
+    return buildSearchQuery(params as Record<string, unknown>);
+}
+
 export function listEnterpriseInquiries(
-    status?: string,
-    limit = 50,
-): Promise<{ data: EnterpriseInquiry[] }> {
-    const usp = new URLSearchParams();
-    if (status) usp.set("status", status);
-    usp.set("limit", String(limit));
+    params: AdminEnterpriseInquirySearch = {},
+): Promise<AdminEnterpriseInquiriesResult> {
     return Request({
         method: "GET",
-        url: `/admin/enterprise/inquiries?${usp.toString()}`,
+        url: `/admin/enterprise/inquiries${toQuery(params)}`,
         authorization: true,
     });
 }

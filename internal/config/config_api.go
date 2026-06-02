@@ -26,14 +26,25 @@ func (c *Config) LoadApiConfig(ctx context.Context) (*ApiConfig, error) {
 		return nil, err
 	}
 
-	allowedOriginsRaw := os.Getenv("CORS_ALLOW_ORIGINS")
-	if allowedOriginsRaw == "" {
-		allowedOriginsRaw = os.Getenv("APP_URL")
-	}
-	allowedOrigins := splitCSV(allowedOriginsRaw)
+	allowedOrigins := splitCSV(os.Getenv("CORS_ALLOW_ORIGINS"))
 	if len(allowedOrigins) == 0 {
+		allowedOrigins = appendOrigin(allowedOrigins, os.Getenv("APP_URL"))
 		if origin := originFromURI(websocketUri); origin != "" {
-			allowedOrigins = []string{origin}
+			allowedOrigins = appendOrigin(allowedOrigins, origin)
+		}
+		if c.Env != "prod" {
+			for _, origin := range []string{
+				"http://localhost:3000",
+				"http://127.0.0.1:3000",
+				"http://localhost:4173",
+				"http://127.0.0.1:4173",
+				"http://localhost:5173",
+				"http://127.0.0.1:5173",
+				"http://localhost:5174",
+				"http://127.0.0.1:5174",
+			} {
+				allowedOrigins = appendOrigin(allowedOrigins, origin)
+			}
 		}
 	}
 
@@ -69,6 +80,19 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func appendOrigin(origins []string, origin string) []string {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return origins
+	}
+	for _, existing := range origins {
+		if existing == origin {
+			return origins
+		}
+	}
+	return append(origins, origin)
 }
 
 func originFromURI(raw string) string {

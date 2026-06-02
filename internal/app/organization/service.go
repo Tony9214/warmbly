@@ -97,7 +97,7 @@ type OrganizationService interface {
 	SubmitLimitIncreaseRequest(ctx context.Context, orgID, submitterID uuid.UUID, req *models.CreateLimitIncreaseRequest) (*models.LimitIncreaseRequest, *errx.Error)
 	ListLimitRequestsForOrg(ctx context.Context, orgID uuid.UUID) ([]models.LimitIncreaseRequest, *errx.Error)
 	CancelLimitRequest(ctx context.Context, id, userID uuid.UUID) *errx.Error
-	AdminListLimitRequests(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, *errx.Error)
+	AdminListLimitRequests(ctx context.Context, search *models.AdminLimitRequestSearch) (*models.AdminLimitRequestsResult, *errx.Error)
 	ApproveLimitRequest(ctx context.Context, id, reviewerID uuid.UUID, notes string) (*models.LimitIncreaseRequest, *errx.Error)
 	RejectLimitRequest(ctx context.Context, id, reviewerID uuid.UUID, notes string) (*models.LimitIncreaseRequest, *errx.Error)
 }
@@ -1001,13 +1001,30 @@ func (s *organizationService) CancelLimitRequest(ctx context.Context, id, userID
 	return nil
 }
 
-func (s *organizationService) AdminListLimitRequests(ctx context.Context, status string, limit int) ([]models.LimitIncreaseRequest, *errx.Error) {
-	rows, err := s.orgRepo.ListLimitRequestsForAdmin(ctx, status, limit)
+func (s *organizationService) AdminListLimitRequests(ctx context.Context, search *models.AdminLimitRequestSearch) (*models.AdminLimitRequestsResult, *errx.Error) {
+	// field/status are free-form strings on the wire (field has no DB enum), so
+	// validate them here rather than relying on query binding.
+	if search.Field != "" {
+		if _, ok := limitFieldUpdater[search.Field]; !ok {
+			return nil, errx.New(errx.BadRequest, "invalid field filter")
+		}
+	}
+	switch search.Status {
+	case "", "all",
+		string(models.LimitRequestStatusPending),
+		string(models.LimitRequestStatusApproved),
+		string(models.LimitRequestStatusRejected),
+		string(models.LimitRequestStatusCancelled):
+	default:
+		return nil, errx.New(errx.BadRequest, "invalid status filter")
+	}
+
+	result, err := s.orgRepo.ListLimitRequestsForAdmin(ctx, search)
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to load limit requests")
 	}
-	return rows, nil
+	return result, nil
 }
 
 // ApproveLimitRequest stamps the row and writes the corresponding

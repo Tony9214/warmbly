@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -74,16 +73,20 @@ func (h *Handler) CancelLimitRequest(c *gin.Context) {
 
 // Admin-facing endpoints under /admin/limit-requests.
 
-// AdminListLimitRequests is GET /admin/limit-requests?status=pending&limit=50.
+// AdminListLimitRequests is GET /admin/limit-requests with the shared faceted
+// query params; returns the standard {data, pagination} envelope.
 func (h *Handler) AdminListLimitRequests(c *gin.Context) {
-	status := c.DefaultQuery("status", "pending")
-	limit, _ := strconv.Atoi(c.Query("limit"))
-	rows, xerr := h.OrganizationService.AdminListLimitRequests(c.Request.Context(), status, limit)
+	var search models.AdminLimitRequestSearch
+	if err := c.ShouldBindQuery(&search); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid query parameters"))
+		return
+	}
+	result, xerr := h.OrganizationService.AdminListLimitRequests(c.Request.Context(), &search)
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": rows})
+	c.JSON(http.StatusOK, result)
 }
 
 // AdminApproveLimitRequest is POST /admin/limit-requests/:id/approve.

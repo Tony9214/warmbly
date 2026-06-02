@@ -51,7 +51,7 @@ func (s *authService) LoginStart(ctx context.Context, data *AuthData, ipaddr str
 		return nil, errx.InternalError()
 	}
 
-	if xerr := s.emailNotificationService.Send(ctx, []string{data.Email}, nil, nil, "Your Login Code", text); xerr != nil {
+	if xerr := s.sendAuthEmail(ctx, data.Email, "Your Login Code", text); xerr != nil {
 		sentry.CaptureException(xerr)
 		return nil, errx.InternalError()
 	}

@@ -2,13 +2,18 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/smtp"
 	"strings"
+	"time"
 
 	"github.com/getsentry/sentry-go"
 )
+
+const smtpSendTimeout = 10 * time.Second
 
 type smtpEmailNotificationService struct {
 	Name    string
@@ -43,7 +48,7 @@ func (s *smtpEmailNotificationService) Send(ctx context.Context, to, cc, bcc []s
 
 	msg := []byte(headers + message)
 
-	if err := smtp.SendMail(addr, nil, s.Address, allRecipients, msg); err != nil {
+	if err := sendSMTP(ctx, addr, s.Host, s.Address, allRecipients, msg); err != nil {
 		sentry.CaptureException(err)
 		return err
 	}
@@ -68,8 +73,62 @@ func (s *smtpEmailNotificationService) SendOutreach(ctx context.Context, to []st
 		"Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n"
 
 	msg := []byte(headers + message)
-	if err := smtp.SendMail(addr, nil, s.Address, to, msg); err != nil {
+	if err := sendSMTP(ctx, addr, s.Host, s.Address, to, msg); err != nil {
 		sentry.CaptureException(err)
+		return err
+	}
+	return nil
+}
+
+func sendSMTP(ctx context.Context, addr, host, from string, recipients []string, msg []byte) error {
+	if len(recipients) == 0 {
+		return errors.New("smtp send requires at least one recipient")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, smtpSendTimeout)
+	defer cancel()
+
+	dialer := net.Dialer{Timeout: smtpSendTimeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := conn.SetDeadline(deadline); err != nil {
+			return err
+		}
+	}
+
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	if err := client.Mail(from); err != nil {
+		return err
+	}
+	for _, recipient := range recipients {
+		if err := client.Rcpt(recipient); err != nil {
+			return err
+		}
+	}
+
+	writer, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := writer.Write(msg); err != nil {
+		_ = writer.Close()
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	if err := client.Quit(); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	return nil

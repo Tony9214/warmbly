@@ -76,6 +76,13 @@ func (h *Handler) AdminCreateWorker(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.BadRequest, "invalid request body"))
 		return
 	}
+	// A worker is never born dedicated: dedicated capacity is allocated by the
+	// control plane (by promoting a spare shared worker). Admins create shared
+	// workers and may convert one later via AdminConvertWorkerToDedicated.
+	if !repository.IsClientRequestableTier(req.WorkerType) {
+		errx.JSON(c, errx.New(errx.BadRequest, "dedicated workers cannot be created directly; dedicated capacity is allocated automatically by the control plane — create a shared worker and convert it if needed"))
+		return
+	}
 	if req.SSHPort == 0 {
 		req.SSHPort = 22
 	}

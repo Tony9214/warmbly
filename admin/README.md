@@ -81,7 +81,6 @@ These signals are layered on purpose. A single one (e.g. just the badge) is easy
 - Overview — `/admin/analytics/overview` plus `/admin/workers/managed` for the fleet card
 - Workers list — `/admin/workers/managed`
 - Worker detail — `/admin/workers/:id/managed`, `/admin/workers/:id/live-status`, `/admin/workers/:id/logs`, plus the SSH lifecycle mutations (`test`, `install`, `restart`, `uninstall`)
-- Egresses — wired to `/admin/workers/managed` re-framed as sending identities (TODO when `/admin/egresses` exists)
 - Audit Log — `/admin/audit-logs`
 - Settings (Encryption, Storage, Messaging, Cache, Transports) — `/admin/settings/backends` with `kind` filter; renders an "endpoint pending" placeholder when the registry isn't wired yet
 
@@ -112,7 +111,7 @@ admin/
     ├── global.css           # design tokens (mirror of web/) + admin-only tokens
     ├── app/
     │   ├── auth/LoginPage.tsx
-    │   ├── dashboard/       # Overview, Workers, Egresses, Audit, stubs
+    │   ├── dashboard/       # Overview, Workers, Audit, stubs
     │   └── settings/        # Encryption/Storage/Messaging/Cache/Transports
     ├── components/
     │   ├── layout/          # AppShell, Sidebar, Topbar, AdminBadge, EnvPill, …

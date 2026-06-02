@@ -23,13 +23,8 @@ import LoginPage from "@/app/auth/LoginPage";
 import OverviewPage from "@/app/dashboard/OverviewPage";
 import WorkersPage from "@/app/dashboard/WorkersPage";
 import WorkerDetailPage from "@/app/dashboard/WorkerDetailPage";
-import EgressesPage from "@/app/dashboard/EgressesPage";
 import AuditPage from "@/app/dashboard/AuditPage";
-import EncryptionPage from "@/app/settings/EncryptionPage";
-import StoragePage from "@/app/settings/StoragePage";
-import MessagingPage from "@/app/settings/MessagingPage";
-import CachePage from "@/app/settings/CachePage";
-import TransportsPage from "@/app/settings/TransportsPage";
+import InfrastructurePage from "@/app/settings/InfrastructurePage";
 import CloudProvidersPage from "@/app/settings/CloudProvidersPage";
 import ProvisioningTemplatesPage from "@/app/settings/ProvisioningTemplatesPage";
 import ProvisioningJobsPage from "@/app/dashboard/ProvisioningJobsPage";
@@ -84,7 +79,6 @@ const router = createBrowserRouter([
                     { path: "workers", element: <WorkersPage /> },
                     { path: "workers/provisioning-jobs", element: <ProvisioningJobsPage /> },
                     { path: "workers/:id", element: <WorkerDetailPage /> },
-                    { path: "egresses", element: <EgressesPage /> },
                     { path: "mailboxes", element: <MailboxesPage /> },
                     { path: "users", element: <UsersPage /> },
                     { path: "users/:id", element: <UserDetailPage /> },
@@ -102,14 +96,10 @@ const router = createBrowserRouter([
                     {
                         path: "settings",
                         children: [
-                            { index: true, element: <Navigate to="/settings/encryption" replace /> },
-                            { path: "encryption", element: <EncryptionPage /> },
-                            { path: "storage", element: <StoragePage /> },
-                            { path: "messaging", element: <MessagingPage /> },
-                            { path: "cache", element: <CachePage /> },
-                            { path: "transports", element: <TransportsPage /> },
+                            { index: true, element: <Navigate to="/settings/cloud-providers" replace /> },
                             { path: "cloud-providers", element: <CloudProvidersPage /> },
                             { path: "provisioning-templates", element: <ProvisioningTemplatesPage /> },
+                            { path: "infrastructure", element: <InfrastructurePage /> },
                         ],
                     },
                     { path: "*", element: <NotFoundPage /> },
