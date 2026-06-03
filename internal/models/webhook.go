@@ -28,6 +28,10 @@ const (
 	WebhookEventCampaignStarted        WebhookEventType = "campaign.started"
 	WebhookEventCampaignPaused         WebhookEventType = "campaign.paused"
 	WebhookEventCampaignCompleted      WebhookEventType = "campaign.completed"
+	// campaign.deliverability_warning fires when a campaign's rolling
+	// bounce/complaint rate enters the early-warning band (half the pause
+	// threshold) — a graduated signal short of an auto-pause.
+	WebhookEventCampaignDeliverabilityWarning WebhookEventType = "campaign.deliverability_warning"
 
 	// Warmup
 	WebhookEventWarmupEmailSent       WebhookEventType = "warmup.email_sent"
@@ -56,6 +60,7 @@ var AllWebhookEventTypes = []WebhookEventType{
 	WebhookEventCampaignStarted,
 	WebhookEventCampaignPaused,
 	WebhookEventCampaignCompleted,
+	WebhookEventCampaignDeliverabilityWarning,
 	WebhookEventWarmupEmailSent,
 	WebhookEventWarmupHealthChanged,
 	WebhookEventWarmupPlacementInSpam,

@@ -11,26 +11,37 @@ import (
 
 // CampaignContactProgress represents the progress of a contact in a campaign
 type CampaignContactProgress struct {
-	CampaignID uuid.UUID
-	ContactID  uuid.UUID
-	SequenceID uuid.UUID
-	SentAt     *time.Time
-	OpenedAt   *time.Time
-	ClickedAt  *time.Time
-	RepliedAt  *time.Time
-	BouncedAt  *time.Time
+	CampaignID   uuid.UUID
+	ContactID    uuid.UUID
+	SequenceID   uuid.UUID
+	SentAt       *time.Time
+	OpenedAt     *time.Time
+	ClickedAt    *time.Time
+	RepliedAt    *time.Time
+	BouncedAt    *time.Time
+	ComplainedAt *time.Time
 }
 
 // CampaignProgress represents overall campaign progress
 type CampaignProgress struct {
-	TotalContacts  int
-	TotalSequences int
-	EmailsSent     int
-	EmailsPending  int
-	EmailsOpened   int
-	EmailsClicked  int
-	EmailsReplied  int
-	EmailsBounced  int
+	TotalContacts    int
+	TotalSequences   int
+	EmailsSent       int
+	EmailsPending    int
+	EmailsOpened     int
+	EmailsClicked    int
+	EmailsReplied    int
+	EmailsBounced    int
+	EmailsComplained int
+}
+
+// CampaignRollingRates holds windowed send/bounce/complaint counts for a
+// campaign, used by the deliverability circuit breaker so it reacts to recent
+// behaviour rather than a campaign's lifetime average.
+type CampaignRollingRates struct {
+	Sent       int
+	Bounced    int
+	Complained int
 }
 
 // ContactSequencePair represents a contact and sequence combination
@@ -52,9 +63,11 @@ type CampaignProgressRepository interface {
 	RecordEmailClicked(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) error
 	RecordEmailReplied(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) error
 	RecordEmailBounced(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) error
+	RecordEmailComplained(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) error
 
 	// Query methods
 	GetCampaignProgress(ctx context.Context, campaignID uuid.UUID) (*CampaignProgress, error)
+	GetCampaignRollingRates(ctx context.Context, campaignID uuid.UUID, since time.Time) (*CampaignRollingRates, error)
 	GetContactProgress(ctx context.Context, campaignID, contactID uuid.UUID) ([]CampaignContactProgress, error)
 	GetContactLastSequenceTime(ctx context.Context, contactID, campaignID uuid.UUID) (*time.Time, error)
 	CheckContactHasReplied(ctx context.Context, contactID, campaignID uuid.UUID) (bool, error)
@@ -147,6 +160,21 @@ func (r *campaignProgressRepository) RecordEmailBounced(ctx context.Context, cam
 	return err
 }
 
+// RecordEmailComplained records that a contact filed a spam complaint
+func (r *campaignProgressRepository) RecordEmailComplained(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) error {
+	query := `
+		UPDATE campaign_contact_progress
+		SET complained_at = NOW()
+		WHERE campaign_id = $1
+		  AND contact_id = $2
+		  AND sequence_id = $3
+		  AND complained_at IS NULL
+	`
+
+	_, err := r.db.Exec(ctx, query, campaignID, contactID, sequenceID)
+	return err
+}
+
 // GetCampaignProgress retrieves overall campaign progress statistics
 func (r *campaignProgressRepository) GetCampaignProgress(ctx context.Context, campaignID uuid.UUID) (*CampaignProgress, error) {
 	query := `
@@ -158,7 +186,8 @@ func (r *campaignProgressRepository) GetCampaignProgress(ctx context.Context, ca
 				COUNT(CASE WHEN ccp.opened_at IS NOT NULL THEN 1 END) as emails_opened,
 				COUNT(CASE WHEN ccp.clicked_at IS NOT NULL THEN 1 END) as emails_clicked,
 				COUNT(CASE WHEN ccp.replied_at IS NOT NULL THEN 1 END) as emails_replied,
-				COUNT(CASE WHEN ccp.bounced_at IS NOT NULL THEN 1 END) as emails_bounced
+				COUNT(CASE WHEN ccp.bounced_at IS NOT NULL THEN 1 END) as emails_bounced,
+				COUNT(CASE WHEN ccp.complained_at IS NOT NULL THEN 1 END) as emails_complained
 			FROM campaigns c
 			LEFT JOIN campaign_leads cl ON c.id = cl.campaign_id
 			LEFT JOIN sequences s ON c.id = s.campaign_id
@@ -174,7 +203,8 @@ func (r *campaignProgressRepository) GetCampaignProgress(ctx context.Context, ca
 			emails_opened,
 			emails_clicked,
 			emails_replied,
-			emails_bounced
+			emails_bounced,
+			emails_complained
 		FROM campaign_stats
 	`
 
@@ -188,6 +218,7 @@ func (r *campaignProgressRepository) GetCampaignProgress(ctx context.Context, ca
 		&progress.EmailsClicked,
 		&progress.EmailsReplied,
 		&progress.EmailsBounced,
+		&progress.EmailsComplained,
 	)
 
 	if err == sql.ErrNoRows {
@@ -197,10 +228,30 @@ func (r *campaignProgressRepository) GetCampaignProgress(ctx context.Context, ca
 	return progress, err
 }
 
+// GetCampaignRollingRates returns send/bounce/complaint counts for a campaign
+// within the window [since, now], computed from the per-contact progress
+// timestamps so the breaker can react to recent behaviour.
+func (r *campaignProgressRepository) GetCampaignRollingRates(ctx context.Context, campaignID uuid.UUID, since time.Time) (*CampaignRollingRates, error) {
+	query := `
+		SELECT
+			COUNT(*) FILTER (WHERE sent_at IS NOT NULL AND sent_at >= $2)             AS sent,
+			COUNT(*) FILTER (WHERE bounced_at IS NOT NULL AND bounced_at >= $2)       AS bounced,
+			COUNT(*) FILTER (WHERE complained_at IS NOT NULL AND complained_at >= $2) AS complained
+		FROM campaign_contact_progress
+		WHERE campaign_id = $1
+	`
+	out := &CampaignRollingRates{}
+	err := r.db.QueryRow(ctx, query, campaignID, since).Scan(&out.Sent, &out.Bounced, &out.Complained)
+	if err == sql.ErrNoRows {
+		return &CampaignRollingRates{}, nil
+	}
+	return out, err
+}
+
 // GetContactProgress retrieves progress for a specific contact in a campaign
 func (r *campaignProgressRepository) GetContactProgress(ctx context.Context, campaignID, contactID uuid.UUID) ([]CampaignContactProgress, error) {
 	query := `
-		SELECT campaign_id, contact_id, sequence_id, sent_at, opened_at, clicked_at, replied_at, bounced_at
+		SELECT campaign_id, contact_id, sequence_id, sent_at, opened_at, clicked_at, replied_at, bounced_at, complained_at
 		FROM campaign_contact_progress
 		WHERE campaign_id = $1 AND contact_id = $2
 		ORDER BY sent_at ASC
@@ -224,6 +275,7 @@ func (r *campaignProgressRepository) GetContactProgress(ctx context.Context, cam
 			&progress.ClickedAt,
 			&progress.RepliedAt,
 			&progress.BouncedAt,
+			&progress.ComplainedAt,
 		)
 		if err != nil {
 			return nil, err
