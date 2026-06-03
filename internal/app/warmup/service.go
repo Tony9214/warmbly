@@ -76,7 +76,7 @@ type Service interface {
 	// RecordSpamPlacement records that a warmup message landed in the
 	// recipient's Junk/Spam folder on arrival. Counted separately from
 	// user complaints so the two signals can drive distinct thresholds.
-	RecordSpamPlacement(ctx context.Context, reporterAccountID, reportedAccountID uuid.UUID, messageID, contentSource string) (*models.WarmupParticipantHealth, *errx.Error)
+	RecordSpamPlacement(ctx context.Context, reporterAccountID, reportedAccountID uuid.UUID, messageID, contentSource, recipientProvider, recipientDomain string) (*models.WarmupParticipantHealth, *errx.Error)
 	ApplyInvalidTokenAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string, scoreDelta int) (*models.WarmupParticipantHealth, *errx.Error)
 	ApplyRateLimitExceeded(ctx context.Context, accountID uuid.UUID, reason string) (*models.WarmupParticipantHealth, *errx.Error)
 
@@ -283,7 +283,7 @@ func (s *service) CanParticipate(ctx context.Context, accountID uuid.UUID, poolT
 // 'spam_placement' type and a smaller spam-score delta (placement is a
 // weaker individual signal than a user complaint — it is more likely to
 // reflect content rather than malice).
-func (s *service) RecordSpamPlacement(ctx context.Context, reporterAccountID, reportedAccountID uuid.UUID, messageID, contentSource string) (*models.WarmupParticipantHealth, *errx.Error) {
+func (s *service) RecordSpamPlacement(ctx context.Context, reporterAccountID, reportedAccountID uuid.UUID, messageID, contentSource, recipientProvider, recipientDomain string) (*models.WarmupParticipantHealth, *errx.Error) {
 	inserted, err := s.repo.RecordSpamReport(ctx, &repository.SpamReport{
 		ID:                uuid.New(),
 		ReporterAccountID: reporterAccountID,
@@ -291,6 +291,8 @@ func (s *service) RecordSpamPlacement(ctx context.Context, reporterAccountID, re
 		MessageID:         messageID,
 		ReportType:        "spam_placement",
 		ContentSource:     contentSource,
+		RecipientProvider: recipientProvider,
+		RecipientDomain:   recipientDomain,
 	})
 	if err != nil {
 		return nil, errx.InternalError()
@@ -820,6 +822,18 @@ func (s *service) GetPoolHealthSummary(ctx context.Context) (*models.WarmupPoolH
 		return nil, errx.InternalError()
 	}
 
+	// Pool-wide spam-placement rate over the last 7 days. Previously this
+	// summary field was always serialised as 0 because nothing populated it.
+	since := s.now().UTC().Add(-7 * 24 * time.Hour)
+	placementRate, prErr := s.repo.PoolSpamPlacementRate(ctx, since)
+	if prErr != nil {
+		return nil, errx.InternalError()
+	}
+	byProvider, bpErr := s.repo.PoolSpamPlacementsByProvider(ctx, since)
+	if bpErr != nil {
+		return nil, errx.InternalError()
+	}
+
 	total := 0
 	blockedCount := 0
 	atRiskCount := 0
@@ -834,10 +848,12 @@ func (s *service) GetPoolHealthSummary(ctx context.Context) (*models.WarmupPoolH
 	}
 
 	return &models.WarmupPoolHealthSummary{
-		TotalParticipants: total,
-		ByState:           counts,
-		AvgSpamScore:      avgScore,
-		BlockedCount:      blockedCount,
-		AtRiskCount:       atRiskCount,
+		TotalParticipants:       total,
+		ByState:                 counts,
+		AvgSpamScore:            avgScore,
+		AvgSpamPlacement:        placementRate,
+		SpamPlacementByProvider: byProvider,
+		BlockedCount:            blockedCount,
+		AtRiskCount:             atRiskCount,
 	}, nil
 }

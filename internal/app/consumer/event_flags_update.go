@@ -48,8 +48,11 @@ func (s *JobsService) HandleFlagsAdd(ctx context.Context, e *models.JobEventFlag
 						health, _ := s.WarmupService.ApplySpamReport(ctx, e.EmailID, token.SenderAccountID, email.MessageID, "user_complaint")
 						s.markRiskBandFromWarmupHealth(ctx, token.SenderAccountID, health)
 					} else {
+						// Degraded mode (no warmup service): record the raw signal
+						// only. Blocking is owned solely by the banded health model
+						// (evaluateMetrics) so all blocks carry a blocked_until +
+						// appeal path; the old permanent auto-block diverged from it.
 						_, _ = s.WarmupRepo.IncrementSpamScore(ctx, token.SenderAccountID, 10)
-						s.checkAndAutoBlock(ctx, token.SenderAccountID)
 						s.markRiskBandFromWarmupHealth(ctx, token.SenderAccountID, nil)
 					}
 				}

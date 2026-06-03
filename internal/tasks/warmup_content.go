@@ -81,10 +81,12 @@ func (s *tasksService) pickNewWarmupContent(ctx context.Context, account Email) 
 	}
 
 	conversation := randomWarmupConversation()
+	staticID := conversation.ID
 	return warmupContent{
-		subject:       generateWarmupSubject(),
-		body:          GenerateConversationEmail(conversation, account, false),
-		theme:         conversation.Theme,
-		contentSource: models.WarmupContentSourceStatic,
+		subject:        generateWarmupSubject(),
+		body:           GenerateConversationEmail(conversation, account, false),
+		theme:          conversation.Theme,
+		contentSource:  models.WarmupContentSourceStatic,
+		conversationID: &staticID,
 	}
 }

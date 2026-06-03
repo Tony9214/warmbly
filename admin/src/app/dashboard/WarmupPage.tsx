@@ -115,8 +115,15 @@ function HealthSummary() {
     const atRisk = data.at_risk_count ?? 0;
     const blocked = data.blocked_count ?? 0;
 
+    // Per-provider spam-folder placement, sorted worst-first so the riskiest
+    // mailbox-provider surface is the first thing an investigator sees.
+    const byProvider = Object.entries(data.spam_placement_by_provider ?? {}).sort(
+        (a, b) => b[1] - a[1],
+    );
+
     return (
-        <div className="grid gap-3 md:grid-cols-4 mb-6">
+        <div className="mb-6">
+        <div className="grid gap-3 md:grid-cols-4">
             <HealthCard
                 icon={<Activity className="size-4" />}
                 title="Total participants"
@@ -146,6 +153,51 @@ function HealthSummary() {
                 hint="quarantined or hard-blocked"
                 tone={blocked > 0 ? "text-red-700" : undefined}
             />
+        </div>
+
+        {byProvider.length > 0 && (
+            <div className="mt-3 border border-border rounded-lg p-3 bg-card">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
+                    <Flame className="size-4" />
+                    <span>Spam placement by provider</span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {byProvider.map(([provider, rate]) => {
+                        const pct = (rate ?? 0) * 100;
+                        const tone =
+                            pct >= 20
+                                ? "text-red-700"
+                                : pct >= 10
+                                  ? "text-amber-700"
+                                  : "text-emerald-600";
+                        const bar =
+                            pct >= 20
+                                ? "bg-red-500"
+                                : pct >= 10
+                                  ? "bg-amber-500"
+                                  : "bg-emerald-500";
+                        return (
+                            <div key={provider}>
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="capitalize truncate text-foreground">
+                                        {provider}
+                                    </span>
+                                    <span className={`tabular-nums font-medium ${tone}`}>
+                                        {pct.toFixed(1)}%
+                                    </span>
+                                </div>
+                                <div className="mt-1 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                                    <div
+                                        className={`h-full rounded-full ${bar}`}
+                                        style={{ width: `${Math.min(100, pct)}%` }}
+                                    />
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        )}
         </div>
     );
 }

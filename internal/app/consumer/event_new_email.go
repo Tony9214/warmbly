@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/config"
@@ -128,7 +127,10 @@ func (s *JobsService) handleWarmupEmail(ctx context.Context, e *models.JobEventN
 	// flags an already-delivered message) because nobody actively rejected
 	// it — the provider classifier placed it there on arrival.
 	if containsSpamFlag(e.Message.Flags) && s.WarmupService != nil {
-		health, _ := s.WarmupService.RecordSpamPlacement(ctx, e.Message.EmailID, token.SenderAccountID, e.Message.MessageID, token.ContentSource)
+		// Record which recipient provider/domain filtered it into spam so the
+		// placement signal can be segmented per provider, not one flat rate.
+		provider, domain := s.recipientProviderDomain(ctx, e.Message.EmailID)
+		health, _ := s.WarmupService.RecordSpamPlacement(ctx, e.Message.EmailID, token.SenderAccountID, e.Message.MessageID, token.ContentSource, provider, domain)
 		s.markRiskBandFromWarmupHealth(ctx, token.SenderAccountID, health)
 	}
 
@@ -168,6 +170,24 @@ func (s *JobsService) performWarmupActions(ctx context.Context, e *models.JobEve
 	}
 }
 
+// recipientProviderDomain best-effort resolves a recipient mailbox's provider
+// ("google"/"smtp_imap") and email domain for the per-provider placement
+// dimension. Returns empty strings when the account can't be loaded.
+func (s *JobsService) recipientProviderDomain(ctx context.Context, accountID uuid.UUID) (string, string) {
+	if s.EmailRepository == nil {
+		return "", ""
+	}
+	acc, err := s.EmailRepository.GetByID(ctx, accountID)
+	if err != nil || acc == nil {
+		return "", ""
+	}
+	domain := ""
+	if at := strings.LastIndex(acc.Email, "@"); at >= 0 {
+		domain = strings.ToLower(acc.Email[at+1:])
+	}
+	return acc.Provider, domain
+}
+
 func (s *JobsService) applyInvalidWarmupAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string, scoreDelta int) {
 	if s.WarmupService != nil {
 		if health, err := s.WarmupService.ApplyInvalidTokenAttempt(ctx, accountID, attemptedToken, scoreDelta); err == nil {
@@ -180,36 +200,17 @@ func (s *JobsService) applyInvalidWarmupAttempt(ctx context.Context, accountID u
 		return
 	}
 
+	// Degraded mode (no warmup service): record the raw signal only. All
+	// blocking is owned by the banded health model (evaluateMetrics), which
+	// already enforces the invalid-token threshold with a blocked_until and an
+	// appeal path. The old checkAndAutoBlock issued permanent blocks
+	// (blocked_until = NULL) that UpdateParticipantHealth then refused to ever
+	// re-evaluate — a divergent dead-end that is now removed.
 	_ = s.WarmupRepo.RecordInvalidTokenAttempt(ctx, accountID, attemptedToken)
 	if scoreDelta > 0 {
 		_, _ = s.WarmupRepo.IncrementSpamScore(ctx, accountID, scoreDelta)
 	}
-
-	s.checkAndAutoBlock(ctx, accountID)
 	s.markRiskBandFromWarmupHealth(ctx, accountID, nil)
-}
-
-// checkAndAutoBlock checks if an account should be auto-blocked based on invalid token attempts or spam score
-func (s *JobsService) checkAndAutoBlock(ctx context.Context, accountID uuid.UUID) {
-	if s.WarmupRepo == nil {
-		return
-	}
-
-	since := time.Now().Add(-24 * time.Hour)
-	attempts, _ := s.WarmupRepo.CountRecentInvalidAttempts(ctx, accountID, since)
-	if attempts >= 3 {
-		_ = s.WarmupRepo.BlockFromPool(ctx, accountID,
-			fmt.Sprintf("Auto-blocked: %d invalid warmup token attempts in 24h", attempts))
-		s.markRiskBandFromWarmupHealth(ctx, accountID, nil)
-		return
-	}
-
-	score, _ := s.WarmupRepo.GetSpamScore(ctx, accountID)
-	if score > 50 {
-		_ = s.WarmupRepo.BlockFromPool(ctx, accountID,
-			fmt.Sprintf("Auto-blocked: spam score %d exceeds threshold", score))
-		s.markRiskBandFromWarmupHealth(ctx, accountID, nil)
-	}
 }
 
 // containsSpamFlag checks if any flag is a spam flag

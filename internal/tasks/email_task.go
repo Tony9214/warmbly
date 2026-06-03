@@ -221,7 +221,8 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 			Msg("warmup content failed lint; falling back to static")
 		conv := randomWarmupConversation()
 		conversationTheme = conv.Theme
-		conversationID = nil
+		fallbackID := conv.ID
+		conversationID = &fallbackID
 		contentSource = models.WarmupContentSourceStatic
 		subject = generateWarmupSubject()
 		emailBody = GenerateConversationEmail(conv, *account, false)
@@ -300,6 +301,13 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	// STEP 12: Update warmup statistics
 	if err := s.warmupRepo.IncrementDailyCount(ctx, account.ID, time.Now()); err != nil {
 		log.Warn().Err(err).Str("task_id", taskID.String()).Str("email_account_id", account.ID.String()).Msg("Failed to increment warmup daily count")
+	}
+	// Track replies separately so warmup reply analytics (emails_replied) is no
+	// longer always zero. Conversational replies are a healthy-traffic signal.
+	if shouldReply {
+		if err := s.warmupRepo.IncrementReplyCount(ctx, account.ID, time.Now()); err != nil {
+			log.Warn().Err(err).Str("task_id", taskID.String()).Str("email_account_id", account.ID.String()).Msg("Failed to increment warmup reply count")
+		}
 	}
 
 	// STEP 13: Mark task completed (with advisory lock)
@@ -791,65 +799,80 @@ func randomWarmupConversation() Conversation {
 	return conversations[rand.Intn(len(conversations))]
 }
 
+// staticConvID derives a STABLE id for a static-library conversation from its
+// content. Previously each call to warmupConversations() minted fresh uuid.New()
+// ids, so the conversation_id recorded on a warmup token never matched across
+// sends — defeating cohort correlation and dedupe. A deterministic id makes the
+// static library traceable the same way the AI bank rows are.
+func staticConvID(theme, description string) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("warmup-static:"+theme+"|"+description))
+}
+
 func warmupConversations() []Conversation {
 	conversations := []Conversation{
 		// Productivity & workflow
-		{ID: uuid.New(), Theme: "productivity", Description: "I have been trying a few workflow changes and wondered what worked best for your week.", Messages: []string{"How do you structure focused work blocks?", "Do you batch similar tasks or tackle them as they come?"}},
-		{ID: uuid.New(), Theme: "productivity", Description: "I started time-blocking my calendar this month and the results have been interesting so far.", Messages: []string{"Have you tried any time management methods that actually stuck?", "What does your typical morning routine look like?"}},
-		{ID: uuid.New(), Theme: "automation", Description: "I automated a couple of repetitive tasks recently and it freed up more time than I expected.", Messages: []string{"Are there any repetitive tasks in your day that you have managed to streamline?"}},
+		{Theme: "productivity", Description: "I have been trying a few workflow changes and wondered what worked best for your week.", Messages: []string{"How do you structure focused work blocks?", "Do you batch similar tasks or tackle them as they come?"}},
+		{Theme: "productivity", Description: "I started time-blocking my calendar this month and the results have been interesting so far.", Messages: []string{"Have you tried any time management methods that actually stuck?", "What does your typical morning routine look like?"}},
+		{Theme: "automation", Description: "I automated a couple of repetitive tasks recently and it freed up more time than I expected.", Messages: []string{"Are there any repetitive tasks in your day that you have managed to streamline?"}},
 
 		// Learning & growth
-		{ID: uuid.New(), Theme: "learning", Description: "I came across a useful article and it got me curious about what resources you rely on lately.", Messages: []string{"Any newsletter or podcast you consistently recommend?", "What is the best thing you have learned recently?"}},
-		{ID: uuid.New(), Theme: "learning", Description: "I have been dedicating an hour each week to learning something new and it has been surprisingly rewarding.", Messages: []string{"How do you make time for professional development?"}},
-		{ID: uuid.New(), Theme: "courses", Description: "I just wrapped up an online course that was really practical and well-structured.", Messages: []string{"Have you taken any courses lately that were worth the investment?"}},
+		{Theme: "learning", Description: "I came across a useful article and it got me curious about what resources you rely on lately.", Messages: []string{"Any newsletter or podcast you consistently recommend?", "What is the best thing you have learned recently?"}},
+		{Theme: "learning", Description: "I have been dedicating an hour each week to learning something new and it has been surprisingly rewarding.", Messages: []string{"How do you make time for professional development?"}},
+		{Theme: "courses", Description: "I just wrapped up an online course that was really practical and well-structured.", Messages: []string{"Have you taken any courses lately that were worth the investment?"}},
 
 		// Collaboration & teams
-		{ID: uuid.New(), Theme: "collaboration", Description: "I was thinking about how teams keep communication clear when work gets busy.", Messages: []string{"What has helped your team keep projects moving smoothly?", "How do you handle async communication across time zones?"}},
-		{ID: uuid.New(), Theme: "meetings", Description: "We cut our meeting load in half last month and the team seems more productive overall.", Messages: []string{"How do you decide which meetings are actually necessary?", "Have you found a good balance between sync and async?"}},
+		{Theme: "collaboration", Description: "I was thinking about how teams keep communication clear when work gets busy.", Messages: []string{"What has helped your team keep projects moving smoothly?", "How do you handle async communication across time zones?"}},
+		{Theme: "meetings", Description: "We cut our meeting load in half last month and the team seems more productive overall.", Messages: []string{"How do you decide which meetings are actually necessary?", "Have you found a good balance between sync and async?"}},
 
 		// Industry & trends
-		{ID: uuid.New(), Theme: "industry", Description: "I noticed a shift in how people are approaching this topic and wanted to get your take.", Messages: []string{"Have you seen any changes in how your industry handles this?", "What trends are you paying attention to right now?"}},
-		{ID: uuid.New(), Theme: "market", Description: "The market has been moving fast lately and I have been trying to figure out what matters most.", Messages: []string{"How are you adapting your approach given recent changes?"}},
+		{Theme: "industry", Description: "I noticed a shift in how people are approaching this topic and wanted to get your take.", Messages: []string{"Have you seen any changes in how your industry handles this?", "What trends are you paying attention to right now?"}},
+		{Theme: "market", Description: "The market has been moving fast lately and I have been trying to figure out what matters most.", Messages: []string{"How are you adapting your approach given recent changes?"}},
 
 		// Tools & technology
-		{ID: uuid.New(), Theme: "tools", Description: "I recently switched up a few tools in my daily workflow and the difference has been noticeable.", Messages: []string{"What tools have made the biggest impact for you this year?", "Have you found a good alternative for that?"}},
-		{ID: uuid.New(), Theme: "software", Description: "I have been testing a new project management setup and wondering if I am overcomplicating things.", Messages: []string{"What is your go-to for keeping projects organized?", "Do you prefer simple tools or full-featured platforms?"}},
+		{Theme: "tools", Description: "I recently switched up a few tools in my daily workflow and the difference has been noticeable.", Messages: []string{"What tools have made the biggest impact for you this year?", "Have you found a good alternative for that?"}},
+		{Theme: "software", Description: "I have been testing a new project management setup and wondering if I am overcomplicating things.", Messages: []string{"What is your go-to for keeping projects organized?", "Do you prefer simple tools or full-featured platforms?"}},
 
 		// Networking & catch-ups
-		{ID: uuid.New(), Theme: "networking", Description: "It has been a while since we last connected and I wanted to see how things are going on your end.", Messages: []string{"Any new projects or goals you are excited about?", "What has been keeping you busy lately?"}},
-		{ID: uuid.New(), Theme: "catchup", Description: "I was cleaning up my contacts list and realized we have not caught up in ages.", Messages: []string{"How has your year been going so far?", "Anything interesting happening on your side?"}},
-		{ID: uuid.New(), Theme: "introduction", Description: "I met someone recently who reminded me of the work you do and thought you two should connect.", Messages: []string{"Would you be open to a quick intro?"}},
+		{Theme: "networking", Description: "It has been a while since we last connected and I wanted to see how things are going on your end.", Messages: []string{"Any new projects or goals you are excited about?", "What has been keeping you busy lately?"}},
+		{Theme: "catchup", Description: "I was cleaning up my contacts list and realized we have not caught up in ages.", Messages: []string{"How has your year been going so far?", "Anything interesting happening on your side?"}},
+		{Theme: "introduction", Description: "I met someone recently who reminded me of the work you do and thought you two should connect.", Messages: []string{"Would you be open to a quick intro?"}},
 
 		// Feedback & advice
-		{ID: uuid.New(), Theme: "feedback", Description: "I have been working on something and would really value a second opinion before moving forward.", Messages: []string{"Would you mind taking a quick look when you have a moment?", "I would appreciate your honest feedback on this."}},
-		{ID: uuid.New(), Theme: "advice", Description: "I am facing a decision and I think your perspective could really help me think it through.", Messages: []string{"Have you dealt with anything similar before?", "What would you do in this situation?"}},
+		{Theme: "feedback", Description: "I have been working on something and would really value a second opinion before moving forward.", Messages: []string{"Would you mind taking a quick look when you have a moment?", "I would appreciate your honest feedback on this."}},
+		{Theme: "advice", Description: "I am facing a decision and I think your perspective could really help me think it through.", Messages: []string{"Have you dealt with anything similar before?", "What would you do in this situation?"}},
 
 		// Planning & strategy
-		{ID: uuid.New(), Theme: "planning", Description: "I am mapping out priorities for the next quarter and trying to stay realistic about what is achievable.", Messages: []string{"How do you decide what to focus on when everything feels urgent?", "What is your process for setting quarterly goals?"}},
-		{ID: uuid.New(), Theme: "strategy", Description: "I have been rethinking how we allocate resources across projects and it is harder than it sounds.", Messages: []string{"How do you balance long-term bets with short-term wins?"}},
+		{Theme: "planning", Description: "I am mapping out priorities for the next quarter and trying to stay realistic about what is achievable.", Messages: []string{"How do you decide what to focus on when everything feels urgent?", "What is your process for setting quarterly goals?"}},
+		{Theme: "strategy", Description: "I have been rethinking how we allocate resources across projects and it is harder than it sounds.", Messages: []string{"How do you balance long-term bets with short-term wins?"}},
 
 		// Reading & content
-		{ID: uuid.New(), Theme: "reading", Description: "I just finished a great book that changed how I think about a few things at work.", Messages: []string{"Read anything good lately that stuck with you?", "Any books you keep recommending to people?"}},
-		{ID: uuid.New(), Theme: "content", Description: "I have been curating a reading list and looking for suggestions outside my usual topics.", Messages: []string{"What is the most surprising thing you have read recently?"}},
+		{Theme: "reading", Description: "I just finished a great book that changed how I think about a few things at work.", Messages: []string{"Read anything good lately that stuck with you?", "Any books you keep recommending to people?"}},
+		{Theme: "content", Description: "I have been curating a reading list and looking for suggestions outside my usual topics.", Messages: []string{"What is the most surprising thing you have read recently?"}},
 
 		// Travel & experiences
-		{ID: uuid.New(), Theme: "travel", Description: "I am starting to plan a trip and looking for recommendations from people who have been there.", Messages: []string{"Any travel tips or favorite destinations you would suggest?", "Where was the last place you traveled that exceeded expectations?"}},
-		{ID: uuid.New(), Theme: "food", Description: "I tried a new restaurant last week that was genuinely impressive and thought you might enjoy it too.", Messages: []string{"Have you discovered any great spots lately?"}},
+		{Theme: "travel", Description: "I am starting to plan a trip and looking for recommendations from people who have been there.", Messages: []string{"Any travel tips or favorite destinations you would suggest?", "Where was the last place you traveled that exceeded expectations?"}},
+		{Theme: "food", Description: "I tried a new restaurant last week that was genuinely impressive and thought you might enjoy it too.", Messages: []string{"Have you discovered any great spots lately?"}},
 
 		// Wellness & balance
-		{ID: uuid.New(), Theme: "wellness", Description: "I have been trying to be more intentional about work-life balance and curious how others handle it.", Messages: []string{"What do you do to recharge after a busy stretch?", "Have you found any habits that help you stay consistent?"}},
-		{ID: uuid.New(), Theme: "fitness", Description: "I recently picked up a new workout routine and it has been making a real difference in my energy levels.", Messages: []string{"Do you have a go-to way to stay active during busy weeks?"}},
+		{Theme: "wellness", Description: "I have been trying to be more intentional about work-life balance and curious how others handle it.", Messages: []string{"What do you do to recharge after a busy stretch?", "Have you found any habits that help you stay consistent?"}},
+		{Theme: "fitness", Description: "I recently picked up a new workout routine and it has been making a real difference in my energy levels.", Messages: []string{"Do you have a go-to way to stay active during busy weeks?"}},
 
 		// Events & community
-		{ID: uuid.New(), Theme: "events", Description: "I saw a conference coming up that might be relevant and wanted to flag it for you.", Messages: []string{"Are you attending any events or meetups soon?", "What was the last event you went to that was actually worthwhile?"}},
-		{ID: uuid.New(), Theme: "community", Description: "I have been getting more involved in a professional community and it has been a great source of ideas.", Messages: []string{"Are you part of any groups or communities you find valuable?"}},
+		{Theme: "events", Description: "I saw a conference coming up that might be relevant and wanted to flag it for you.", Messages: []string{"Are you attending any events or meetups soon?", "What was the last event you went to that was actually worthwhile?"}},
+		{Theme: "community", Description: "I have been getting more involved in a professional community and it has been a great source of ideas.", Messages: []string{"Are you part of any groups or communities you find valuable?"}},
 
 		// Hiring & careers
-		{ID: uuid.New(), Theme: "hiring", Description: "We have been expanding the team and I have been learning a lot about what makes a strong hire.", Messages: []string{"What do you look for when bringing someone new on board?"}},
-		{ID: uuid.New(), Theme: "career", Description: "I have been reflecting on where I want to be in the next few years and it is a useful exercise.", Messages: []string{"How do you think about career growth without burning out?"}},
+		{Theme: "hiring", Description: "We have been expanding the team and I have been learning a lot about what makes a strong hire.", Messages: []string{"What do you look for when bringing someone new on board?"}},
+		{Theme: "career", Description: "I have been reflecting on where I want to be in the next few years and it is a useful exercise.", Messages: []string{"How do you think about career growth without burning out?"}},
 
 		// Gratitude & appreciation
-		{ID: uuid.New(), Theme: "gratitude", Description: "I was thinking about the people who have been helpful to me this year and you came to mind.", Messages: []string{"Just wanted to say thanks for being a great connection.", "Appreciate you always being willing to share your perspective."}},
+		{Theme: "gratitude", Description: "I was thinking about the people who have been helpful to me this year and you came to mind.", Messages: []string{"Just wanted to say thanks for being a great connection.", "Appreciate you always being willing to share your perspective."}},
+	}
+
+	// Assign stable, content-derived ids so a given static conversation has the
+	// same id on every send (see staticConvID).
+	for i := range conversations {
+		conversations[i].ID = staticConvID(conversations[i].Theme, conversations[i].Description)
 	}
 
 	return conversations

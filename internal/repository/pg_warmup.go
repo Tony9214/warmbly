@@ -47,7 +47,13 @@ type SpamReport struct {
 	// that landed in spam, denormalised here from the warmup token so the A/B
 	// harness can aggregate spam-placement rate by cohort.
 	ContentSource string
-	CreatedAt     time.Time
+	// RecipientProvider / RecipientDomain record where the message was filtered
+	// into spam (the recipient mailbox's provider, e.g. "google"/"smtp_imap",
+	// and domain, e.g. "outlook.com") so placement can be segmented per provider
+	// instead of one flat rate. Empty when the dimension isn't known.
+	RecipientProvider string
+	RecipientDomain   string
+	CreatedAt         time.Time
 }
 
 // WarmupStatistic represents daily warmup statistics
@@ -111,8 +117,13 @@ type WarmupRepository interface {
 
 	// Statistics
 	IncrementDailyCount(ctx context.Context, accountID uuid.UUID, date time.Time) error
+	IncrementReplyCount(ctx context.Context, accountID uuid.UUID, date time.Time) error
 	GetWarmupStatistics(ctx context.Context, accountID uuid.UUID, from, to time.Time) ([]WarmupStatistic, error)
 	GetOrCreateDailyStats(ctx context.Context, accountID uuid.UUID, date time.Time, targetVolume int) (*WarmupStatistic, error)
+
+	// Pool-wide placement analytics (admin overview)
+	PoolSpamPlacementRate(ctx context.Context, since time.Time) (float64, error)
+	PoolSpamPlacementsByProvider(ctx context.Context, since time.Time) (map[string]int, error)
 
 	// Warmup token management
 	CreateWarmupToken(ctx context.Context, token *models.WarmupToken) error
@@ -378,8 +389,8 @@ func (r *warmupRepository) IsInPool(ctx context.Context, accountID uuid.UUID, po
 // RecordSpamReport records a spam report
 func (r *warmupRepository) RecordSpamReport(ctx context.Context, report *SpamReport) (bool, error) {
 	query := `
-		INSERT INTO warmup_spam_reports (id, reporter_account_id, reported_account_id, message_id, report_type, content_source, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		INSERT INTO warmup_spam_reports (id, reporter_account_id, reported_account_id, message_id, report_type, content_source, recipient_provider, recipient_domain, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
 		ON CONFLICT (reporter_account_id, message_id) DO NOTHING
 	`
 
@@ -390,6 +401,8 @@ func (r *warmupRepository) RecordSpamReport(ctx context.Context, report *SpamRep
 		report.MessageID,
 		report.ReportType,
 		report.ContentSource,
+		report.RecipientProvider,
+		report.RecipientDomain,
 	)
 
 	if err != nil {
@@ -614,6 +627,66 @@ func (r *warmupRepository) IncrementDailyCount(ctx context.Context, accountID uu
 
 	_, err := r.db.Exec(ctx, query, accountID, date)
 	return err
+}
+
+// IncrementReplyCount increments the daily warmup reply count. Upserts the row
+// so it is order-independent with IncrementDailyCount (either may run first).
+func (r *warmupRepository) IncrementReplyCount(ctx context.Context, accountID uuid.UUID, date time.Time) error {
+	query := `
+		INSERT INTO warmup_statistics (email_account_id, date, emails_sent, emails_replied, target_volume)
+		VALUES ($1, DATE($2), 0, 1, 0)
+		ON CONFLICT (email_account_id, date)
+		DO UPDATE SET emails_replied = warmup_statistics.emails_replied + 1
+	`
+	_, err := r.db.Exec(ctx, query, accountID, date)
+	return err
+}
+
+// PoolSpamPlacementRate returns the pool-wide warmup spam-placement rate (%)
+// over the window: spam_placement events divided by total warmup sends. This is
+// the number surfaced as avg_spam_placement_rate in the admin health summary.
+func (r *warmupRepository) PoolSpamPlacementRate(ctx context.Context, since time.Time) (float64, error) {
+	query := `
+		SELECT
+			(SELECT COUNT(*) FROM warmup_spam_reports WHERE report_type = 'spam_placement' AND created_at >= $1) AS placements,
+			(SELECT COALESCE(SUM(emails_sent), 0) FROM warmup_statistics WHERE date >= DATE($1)) AS sent
+	`
+	var placements, sent int
+	if err := r.db.QueryRow(ctx, query, since).Scan(&placements, &sent); err != nil {
+		return 0, err
+	}
+	if sent == 0 {
+		return 0, nil
+	}
+	return float64(placements) / float64(sent) * 100, nil
+}
+
+// PoolSpamPlacementsByProvider returns spam-placement counts grouped by the
+// recipient provider over the window, so the admin overview can show where
+// warmup mail is being filtered (e.g. mostly at Outlook vs Gmail).
+func (r *warmupRepository) PoolSpamPlacementsByProvider(ctx context.Context, since time.Time) (map[string]int, error) {
+	query := `
+		SELECT COALESCE(NULLIF(recipient_provider, ''), 'unknown'), COUNT(*)
+		FROM warmup_spam_reports
+		WHERE report_type = 'spam_placement' AND created_at >= $1
+		GROUP BY 1
+	`
+	rows, err := r.db.Query(ctx, query, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]int)
+	for rows.Next() {
+		var provider string
+		var n int
+		if err := rows.Scan(&provider, &n); err != nil {
+			return nil, err
+		}
+		out[provider] = n
+	}
+	return out, rows.Err()
 }
 
 // GetWarmupStatistics retrieves warmup statistics for a date range
