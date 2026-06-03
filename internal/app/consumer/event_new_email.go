@@ -2,9 +2,11 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -151,30 +153,66 @@ func (s *JobsService) performWarmupActions(ctx context.Context, e *models.JobEve
 
 	settings := s.getGenerationSettings(ctx)
 	actions, delaySeconds := engagementPlan(e.Message.EmailID, settings.Engagement)
+	immediate, delayed := splitEngagementLegs(actions)
 
-	action := &models.WarmupEmailAction{
+	base := models.WarmupEmailAction{
 		UserID:             e.UserID,
 		EmailID:            e.Message.EmailID,
 		GmailID:            e.Message.GmailID,
 		UID:                e.Message.UID,
 		MailboxUIDValidity: e.Message.Mailbox,
-		Actions:            actions,
-		DelaySeconds:       delaySeconds,
 	}
 
-	// Look up the worker ID from the email account
+	// Resolve the receiving mailbox's worker once.
+	var workerID *uuid.UUID
 	if s.EmailRepository != nil {
-		account, xerr := s.EmailRepository.GetByID(ctx, e.Message.EmailID)
-		if xerr == nil && account != nil && account.WorkerID != nil {
-			s.Publisher.PublishWarmupAction(ctx, *account.WorkerID, action)
-		} else if account != nil && account.WorkerID == nil {
-			// No assigned worker (mid-migration / just-unassigned / assignment
-			// lag): the warmup mail can't be foldered or engaged with. Log it
-			// instead of dropping silently so the gap is observable.
-			log.Warn().
-				Str("email_id", e.Message.EmailID.String()).
-				Msg("Warmup actions skipped: recipient mailbox has no assigned worker")
+		if account, xerr := s.EmailRepository.GetByID(ctx, e.Message.EmailID); xerr == nil && account != nil {
+			workerID = account.WorkerID
 		}
+	}
+	if workerID == nil {
+		// No assigned worker (mid-migration / just-unassigned / assignment lag):
+		// the warmup mail can't be foldered or engaged with. Log instead of
+		// dropping silently so the gap is observable.
+		log.Warn().
+			Str("email_id", e.Message.EmailID.String()).
+			Msg("Warmup actions skipped: recipient mailbox has no assigned worker")
+		return
+	}
+
+	// Immediate, durable leg (folder + spam-rescue): publish to the worker now.
+	if len(immediate) > 0 {
+		act := base
+		act.Actions = immediate
+		s.Publisher.PublishWarmupAction(ctx, *workerID, &act)
+	}
+
+	if len(delayed) == 0 {
+		return
+	}
+
+	act := base
+	act.Actions = delayed
+
+	// Delayed leg (read / important / star): with no dwell (or no durable store
+	// available) publish immediately; otherwise persist it to the durable
+	// schedule so a worker restart mid-dwell can't drop it. The poller publishes
+	// it when fire_at passes.
+	if delaySeconds <= 0 || s.WarmupEngagementRepo == nil {
+		s.Publisher.PublishWarmupAction(ctx, *workerID, &act)
+		return
+	}
+
+	payload, err := json.Marshal(act)
+	if err != nil {
+		log.Warn().Err(err).Str("email_id", e.Message.EmailID.String()).Msg("Failed to marshal delayed warmup engagement; publishing immediately")
+		s.Publisher.PublishWarmupAction(ctx, *workerID, &act)
+		return
+	}
+	fireAt := time.Now().Add(time.Duration(delaySeconds) * time.Second)
+	if err := s.WarmupEngagementRepo.EnqueuePendingEngagement(ctx, e.Message.EmailID, payload, fireAt); err != nil {
+		log.Warn().Err(err).Str("email_id", e.Message.EmailID.String()).Msg("Failed to enqueue delayed warmup engagement; publishing immediately")
+		s.Publisher.PublishWarmupAction(ctx, *workerID, &act)
 	}
 }
 

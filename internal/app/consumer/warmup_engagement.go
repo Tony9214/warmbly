@@ -83,6 +83,23 @@ func engagementPlan(accountID uuid.UUID, e models.WarmupEngagementSettings) (act
 	return actions, delaySeconds
 }
 
+// splitEngagementLegs separates the reputation-critical, durable actions
+// (foldering + spam-rescue, published immediately) from the low-stakes
+// engagement-timing signals (read / important / star) that carry the
+// recipient-side dwell. The dwell is now applied durably in the control plane
+// (a fire_at row drained by the poller), not by an in-process worker timer, so
+// a worker restart can no longer drop the delayed leg.
+func splitEngagementLegs(actions []string) (immediate, delayed []string) {
+	for _, a := range actions {
+		if a == "move_to_warmbly" || a == "remove_from_spam" {
+			immediate = append(immediate, a)
+		} else {
+			delayed = append(delayed, a)
+		}
+	}
+	return immediate, delayed
+}
+
 // rollPct rolls a biased percentage chance. The persona bias nudges a given
 // mailbox consistently above/below the configured rate so mailboxes differ.
 func rollPct(rate int, bias float64) bool {
