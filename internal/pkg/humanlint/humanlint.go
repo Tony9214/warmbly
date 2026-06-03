@@ -171,6 +171,26 @@ func Humanize(text string, seed int64) string {
 	return strings.TrimSpace(out)
 }
 
+// HumanizeSubject is Humanize tuned for short subject lines. It applies only the
+// safe normalizations (punctuation, AI-word swaps, contractions, exclamation
+// cap) and skips the clause-level transforms meant for multi-sentence bodies
+// (opener stripping, filler strips, "not only X but also Y" flattening) — those
+// can mangle a 2-6 word subject, e.g. turning "I'm reaching out re Tuesday" into
+// a stray "Re Tuesday".
+func HumanizeSubject(text string, seed int64) string {
+	if strings.TrimSpace(text) == "" {
+		return text
+	}
+	rng := rand.New(rand.NewSource(seed))
+
+	out := normalizePunctuation(text)
+	out = applyWordSwaps(out)
+	out = applyContractions(out, rng)
+	out = capExclamations(out)
+	out = multiSpace.ReplaceAllString(out, " ")
+	return strings.TrimSpace(out)
+}
+
 // normalizePunctuation straightens curly quotes/ellipsis and turns em/spaced
 // dashes into commas (a clause join) — the single most cited punctuation tell.
 func normalizePunctuation(s string) string {
@@ -186,6 +206,14 @@ func normalizePunctuation(s string) string {
 
 func stripLeadingOpener(s string) string {
 	trimmed := strings.TrimLeft(s, " \t")
+	// Defensive: don't strip clause-level openers off subject-shaped text (a
+	// short line with no sentence terminator). Stripping "I'm reaching out" off
+	// the subject "I'm reaching out re Tuesday" would leave a stray "Re
+	// Tuesday". HumanizeSubject already avoids this; this guard covers any
+	// other caller.
+	if !strings.ContainsAny(trimmed, ".!?") && len(wordRe.FindAllString(trimmed, -1)) <= 6 {
+		return s
+	}
 	lower := strings.ToLower(trimmed)
 	for _, op := range clicheOpeners {
 		if strings.HasPrefix(lower, op) {

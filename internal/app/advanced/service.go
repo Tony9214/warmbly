@@ -35,13 +35,6 @@ type Service interface {
 
 	IngestDeliverabilityEvent(ctx context.Context, organizationID uuid.UUID, req *models.IngestDeliverabilityEventRequest) *errx.Error
 
-	// EvaluateCampaignBreaker re-checks a campaign's deliverability health and
-	// auto-pauses (or warns) when rolling bounce/complaint rates breach the
-	// configured thresholds. Exposed so any future signal source (e.g. a
-	// provider feedback-loop Kafka topic) can drive the same breaker as the
-	// HTTP deliverability-event ingest path.
-	EvaluateCampaignBreaker(ctx context.Context, organizationID, campaignID uuid.UUID) *errx.Error
-
 	ShouldSuppressRecipient(ctx context.Context, organizationID uuid.UUID, recipient string) (bool, string, *errx.Error)
 	SelectVariant(ctx context.Context, organizationID, campaignID, contactID uuid.UUID, subject, bodyHTML, bodyPlain string) (*models.VariantSelection, *errx.Error)
 	OptimizeSendTime(ctx context.Context, organizationID uuid.UUID, contact *models.Contact, base time.Time) (time.Time, *errx.Error)
@@ -744,18 +737,6 @@ const (
 	// Early-warning band: emit a warning webhook at half the pause threshold.
 	campaignBreakerWarnRatio = 0.5
 )
-
-// EvaluateCampaignBreaker loads the org's outreach settings and re-checks the
-// campaign's deliverability health. Exposed on the interface so any signal
-// source can invoke the same breaker.
-func (s *service) EvaluateCampaignBreaker(ctx context.Context, organizationID, campaignID uuid.UUID) *errx.Error {
-	settings, err := s.repo.GetOutreachSettings(ctx, organizationID)
-	if err != nil {
-		return toErrx(err)
-	}
-	s.evaluateCampaignBreaker(ctx, organizationID, campaignID, settings)
-	return nil
-}
 
 // evaluateCampaignBreaker auto-pauses a campaign when its rolling bounce or
 // complaint rate breaches the configured threshold, and emits an early-warning

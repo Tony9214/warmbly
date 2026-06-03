@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"github.com/warmbly/warmbly/internal/infrastructure/cloudprovider"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -200,7 +201,23 @@ func (s *Service) Run(ctx context.Context, jobID uuid.UUID) error {
 					hostname := strings.ReplaceAll(cfg.RDNSPattern, "{{ip}}", strings.ReplaceAll(ip, ".", "-"))
 					if err := provider.SetReverseDNS(ctx, ipID, hostname); err != nil {
 						// rDNS failure is non-fatal — log and continue.
-						_ = err
+						log.Warn().Err(err).Str("ip", ip).Str("hostname", hostname).Msg("provisioning: SetReverseDNS failed")
+						continue
+					}
+					// Verify the PTR actually took and forward-confirms (FCrDNS).
+					// A missing/mismatched PTR is a classic mailbox-provider
+					// rejection cause, so surface it; non-fatal (DNS may still be
+					// propagating). Best-effort — only verify when we know the IP.
+					if ip != "" {
+						ptr, ok, vErr := VerifyReverseDNS(ctx, ip)
+						switch {
+						case vErr != nil:
+							log.Warn().Err(vErr).Str("ip", ip).Msg("provisioning: rDNS verification lookup failed")
+						case !ok:
+							log.Warn().Str("ip", ip).Str("ptr", ptr).Str("expected", hostname).Msg("provisioning: rDNS not yet forward-confirmed (FCrDNS)")
+						default:
+							log.Info().Str("ip", ip).Str("ptr", ptr).Msg("provisioning: rDNS forward-confirmed")
+						}
 					}
 				}
 			}

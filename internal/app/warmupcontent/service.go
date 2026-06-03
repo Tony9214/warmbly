@@ -332,7 +332,7 @@ func humanizeThread(subject, description string, messages []string) (string, str
 	_, _ = h.Write([]byte(subject + "|" + description))
 	seed := int64(h.Sum64())
 
-	subject = humanlint.Humanize(subject, seed)
+	subject = humanlint.HumanizeSubject(subject, seed)
 	description = humanlint.Humanize(description, seed+1)
 	for i := range messages {
 		messages[i] = humanlint.Humanize(messages[i], seed+int64(i)+2)

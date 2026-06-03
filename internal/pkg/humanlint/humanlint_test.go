@@ -60,6 +60,22 @@ func TestHumanizeAppliesSomeContractions(t *testing.T) {
 	}
 }
 
+func TestHumanizeSubjectDoesNotFabricateReplyPrefix(t *testing.T) {
+	// A short subject starting with a stock-opener fragment must NOT have the
+	// opener stripped into a stray "Re ..." prefix.
+	for seed := int64(0); seed < 5; seed++ {
+		out := HumanizeSubject("I'm reaching out re Tuesday", seed)
+		if strings.HasPrefix(out, "Re ") || strings.HasPrefix(strings.ToLower(out), "re:") {
+			t.Fatalf("subject mangled into reply-prefix: %q", out)
+		}
+	}
+	// The defensive guard also protects plain Humanize on subject-shaped text
+	// (short, no sentence terminator): the opener must not be clause-stripped.
+	if got := Humanize("I'm reaching out re Tuesday", 1); strings.HasPrefix(got, "Re ") {
+		t.Fatalf("short opener-stripping not guarded: %q", got)
+	}
+}
+
 func TestHumanizeIsDeterministic(t *testing.T) {
 	in := "I am reaching out. It is not only fast but also smooth — really."
 	if Humanize(in, 42) != Humanize(in, 42) {
