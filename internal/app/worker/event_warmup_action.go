@@ -58,11 +58,16 @@ func (w *WorkerService) HandleWarmupAction(ctx context.Context, body any) error 
 		}
 	}
 
-	// Foldering (moving the warmup email into the dedicated "Warmbly"
-	// folder/label, auto-created if missing) keeps the recipient's inbox clean
-	// and should happen promptly. The engagement actions (read / mark-important
-	// / spam-rescue) get the recipient-side dwell delay so they don't all fire
-	// milliseconds after delivery — a bot signature.
+	// Two legs. The IMMEDIATE leg holds the reputation-critical, durable actions:
+	// foldering (move the warmup mail into the auto-created "Warmbly"
+	// folder/label, keeping the inbox clean) AND spam-rescue (move it out of
+	// Junk). These run promptly and survive a worker restart. The DELAYED leg
+	// holds the pure engagement-timing signals (read / important / star) behind
+	// the recipient-side dwell so they don't all fire milliseconds after
+	// delivery — a bot signature. The delayed leg is best-effort: its timer is
+	// in-process, so a restart mid-dwell drops those low-stakes signals. We keep
+	// spam-rescue OUT of the delayed leg precisely so the highest-stakes action
+	// (a message stuck in spam) is never lost to a restart.
 	immediate, delayed := splitWarmupActions(action.Actions)
 	runActions(ctx, immediate)
 
@@ -83,11 +88,12 @@ func (w *WorkerService) HandleWarmupAction(ctx context.Context, body any) error 
 	return nil
 }
 
-// splitWarmupActions separates foldering (done promptly) from engagement
-// actions (delayed by the recipient-side dwell).
+// splitWarmupActions separates the durable, reputation-critical actions
+// (foldering + spam-rescue, run promptly) from the pure engagement-timing
+// signals (read / important / star, delayed by the recipient-side dwell).
 func splitWarmupActions(actions []string) (immediate, delayed []string) {
 	for _, a := range actions {
-		if a == "move_to_warmbly" {
+		if a == "move_to_warmbly" || a == "remove_from_spam" {
 			immediate = append(immediate, a)
 		} else {
 			delayed = append(delayed, a)

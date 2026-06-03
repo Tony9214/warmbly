@@ -198,6 +198,13 @@ func main() {
 	integrationRepoC := repository.NewIntegrationRepository(primaryDB.Pool)
 	integrationServiceC := integration.NewService(integrationRepoC, cipherService, integration.NewOAuthManager())
 	webhookService.WireDispatchSink(integrationServiceC.DispatchAny)
+	// Warmup health transitions happen in THIS process (the health sweep + all
+	// event-driven re-evaluations run in the consumer). Without wiring the
+	// webhook dispatcher here, dispatchHealthEvent saw s.webhooks == nil and
+	// every warmup.health_changed / quarantined / blocked event silently fired
+	// no webhook. Dispatch only enqueues delivery rows in Postgres (drained by
+	// the backend's DeliveryWorker), so no worker/PG boundary is crossed.
+	warmupService.WireWebhooks(webhookService, emailRepo)
 
 	advancedService := advanced.NewService(
 		advancedRepo,

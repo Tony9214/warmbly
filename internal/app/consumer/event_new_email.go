@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
@@ -166,6 +167,13 @@ func (s *JobsService) performWarmupActions(ctx context.Context, e *models.JobEve
 		account, xerr := s.EmailRepository.GetByID(ctx, e.Message.EmailID)
 		if xerr == nil && account != nil && account.WorkerID != nil {
 			s.Publisher.PublishWarmupAction(ctx, *account.WorkerID, action)
+		} else if account != nil && account.WorkerID == nil {
+			// No assigned worker (mid-migration / just-unassigned / assignment
+			// lag): the warmup mail can't be foldered or engaged with. Log it
+			// instead of dropping silently so the gap is observable.
+			log.Warn().
+				Str("email_id", e.Message.EmailID.String()).
+				Msg("Warmup actions skipped: recipient mailbox has no assigned worker")
 		}
 	}
 }
