@@ -248,6 +248,12 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 
 	// STEP 9: Generate Message-ID
 	messageID := generateMessageID(account.Email)
+	// Persist it now so the reply path (GetLatestReplyCandidate, which filters
+	// message_id <> '') can find this send as a thread parent on a later turn.
+	// Without this the warmup reply/threading path never fires.
+	if err := s.taskRepo.UpdateTaskMessageID(ctx, taskID, messageID); err != nil {
+		log.Warn().Err(err).Str("task_id", taskID.String()).Msg("Failed to persist warmup task message_id")
+	}
 
 	// STEP 9.5: Generate warmup verification token
 	var warmupTokenStr string
@@ -477,14 +483,43 @@ func (s *tasksService) selectWarmupPartner(ctx context.Context, account Email) (
 		return nil, fmt.Errorf("no available warmup partners")
 	}
 
-	partnerID := pickWeightedPartner(availablePartners, domainsByID, domainCounts, routingRules, account.Email, emailsByID)
+	// Pick a partner, then gate it through the SAME health re-evaluation the
+	// sender passes (email_task STEP 5). The recipient-selection SQL re-admits a
+	// row the instant blocked_until elapses — before the hourly sweep
+	// reclassifies it — so without this gate a just-expired quarantined/blocked
+	// mailbox could be chosen as a recipient with no re-qualification.
+	// CanParticipate re-evaluates and forces just-unblocked mailboxes into
+	// probation, matching the CLAUDE.md re-entry policy on the recipient surface.
+	for attempts := 0; attempts < 5 && len(availablePartners) > 0; attempts++ {
+		partnerID := pickWeightedPartner(availablePartners, domainsByID, domainCounts, routingRules, account.Email, emailsByID)
 
-	partner, err := s.emailRepo.GetByID(ctx, partnerID)
-	if err != nil {
-		return nil, err
+		if s.warmupHealth != nil {
+			if ok, _, _ := s.warmupHealth.CanParticipate(ctx, partnerID, poolType); !ok {
+				availablePartners = removePartnerID(availablePartners, partnerID)
+				continue
+			}
+		}
+
+		partner, err := s.emailRepo.GetByID(ctx, partnerID)
+		if err != nil {
+			return nil, err
+		}
+		return partner, nil
 	}
 
-	return partner, nil
+	return nil, fmt.Errorf("no eligible warmup partners after health gate")
+}
+
+// removePartnerID returns ids without the first occurrence of target. Used to
+// drop a partner that failed the health gate before re-picking.
+func removePartnerID(ids []uuid.UUID, target uuid.UUID) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if id != target {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // pickWeightedPartner picks a partner ID using a composite weight:

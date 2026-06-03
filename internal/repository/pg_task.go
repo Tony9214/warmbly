@@ -124,6 +124,7 @@ type TaskRepository interface {
 	CreateTaskWithLock(ctx context.Context, task *Task, campaignTask *CampaignTask) (bool, error)
 	CreateWarmupTaskWithLock(ctx context.Context, task *Task, warmupTask *WarmupTask) (bool, error)
 	UpdateTaskStatusWithLock(ctx context.Context, taskID uuid.UUID, status string) error
+	UpdateTaskMessageID(ctx context.Context, taskID uuid.UUID, messageID string) error
 
 	// Update campaign task with contact/sequence IDs (for tracking)
 	UpdateCampaignTaskTracking(ctx context.Context, taskID, contactID, sequenceID uuid.UUID) error
@@ -728,6 +729,17 @@ func (r *taskRepository) UpdateTaskStatusWithLock(ctx context.Context, taskID uu
 	}
 
 	return tx.Commit(ctx)
+}
+
+// UpdateTaskMessageID persists the outbound Message-ID on the task row. Warmup
+// reply threading depends on this: GetLatestReplyCandidate filters on
+// message_id <> ”, so without persisting it here the reply path never finds a
+// prior message to reply to and warmup conversations never thread.
+func (r *taskRepository) UpdateTaskMessageID(ctx context.Context, taskID uuid.UUID, messageID string) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE tasks SET message_id = $1, updated_at = NOW() WHERE id = $2`,
+		messageID, taskID)
+	return err
 }
 
 // UpdateCampaignTaskTracking updates the campaign task with contact_id and sequence_id

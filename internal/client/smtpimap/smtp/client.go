@@ -56,8 +56,12 @@ func (c *Client) Send(
 		headers["Cc"] = strings.Join(cc, ", ")
 	}
 	if inReplyTo != "" {
-		headers["In-Reply-To"] = fmt.Sprintf("<%s>", inReplyTo)
-		headers["References"] = fmt.Sprintf("<%s>", inReplyTo)
+		// The parent Message-ID may arrive already wrapped in <...>; trim before
+		// re-wrapping so we don't emit <<id>>, which won't match the original
+		// Message-ID header and breaks Gmail/Outlook threading.
+		mid := "<" + strings.Trim(inReplyTo, "<>") + ">"
+		headers["In-Reply-To"] = mid
+		headers["References"] = mid
 	}
 
 	// Add custom headers (e.g., X-Warmbly-Token for warmup)

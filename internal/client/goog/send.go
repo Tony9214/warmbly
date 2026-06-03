@@ -41,9 +41,12 @@ func (c *Client) SendMessage(
 	}
 
 	if parent != nil && parent.MessageID != "" {
+		// Trim any existing <...> before re-wrapping so we don't emit <<id>>,
+		// which won't match the original Message-ID header and breaks threading.
+		mid := "<" + strings.Trim(parent.MessageID, "<>") + ">"
 		headers = append(headers,
-			&gmail.MessagePartHeader{Name: "In-Reply-To", Value: fmt.Sprintf("<%s>", parent.MessageID)},
-			&gmail.MessagePartHeader{Name: "References", Value: fmt.Sprintf("<%s>", parent.MessageID)},
+			&gmail.MessagePartHeader{Name: "In-Reply-To", Value: mid},
+			&gmail.MessagePartHeader{Name: "References", Value: mid},
 		)
 	}
 
