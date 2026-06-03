@@ -198,6 +198,13 @@ func main() {
 	integrationRepoC := repository.NewIntegrationRepository(primaryDB.Pool)
 	integrationServiceC := integration.NewService(integrationRepoC, cipherService, integration.NewOAuthManager())
 	webhookService.WireDispatchSink(integrationServiceC.DispatchAny)
+	// Warmup health transitions happen in THIS process (the health sweep + all
+	// event-driven re-evaluations run in the consumer). Without wiring the
+	// webhook dispatcher here, dispatchHealthEvent saw s.webhooks == nil and
+	// every warmup.health_changed / quarantined / blocked event silently fired
+	// no webhook. Dispatch only enqueues delivery rows in Postgres (drained by
+	// the backend's DeliveryWorker), so no worker/PG boundary is crossed.
+	warmupService.WireWebhooks(webhookService, emailRepo)
 
 	advancedService := advanced.NewService(
 		advancedRepo,
@@ -232,6 +239,8 @@ func main() {
 		EmailHistoryIDRepository:    emailHistoryIDRepo,
 		EmailAccountErrorRepository: emailAccountErrorRepo,
 		WarmupRepo:                  warmupRepo,
+		WarmupContentRepo:           repository.NewWarmupContentRepository(primaryDB.Pool),
+		WarmupEngagementRepo:        repository.NewWarmupEngagementRepository(primaryDB.Pool),
 		WarmupService:               warmupService,
 		WorkerRepo:                  workerRepo,
 		Publisher:                   eventsPublisher,
@@ -259,6 +268,11 @@ func main() {
 
 	// Start warmup health evaluation sweep (every hour)
 	go jobsService.StartWarmupHealthSweep(ctx, 1*time.Hour)
+
+	// Drains the durable delayed-engagement schedule (read/important/star) so the
+	// recipient-side dwell survives worker restarts. Short interval keeps the
+	// effective dwell close to the requested value.
+	go jobsService.StartWarmupEngagementPoller(ctx, 30*time.Second)
 
 	// Start dead worker detection (every 5 minutes)
 	go jobsService.StartDeadWorkerDetection(ctx, 5*time.Minute)

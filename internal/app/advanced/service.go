@@ -36,6 +36,10 @@ type Service interface {
 	IngestDeliverabilityEvent(ctx context.Context, organizationID uuid.UUID, req *models.IngestDeliverabilityEventRequest) *errx.Error
 
 	ShouldSuppressRecipient(ctx context.Context, organizationID uuid.UUID, recipient string) (bool, string, *errx.Error)
+	// Unsubscribe suppresses a contact in response to a List-Unsubscribe action
+	// (one-click POST or the manual link). Always suppresses — it's an explicit
+	// recipient request, independent of the auto-suppress settings.
+	Unsubscribe(ctx context.Context, campaignID, contactID uuid.UUID) *errx.Error
 	SelectVariant(ctx context.Context, organizationID, campaignID, contactID uuid.UUID, subject, bodyHTML, bodyPlain string) (*models.VariantSelection, *errx.Error)
 	OptimizeSendTime(ctx context.Context, organizationID uuid.UUID, contact *models.Contact, base time.Time) (time.Time, *errx.Error)
 
@@ -267,6 +271,38 @@ func (s *service) ShouldSuppressRecipient(ctx context.Context, organizationID uu
 		return false, "", nil
 	}
 	return true, entry.Reason, nil
+}
+
+// Unsubscribe resolves the campaign + contact behind a List-Unsubscribe link and
+// suppresses the recipient org-wide. Always suppresses (an explicit recipient
+// request), then fans out the campaign.unsubscribed event for Slack/CRM.
+func (s *service) Unsubscribe(ctx context.Context, campaignID, contactID uuid.UUID) *errx.Error {
+	campaign, err := s.campaignRepo.GetByID(ctx, campaignID)
+	if err != nil || campaign == nil || campaign.OrganizationID == nil {
+		return errx.New(errx.BadRequest, "invalid unsubscribe link")
+	}
+	contact, cerr := s.contactRepo.GetByID(ctx, contactID)
+	if cerr != nil || contact == nil || contact.Email == "" {
+		return errx.New(errx.BadRequest, "invalid unsubscribe link")
+	}
+
+	if err := s.repo.UpsertSuppressedRecipient(ctx, &models.SuppressedRecipient{
+		OrganizationID: *campaign.OrganizationID,
+		Email:          contact.Email,
+		Reason:         "one-click unsubscribe",
+		Source:         models.DeliverabilityEventUnsubscribe,
+		CampaignID:     &campaignID,
+	}); err != nil {
+		return toErrx(err)
+	}
+
+	s.emit(ctx, *campaign.OrganizationID, models.WebhookEventCampaignUnsubscribed, map[string]any{
+		"campaign_id":   campaignID.String(),
+		"contact_id":    contactID.String(),
+		"contact_email": contact.Email,
+		"source":        "one_click",
+	})
+	return nil
 }
 
 func (s *service) SelectVariant(ctx context.Context, organizationID, campaignID, contactID uuid.UUID, subject, bodyHTML, bodyPlain string) (*models.VariantSelection, *errx.Error) {
@@ -668,24 +704,25 @@ func (s *service) IngestDeliverabilityEvent(ctx context.Context, organizationID 
 		_ = s.repo.MarkVariantEvent(ctx, *req.CampaignID, *req.ContactID, string(eventType))
 	}
 
-	// Record bounces in campaign progress so analytics and auto-pause work correctly
+	// Record bounces + complaints in campaign progress so analytics and the
+	// breaker work correctly. Complaints were previously never recorded, which
+	// is why complaint-rate auto-pause could never fire.
 	if req.CampaignID != nil && req.ContactID != nil && req.TaskID != nil &&
-		eventType == models.DeliverabilityEventBounce {
+		(eventType == models.DeliverabilityEventBounce || eventType == models.DeliverabilityEventComplaint) {
 		campaignTask, cErr := s.taskRepo.GetCampaignTask(ctx, *req.TaskID)
 		if cErr == nil && campaignTask != nil && campaignTask.SequenceID != nil {
-			_ = s.campaignProgressRepo.RecordEmailBounced(ctx, *req.CampaignID, *req.ContactID, *campaignTask.SequenceID)
+			switch eventType {
+			case models.DeliverabilityEventBounce:
+				_ = s.campaignProgressRepo.RecordEmailBounced(ctx, *req.CampaignID, *req.ContactID, *campaignTask.SequenceID)
+			case models.DeliverabilityEventComplaint:
+				_ = s.campaignProgressRepo.RecordEmailComplained(ctx, *req.CampaignID, *req.ContactID, *campaignTask.SequenceID)
+			}
 		}
 	}
 
-	if req.CampaignID != nil && settings.BouncePipeline.AutoPauseCampaignOnSpike &&
+	if req.CampaignID != nil &&
 		(eventType == models.DeliverabilityEventBounce || eventType == models.DeliverabilityEventComplaint) {
-		progress, pErr := s.campaignProgressRepo.GetCampaignProgress(ctx, *req.CampaignID)
-		if pErr == nil && progress != nil && progress.EmailsSent > 0 {
-			rate := float64(progress.EmailsBounced) / float64(progress.EmailsSent) * 100
-			if rate >= settings.BouncePipeline.PauseBounceRateThreshold {
-				_ = s.campaignRepo.UpdateStatus(ctx, *req.CampaignID, "paused")
-			}
-		}
+		s.evaluateCampaignBreaker(ctx, organizationID, *req.CampaignID, settings)
 	}
 
 	// Trigger warmup health re-evaluation on bounce or complaint events.
@@ -724,6 +761,85 @@ func (s *service) IngestDeliverabilityEvent(ctx context.Context, organizationID 
 	}
 
 	return nil
+}
+
+// Campaign deliverability circuit breaker tuning. Mirrors Instantly's safeguards:
+// a minimum sample before acting (so a single early bounce can't pause a
+// campaign) and a rolling window so the breaker reacts to recent behaviour
+// rather than a campaign's lifetime average.
+const (
+	campaignBreakerWindow    = 7 * 24 * time.Hour
+	campaignBreakerMinSample = 50
+	// Early-warning band: emit a warning webhook at half the pause threshold.
+	campaignBreakerWarnRatio = 0.5
+)
+
+// evaluateCampaignBreaker auto-pauses a campaign when its rolling bounce or
+// complaint rate breaches the configured threshold, and emits an early-warning
+// webhook in the band below. Rolling-first with a cumulative fallback when the
+// recent window is too small a sample.
+func (s *service) evaluateCampaignBreaker(ctx context.Context, orgID, campaignID uuid.UUID, settings *models.AdvancedOutreachSettings) {
+	if settings == nil || !settings.BouncePipeline.AutoPauseCampaignOnSpike {
+		return
+	}
+	bounceThresh := settings.BouncePipeline.PauseBounceRateThreshold
+	complaintThresh := settings.BouncePipeline.PauseComplaintRateThreshold
+	if bounceThresh <= 0 && complaintThresh <= 0 {
+		return
+	}
+
+	sent, bounced, complained := 0, 0, 0
+	if rolling, err := s.campaignProgressRepo.GetCampaignRollingRates(ctx, campaignID, time.Now().Add(-campaignBreakerWindow)); err == nil && rolling != nil && rolling.Sent >= campaignBreakerMinSample {
+		sent, bounced, complained = rolling.Sent, rolling.Bounced, rolling.Complained
+	} else if progress, pErr := s.campaignProgressRepo.GetCampaignProgress(ctx, campaignID); pErr == nil && progress != nil {
+		sent, bounced, complained = progress.EmailsSent, progress.EmailsBounced, progress.EmailsComplained
+	}
+
+	// Not enough delivered volume yet to judge — never pause on a tiny sample.
+	if sent < campaignBreakerMinSample {
+		return
+	}
+
+	bounceRate := float64(bounced) / float64(sent) * 100
+	complaintRate := float64(complained) / float64(sent) * 100
+
+	pauseBounce := bounceThresh > 0 && bounceRate >= bounceThresh
+	pauseComplaint := complaintThresh > 0 && complaintRate >= complaintThresh
+	if pauseBounce || pauseComplaint {
+		if err := s.campaignRepo.UpdateStatus(ctx, campaignID, "paused"); err == nil {
+			s.emit(ctx, orgID, models.WebhookEventCampaignPaused, map[string]any{
+				"campaign_id":    campaignID.String(),
+				"reason":         "deliverability_auto_pause",
+				"bounce_rate":    bounceRate,
+				"complaint_rate": complaintRate,
+				"sample_size":    sent,
+				"breached":       breachLabel(pauseBounce, pauseComplaint),
+			})
+		}
+		return
+	}
+
+	warnBounce := bounceThresh > 0 && bounceRate >= bounceThresh*campaignBreakerWarnRatio
+	warnComplaint := complaintThresh > 0 && complaintRate >= complaintThresh*campaignBreakerWarnRatio
+	if warnBounce || warnComplaint {
+		s.emit(ctx, orgID, models.WebhookEventCampaignDeliverabilityWarning, map[string]any{
+			"campaign_id":    campaignID.String(),
+			"bounce_rate":    bounceRate,
+			"complaint_rate": complaintRate,
+			"sample_size":    sent,
+		})
+	}
+}
+
+func breachLabel(bounce, complaint bool) string {
+	switch {
+	case bounce && complaint:
+		return "bounce_and_complaint"
+	case bounce:
+		return "bounce"
+	default:
+		return "complaint"
+	}
 }
 
 func (s *service) OptimizeSendTime(ctx context.Context, organizationID uuid.UUID, contact *models.Contact, base time.Time) (time.Time, *errx.Error) {

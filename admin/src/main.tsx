@@ -33,6 +33,13 @@ import OrganizationDetailPage from "@/app/dashboard/OrganizationDetailPage";
 import UsersPage from "@/app/dashboard/UsersPage";
 import UserDetailPage from "@/app/dashboard/UserDetailPage";
 import WarmupPage from "@/app/dashboard/WarmupPage";
+import WarmupAppealsPage from "@/app/dashboard/WarmupAppealsPage";
+import WarmupContentLayout from "@/app/dashboard/warmup-content/WarmupContentLayout";
+import WarmupContentOverviewPage from "@/app/dashboard/warmup-content/OverviewPage";
+import WarmupContentLibraryPage from "@/app/dashboard/warmup-content/LibraryPage";
+import WarmupContentGeneratePage from "@/app/dashboard/warmup-content/GeneratePage";
+import WarmupContentJobsPage from "@/app/dashboard/warmup-content/JobsPage";
+import WarmupContentSettingsPage from "@/app/dashboard/warmup-content/SettingsPage";
 import CampaignsPage from "@/app/dashboard/CampaignsPage";
 import EnterprisePage from "@/app/dashboard/EnterprisePage";
 import PlansPage from "@/app/dashboard/PlansPage";
@@ -41,6 +48,7 @@ import LimitRequestsPage from "@/app/dashboard/LimitRequestsPage";
 import OutreachPage from "@/app/dashboard/OutreachPage";
 import AnalyticsPage from "@/app/dashboard/AnalyticsPage";
 import MailboxesPage from "@/app/dashboard/MailboxesPage";
+import PlacementPage from "@/app/dashboard/PlacementPage";
 import { NotFoundPage } from "@/app/dashboard/StubPages";
 
 // Mirror of web/src/main.tsx's tuned defaults. The admin app sees less
@@ -87,6 +95,25 @@ const router = createBrowserRouter([
                     { path: "plans", element: <PlansPage /> },
                     { path: "discounts", element: <DiscountsPage /> },
                     { path: "warmup", element: <WarmupPage /> },
+                    { path: "warmup/appeals", element: <WarmupAppealsPage /> },
+                    {
+                        path: "warmup-content",
+                        element: <WarmupContentLayout />,
+                        children: [
+                            {
+                                index: true,
+                                element: (
+                                    <Navigate to="/warmup-content/overview" replace />
+                                ),
+                            },
+                            { path: "overview", element: <WarmupContentOverviewPage /> },
+                            { path: "library", element: <WarmupContentLibraryPage /> },
+                            { path: "generate", element: <WarmupContentGeneratePage /> },
+                            { path: "jobs", element: <WarmupContentJobsPage /> },
+                            { path: "settings", element: <WarmupContentSettingsPage /> },
+                        ],
+                    },
+                    { path: "placement", element: <PlacementPage /> },
                     { path: "campaigns", element: <CampaignsPage /> },
                     { path: "enterprise", element: <EnterprisePage /> },
                     { path: "limit-requests", element: <LimitRequestsPage /> },

@@ -7,14 +7,20 @@ import (
 )
 
 type WarmupToken struct {
-	Token              uuid.UUID  `json:"token"`
-	TaskID             uuid.UUID  `json:"task_id"`
-	SenderAccountID    uuid.UUID  `json:"sender_account_id"`
-	RecipientAccountID uuid.UUID  `json:"recipient_account_id"`
-	ConversationTheme  string     `json:"conversation_theme"`
-	CreatedAt          time.Time  `json:"created_at"`
-	ConsumedAt         *time.Time `json:"consumed_at,omitempty"`
-	ExpiresAt          time.Time  `json:"expires_at"`
+	Token              uuid.UUID `json:"token"`
+	TaskID             uuid.UUID `json:"task_id"`
+	SenderAccountID    uuid.UUID `json:"sender_account_id"`
+	RecipientAccountID uuid.UUID `json:"recipient_account_id"`
+	ConversationTheme  string    `json:"conversation_theme"`
+	// ContentSource records which content cohort produced this send
+	// ("static" or "ai") so the A/B harness can compare spam-placement
+	// rate by cohort. ConversationID points at the cached warmup_conversations
+	// row when the body came from the AI bank (nil for static content).
+	ContentSource  string     `json:"content_source"`
+	ConversationID *uuid.UUID `json:"conversation_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ConsumedAt     *time.Time `json:"consumed_at,omitempty"`
+	ExpiresAt      time.Time  `json:"expires_at"`
 }
 
 // WarmupEmailAction represents actions to perform on a detected warmup email.
@@ -30,6 +36,15 @@ type WarmupEmailAction struct {
 	UID                uint32    `json:"uid"`
 	MailboxUIDValidity uint32    `json:"mailbox_uid_validity"`
 	Actions            []string  `json:"actions"` // "move_to_warmbly", "mark_read", "remove_from_spam", "mark_important"
+
+	// DelaySeconds is retained for wire compatibility but is now always 0: the
+	// recipient-side "dwell" is owned by the consumer's durable schedule
+	// (warmup_pending_engagements + the engagement poller), which publishes the
+	// immediate leg (folder + spam-rescue) now and the delayed leg (read /
+	// important / star) when due. The worker runs whatever it receives
+	// immediately. This survives a worker restart, which the old in-process
+	// timer did not.
+	DelaySeconds int `json:"delay_seconds,omitempty"`
 }
 
 type WarmupHealthState string
@@ -57,13 +72,31 @@ type WarmupParticipantHealth struct {
 	LastHealthEvaluatedAt *time.Time        `json:"last_health_evaluated_at,omitempty"`
 }
 
+// WarmupBanStatus is the user-facing view of a mailbox's warmup standing,
+// returned by GetBanStatus so the dashboard can show why warmup is blocked and
+// whether the user can appeal.
+type WarmupBanStatus struct {
+	EmailAccountID uuid.UUID  `json:"email_account_id"`
+	Blocked        bool       `json:"blocked"`
+	HealthState    string     `json:"health_state"`
+	Reason         string     `json:"reason,omitempty"`
+	BlockedAt      *time.Time `json:"blocked_at,omitempty"`
+	BlockedUntil   *time.Time `json:"blocked_until,omitempty"`
+	CanAppeal      bool       `json:"can_appeal"`
+	PendingAppeal  bool       `json:"pending_appeal"`
+}
+
 type WarmupPoolHealthSummary struct {
 	TotalParticipants int            `json:"total_participants"`
 	ByState           map[string]int `json:"by_state"`
 	AvgSpamScore      float64        `json:"avg_spam_score"`
 	AvgSpamPlacement  float64        `json:"avg_spam_placement_rate"`
-	BlockedCount      int            `json:"blocked_count"`
-	AtRiskCount       int            `json:"at_risk_count"`
+	// SpamPlacementByProvider breaks recent spam-placement counts down by the
+	// recipient provider so the admin can see where warmup mail is being
+	// filtered (e.g. mostly at Outlook vs Gmail) rather than one flat rate.
+	SpamPlacementByProvider map[string]int `json:"spam_placement_by_provider"`
+	BlockedCount            int            `json:"blocked_count"`
+	AtRiskCount             int            `json:"at_risk_count"`
 }
 
 type WarmupHealthMetrics struct {

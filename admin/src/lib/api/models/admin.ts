@@ -1022,6 +1022,7 @@ export interface WarmupPoolHealthSummary {
     by_state: Record<string, number>;
     avg_spam_score: number;
     avg_spam_placement_rate: number;
+    spam_placement_by_provider: Record<string, number>;
     blocked_count: number;
     at_risk_count: number;
 }

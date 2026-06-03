@@ -10,6 +10,15 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 )
 
+// HandleWarmupAction executes recipient-side warmup actions on the mailbox.
+//
+// The worker just runs whatever actions it receives, immediately. The
+// recipient-side "dwell" and the immediate-vs-delayed split are now owned by the
+// CONSUMER's durable schedule (internal/app/consumer/warmup_engagement_poller):
+// the consumer publishes the immediate leg (folder + spam-rescue) right away and
+// the delayed leg (read / important / star) when its fire_at passes, each with
+// DelaySeconds=0. That makes the dwell survive a worker restart, which the old
+// in-process time.AfterFunc here could not.
 func (w *WorkerService) HandleWarmupAction(ctx context.Context, body any) error {
 	action, ok := body.(models.WarmupEmailAction)
 	if !ok {
@@ -25,13 +34,16 @@ func (w *WorkerService) HandleWarmupAction(ctx context.Context, body any) error 
 		Strs("actions", action.Actions).
 		Msg("Processing warmup email action")
 
+	if len(action.Actions) == 0 {
+		return nil
+	}
+
 	w.mailManager.RLock()
 	mail, exists := w.mailManager.Emails[action.EmailID]
 	w.mailManager.RUnlock()
-
 	if !exists {
 		log.Warn().Str("email_id", action.EmailID.String()).Msg("Email account not found for warmup action")
-		return fmt.Errorf("email account %s not found", action.EmailID.String())
+		return nil
 	}
 
 	switch {
@@ -44,11 +56,6 @@ func (w *WorkerService) HandleWarmupAction(ctx context.Context, body any) error 
 			Str("email_id", action.EmailID.String()).
 			Msg("No mail client available for warmup actions; skipping")
 	}
-
-	log.Info().
-		Str("email_id", action.EmailID.String()).
-		Msg("Warmup email actions completed")
-
 	return nil
 }
 
@@ -70,6 +77,10 @@ func (w *WorkerService) runGoogleWarmupActions(ctx context.Context, mail *wmail.
 		case "mark_important":
 			if err := mail.GoogleData.Client.MarkImportant(ctx, action.GmailID); err != nil {
 				log.Error().Err(err).Str("gmail_id", action.GmailID).Msg("Failed to mark important")
+			}
+		case "star":
+			if err := mail.GoogleData.Client.AddStar(ctx, action.GmailID); err != nil {
+				log.Error().Err(err).Str("gmail_id", action.GmailID).Msg("Failed to star warmup message")
 			}
 		default:
 			log.Warn().Str("action", act).Msg("Unknown warmup action")
@@ -117,6 +128,11 @@ func (w *WorkerService) runImapWarmupActions(ctx context.Context, mail *wmail.WM
 			if err := imapClient.MarkImportant(ctx, sourceBox.Name, uid); err != nil {
 				log.Error().Err(err).Uint32("uid", uid).Msg("Failed to mark important (IMAP)")
 			}
+		case "star":
+			// No-op on IMAP: \Flagged is already set by mark_important, so
+			// starring here would just re-flag the same message. Star is a
+			// Gmail-only distinct signal.
+			continue
 		default:
 			log.Warn().Str("action", act).Msg("Unknown warmup action")
 		}

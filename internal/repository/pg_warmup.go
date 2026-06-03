@@ -43,6 +43,16 @@ type SpamReport struct {
 	ReportedAccountID uuid.UUID
 	MessageID         string
 	ReportType        string
+	// ContentSource is the content cohort ("static"/"ai") of the warmup send
+	// that landed in spam, denormalised here from the warmup token so the A/B
+	// harness can aggregate spam-placement rate by cohort.
+	ContentSource string
+	// RecipientProvider / RecipientDomain record where the message was filtered
+	// into spam (the recipient mailbox's provider, e.g. "google"/"smtp_imap",
+	// and domain, e.g. "outlook.com") so placement can be segmented per provider
+	// instead of one flat rate. Empty when the dimension isn't known.
+	RecipientProvider string
+	RecipientDomain   string
 	CreatedAt         time.Time
 }
 
@@ -63,6 +73,17 @@ type WarmupReplyCandidate struct {
 	ConversationTheme string
 }
 
+// WarmupReceived records a verified warmup email delivered to a participant
+// mailbox, so a later deletion/flag event (which carries only the internal
+// message id) can be matched back to warmup and to the sender.
+type WarmupReceived struct {
+	EmailAccountID  uuid.UUID
+	InternalID      uuid.UUID
+	MessageID       string
+	SenderAccountID uuid.UUID
+	CreatedAt       time.Time
+}
+
 // WarmupRepository defines methods for warmup data access
 type WarmupRepository interface {
 	// Pool management
@@ -73,6 +94,11 @@ type WarmupRepository interface {
 	SetParticipantRole(ctx context.Context, poolID, accountID uuid.UUID, role string) error
 	LeavePool(ctx context.Context, poolID, accountID uuid.UUID) error
 	BlockFromPool(ctx context.Context, accountID uuid.UUID, reason string) error
+	// GetHealthState returns the WORST current warmup health state across the
+	// account's pool memberships plus its blocked_until, so non-warmup callers
+	// (e.g. the campaign scheduler) can gate cold sends on warmup health without
+	// needing a pool type. Returns ("healthy", nil) when the account is in no pool.
+	GetHealthState(ctx context.Context, accountID uuid.UUID) (models.WarmupHealthState, *time.Time, error)
 	UnblockFromPool(ctx context.Context, accountID uuid.UUID) error
 	IsInPool(ctx context.Context, accountID uuid.UUID, poolType string) (bool, error)
 	GetParticipantHealth(ctx context.Context, accountID uuid.UUID, poolType string) (*models.WarmupParticipantHealth, error)
@@ -96,8 +122,13 @@ type WarmupRepository interface {
 
 	// Statistics
 	IncrementDailyCount(ctx context.Context, accountID uuid.UUID, date time.Time) error
+	IncrementReplyCount(ctx context.Context, accountID uuid.UUID, date time.Time) error
 	GetWarmupStatistics(ctx context.Context, accountID uuid.UUID, from, to time.Time) ([]WarmupStatistic, error)
 	GetOrCreateDailyStats(ctx context.Context, accountID uuid.UUID, date time.Time, targetVolume int) (*WarmupStatistic, error)
+
+	// Pool-wide placement analytics (admin overview)
+	PoolSpamPlacementRate(ctx context.Context, since time.Time) (float64, error)
+	PoolSpamPlacementsByProvider(ctx context.Context, since time.Time) (map[string]int, error)
 
 	// Warmup token management
 	CreateWarmupToken(ctx context.Context, token *models.WarmupToken) error
@@ -109,6 +140,7 @@ type WarmupRepository interface {
 
 	// Warmup conversation support
 	GetRecentlyUsedPartners(ctx context.Context, accountID uuid.UUID, since time.Time) ([]uuid.UUID, error)
+	GetRecentPartnerCounts(ctx context.Context, accountID uuid.UUID, since time.Time) (map[uuid.UUID]int, error)
 	GetLatestReplyCandidate(ctx context.Context, senderAccountID, recipientAccountID uuid.UUID) (*WarmupReplyCandidate, error)
 
 	// Partner diversity support
@@ -116,6 +148,17 @@ type WarmupRepository interface {
 	GetPoolParticipantEmails(ctx context.Context, poolType string, excludeBlocked bool) (map[uuid.UUID]string, error)
 	CountEligibleRecipients(ctx context.Context, poolType string, excludeAccountID uuid.UUID) (int, error)
 	GetRecentPartnerDomainCounts(ctx context.Context, accountID uuid.UUID, since time.Time) (map[string]int, error)
+
+	// Tampering protection: track delivered warmup mail so a later deletion or
+	// spam-flag can be attributed, and count "harm" events per mailbox.
+	RecordWarmupReceived(ctx context.Context, accountID, internalID uuid.UUID, messageID string, senderAccountID uuid.UUID) error
+	GetWarmupReceived(ctx context.Context, accountID, internalID uuid.UUID) (*WarmupReceived, error)
+	RecordWarmupTampering(ctx context.Context, accountID uuid.UUID, messageID, kind string) (bool, error)
+	CountWarmupTamperingSince(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error)
+
+	// Appeals (user-facing submission; admin review lives in the admin repo).
+	CreateWarmupAppeal(ctx context.Context, accountID, userID uuid.UUID, reason string) (uuid.UUID, error)
+	HasPendingWarmupAppeal(ctx context.Context, accountID uuid.UUID) (bool, error)
 }
 
 type warmupRepository struct {
@@ -301,6 +344,36 @@ func (r *warmupRepository) BlockFromPool(ctx context.Context, accountID uuid.UUI
 	return err
 }
 
+// GetHealthState returns the worst current health state across the account's
+// pool memberships and that row's blocked_until. Worst-wins so a mailbox that's
+// blocked in any pool is treated as blocked for cold-send gating.
+func (r *warmupRepository) GetHealthState(ctx context.Context, accountID uuid.UUID) (models.WarmupHealthState, *time.Time, error) {
+	query := `
+		SELECT health_state, blocked_until
+		FROM warmup_pool_participants
+		WHERE email_account_id = $1
+		ORDER BY CASE health_state
+			WHEN 'blocked' THEN 5
+			WHEN 'quarantined' THEN 4
+			WHEN 'throttled' THEN 3
+			WHEN 'watch' THEN 2
+			WHEN 'healthy' THEN 1
+			ELSE 0
+		END DESC
+		LIMIT 1
+	`
+	var state string
+	var blockedUntil *time.Time
+	err := r.db.QueryRow(ctx, query, accountID).Scan(&state, &blockedUntil)
+	if err == sql.ErrNoRows {
+		return models.WarmupHealthHealthy, nil, nil
+	}
+	if err != nil {
+		return models.WarmupHealthHealthy, nil, err
+	}
+	return models.WarmupHealthState(state), blockedUntil, nil
+}
+
 // UnblockFromPool unblocks an account from all warmup pools
 func (r *warmupRepository) UnblockFromPool(ctx context.Context, accountID uuid.UUID) error {
 	query := `
@@ -351,8 +424,8 @@ func (r *warmupRepository) IsInPool(ctx context.Context, accountID uuid.UUID, po
 // RecordSpamReport records a spam report
 func (r *warmupRepository) RecordSpamReport(ctx context.Context, report *SpamReport) (bool, error) {
 	query := `
-		INSERT INTO warmup_spam_reports (id, reporter_account_id, reported_account_id, message_id, report_type, created_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
+		INSERT INTO warmup_spam_reports (id, reporter_account_id, reported_account_id, message_id, report_type, content_source, recipient_provider, recipient_domain, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
 		ON CONFLICT (reporter_account_id, message_id) DO NOTHING
 	`
 
@@ -362,6 +435,9 @@ func (r *warmupRepository) RecordSpamReport(ctx context.Context, report *SpamRep
 		report.ReportedAccountID,
 		report.MessageID,
 		report.ReportType,
+		report.ContentSource,
+		report.RecipientProvider,
+		report.RecipientDomain,
 	)
 
 	if err != nil {
@@ -588,6 +664,66 @@ func (r *warmupRepository) IncrementDailyCount(ctx context.Context, accountID uu
 	return err
 }
 
+// IncrementReplyCount increments the daily warmup reply count. Upserts the row
+// so it is order-independent with IncrementDailyCount (either may run first).
+func (r *warmupRepository) IncrementReplyCount(ctx context.Context, accountID uuid.UUID, date time.Time) error {
+	query := `
+		INSERT INTO warmup_statistics (email_account_id, date, emails_sent, emails_replied, target_volume)
+		VALUES ($1, DATE($2), 0, 1, 0)
+		ON CONFLICT (email_account_id, date)
+		DO UPDATE SET emails_replied = warmup_statistics.emails_replied + 1
+	`
+	_, err := r.db.Exec(ctx, query, accountID, date)
+	return err
+}
+
+// PoolSpamPlacementRate returns the pool-wide warmup spam-placement rate (%)
+// over the window: spam_placement events divided by total warmup sends. This is
+// the number surfaced as avg_spam_placement_rate in the admin health summary.
+func (r *warmupRepository) PoolSpamPlacementRate(ctx context.Context, since time.Time) (float64, error) {
+	query := `
+		SELECT
+			(SELECT COUNT(*) FROM warmup_spam_reports WHERE report_type = 'spam_placement' AND created_at >= $1) AS placements,
+			(SELECT COALESCE(SUM(emails_sent), 0) FROM warmup_statistics WHERE date >= DATE($1)) AS sent
+	`
+	var placements, sent int
+	if err := r.db.QueryRow(ctx, query, since).Scan(&placements, &sent); err != nil {
+		return 0, err
+	}
+	if sent == 0 {
+		return 0, nil
+	}
+	return float64(placements) / float64(sent) * 100, nil
+}
+
+// PoolSpamPlacementsByProvider returns spam-placement counts grouped by the
+// recipient provider over the window, so the admin overview can show where
+// warmup mail is being filtered (e.g. mostly at Outlook vs Gmail).
+func (r *warmupRepository) PoolSpamPlacementsByProvider(ctx context.Context, since time.Time) (map[string]int, error) {
+	query := `
+		SELECT COALESCE(NULLIF(recipient_provider, ''), 'unknown'), COUNT(*)
+		FROM warmup_spam_reports
+		WHERE report_type = 'spam_placement' AND created_at >= $1
+		GROUP BY 1
+	`
+	rows, err := r.db.Query(ctx, query, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]int)
+	for rows.Next() {
+		var provider string
+		var n int
+		if err := rows.Scan(&provider, &n); err != nil {
+			return nil, err
+		}
+		out[provider] = n
+	}
+	return out, rows.Err()
+}
+
 // GetWarmupStatistics retrieves warmup statistics for a date range
 func (r *warmupRepository) GetWarmupStatistics(ctx context.Context, accountID uuid.UUID, from, to time.Time) ([]WarmupStatistic, error) {
 	query := `
@@ -649,8 +785,8 @@ func (r *warmupRepository) GetOrCreateDailyStats(ctx context.Context, accountID 
 // CreateWarmupToken creates a warmup verification token
 func (r *warmupRepository) CreateWarmupToken(ctx context.Context, token *models.WarmupToken) error {
 	query := `
-		INSERT INTO warmup_tokens (token, task_id, sender_account_id, recipient_account_id, conversation_theme, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO warmup_tokens (token, task_id, sender_account_id, recipient_account_id, conversation_theme, content_source, conversation_id, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 	_, err := r.db.Exec(ctx, query,
 		token.Token,
@@ -658,6 +794,8 @@ func (r *warmupRepository) CreateWarmupToken(ctx context.Context, token *models.
 		token.SenderAccountID,
 		token.RecipientAccountID,
 		token.ConversationTheme,
+		token.ContentSource,
+		token.ConversationID,
 		token.ExpiresAt,
 	)
 	return err
@@ -666,7 +804,7 @@ func (r *warmupRepository) CreateWarmupToken(ctx context.Context, token *models.
 // GetWarmupToken retrieves a valid (unconsumed, unexpired) warmup token
 func (r *warmupRepository) GetWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error) {
 	query := `
-		SELECT token, task_id, sender_account_id, recipient_account_id, COALESCE(conversation_theme, ''), created_at, consumed_at, expires_at
+		SELECT token, task_id, sender_account_id, recipient_account_id, COALESCE(conversation_theme, ''), COALESCE(content_source, ''), conversation_id, created_at, consumed_at, expires_at
 		FROM warmup_tokens
 		WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW()
 	`
@@ -678,6 +816,8 @@ func (r *warmupRepository) GetWarmupToken(ctx context.Context, tokenID uuid.UUID
 		&t.SenderAccountID,
 		&t.RecipientAccountID,
 		&t.ConversationTheme,
+		&t.ContentSource,
+		&t.ConversationID,
 		&t.CreatedAt,
 		&t.ConsumedAt,
 		&t.ExpiresAt,
@@ -692,7 +832,7 @@ func (r *warmupRepository) GetWarmupToken(ctx context.Context, tokenID uuid.UUID
 
 func (r *warmupRepository) FindWarmupToken(ctx context.Context, tokenID uuid.UUID) (*models.WarmupToken, error) {
 	query := `
-		SELECT token, task_id, sender_account_id, recipient_account_id, COALESCE(conversation_theme, ''), created_at, consumed_at, expires_at
+		SELECT token, task_id, sender_account_id, recipient_account_id, COALESCE(conversation_theme, ''), COALESCE(content_source, ''), conversation_id, created_at, consumed_at, expires_at
 		FROM warmup_tokens
 		WHERE token = $1
 	`
@@ -704,6 +844,8 @@ func (r *warmupRepository) FindWarmupToken(ctx context.Context, tokenID uuid.UUI
 		&t.SenderAccountID,
 		&t.RecipientAccountID,
 		&t.ConversationTheme,
+		&t.ContentSource,
+		&t.ConversationID,
 		&t.CreatedAt,
 		&t.ConsumedAt,
 		&t.ExpiresAt,
@@ -771,6 +913,113 @@ func (r *warmupRepository) GetRecentlyUsedPartners(ctx context.Context, accountI
 	}
 
 	return partnerIDs, rows.Err()
+}
+
+// GetRecentPartnerCounts returns how many times the sender has targeted each
+// partner since the provided timestamp. Used to enforce an explicit
+// partner-diversity target — no single partner should absorb a large share of
+// one mailbox's warmup traffic (a reciprocal-graph detection signal).
+func (r *warmupRepository) GetRecentPartnerCounts(ctx context.Context, accountID uuid.UUID, since time.Time) (map[uuid.UUID]int, error) {
+	query := `
+		SELECT recipient_account_id, COUNT(*)
+		FROM warmup_tokens
+		WHERE sender_account_id = $1
+		  AND created_at >= $2
+		GROUP BY recipient_account_id
+	`
+
+	rows, err := r.db.Query(ctx, query, accountID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[uuid.UUID]int)
+	for rows.Next() {
+		var partnerID uuid.UUID
+		var n int
+		if err := rows.Scan(&partnerID, &n); err != nil {
+			return nil, err
+		}
+		counts[partnerID] = n
+	}
+
+	return counts, rows.Err()
+}
+
+// RecordWarmupReceived stores a delivered warmup email keyed by recipient +
+// internal message id. Idempotent on re-delivery of the same message.
+func (r *warmupRepository) RecordWarmupReceived(ctx context.Context, accountID, internalID uuid.UUID, messageID string, senderAccountID uuid.UUID) error {
+	query := `
+		INSERT INTO warmup_received (email_account_id, internal_id, message_id, sender_account_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (email_account_id, internal_id) DO NOTHING
+	`
+	_, err := r.db.Exec(ctx, query, accountID, internalID, messageID, senderAccountID)
+	return err
+}
+
+// GetWarmupReceived looks up a delivered warmup email by recipient + internal
+// message id. Returns nil when the message was not a warmup email.
+func (r *warmupRepository) GetWarmupReceived(ctx context.Context, accountID, internalID uuid.UUID) (*WarmupReceived, error) {
+	query := `
+		SELECT email_account_id, internal_id, message_id, sender_account_id, created_at
+		FROM warmup_received
+		WHERE email_account_id = $1 AND internal_id = $2
+	`
+	var w WarmupReceived
+	err := r.db.QueryRow(ctx, query, accountID, internalID).Scan(
+		&w.EmailAccountID, &w.InternalID, &w.MessageID, &w.SenderAccountID, &w.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+// RecordWarmupTampering records one "harm" a participant did to a warmup email.
+// Returns whether a new row was inserted (deduped per account+message+kind).
+func (r *warmupRepository) RecordWarmupTampering(ctx context.Context, accountID uuid.UUID, messageID, kind string) (bool, error) {
+	query := `
+		INSERT INTO warmup_tampering_events (email_account_id, message_id, kind)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (email_account_id, message_id, kind) DO NOTHING
+	`
+	cmd, err := r.db.Exec(ctx, query, accountID, messageID, kind)
+	if err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
+// CountWarmupTamperingSince counts distinct tampering events for a mailbox.
+func (r *warmupRepository) CountWarmupTamperingSince(ctx context.Context, accountID uuid.UUID, since time.Time) (int, error) {
+	query := `SELECT COUNT(*) FROM warmup_tampering_events WHERE email_account_id = $1 AND created_at >= $2`
+	var n int
+	err := r.db.QueryRow(ctx, query, accountID, since).Scan(&n)
+	return n, err
+}
+
+// CreateWarmupAppeal inserts a pending appeal for a blocked mailbox.
+func (r *warmupRepository) CreateWarmupAppeal(ctx context.Context, accountID, userID uuid.UUID, reason string) (uuid.UUID, error) {
+	id := uuid.New()
+	query := `
+		INSERT INTO warmup_appeals (id, email_account_id, user_id, reason, status)
+		VALUES ($1, $2, $3, $4, 'pending')
+	`
+	_, err := r.db.Exec(ctx, query, id, accountID, userID, reason)
+	return id, err
+}
+
+// HasPendingWarmupAppeal reports whether the mailbox already has an open appeal.
+func (r *warmupRepository) HasPendingWarmupAppeal(ctx context.Context, accountID uuid.UUID) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM warmup_appeals WHERE email_account_id = $1 AND status = 'pending')`
+	var exists bool
+	err := r.db.QueryRow(ctx, query, accountID).Scan(&exists)
+	return exists, err
 }
 
 // GetPoolParticipantDomains returns a map from email_account_id to lowercased

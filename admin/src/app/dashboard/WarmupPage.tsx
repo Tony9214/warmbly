@@ -108,15 +108,26 @@ function HealthSummary() {
 
     // Guard every field: a partial response must degrade gracefully, never
     // throw and blank the whole tab.
+    //
+    // `avg_spam_placement_rate` is ALREADY a percent (the backend computes
+    // placements/sent*100), so we render it directly — no second *100.
     const placement = data.avg_spam_placement_rate ?? 0;
-    const spamPct = (placement * 100).toFixed(1);
+    const spamPct = placement.toFixed(1);
     const placementTone =
-        placement >= 0.2 ? "text-red-700" : placement >= 0.1 ? "text-amber-700" : "text-emerald-600";
+        placement >= 20 ? "text-red-700" : placement >= 10 ? "text-amber-700" : "text-emerald-600";
     const atRisk = data.at_risk_count ?? 0;
     const blocked = data.blocked_count ?? 0;
 
+    // `spam_placement_by_provider` is a Record of RAW COUNTS (backend does
+    // COUNT(*)), not rates. Sort worst-first by count so the riskiest
+    // mailbox-provider surface is the first thing an investigator sees.
+    const byProvider = Object.entries(data.spam_placement_by_provider ?? {}).sort(
+        (a, b) => b[1] - a[1],
+    );
+
     return (
-        <div className="grid gap-3 md:grid-cols-4 mb-6">
+        <div className="mb-6">
+        <div className="grid gap-3 md:grid-cols-4">
             <HealthCard
                 icon={<Activity className="size-4" />}
                 title="Total participants"
@@ -146,6 +157,31 @@ function HealthSummary() {
                 hint="quarantined or hard-blocked"
                 tone={blocked > 0 ? "text-red-700" : undefined}
             />
+        </div>
+
+        {byProvider.length > 0 && (
+            <div className="mt-3 border border-border rounded-lg p-3 bg-card">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
+                    <Flame className="size-4" />
+                    <span>Spam placements by provider (count)</span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {byProvider.map(([provider, count]) => (
+                        <div
+                            key={provider}
+                            className="flex items-center justify-between text-xs"
+                        >
+                            <span className="capitalize truncate text-foreground">
+                                {provider}
+                            </span>
+                            <span className="tabular-nums font-medium text-foreground">
+                                {(count ?? 0).toLocaleString()}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
         </div>
     );
 }

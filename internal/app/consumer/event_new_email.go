@@ -2,12 +2,14 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
@@ -114,13 +116,24 @@ func (s *JobsService) handleWarmupEmail(ctx context.Context, e *models.JobEventN
 	// Valid! Consume the token
 	s.WarmupRepo.ConsumeWarmupToken(ctx, tokenUUID)
 
+	// Record the receipt so a later deletion or spam-flag of THIS message can be
+	// attributed back to warmup and to the sender. Verified warmup mail is not
+	// stored in the unibox, so this is the only record that the message was a
+	// warmup email.
+	if e.Message != nil {
+		_ = s.WarmupRepo.RecordWarmupReceived(ctx, e.Message.EmailID, e.Message.ID, e.Message.MessageID, token.SenderAccountID)
+	}
+
 	// If the warmup mail arrived in a Junk/Spam state, record a
 	// spam_placement event against the sender. This is distinct from a
 	// user_complaint (which fires later via HandleFlagsAdd when a recipient
 	// flags an already-delivered message) because nobody actively rejected
 	// it — the provider classifier placed it there on arrival.
 	if containsSpamFlag(e.Message.Flags) && s.WarmupService != nil {
-		health, _ := s.WarmupService.RecordSpamPlacement(ctx, e.Message.EmailID, token.SenderAccountID, e.Message.MessageID)
+		// Record which recipient provider/domain filtered it into spam so the
+		// placement signal can be segmented per provider, not one flat rate.
+		provider, domain := s.recipientProviderDomain(ctx, e.Message.EmailID)
+		health, _ := s.WarmupService.RecordSpamPlacement(ctx, e.Message.EmailID, token.SenderAccountID, e.Message.MessageID, token.ContentSource, provider, domain)
 		s.markRiskBandFromWarmupHealth(ctx, token.SenderAccountID, health)
 	}
 
@@ -129,28 +142,96 @@ func (s *JobsService) handleWarmupEmail(ctx context.Context, e *models.JobEventN
 	return true, nil
 }
 
-// performWarmupActions publishes warmup action events to the worker
+// performWarmupActions publishes warmup action events to the worker. Action
+// selection is probabilistic and per-mailbox (see engagementPlan) so the pool
+// doesn't behave in detectable lockstep, with a randomised recipient-side
+// dwell before the actions run.
 func (s *JobsService) performWarmupActions(ctx context.Context, e *models.JobEventNewEmail) {
 	if s.Publisher == nil {
 		return
 	}
 
-	action := &models.WarmupEmailAction{
+	settings := s.getGenerationSettings(ctx)
+	actions, delaySeconds := engagementPlan(e.Message.EmailID, settings.Engagement)
+	immediate, delayed := splitEngagementLegs(actions)
+
+	base := models.WarmupEmailAction{
 		UserID:             e.UserID,
 		EmailID:            e.Message.EmailID,
 		GmailID:            e.Message.GmailID,
 		UID:                e.Message.UID,
 		MailboxUIDValidity: e.Message.Mailbox,
-		Actions:            []string{"move_to_warmbly", "mark_read", "remove_from_spam", "mark_important"},
 	}
 
-	// Look up the worker ID from the email account
+	// Resolve the receiving mailbox's worker once.
+	var workerID *uuid.UUID
 	if s.EmailRepository != nil {
-		account, xerr := s.EmailRepository.GetByID(ctx, e.Message.EmailID)
-		if xerr == nil && account != nil && account.WorkerID != nil {
-			s.Publisher.PublishWarmupAction(ctx, *account.WorkerID, action)
+		if account, xerr := s.EmailRepository.GetByID(ctx, e.Message.EmailID); xerr == nil && account != nil {
+			workerID = account.WorkerID
 		}
 	}
+	if workerID == nil {
+		// No assigned worker (mid-migration / just-unassigned / assignment lag):
+		// the warmup mail can't be foldered or engaged with. Log instead of
+		// dropping silently so the gap is observable.
+		log.Warn().
+			Str("email_id", e.Message.EmailID.String()).
+			Msg("Warmup actions skipped: recipient mailbox has no assigned worker")
+		return
+	}
+
+	// Immediate, durable leg (folder + spam-rescue): publish to the worker now.
+	if len(immediate) > 0 {
+		act := base
+		act.Actions = immediate
+		s.Publisher.PublishWarmupAction(ctx, *workerID, &act)
+	}
+
+	if len(delayed) == 0 {
+		return
+	}
+
+	act := base
+	act.Actions = delayed
+
+	// Delayed leg (read / important / star): with no dwell (or no durable store
+	// available) publish immediately; otherwise persist it to the durable
+	// schedule so a worker restart mid-dwell can't drop it. The poller publishes
+	// it when fire_at passes.
+	if delaySeconds <= 0 || s.WarmupEngagementRepo == nil {
+		s.Publisher.PublishWarmupAction(ctx, *workerID, &act)
+		return
+	}
+
+	payload, err := json.Marshal(act)
+	if err != nil {
+		log.Warn().Err(err).Str("email_id", e.Message.EmailID.String()).Msg("Failed to marshal delayed warmup engagement; publishing immediately")
+		s.Publisher.PublishWarmupAction(ctx, *workerID, &act)
+		return
+	}
+	fireAt := time.Now().Add(time.Duration(delaySeconds) * time.Second)
+	if err := s.WarmupEngagementRepo.EnqueuePendingEngagement(ctx, e.Message.EmailID, payload, fireAt); err != nil {
+		log.Warn().Err(err).Str("email_id", e.Message.EmailID.String()).Msg("Failed to enqueue delayed warmup engagement; publishing immediately")
+		s.Publisher.PublishWarmupAction(ctx, *workerID, &act)
+	}
+}
+
+// recipientProviderDomain best-effort resolves a recipient mailbox's provider
+// ("google"/"smtp_imap") and email domain for the per-provider placement
+// dimension. Returns empty strings when the account can't be loaded.
+func (s *JobsService) recipientProviderDomain(ctx context.Context, accountID uuid.UUID) (string, string) {
+	if s.EmailRepository == nil {
+		return "", ""
+	}
+	acc, err := s.EmailRepository.GetByID(ctx, accountID)
+	if err != nil || acc == nil {
+		return "", ""
+	}
+	domain := ""
+	if at := strings.LastIndex(acc.Email, "@"); at >= 0 {
+		domain = strings.ToLower(acc.Email[at+1:])
+	}
+	return acc.Provider, domain
 }
 
 func (s *JobsService) applyInvalidWarmupAttempt(ctx context.Context, accountID uuid.UUID, attemptedToken string, scoreDelta int) {
@@ -165,36 +246,17 @@ func (s *JobsService) applyInvalidWarmupAttempt(ctx context.Context, accountID u
 		return
 	}
 
+	// Degraded mode (no warmup service): record the raw signal only. All
+	// blocking is owned by the banded health model (evaluateMetrics), which
+	// already enforces the invalid-token threshold with a blocked_until and an
+	// appeal path. The old checkAndAutoBlock issued permanent blocks
+	// (blocked_until = NULL) that UpdateParticipantHealth then refused to ever
+	// re-evaluate — a divergent dead-end that is now removed.
 	_ = s.WarmupRepo.RecordInvalidTokenAttempt(ctx, accountID, attemptedToken)
 	if scoreDelta > 0 {
 		_, _ = s.WarmupRepo.IncrementSpamScore(ctx, accountID, scoreDelta)
 	}
-
-	s.checkAndAutoBlock(ctx, accountID)
 	s.markRiskBandFromWarmupHealth(ctx, accountID, nil)
-}
-
-// checkAndAutoBlock checks if an account should be auto-blocked based on invalid token attempts or spam score
-func (s *JobsService) checkAndAutoBlock(ctx context.Context, accountID uuid.UUID) {
-	if s.WarmupRepo == nil {
-		return
-	}
-
-	since := time.Now().Add(-24 * time.Hour)
-	attempts, _ := s.WarmupRepo.CountRecentInvalidAttempts(ctx, accountID, since)
-	if attempts >= 3 {
-		_ = s.WarmupRepo.BlockFromPool(ctx, accountID,
-			fmt.Sprintf("Auto-blocked: %d invalid warmup token attempts in 24h", attempts))
-		s.markRiskBandFromWarmupHealth(ctx, accountID, nil)
-		return
-	}
-
-	score, _ := s.WarmupRepo.GetSpamScore(ctx, accountID)
-	if score > 50 {
-		_ = s.WarmupRepo.BlockFromPool(ctx, accountID,
-			fmt.Sprintf("Auto-blocked: spam score %d exceeds threshold", score))
-		s.markRiskBandFromWarmupHealth(ctx, accountID, nil)
-	}
 }
 
 // containsSpamFlag checks if any flag is a spam flag

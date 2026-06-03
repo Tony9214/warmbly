@@ -27,6 +27,11 @@ import {
     PlayIcon,
     PauseIcon,
     ShieldCheckIcon,
+    ShieldAlertIcon,
+    BanIcon,
+    HourglassIcon,
+    XCircleIcon,
+    RefreshCwIcon,
     type LucideIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -38,6 +43,9 @@ import useAccountStatus from "@/lib/api/hooks/app/analytics/useAccountStatus";
 import useWarmupAnalytics from "@/lib/api/hooks/app/analytics/useWarmupAnalytics";
 import useUpdateEmail from "@/lib/api/hooks/app/emails/useUpdateEmail";
 import useWarmupLifecycle from "@/lib/api/hooks/app/emails/useWarmupLifecycle";
+import useWarmupBanStatus from "@/lib/api/hooks/app/emails/useWarmupBanStatus";
+import useAppealWarmupBan from "@/lib/api/hooks/app/emails/useAppealWarmupBan";
+import useAuthCheck from "@/lib/api/hooks/app/emails/useAuthCheck";
 import useUpdateEmailTrackingDomain from "@/lib/api/hooks/app/emails/useUpdateEmailTrackingDomain";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
@@ -167,7 +175,7 @@ const EDITABLE: (keyof Inbox)[] = [
     "name", "signature_html", "signature_plain", "signature_sync", "signature_code",
     "tags", "campaign_limit", "min_wait_time", "reply_to",
     "warmup_base", "warmup_max", "warmup_increase", "warmup_reply_rate",
-    "warmup_start_time", "warmup_end_time", "warmup_days",
+    "warmup_tag", "warmup_start_time", "warmup_end_time", "warmup_days",
 ];
 
 function Detail({ mailbox, onClose, initialTab = "overview", canWarmup = true }: { mailbox: Inbox; onClose: () => void; initialTab?: string; canWarmup?: boolean }) {
@@ -441,6 +449,208 @@ const warmupStateTone: Record<string, { text: string; bar: string; label: string
     blocked: { text: "text-rose-700", bar: "bg-rose-600", label: "Blocked" },
 };
 
+/* ── Warmup ban banner + appeal form ─────────────────────── */
+
+// Shown at the top of the Warmup tab when a mailbox has been blocked from the
+// warmup pool (e.g. for deleting or spam-marking warmup mail). Explains why,
+// lets the owner submit an appeal, and flips to "under review" once one is
+// pending. Renders nothing while loading or when the mailbox isn't blocked.
+function WarmupBanBanner({ emailId }: { emailId: string }) {
+    const ban = useWarmupBanStatus(emailId);
+    const appeal = useAppealWarmupBan(emailId);
+    const [open, setOpen] = useState(false);
+    const [reason, setReason] = useState("");
+
+    const data = ban.data;
+    if (!data || !data.blocked) return null;
+
+    const submit = async () => {
+        const trimmed = reason.trim();
+        if (!trimmed) {
+            toast.error("Please describe why this mailbox should be reinstated.");
+            return;
+        }
+        try {
+            await appeal.mutateAsync(trimmed);
+            toast.success("Appeal submitted — our team will review it.");
+            setOpen(false);
+            setReason("");
+        } catch (e) {
+            toast.error(buildError(e as unknown as AppError));
+        }
+    };
+
+    return (
+        <div className="px-5 py-4">
+            <div className="rounded-md border border-rose-200 bg-rose-50 p-3.5">
+                <div className="flex items-start gap-2.5">
+                    <div className="w-7 h-7 rounded-md bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                        <BanIcon className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[12.5px] font-semibold text-rose-900">Blocked from warmup</span>
+                            <span className="h-5 px-2 rounded-full border border-rose-200 bg-white/60 text-rose-700 text-[10px] font-semibold uppercase tracking-wide inline-flex items-center capitalize">
+                                {data.health_state}
+                            </span>
+                        </div>
+                        <p className="mt-1 text-[11.5px] text-rose-800/90 leading-relaxed">
+                            {data.reason || "This mailbox was removed from the warmup pool to protect shared sender reputation."}
+                        </p>
+                        {(data.blocked_at || data.blocked_until) && (
+                            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-rose-700/80">
+                                {data.blocked_at && (
+                                    <span className="inline-flex items-center gap-1">
+                                        <ClockIcon className="w-3 h-3" /> Blocked {new Date(data.blocked_at).toLocaleDateString()}
+                                    </span>
+                                )}
+                                {data.blocked_until && (
+                                    <span className="inline-flex items-center gap-1">
+                                        <CalendarIcon className="w-3 h-3" /> Until {new Date(data.blocked_until).toLocaleDateString()}
+                                    </span>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Appeal affordance */}
+                        {data.pending_appeal ? (
+                            <div className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11.5px] font-medium text-amber-800">
+                                <HourglassIcon className="w-3.5 h-3.5" /> Appeal submitted — under review
+                            </div>
+                        ) : data.can_appeal ? (
+                            open ? (
+                                <div className="mt-3 space-y-2">
+                                    <label className="block text-[10px] uppercase tracking-[0.14em] text-rose-700/80 font-medium">
+                                        Appeal reason
+                                    </label>
+                                    <textarea
+                                        value={reason}
+                                        onChange={(e) => setReason(e.target.value)}
+                                        rows={3}
+                                        autoFocus
+                                        placeholder="Tell us what changed or why this block is a mistake…"
+                                        className="w-full px-2.5 py-2 rounded-md border border-rose-200 bg-white text-[12px] text-slate-900 placeholder:text-slate-400 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 resize-none transition-colors"
+                                    />
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={submit}
+                                            disabled={appeal.isPending || !reason.trim()}
+                                            className="h-8 px-3.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                                        >
+                                            {appeal.isPending && <Loading className="!w-3.5 h-3.5 text-white" />}
+                                            Submit appeal
+                                        </button>
+                                        <button
+                                            onClick={() => { setOpen(false); setReason(""); }}
+                                            disabled={appeal.isPending}
+                                            className="h-8 px-3 rounded-md border border-rose-200 hover:border-rose-300 text-[12px] text-rose-700 hover:text-rose-900 transition-colors disabled:opacity-60"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={() => setOpen(true)}
+                                    className="mt-3 h-8 px-3 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors"
+                                >
+                                    <ShieldAlertIcon className="w-3.5 h-3.5" /> Appeal this block
+                                </button>
+                            )
+                        ) : null}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/* ── Domain authentication (SPF / DKIM / DMARC live check) ─────────────────────── */
+
+// One row per auth record. Green check when present/aligned, red cross when
+// missing. Optional detail (selectors, the SPF record, the DMARC policy) is
+// shown muted underneath.
+function AuthRecordRow({ label, ok, detail }: { label: string; ok: boolean; detail?: React.ReactNode }) {
+    return (
+        <div className="flex items-start justify-between gap-3 py-2 border-b border-slate-200/60 last:border-b-0">
+            <div className="min-w-0">
+                <div className="text-[12.5px] font-medium text-slate-900">{label}</div>
+                {detail && <div className="mt-0.5 text-[10.5px] text-slate-500 font-mono break-all leading-relaxed">{detail}</div>}
+            </div>
+            <span className={cn("inline-flex items-center gap-1 shrink-0 text-[11px] font-medium", ok ? "text-emerald-600" : "text-rose-600")}>
+                {ok ? <CheckCircle2Icon className="w-3.5 h-3.5" /> : <XCircleIcon className="w-3.5 h-3.5" />}
+                {ok ? "Found" : "Missing"}
+            </span>
+        </div>
+    );
+}
+
+function AuthCheckPanel({ emailId }: { emailId: string }) {
+    const [open, setOpen] = useState(false);
+    const check = useAuthCheck(emailId, open);
+    const data = check.data;
+
+    return (
+        <div className="px-5 py-4">
+            <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <Eyebrow>Domain authentication</Eyebrow>
+                    <p className="mt-1 text-[11px] text-slate-400 leading-relaxed">Live SPF, DKIM &amp; DMARC check on the sending domain.</p>
+                </div>
+                <button
+                    onClick={() => {
+                        setOpen(true);
+                        if (open) check.refetch();
+                    }}
+                    disabled={check.isFetching}
+                    className="h-8 px-3 rounded-md border border-slate-200 hover:border-slate-300 text-[12px] font-medium text-slate-700 hover:text-slate-900 inline-flex items-center gap-1.5 transition-colors disabled:opacity-60 shrink-0"
+                >
+                    {check.isFetching ? <Loading className="!w-3.5 h-3.5" /> : <RefreshCwIcon className="w-3.5 h-3.5" />}
+                    {open ? "Re-check" : "Check"}
+                </button>
+            </div>
+
+            {open && (
+                <div className="mt-3">
+                    {check.isError ? (
+                        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-[11.5px] text-rose-700 leading-relaxed">
+                            {buildError(check.error as unknown as AppError)}
+                        </div>
+                    ) : check.isFetching && !data ? (
+                        <div className="rounded-md border border-slate-200 bg-slate-50/70 px-3 py-3 flex items-center gap-2 text-[12px] text-slate-500">
+                            <Loading className="!w-3.5 h-3.5" /> Looking up DNS records…
+                        </div>
+                    ) : data ? (
+                        <div className="rounded-md border border-slate-200 bg-white">
+                            <div className={cn("flex items-start gap-2 px-3 py-2.5 border-b border-slate-200/60", data.all_aligned ? "text-emerald-700" : "text-amber-700")}>
+                                {data.all_aligned ? <ShieldCheckIcon className="w-4 h-4 shrink-0 mt-0.5" /> : <ShieldAlertIcon className="w-4 h-4 shrink-0 mt-0.5" />}
+                                <div className="min-w-0">
+                                    <div className="text-[12px] font-medium">{data.all_aligned ? "Authentication aligned" : "Authentication needs attention"}</div>
+                                    {data.summary && <div className="mt-0.5 text-[11px] text-slate-500 leading-relaxed">{data.summary}</div>}
+                                </div>
+                            </div>
+                            <div className="px-3">
+                                <AuthRecordRow label="SPF" ok={data.spf_found} detail={data.spf_record} />
+                                <AuthRecordRow
+                                    label="DKIM"
+                                    ok={data.dkim_found}
+                                    detail={data.dkim_selectors && data.dkim_selectors.length > 0 ? `selectors: ${data.dkim_selectors.join(", ")}` : undefined}
+                                />
+                                <AuthRecordRow
+                                    label="DMARC"
+                                    ok={data.dmarc_found}
+                                    detail={data.dmarc_found && data.dmarc_policy ? `policy: ${data.dmarc_policy}` : undefined}
+                                />
+                            </div>
+                            <div className="px-3 py-2 text-[10.5px] text-slate-400 font-mono truncate border-t border-slate-200/60">{data.domain}</div>
+                        </div>
+                    ) : null}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: Inbox; update: (p: Partial<Inbox>) => void; status?: AccountStatusModel; mailbox: Inbox; canWarmup?: boolean }) {
     const ws = status?.warmup_status;
     const wh = status?.warmup_health;
@@ -469,6 +679,9 @@ function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: 
 
     return (
         <div className="divide-y divide-slate-200/60">
+            {/* Ban banner + appeal — only when the mailbox is blocked from the pool */}
+            <WarmupBanBanner emailId={mailbox.id} />
+
             {/* Lifecycle control */}
             <div className="px-5 py-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -562,6 +775,9 @@ function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: 
                 </div>
             )}
 
+            {/* Domain authentication (live SPF/DKIM/DMARC check) */}
+            <AuthCheckPanel emailId={mailbox.id} />
+
             {/* In-campaign health-check explainer */}
             {inCampaign && (
                 <div className="px-5 py-4">
@@ -593,6 +809,14 @@ function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: 
                 )}
                 <FieldShell label="Reply rate" hint="Share of warmup mail that gets a reply, to mimic real conversation.">
                     <NumField value={form.warmup_reply_rate} onChange={(v) => update({ warmup_reply_rate: v })} suffix="%" />
+                </FieldShell>
+                <FieldShell label="Content segment" hint="Targets segment-specific warmup content (e.g. saas, agency). Leave empty for generic content.">
+                    <TextInput
+                        value={form.warmup_tag ?? ""}
+                        placeholder="e.g. saas, agency"
+                        onChange={(v) => update({ warmup_tag: v.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
+                        className="w-full h-9"
+                    />
                 </FieldShell>
             </div>
 
