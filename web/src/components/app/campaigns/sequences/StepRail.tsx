@@ -1,5 +1,5 @@
 import React from "react";
-import { ClockIcon, Loader2Icon, PlusIcon, SendIcon } from "lucide-react";
+import { CheckIcon, ClockIcon, Loader2Icon, PlusIcon, SendIcon } from "lucide-react";
 import toast from "react-hot-toast";
 import { NumberInput } from "@/components/ui/field";
 import SequenceBox from "./SequenceBox";
@@ -8,6 +8,7 @@ import useUpdateSequence from "@/lib/api/hooks/app/campaigns/sequences/useUpdate
 import useDeleteSequence from "@/lib/api/hooks/app/campaigns/sequences/useDeleteSequence";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
+import { useConfirm } from "@/hooks/context/confirm";
 
 const MAX_STEPS = 5;
 
@@ -22,7 +23,11 @@ function WaitConnector({
     sequence: Sequence;
 }) {
     const update = useUpdateSequence(campaignId, sequence.id);
+    // `draft` is the live edited value; it only persists on a commit point
+    // (blur / Enter / stepper) — never on every keystroke — so an in-flight
+    // save can't snap the field back mid-typing.
     const [draft, setDraft] = React.useState<number>(sequence.wait_after);
+    const [savedAt, setSavedAt] = React.useState(0);
 
     // Keep the local draft in lockstep with the canonical value when the cache
     // updates (e.g. after a save elsewhere).
@@ -33,10 +38,11 @@ function WaitConnector({
     const commit = (v: number) => {
         const next = Math.max(0, Math.round(v));
         setDraft(next);
-        if (next === sequence.wait_after) return;
+        if (next === sequence.wait_after) return; // no change → nothing to save
         update.mutate(
             { wait_after: next },
             {
+                onSuccess: () => setSavedAt((n) => n + 1),
                 onError: (err) => {
                     setDraft(sequence.wait_after);
                     toast.error(buildError(err as unknown as AppError));
@@ -44,6 +50,15 @@ function WaitConnector({
             },
         );
     };
+
+    // Briefly flash a "saved" tick after a successful commit.
+    const [showSaved, setShowSaved] = React.useState(false);
+    React.useEffect(() => {
+        if (savedAt === 0) return;
+        setShowSaved(true);
+        const t = setTimeout(() => setShowSaved(false), 1400);
+        return () => clearTimeout(t);
+    }, [savedAt]);
 
     return (
         <div className="flex items-stretch gap-2 pl-2.5">
@@ -58,16 +73,22 @@ function WaitConnector({
                     <span className="text-[11px] text-slate-500">Wait</span>
                     <NumberInput
                         value={draft}
-                        onChange={commit}
+                        onChange={setDraft}
+                        onCommit={commit}
                         min={0}
                         max={60}
                         className="w-20"
                         align="center"
                     />
                     <span className="text-[11px] text-slate-500">days</span>
-                    {update.isPending && (
+                    {update.isPending ? (
                         <Loader2Icon className="w-3 h-3 text-slate-300 animate-spin" />
-                    )}
+                    ) : showSaved ? (
+                        <span className="inline-flex items-center gap-0.5 text-[10.5px] font-medium text-emerald-600">
+                            <CheckIcon className="w-3 h-3" />
+                            Saved
+                        </span>
+                    ) : null}
                 </div>
             </div>
         </div>
@@ -89,30 +110,26 @@ export default function StepRail({
     onCreate: () => void;
     creating: boolean;
 }) {
-    const [confirmId, setConfirmId] = React.useState<string | null>(null);
-    const [deletingId, setDeletingId] = React.useState<string | null>(null);
-    const deleteSequence = useDeleteSequence(campaignId, confirmId ?? "");
+    const confirm = useConfirm();
+    const deleteSequence = useDeleteSequence(campaignId);
 
-    const confirmTarget = sequences.find((s) => s.id === confirmId) ?? null;
-    const confirmIndex = sequences.findIndex((s) => s.id === confirmId);
-
-    async function runDelete() {
-        if (!confirmId) return;
-        const id = confirmId;
-        setDeletingId(id);
-        try {
-            await deleteSequence.mutateAsync(id);
-            toast.success("Step removed.");
-            if (selectedId === id) {
-                const remaining = sequences.filter((s) => s.id !== id);
-                onSelect(remaining[0]?.id ?? "");
-            }
-        } catch (err) {
-            toast.error(buildError(err as AppError));
-        } finally {
-            setDeletingId(null);
-            setConfirmId(null);
-        }
+    function requestDelete(seq: Sequence, index: number) {
+        const name = seq.name || `Step ${index + 1}`;
+        confirm.show(
+            `Delete step ${index + 1}? "${name}" and its content will be removed from this campaign. This can't be undone.`,
+            async () => {
+                try {
+                    await deleteSequence.mutateAsync(seq.id);
+                    toast.success("Step removed.");
+                    if (selectedId === seq.id) {
+                        const remaining = sequences.filter((s) => s.id !== seq.id);
+                        onSelect(remaining[0]?.id ?? "");
+                    }
+                } catch (err) {
+                    toast.error(buildError(err as AppError));
+                }
+            },
+        );
     }
 
     return (
@@ -133,7 +150,7 @@ export default function StepRail({
                         subject={seq.subject}
                         active={seq.id === selectedId}
                         onClick={() => onSelect(seq.id)}
-                        onDelete={() => setConfirmId(seq.id)}
+                        onDelete={() => requestDelete(seq, i)}
                     />
                 </React.Fragment>
             ))}
@@ -159,40 +176,6 @@ export default function StepRail({
                 </div>
             )}
 
-            {confirmTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 px-4">
-                    <div className="w-full max-w-sm rounded-md border border-slate-200 bg-white p-4 shadow-lg">
-                        <p className="text-[13px] font-medium text-slate-900">
-                            Delete step {confirmIndex + 1}?
-                        </p>
-                        <p className="mt-1 text-[11.5px] leading-relaxed text-slate-500">
-                            {confirmTarget.name || `Step ${confirmIndex + 1}`} and its content will
-                            be removed from this campaign. This can&apos;t be undone.
-                        </p>
-                        <div className="mt-4 flex justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setConfirmId(null)}
-                                disabled={deletingId === confirmId}
-                                className="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={runDelete}
-                                disabled={deletingId === confirmId}
-                                className="h-7 px-2.5 rounded-md bg-rose-600 text-[12px] font-medium text-white transition-colors hover:bg-rose-700 inline-flex items-center gap-1.5 disabled:opacity-60"
-                            >
-                                {deletingId === confirmId && (
-                                    <Loader2Icon className="w-3 h-3 animate-spin" />
-                                )}
-                                Delete step
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

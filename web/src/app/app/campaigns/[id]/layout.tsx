@@ -19,7 +19,7 @@ import { useConfirm } from "@/hooks/context/confirm";
 const TABS = [
     { label: "Overview", path: "", Icon: BarChart3Icon },
     { label: "Leads", path: "/leads", Icon: UsersIcon },
-    { label: "Sequences", path: "/sequences", Icon: ListChecksIcon },
+    { label: "Steps", path: "/sequences", Icon: ListChecksIcon },
     { label: "Schedule", path: "/schedule", Icon: CalendarIcon },
     { label: "Settings", path: "/preferences", Icon: Settings2Icon },
 ] as const;
