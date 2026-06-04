@@ -1,6 +1,8 @@
-// Active-days picker — a grid of 7 day pills backed by a uint8 day-of-week
-// bitmask (bit i = weekday i). On-theme: sky-600 active, slate idle, h-7
-// rounded-md pills. Mirrors the create wizard's ScheduleStep.
+// Active-days picker — a roomier grid of 7 day cells backed by a uint8
+// day-of-week bitmask (bit i = weekday i, 0=Mon..6=Sun). On-theme: sky
+// active, slate idle, h-12 rounded-md cells with a 3-letter label over a
+// status dot. Logic is identical to the bitmask contract — only the cell
+// presentation changed.
 
 export default function WeekdayBitmask({
     weekdays,
@@ -23,13 +25,18 @@ export default function WeekdayBitmask({
                         aria-pressed={active}
                         title={day}
                         onClick={() => setValue(value ^ mask)}
-                        className={`h-7 rounded-md text-[11.5px] font-medium transition-colors ${
+                        className={`h-12 rounded-md border flex flex-col items-center justify-center transition-colors ${
                             active
-                                ? "bg-sky-600 text-white"
-                                : "bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                                ? "border-sky-500 bg-sky-50 text-sky-700"
+                                : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
                         }`}
                     >
-                        {day.slice(0, 3)}
+                        <span className="text-[11px] font-medium">{day.slice(0, 3)}</span>
+                        <span
+                            className={`mt-1 size-1.5 rounded-full ${
+                                active ? "bg-sky-500" : "bg-slate-300"
+                            }`}
+                        />
                     </button>
                 );
             })}

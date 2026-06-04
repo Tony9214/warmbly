@@ -25,6 +25,11 @@ export default interface Campaign {
     start_time: string;
     end_time: string;
 
+    // Per-day sending windows. 7 elements indexed by weekday (0=Sunday..6=Saturday,
+    // matching the backend's time.Weekday); each day holds zero or more
+    // minute-of-day intervals. When present it supersedes days/start_time/end_time.
+    schedule_windows?: ScheduleInterval[][] | null;
+
     email_tags: string[];
 
     contact_order_by: 'created_at' | 'email' | 'name' | 'custom_field' | 'manual';
@@ -64,6 +69,12 @@ export default interface Campaign {
     // Extra
     analytics: null;
     sequences: Sequence[] | null;
+}
+
+// One sending window within a day, in minutes since local midnight (end > start).
+export interface ScheduleInterval {
+    start: number;
+    end: number;
 }
 
 export interface CampaignSender {
