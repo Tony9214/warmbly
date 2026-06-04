@@ -93,7 +93,7 @@ export function DailyBars({
                     return (
                         <div
                             key={i}
-                            className="relative flex-1 flex items-end h-full"
+                            className="relative flex-1 flex items-end justify-center h-full"
                             onMouseEnter={() => setHover(i)}
                             onMouseLeave={() => setHover(null)}
                         >
@@ -103,7 +103,10 @@ export function DailyBars({
                                     barClass,
                                     hover === null || hover === i ? "opacity-100" : "opacity-50",
                                 )}
-                                style={{ height: h }}
+                                // Cap + center each bar so a sparse series (1–2 points) renders
+                                // as a normal bar, not a full-width block. Dense series have
+                                // cells narrower than the cap, so this is a no-op for them.
+                                style={{ height: h, maxWidth: 64 }}
                             />
                             {hover === i && (
                                 <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-10 whitespace-nowrap rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">

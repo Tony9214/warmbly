@@ -15,9 +15,19 @@ import { downloadBlob } from "@/lib/api/client/app/contacts/exportContacts";
 export default function useExportCard() {
     const [exporting, setExporting] = useState(false);
 
-    const exportPng = useCallback(
-        async (node: HTMLElement | null, filename: string) => {
-            if (!node || exporting) return;
+    // Rasterize an offscreen node to a PNG *data URL* (two-pass: prime the
+    // font/embed cache, then capture). Returns null on failure. Does NOT
+    // download — callers can preview the result first, then downloadPng it.
+    //
+    // pixelRatio defaults to 3 (crisp for the square card). Wide presets (16:9
+    // at 1920px) get huge at 3x, so callers can pass a lower ratio (e.g. 2) to
+    // keep the capture snappy.
+    const renderPng = useCallback(
+        async (
+            node: HTMLElement | null,
+            options?: { pixelRatio?: number },
+        ): Promise<string | null> => {
+            if (!node) return null;
             setExporting(true);
             try {
                 try {
@@ -25,17 +35,36 @@ export default function useExportCard() {
                 } catch {
                     /* fonts.ready is best-effort */
                 }
-                const opts = { pixelRatio: 3, backgroundColor: "#ffffff", cacheBust: true };
+                const opts = {
+                    pixelRatio: options?.pixelRatio ?? 3,
+                    backgroundColor: "#ffffff",
+                    cacheBust: true,
+                };
                 await toPng(node, opts); // prime font/embed cache
-                const dataUrl = await toPng(node, opts); // real capture
-                const blob = await (await fetch(dataUrl)).blob();
-                downloadBlob(blob, filename);
+                return await toPng(node, opts); // real capture
+            } catch {
+                return null;
             } finally {
                 setExporting(false);
             }
         },
-        [exporting],
+        [],
     );
 
-    return { exporting, exportPng };
+    // Trigger a browser download of a PNG data URL (produced by renderPng).
+    const downloadPng = useCallback(async (dataUrl: string, filename: string) => {
+        const blob = await (await fetch(dataUrl)).blob();
+        downloadBlob(blob, filename);
+    }, []);
+
+    // Convenience: render + download in one shot (no preview step).
+    const exportPng = useCallback(
+        async (node: HTMLElement | null, filename: string, options?: { pixelRatio?: number }) => {
+            const url = await renderPng(node, options);
+            if (url) await downloadPng(url, filename);
+        },
+        [renderPng, downloadPng],
+    );
+
+    return { exporting, renderPng, downloadPng, exportPng };
 }
