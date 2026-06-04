@@ -3,7 +3,7 @@ import { useSocket } from './context/socket'
 import { useAppStore } from '@/stores'
 import { useUserProfile } from './context/user'
 import { useRealtimeEvents } from './useRealtimeEvents'
-import getUnseenCount from '@/lib/api/client/app/unibox/getUnseenCount'
+import useUnseenCount from '@/lib/api/hooks/app/unibox/useUnseenCount'
 
 export function RealtimeManager({ children }: { children: React.ReactNode }) {
   const { isConnected, reconnectAttempt, joinChannel, leaveChannel } = useSocket()
@@ -99,15 +99,23 @@ export function RealtimeManager({ children }: { children: React.ReactNode }) {
     }
   }, [isConnected, setConnectionQuality])
 
-  // Seed the unread inbox count from the server once on load. The store value
-  // is otherwise session-only (realtime increments it but it starts at 0), so
-  // seeding makes the title + favicon badge reflect the real unread count
-  // immediately. Best-effort — a failure just leaves the count at 0.
+  // Seed the unread inbox count from the server. The store value is otherwise
+  // session-only (realtime increments it but it starts at 0), so seeding makes
+  // the title + favicon badge reflect the real unread count.
+  //
+  // This is a react-query (not a one-shot fetch) on purpose: /unibox/count is
+  // org-scoped, and on a fresh login the bootstrap fires before OrgGate has
+  // re-synced the server session — so the first read returns the wrong/empty
+  // count. OrgGate's "sync" switch invalidates org-scoped queries on success
+  // (root "unibox" included), which refetches this against the correct session
+  // and corrects the badge without a reload. Gated on a selected workspace so a
+  // multi-org login (which redirects to /select-org before any sync) doesn't
+  // fire a NULL-org read. Best-effort: a failure leaves the current count as-is.
+  const unseenQuery = useUnseenCount({ enabled: !!currentOrg })
   useEffect(() => {
-    getUnseenCount()
-      .then((r) => { if (r && typeof r.count === 'number') setUnseenCount(r.count) })
-      .catch(() => { /* endpoint unavailable — keep current count */ })
-  }, [setUnseenCount])
+    const c = unseenQuery.data?.count
+    if (typeof c === 'number') setUnseenCount(c)
+  }, [unseenQuery.data, setUnseenCount])
 
   // Set up event-to-store routing
   useRealtimeEvents()
