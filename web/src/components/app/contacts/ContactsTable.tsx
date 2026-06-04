@@ -37,6 +37,7 @@ import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import ContactFilters from "./ContactFilters";
 import ContactEdit from "./ContactEdit";
+import type { ContactSlideTab } from "./contact-edit/tabs";
 import type MiniCampaign from "@/lib/api/models/app/campaigns/MiniCampaign";
 import ContactsEditBulk from "./ContactsEditBulk";
 import { NewContactDialog } from "./NewContactDialog";
@@ -77,6 +78,13 @@ export default function ContactsTable({
     const [del, setDelete] = React.useState<boolean>(false);
     const [filtersOpen, setFiltersOpen] = React.useState<boolean>(false);
     const [edit, setEdit] = React.useState<string>("");
+    // Which tab the drawer opens on. Row click → default (overview); the
+    // right-side 3-dots → "details", mirroring the mailbox 3-dots → settings.
+    const [editTab, setEditTab] = React.useState<ContactSlideTab | undefined>(undefined);
+    const openContact = React.useCallback((id: string, tab?: ContactSlideTab) => {
+        setEditTab(tab);
+        setEdit(id);
+    }, []);
     const [bulkEdit, setBulkEdit] = React.useState<boolean>(false);
     const [subFilter, setSubFilter] = React.useState<SubFilter>("all");
     const [newOpen, setNewOpen] = React.useState<boolean>(false);
@@ -163,7 +171,7 @@ export default function ContactsTable({
             }
             isSelectedAll={isSelectedAll}
             onToggleAll={toggleAll}
-            onRowClick={setEdit}
+            onRowClick={openContact}
             onDelete={(id) =>
                 confirm?.show(`Delete this contact?`, async () => {
                     setSelected([id]);
@@ -413,7 +421,7 @@ export default function ContactsTable({
                 activeCampaign={current_campaign}
                 loading={contactsData.isLoading}
             />
-            <ContactEdit contacts={contacts ?? []} active={edit} setActive={setEdit} />
+            <ContactEdit contacts={contacts ?? []} active={edit} setActive={setEdit} initialTab={editTab} />
             <ContactsEditBulk active={bulkEdit} setActive={setBulkEdit} selected={selected} />
             <NewContactDialog open={newOpen} onClose={() => setNewOpen(false)} />
             <ExportDialog
@@ -472,7 +480,7 @@ function ContactsTableBody({
     onToggle: (id: string, on: boolean) => void;
     isSelectedAll: boolean;
     onToggleAll: () => void;
-    onRowClick: (id: string) => void;
+    onRowClick: (id: string, tab?: ContactSlideTab) => void;
     onDelete: (id: string) => void;
     emptyTitle: string;
     emptyBody: string;
@@ -650,7 +658,8 @@ function ContactsTableBody({
                                         : "—"}
                                 </td>
                                 <td className="px-3" onClick={(e) => e.stopPropagation()}>
-                                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {/* Touch-safe: always visible on mobile, hover-reveal on desktop. */}
+                                    <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                         <button
                                             type="button"
                                             aria-label="Delete contact"
@@ -661,8 +670,8 @@ function ContactsTableBody({
                                         </button>
                                         <button
                                             type="button"
-                                            aria-label="More"
-                                            onClick={() => onRowClick(c.id)}
+                                            aria-label="Contact details"
+                                            onClick={() => onRowClick(c.id, "details")}
                                             className="size-6 rounded text-slate-400 hover:text-slate-900 hover:bg-slate-100 flex items-center justify-center transition-colors"
                                         >
                                             <MoreHorizontalIcon className="w-3 h-3" />
