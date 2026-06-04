@@ -450,6 +450,27 @@ func Run(
 			integrations.GET("/bookings", h.ListMeetingBookings)
 		}
 
+		// On-demand Google Sheets -> leads sync (org-scoped). A saved "sync
+		// source" the user re-runs with "Sync now"; new rows create contacts and
+		// existing rows (matched by email) update. Gated under the contacts
+		// write permissions because it ultimately upserts contacts. The Google
+		// account itself is connected via the existing /integrations/oauth flow
+		// with provider "google_sheets".
+		leadSync := protected.Group("/lead-sync")
+		leadSync.Use(m.RequireOrganization(), m.RequireAccess(models.PermManageContacts, models.APIPermWriteContacts), m.RateLimitMiddleware(models.RateLimitWrite))
+		{
+			leadSync.GET("/google/connection", h.GetLeadSyncGoogleConnection)
+			leadSync.POST("/google/spreadsheet", h.GetLeadSyncSpreadsheet)
+			leadSync.POST("/google/preview", h.PreviewLeadSync)
+
+			leadSync.GET("/sources", h.ListLeadSyncSources)
+			leadSync.POST("/sources", h.CreateLeadSyncSource)
+			leadSync.GET("/sources/:id", h.GetLeadSyncSource)
+			leadSync.PATCH("/sources/:id", h.UpdateLeadSyncSource)
+			leadSync.DELETE("/sources/:id", h.DeleteLeadSyncSource)
+			leadSync.POST("/sources/:id/sync", h.SyncLeadSyncSourceNow)
+		}
+
 		// Warmup routing rules (org-scoped). Lets customers define
 		// preferences for premium-pool partner selection — e.g. send
 		// to Gmail recipients only from Google-classified senders.

@@ -19,6 +19,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/feature"
 	"github.com/warmbly/warmbly/internal/app/group"
 	"github.com/warmbly/warmbly/internal/app/integration"
+	"github.com/warmbly/warmbly/internal/app/leadsync"
 	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/passkey"
 	"github.com/warmbly/warmbly/internal/app/placement"
@@ -133,6 +134,10 @@ type Handler struct {
 	// SNDS, Cloudflare, GoDaddy, Namecheap, Google Sheets).
 	IntegrationService integration.Service
 	ContactRepo        repository.ContactRepository
+
+	// On-demand Google Sheets -> leads sync. Reuses the google_sheets OAuth
+	// connection's token to read sheets and the contact import path to upsert.
+	LeadSyncService leadsync.Service
 
 	// Public websocket URL used by frontend clients
 	WebsocketURI string

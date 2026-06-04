@@ -40,6 +40,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/group"
 	idempotencyapp "github.com/warmbly/warmbly/internal/app/idempotency"
 	"github.com/warmbly/warmbly/internal/app/integration"
+	"github.com/warmbly/warmbly/internal/app/leadsync"
 	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/passkey"
 	"github.com/warmbly/warmbly/internal/app/placement"
@@ -184,6 +185,7 @@ func main() {
 	var webhookServiceForHandler webhook.Service
 	var integrationServiceForHandler integration.Service
 	var contactRepoForHandler repository.ContactRepository
+	var leadSyncServiceForHandler leadsync.Service
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -766,6 +768,13 @@ func main() {
 		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)
 		sequenceService = sequence.NewService(sequenceRepostory)
 		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository, streamingPublisher)
+
+		// On-demand Google Sheets -> leads sync (backend-only / control plane).
+		// Reuses the integration service for the Google token + sheet reads and
+		// the contact service for the upsert. No worker / scheduler involvement.
+		leadSyncRepository := repository.NewLeadSyncRepository(primaryDB.Pool)
+		leadSyncServiceForHandler = leadsync.NewService(leadSyncRepository, integrationServiceForHandler, contactService)
+
 		apiKeyService = apikey.NewService(cache, apiKeyRepository)
 		crmService = crm.NewService(crmRepository)
 		socketService = socket.NewService(cache, tokenService)
@@ -998,6 +1007,9 @@ func main() {
 		// Third-party integrations
 		IntegrationService: integrationServiceForHandler,
 		ContactRepo:        contactRepoForHandler,
+
+		// On-demand Google Sheets -> leads sync
+		LeadSyncService: leadSyncServiceForHandler,
 
 		WebsocketURI: websocketURI,
 
