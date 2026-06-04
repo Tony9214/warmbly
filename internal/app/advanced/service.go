@@ -1022,7 +1022,9 @@ func (s *service) RunPreflight(ctx context.Context, organizationID, campaignID u
 	}
 
 	if settings.Preflight.CheckScheduleWindow {
-		pass := campaign.StartTime < campaign.EndTime
+		// Per-day windows (when set) define the schedule; otherwise fall back to
+		// the legacy start_time/end_time check.
+		pass := !campaign.ScheduleWindows.IsEmpty() || campaign.StartTime < campaign.EndTime
 		check := models.PreflightCheckResult{
 			Key:      "schedule_window",
 			Passed:   pass,

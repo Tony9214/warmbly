@@ -1,10 +1,90 @@
 package models
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// TimeInterval is a sending window within a single day, expressed in minutes
+// since local midnight. End is exclusive-ish and must be > Start, <= 1440.
+type TimeInterval struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// ScheduleWindows is a campaign's per-day sending schedule, indexed by
+// time.Weekday (0=Sunday .. 6=Saturday). A nil/empty day means "no sending that
+// day". When non-empty it is the authoritative schedule and supersedes the
+// legacy Days/StartTime/EndTime fields. Persisted as a jsonb array-of-7.
+type ScheduleWindows [7][]TimeInterval
+
+// IsEmpty reports whether no day carries any interval (treated as "unset").
+func (w ScheduleWindows) IsEmpty() bool {
+	for _, day := range w {
+		if len(day) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// DaySpan returns the earliest start and latest end across a weekday's
+// intervals (ok=false when that day has none). Used for even send distribution.
+func (w ScheduleWindows) DaySpan(weekday int) (start, end int, ok bool) {
+	if weekday < 0 || weekday > 6 || len(w[weekday]) == 0 {
+		return 0, 0, false
+	}
+	start, end = w[weekday][0].Start, w[weekday][0].End
+	for _, iv := range w[weekday][1:] {
+		if iv.Start < start {
+			start = iv.Start
+		}
+		if iv.End > end {
+			end = iv.End
+		}
+	}
+	return start, end, true
+}
+
+// Value implements driver.Valuer — marshals to jsonb, or NULL when empty (so an
+// empty schedule reverts to the legacy day/time derivation).
+func (w ScheduleWindows) Value() (driver.Value, error) {
+	if w.IsEmpty() {
+		return nil, nil
+	}
+	return json.Marshal(w)
+}
+
+// Scan implements sql.Scanner — reads the jsonb column (NULL → empty).
+func (w *ScheduleWindows) Scan(src any) error {
+	if src == nil {
+		*w = ScheduleWindows{}
+		return nil
+	}
+	var b []byte
+	switch v := src.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("ScheduleWindows: unsupported scan type %T", src)
+	}
+	if len(b) == 0 {
+		*w = ScheduleWindows{}
+		return nil
+	}
+	var parsed ScheduleWindows
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		return err
+	}
+	*w = parsed
+	return nil
+}
 
 type Campaign struct {
 	ID             uuid.UUID  `json:"id"`
@@ -32,6 +112,10 @@ type Campaign struct {
 	Days      uint8      `json:"days"`
 	StartTime string     `json:"start_time"`
 	EndTime   string     `json:"end_time"`
+
+	// ScheduleWindows, when non-empty, is the authoritative per-day sending
+	// schedule (supersedes Days/StartTime/EndTime). Indexed by time.Weekday.
+	ScheduleWindows ScheduleWindows `json:"schedule_windows"`
 
 	EmailTags []string `json:"email_tags"`
 	Folders   []string `json:"folders"`
@@ -123,6 +207,9 @@ type UpdateCampaign struct {
 	Days      *uint8     `json:"days"`
 	StartTime *string    `json:"start_time"`
 	EndTime   *string    `json:"end_time"`
+
+	// Authoritative per-day schedule. When sent, supersedes Days/StartTime/EndTime.
+	ScheduleWindows *ScheduleWindows `json:"schedule_windows,omitempty"`
 
 	EmailTags []string `json:"email_tags"`
 	Folders   []string `json:"folders"`

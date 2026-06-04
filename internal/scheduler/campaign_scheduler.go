@@ -169,6 +169,9 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	// Fall back to UTC if campaign has no timezone set (account timezone checked later)
 	campaignTZName := campaign.Timezone
 	campaignTZ := loadLocation(campaignTZName)
+	// Authoritative per-day sending windows (or derived from the legacy
+	// days/start/end fields). Drives every day-of-week + time-window gate below.
+	windows := effectiveWindows(campaign)
 	candidateTime := baseTime
 
 	// Check campaign date range
@@ -180,11 +183,10 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 		return time.Time{}, nil, uuid.Nil, ErrCampaignEnded
 	}
 
-	// STEP 6: Find next valid day of week (campaign.Days is bitmask)
-	candidateTime = findNextValidDay(candidateTime, uint8(campaign.Days), campaignTZ)
-
-	// STEP 7: Ensure within campaign time window (start_time to end_time)
-	candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
+	// STEP 6+7: Snap to the next allowed per-day sending window (handles both
+	// the day-of-week gate and the time-of-day window, including multiple
+	// intervals per day).
+	candidateTime = nextScheduleSlot(candidateTime, windows, campaignTZ)
 
 	// effectiveCap is the per-mailbox cold cap for THIS campaign, after the ramp
 	// clamp. It is min(per-mailbox cold cap, campaign daily limit) further min()'d
@@ -321,8 +323,7 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 		// filter MUST be re-applied here, or tomorrow's recompute over-budgets a
 		// mailbox past its ramp ceiling / picks a cross-provider sender.
 		candidateTime = candidateTime.Add(24 * time.Hour)
-		candidateTime = findNextValidDay(candidateTime, uint8(campaign.Days), campaignTZ)
-		candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
+		candidateTime = nextScheduleSlot(candidateTime, windows, campaignTZ)
 
 		var tomorrow []AccountCandidate
 		for i := range candidates {
@@ -367,24 +368,25 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 
 	account := &selected.Account
 
-	// STEP 9: Even distribution across today's time window
-	endMinutes := parseTimeOfDay(campaign.EndTime)
-	nowLocal := time.Now().In(campaignTZ)
-	currentMinutes := nowLocal.Hour()*60 + nowLocal.Minute()
-
+	// STEP 9: Even distribution across the candidate day's sending window. Uses
+	// the span (earliest start → latest end) of that weekday's intervals.
 	remainingEmails := selected.RemainingToday
 	if remainingEmails > 0 {
-		startMinutes := parseTimeOfDay(campaign.StartTime)
-		remainingMinutes := endMinutes - max(currentMinutes, startMinutes)
-		if remainingMinutes > 0 {
-			idealInterval := time.Minute * time.Duration(remainingMinutes/remainingEmails)
-			minInterval := time.Second * time.Duration(account.MinWaitTime)
-			if idealInterval < minInterval {
-				idealInterval = minInterval
-			}
-			distributedTime := time.Now().Add(idealInterval)
-			if distributedTime.After(candidateTime) {
-				candidateTime = distributedTime
+		wd := int(candidateTime.In(campaignTZ).Weekday())
+		if dayStart, dayEnd, ok := windows.DaySpan(wd); ok {
+			nowLocal := time.Now().In(campaignTZ)
+			currentMinutes := nowLocal.Hour()*60 + nowLocal.Minute()
+			remainingMinutes := dayEnd - max(currentMinutes, dayStart)
+			if remainingMinutes > 0 {
+				idealInterval := time.Minute * time.Duration(remainingMinutes/remainingEmails)
+				minInterval := time.Second * time.Duration(account.MinWaitTime)
+				if idealInterval < minInterval {
+					idealInterval = minInterval
+				}
+				distributedTime := time.Now().Add(idealInterval)
+				if distributedTime.After(candidateTime) {
+					candidateTime = distributedTime
+				}
 			}
 		}
 	}
@@ -401,8 +403,8 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 
 		if candidateTime.Before(earliestNext) {
 			candidateTime = earliestNext
-			// Re-apply time window after adjusting for min wait
-			candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
+			// Re-snap into a sending window after adjusting for min wait.
+			candidateTime = nextScheduleSlot(candidateTime, windows, campaignTZ)
 		}
 	}
 
@@ -423,8 +425,9 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	// STEP 13: Apply human-like distribution (favor morning/afternoon peaks)
 	candidateTime = applyDistributionCurve(candidateTime, campaignTZ)
 
-	// STEP 14: Ensure still within campaign window after all adjustments
-	candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
+	// STEP 14: Ensure still within a sending window after all adjustments
+	// (jitter/conflict/distribution can push into a gap between intervals).
+	candidateTime = nextScheduleSlot(candidateTime, windows, campaignTZ)
 
 	return candidateTime, nextPair, account.ID, nil
 }
@@ -434,9 +437,7 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 // paths so a campaign reschedules instead of completing or busy-looping.
 func (s *schedulerService) deferToNextDay(campaign *models.Campaign) time.Time {
 	tz := loadLocation(campaign.Timezone)
-	t := time.Now().Add(24 * time.Hour)
-	t = findNextValidDay(t, uint8(campaign.Days), tz)
-	t = ensureTimeWindow(t, campaign.StartTime, campaign.EndTime, tz)
+	t := nextScheduleSlot(time.Now().Add(24*time.Hour), effectiveWindows(campaign), tz)
 	// Add a small jitter so deferred tasks don't all wake at the same instant.
 	return t.Add(time.Minute * time.Duration(randomJitter(0, 30)))
 }

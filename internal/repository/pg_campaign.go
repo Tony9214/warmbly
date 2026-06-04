@@ -101,7 +101,8 @@ const CAMPAIGN_SELECT = `id, name, description, status,
 		  sender_strategy, rotation_mode,
 		  ramp_enabled, ramp_start, ramp_increment, ramp_ceiling, ramp_level, ramp_level_date,
 		  esp_match_mode, max_new_leads_per_day, prioritize_new_leads,
-		  tracking_domain, tracking_domain_verified, tracking_domain_verified_at`
+		  tracking_domain, tracking_domain_verified, tracking_domain_verified_at,
+		  schedule_windows`
 
 func getCampaign(rows db.Scannable, campaign *models.Campaign, extra ...any) error {
 	var dest []any = []any{
@@ -116,6 +117,7 @@ func getCampaign(rows db.Scannable, campaign *models.Campaign, extra ...any) err
 		&campaign.RampEnabled, &campaign.RampStart, &campaign.RampIncrement, &campaign.RampCeiling, &campaign.RampLevel, &campaign.RampLevelDate,
 		&campaign.ESPMatchMode, &campaign.MaxNewLeadsPerDay, &campaign.PrioritizeNewLeads,
 		&campaign.TrackingDomain, &campaign.TrackingDomainVerified, &campaign.TrackingDomainVerifiedAt,
+		&campaign.ScheduleWindows,
 	}
 	dest = append(dest, extra...)
 	return rows.Scan(
@@ -135,6 +137,7 @@ const CAMPAIGN_SELECT_FULL = `
 	c.ramp_enabled, c.ramp_start, c.ramp_increment, c.ramp_ceiling, c.ramp_level, c.ramp_level_date,
 	c.esp_match_mode, c.max_new_leads_per_day, c.prioritize_new_leads,
 	c.tracking_domain, c.tracking_domain_verified, c.tracking_domain_verified_at,
+	c.schedule_windows,
 	COALESCE(array_agg(cet.tag_id) FILTER (WHERE cet.tag_id IS NOT NULL), '{}') AS email_tag_ids,
 	COALESCE(array_agg(cec.folder_id) FILTER (WHERE cec.folder_id IS NOT NULL), '{}') AS email_folder_ids
 `
@@ -435,7 +438,11 @@ func (r *campaignRepository) Create(ctx context.Context, userID string, orgID *u
 	// Explicit sender pool (feature 1). Only persisted when the caller passed a
 	// list; validation/ownership checks live in syncCampaignSendersTx.
 	if len(data.Senders) > 0 {
-		senders, xerr := syncCampaignSendersTx(ctx, tx, campaign.ID, userID, data.Senders)
+		orgStr := ""
+		if orgID != nil {
+			orgStr = orgID.String()
+		}
+		senders, xerr := syncCampaignSendersTx(ctx, tx, campaign.ID, userID, orgStr, data.Senders)
 		if xerr != nil {
 			return nil, xerr
 		}
@@ -852,6 +859,14 @@ func (r *campaignRepository) Update(ctx context.Context, userID, campaignID stri
 		args = append(args, *data.EndTime)
 		argPos++
 	}
+	if data.ScheduleWindows != nil {
+		if err := validate.CampaignScheduleWindows(data.ScheduleWindows); err != nil {
+			return nil, err
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", "schedule_windows", argPos))
+		args = append(args, *data.ScheduleWindows)
+		argPos++
+	}
 	if data.ContactOrderBy != nil {
 		validOrderBy := map[string]bool{
 			"created_at": true, "email": true, "name": true,
@@ -1062,6 +1077,7 @@ func (r *campaignRepository) GetByID(ctx context.Context, campaignID uuid.UUID) 
 		&campaign.RampEnabled, &campaign.RampStart, &campaign.RampIncrement, &campaign.RampCeiling, &campaign.RampLevel, &campaign.RampLevelDate,
 		&campaign.ESPMatchMode, &campaign.MaxNewLeadsPerDay, &campaign.PrioritizeNewLeads,
 		&campaign.TrackingDomain, &campaign.TrackingDomainVerified, &campaign.TrackingDomainVerifiedAt,
+		&campaign.ScheduleWindows,
 		&campaign.EmailTags, &campaign.Folders,
 	)
 	if err != nil {
@@ -1350,10 +1366,12 @@ func (r *campaignRepository) CountActiveCampaignsForAccount(ctx context.Context,
 
 // syncCampaignSendersTx replaces the explicit sender pool inside an existing tx.
 // It deletes the current rows and multi-inserts the new set, validating that
-// every account belongs to the campaign owner (userID). rotation_position and
-// last_sent_at are preserved for accounts that remain in the pool so a rewrite
-// of weights/enabled flags does not reset the round-robin/LRU cursors.
-func syncCampaignSendersTx(ctx context.Context, tx pgx.Tx, campaignID uuid.UUID, userID string, in []models.CampaignSenderInput) ([]models.CampaignSender, *errx.Error) {
+// every account is reachable in the campaign's context — by the campaign's
+// organization (orgID) for org-scoped campaigns, or by the owner (userID) for a
+// personal campaign with no org. rotation_position and last_sent_at are
+// preserved for accounts that remain in the pool so a rewrite of weights/enabled
+// flags does not reset the round-robin/LRU cursors.
+func syncCampaignSendersTx(ctx context.Context, tx pgx.Tx, campaignID uuid.UUID, userID, orgID string, in []models.CampaignSenderInput) ([]models.CampaignSender, *errx.Error) {
 	accountIDs := make([]uuid.UUID, 0, len(in))
 	weights := make(map[uuid.UUID]int, len(in))
 	enabledFor := make(map[uuid.UUID]bool, len(in))
@@ -1382,13 +1400,21 @@ func syncCampaignSendersTx(ctx context.Context, tx pgx.Tx, campaignID uuid.UUID,
 		enabledFor[s.EmailAccountID] = enabled
 	}
 
-	// Ownership check: every referenced mailbox must belong to the campaign owner.
+	// Ownership check: every referenced mailbox must be reachable in the
+	// campaign's context. Org-scoped campaigns (the org-gated senders route)
+	// validate against the organization, so any member with PermManageCampaigns
+	// can pick the org's mailboxes; a personal campaign with no org falls back to
+	// the owner's user_id. (ownerCol is a fixed literal, never user input.)
+	ownerCol, ownerVal := "user_id", userID
+	if orgID != "" {
+		ownerCol, ownerVal = "organization_id", orgID
+	}
 	var ownedCount int
 	if err := tx.QueryRow(ctx,
-		`SELECT COUNT(*) FROM email_accounts WHERE user_id = $1 AND id = ANY($2)`,
-		userID, accountIDs,
+		`SELECT COUNT(*) FROM email_accounts WHERE `+ownerCol+` = $1 AND id = ANY($2)`,
+		ownerVal, accountIDs,
 	).Scan(&ownedCount); err != nil {
-		db.CaptureError(err, "campaign_senders ownership", []any{userID}, "queryrow")
+		db.CaptureError(err, "campaign_senders ownership", []any{ownerVal}, "queryrow")
 		return nil, errx.InternalError()
 	}
 	if ownedCount != len(accountIDs) {
@@ -1475,14 +1501,20 @@ func (r *campaignRepository) ReplaceCampaignSenders(ctx context.Context, campaig
 		return nil, errx.New(errx.BadRequest, "explicit sender strategy requires at least one sender")
 	}
 
-	// Resolve the campaign owner so we can validate mailbox ownership.
+	// Resolve the campaign owner + organization so we can validate mailbox
+	// ownership against the org (the senders route is org-scoped).
 	var userID string
-	if err := r.DB.QueryRow(ctx, `SELECT user_id FROM campaigns WHERE id = $1`, campaignID).Scan(&userID); err != nil {
+	var orgID *uuid.UUID
+	if err := r.DB.QueryRow(ctx, `SELECT user_id, organization_id FROM campaigns WHERE id = $1`, campaignID).Scan(&userID, &orgID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errx.ErrNotFound
 		}
 		db.CaptureError(err, "campaign owner lookup", []any{campaignID}, "queryrow")
 		return nil, errx.InternalError()
+	}
+	orgStr := ""
+	if orgID != nil {
+		orgStr = orgID.String()
 	}
 
 	tx, err := r.DB.Begin(ctx)
@@ -1497,7 +1529,7 @@ func (r *campaignRepository) ReplaceCampaignSenders(ctx context.Context, campaig
 		}
 	}()
 
-	senders, xerr := syncCampaignSendersTx(ctx, tx, campaignID, userID, in)
+	senders, xerr := syncCampaignSendersTx(ctx, tx, campaignID, userID, orgStr, in)
 	if xerr != nil {
 		return nil, xerr
 	}

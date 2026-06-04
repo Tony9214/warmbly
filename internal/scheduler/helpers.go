@@ -63,6 +63,68 @@ func ensureTimeWindow(t time.Time, startTime, endTime string, tz *time.Location)
 	return t
 }
 
+// effectiveWindows returns the campaign's authoritative per-day sending
+// schedule. When ScheduleWindows is set it is used as-is; otherwise it is
+// DERIVED from the legacy days bitmask + start/end time (one interval per active
+// day) so campaigns created before the multi-window feature still schedule
+// correctly. The stored days bitmask is Monday-indexed (bit 0 = Monday, as the
+// bitmask package and dashboard write it), so it is mapped to time.Weekday
+// (Sun=0) via (bit+1)%7 — which also corrects the historical off-by-one in the
+// legacy day check.
+func effectiveWindows(c *models.Campaign) models.ScheduleWindows {
+	if !c.ScheduleWindows.IsEmpty() {
+		return c.ScheduleWindows
+	}
+	start := parseTimeOfDay(c.StartTime)
+	end := parseTimeOfDay(c.EndTime)
+	if end <= start {
+		// No usable legacy window → unconstrained (any time allowed).
+		return models.ScheduleWindows{}
+	}
+	var sw models.ScheduleWindows
+	for bit := 0; bit < 7; bit++ {
+		if c.Days == 0 || c.Days&(1<<uint(bit)) != 0 {
+			wd := (bit + 1) % 7 // Monday-indexed bit → time.Weekday
+			sw[wd] = []models.TimeInterval{{Start: start, End: end}}
+		}
+	}
+	return sw
+}
+
+// nextScheduleSlot returns the earliest time >= from that falls inside one of
+// the campaign's per-day sending windows, searching up to 8 days ahead. An
+// empty schedule means "unconstrained" and returns from unchanged. When from is
+// already inside a window its exact instant is preserved (so jitter/min-wait
+// adjustments survive); otherwise it advances to the next interval's start.
+func nextScheduleSlot(from time.Time, sw models.ScheduleWindows, tz *time.Location) time.Time {
+	if sw.IsEmpty() {
+		return from
+	}
+	cur := from.In(tz)
+	for i := 0; i < 8; i++ {
+		y, m, d := cur.Date()
+		nowMin := cur.Hour()*60 + cur.Minute()
+
+		ivs := append([]models.TimeInterval(nil), sw[int(cur.Weekday())]...)
+		sort.Slice(ivs, func(a, b int) bool { return ivs[a].Start < ivs[b].Start })
+
+		for _, iv := range ivs {
+			if nowMin < iv.Start {
+				return time.Date(y, m, d, iv.Start/60, iv.Start%60, 0, 0, tz)
+			}
+			if nowMin < iv.End {
+				if i == 0 {
+					return from // already inside a window — keep the exact instant
+				}
+				return cur
+			}
+		}
+		// No interval left today — jump to the start of the next day.
+		cur = time.Date(y, m, d, 0, 0, 0, 0, tz).Add(24 * time.Hour)
+	}
+	return from
+}
+
 // ensureBusinessHours ensures time is within business hours (8am-8pm)
 func ensureBusinessHours(t time.Time, timezone string) time.Time {
 	loc := loadLocation(timezone)
