@@ -31,11 +31,52 @@ export default interface Campaign {
     contact_order_dir: 'asc' | 'desc';
     contact_order_field?: string;
 
+    // ── Net-new send controls ────────────────────────────────────────────
+    // Sender selection: "tags" (default) resolves mailboxes from email_tags;
+    // "explicit" uses the campaign's sender pool (edited via the senders endpoint).
+    sender_strategy: 'tags' | 'explicit';
+    rotation_mode: 'weighted' | 'round_robin' | 'least_recently_used';
+    senders?: CampaignSender[];
+
+    // Per-campaign daily ramp-up. ramp_level/ramp_level_date are server-managed.
+    ramp_enabled: boolean;
+    ramp_start: number;
+    ramp_increment: number;
+    ramp_ceiling: number;
+    ramp_level: number;
+    ramp_level_date?: string | null;
+
+    // Match the sending mailbox provider to the recipient's provider.
+    esp_match_mode: 'off' | 'prefer' | 'strict';
+
+    // New-lead throttle. max_new_leads_per_day 0 = unlimited.
+    max_new_leads_per_day: number;
+    prioritize_new_leads: boolean;
+
+    // Campaign-scoped tracking-domain override (honored only when verified).
+    tracking_domain: string;
+    tracking_domain_verified: boolean;
+    tracking_domain_verified_at?: string | null;
+
     updated_at: Date;
     created_at: Date;
 
     // Extra
     analytics: null;
     sequences: Sequence[] | null;
+}
+
+export interface CampaignSender {
+    email_account_id: string;
+    weight: number;
+    last_sent_at?: string | null;
+    enabled: boolean;
+}
+
+// Write shape for PUT /campaigns/:id/senders (full-replace of the pool).
+export interface CampaignSenderInput {
+    email_account_id: string;
+    weight?: number;
+    enabled?: boolean;
 }
 
