@@ -48,6 +48,9 @@ type CampaignRollingRates struct {
 type ContactSequencePair struct {
 	ContactID  uuid.UUID
 	SequenceID uuid.UUID
+	// IsNewLead is true when this pair is the contact's first step (sequence
+	// position 1). Drives the per-day new-lead counter and cap.
+	IsNewLead bool
 }
 
 type CampaignSequencePair struct {
@@ -74,8 +77,10 @@ type CampaignProgressRepository interface {
 	CountEmailsSentTodayByOrganization(ctx context.Context, organizationID uuid.UUID) (int, error)
 	GetLatestCampaignSequenceForContact(ctx context.Context, contactID uuid.UUID) (*CampaignSequencePair, error)
 
-	// Find next email to send
-	FindNextContactSequence(ctx context.Context, campaignID uuid.UUID, orderBy, orderDir, orderField string) (*ContactSequencePair, error)
+	// Find next email to send. prioritizeNewLeads sorts position-1 (new lead)
+	// pairs first; excludeNewLeads drops position-1 pairs entirely (so the
+	// new-lead/day cap can be enforced while follow-ups keep flowing).
+	FindNextContactSequence(ctx context.Context, campaignID uuid.UUID, orderBy, orderDir, orderField string, prioritizeNewLeads, excludeNewLeads bool) (*ContactSequencePair, error)
 }
 
 type campaignProgressRepository struct {
@@ -360,7 +365,7 @@ func (r *campaignProgressRepository) GetLatestCampaignSequenceForContact(ctx con
 // orderBy: "created_at", "email", "name", "custom_field", "manual"
 // orderDir: "asc", "desc"
 // orderField: custom field name (used when orderBy is "custom_field")
-func (r *campaignProgressRepository) FindNextContactSequence(ctx context.Context, campaignID uuid.UUID, orderBy, orderDir, orderField string) (*ContactSequencePair, error) {
+func (r *campaignProgressRepository) FindNextContactSequence(ctx context.Context, campaignID uuid.UUID, orderBy, orderDir, orderField string, prioritizeNewLeads, excludeNewLeads bool) (*ContactSequencePair, error) {
 	// Build the ORDER BY clause based on ordering settings
 	var contactOrder string
 	switch orderBy {
@@ -386,18 +391,34 @@ func (r *campaignProgressRepository) FindNextContactSequence(ctx context.Context
 		dir = "DESC"
 	}
 
+	// When prioritizing new leads, sort position-1 pairs first; otherwise the
+	// existing contact/position/created_at order is preserved exactly.
+	orderPrefix := ""
+	if prioritizeNewLeads {
+		orderPrefix = "(s.position = 1) DESC, "
+	}
+
+	// When excluding new leads (the per-day cap is hit), drop position-1 pairs
+	// so only follow-ups remain eligible.
+	excludeClause := ""
+	if excludeNewLeads {
+		excludeClause = "AND s.position > 1"
+	}
+
 	query := `
 		WITH all_pairs AS (
 			-- Generate all possible contact-sequence combinations for this campaign
 			SELECT
 				cl.contact_id,
 				s.id as sequence_id,
-				ROW_NUMBER() OVER (ORDER BY ` + contactOrder + ` ` + dir + `, s.position, s.created_at) as pair_order
+				(s.position = 1) as is_new_lead,
+				ROW_NUMBER() OVER (ORDER BY ` + orderPrefix + contactOrder + ` ` + dir + `, s.position, s.created_at) as pair_order
 			FROM campaign_leads cl
 			JOIN contacts c ON c.id = cl.contact_id
 			CROSS JOIN sequences s
 			WHERE cl.campaign_id = $1
 			  AND s.campaign_id = $1
+			  ` + excludeClause + `
 			  -- Skip contacts that bounced in ANY campaign
 			  AND NOT EXISTS (
 			    SELECT 1 FROM campaign_contact_progress ccp2
@@ -420,7 +441,7 @@ func (r *campaignProgressRepository) FindNextContactSequence(ctx context.Context
 			WHERE campaign_id = $1
 			  AND sent_at IS NOT NULL
 		)
-		SELECT ap.contact_id, ap.sequence_id
+		SELECT ap.contact_id, ap.sequence_id, ap.is_new_lead
 		FROM all_pairs ap
 		LEFT JOIN sent_pairs sp ON ap.contact_id = sp.contact_id AND ap.sequence_id = sp.sequence_id
 		WHERE sp.contact_id IS NULL  -- Not yet sent
@@ -429,7 +450,7 @@ func (r *campaignProgressRepository) FindNextContactSequence(ctx context.Context
 	`
 
 	pair := &ContactSequencePair{}
-	err := r.db.QueryRow(ctx, query, campaignID).Scan(&pair.ContactID, &pair.SequenceID)
+	err := r.db.QueryRow(ctx, query, campaignID).Scan(&pair.ContactID, &pair.SequenceID, &pair.IsNewLead)
 
 	if err == sql.ErrNoRows {
 		return nil, nil // No more emails to send

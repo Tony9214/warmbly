@@ -39,6 +39,12 @@ type Contact struct {
 	IsCatchAll            bool       `json:"is_catch_all"`
 	VerificationCheckedAt *time.Time `json:"verification_checked_at,omitempty"`
 
+	// Recipient ESP/provider, derived in the control plane from the recipient
+	// domain (never an MX dial on the send hot path). '' | 'gmail' | 'outlook'
+	// | 'other'. Used by the campaign ESP-matching feature.
+	ESPProvider   string     `json:"esp_provider"`
+	ESPResolvedAt *time.Time `json:"esp_resolved_at,omitempty"`
+
 	UpdatedAt time.Time `json:"updated_at"`
 	CreatedAt time.Time `json:"created_at"`
 }

@@ -12,6 +12,16 @@ const (
 	WarmupMaxDefault      = 40
 	WarmupIncreaseDefault = 1
 
+	// Net-new campaign send controls. The ramp mirrors the warmup ramp shape
+	// (start, +increment/day, ceiling) but is applied only via min() against
+	// the per-mailbox cold cap, so it can only lower effective volume.
+	CampaignSenderWeightDefault  = 1
+	CampaignSenderWeightMax      = 100
+	CampaignRampStartDefault     = 10
+	CampaignRampIncrementDefault = 5
+	CampaignRampCeilingDefault   = 50
+	CampaignMaxNewLeadsMax       = 1000
+
 	MaxContactSize   = 10240
 	MaxEmailBodySize = 200 * 1024 // 200 KB
 	MaxEmailFolders  = 30

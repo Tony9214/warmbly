@@ -22,20 +22,73 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 		return time.Time{}, nil, uuid.Nil, ErrCampaignNotActive
 	}
 
-	// STEP 2: Get all email accounts assigned to this campaign (via tags)
-	accounts, err := s.emailRepo.GetByTags(ctx, campaign.UserID, campaign.EmailTags)
-	if err != nil {
-		return time.Time{}, nil, uuid.Nil, err
+	// STEP 1.5: Advance the per-campaign daily ramp level (idempotent, once per
+	// UTC day; no-op when ramp is disabled). Re-load so campaign.RampLevel
+	// reflects today's level before any capacity math. Failing open here keeps
+	// scheduling running (the worst case is today's ramp not advancing).
+	if campaign.RampEnabled {
+		if aerr := s.campaignRepo.AdvanceRampLevel(ctx, campaignID); aerr == nil {
+			if reloaded, rerr := s.campaignRepo.GetByID(ctx, campaignID); rerr == nil && reloaded != nil {
+				campaign = reloaded
+			}
+		}
+	}
+
+	// STEP 2: Resolve the campaign's sending mailboxes. Explicit strategy uses
+	// the campaign_senders pool (carrying per-sender rotation metadata); tags
+	// strategy keeps the existing tag-based resolution. An empty explicit pool
+	// falls back to tags so a misconfigured campaign still sends.
+	type senderMeta struct {
+		weight           int
+		rotationPosition int
+		lastSentAt       *time.Time
+		hasMeta          bool
+	}
+	accounts := []models.Email{}
+	senderMetaByID := map[uuid.UUID]senderMeta{}
+	if campaign.SenderStrategy == "explicit" {
+		senders, serr := s.emailRepo.GetByCampaignSenders(ctx, campaign.UserID, campaignID)
+		if serr != nil {
+			return time.Time{}, nil, uuid.Nil, serr
+		}
+		for _, snd := range senders {
+			accounts = append(accounts, snd.Account)
+			senderMetaByID[snd.Account.ID] = senderMeta{
+				weight:           snd.Weight,
+				rotationPosition: snd.RotationPosition,
+				lastSentAt:       snd.LastSentAt,
+				hasMeta:          true,
+			}
+		}
+	}
+	if len(accounts) == 0 {
+		tagAccounts, terr := s.emailRepo.GetByTags(ctx, campaign.UserID, campaign.EmailTags)
+		if terr != nil {
+			return time.Time{}, nil, uuid.Nil, terr
+		}
+		accounts = tagAccounts
+		senderMetaByID = map[uuid.UUID]senderMeta{}
 	}
 
 	if len(accounts) == 0 {
 		return time.Time{}, nil, uuid.Nil, ErrNoEmailAccounts
 	}
 
-	// STEP 3: Get campaign progress - find next contact/sequence to send
+	// STEP 3: Get campaign progress - find next contact/sequence to send.
+	// Honor the new-lead-per-day cap and the prioritize-new-leads ordering.
 	orderField := ""
 	if campaign.ContactOrderField != nil {
 		orderField = *campaign.ContactOrderField
+	}
+	excludeNewLeads := false
+	if campaign.MaxNewLeadsPerDay > 0 {
+		newLeadsToday, nlerr := s.campaignRepo.CountNewLeadsStartedToday(ctx, campaignID)
+		if nlerr != nil {
+			return time.Time{}, nil, uuid.Nil, nlerr
+		}
+		if newLeadsToday >= campaign.MaxNewLeadsPerDay {
+			excludeNewLeads = true
+		}
 	}
 	nextPair, err := s.campaignProgressRepo.FindNextContactSequence(
 		ctx,
@@ -43,13 +96,52 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 		campaign.ContactOrderBy,
 		campaign.ContactOrderDir,
 		orderField,
+		campaign.PrioritizeNewLeads,
+		excludeNewLeads,
 	)
 	if err != nil {
 		return time.Time{}, nil, uuid.Nil, err
 	}
 
 	if nextPair == nil {
+		// When the new-lead cap is active and only new-lead pairs remain,
+		// FindNextContactSequence returns nil with exclude on but WOULD return a
+		// pair without it. In that case defer to the next day so follow-ups keep
+		// progressing and new leads resume tomorrow — do NOT complete.
+		if excludeNewLeads {
+			if again, aerr := s.campaignProgressRepo.FindNextContactSequence(
+				ctx, campaignID, campaign.ContactOrderBy, campaign.ContactOrderDir, orderField,
+				campaign.PrioritizeNewLeads, false,
+			); aerr == nil && again != nil {
+				s.logCampaignDecision(ctx, campaignID, "new_lead_cap_reached",
+					"Daily new-lead cap reached; deferring remaining new leads to tomorrow",
+					map[string]interface{}{"max_new_leads_per_day": campaign.MaxNewLeadsPerDay})
+				deferTime := s.deferToNextDay(campaign)
+				// Return a DEFERRAL, never a sendable pair: the caller only checks
+				// err for deferrals, so a nil-error here would send a new lead and
+				// blow past the cap. nil pair + sentinel = reschedule, don't send.
+				return deferTime, nil, accounts[0].ID, ErrCampaignDeferred
+			}
+		}
 		return time.Time{}, nil, uuid.Nil, ErrCampaignCompleted
+	}
+
+	// STEP 3.5: Resolve the recipient ESP/provider for ESP matching. Cheap:
+	// prefer the cached contact.esp_provider, else derive from the domain
+	// string. NEVER dial MX on the hot path. Empty => unknown => wildcard.
+	recipientProvider := ""
+	if campaign.ESPMatchMode != "off" && s.contactRepo != nil {
+		if contact, cerr := s.contactRepo.GetByID(ctx, nextPair.ContactID); cerr == nil && contact != nil {
+			if contact.ESPProvider != "" {
+				recipientProvider = contact.ESPProvider
+			} else {
+				recipientProvider = providerForEmailDomain(contact.Email)
+				// Opportunistically cache the derived provider (best-effort).
+				if recipientProvider != "" {
+					_ = s.contactRepo.SetContactESP(ctx, contact.ID, recipientProvider)
+				}
+			}
+		}
 	}
 
 	// STEP 4: Calculate base time from sequence wait_after
@@ -94,6 +186,32 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	// STEP 7: Ensure within campaign time window (start_time to end_time)
 	candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
 
+	// effectiveCap is the per-mailbox cold cap for THIS campaign, after the ramp
+	// clamp. It is min(per-mailbox cold cap, campaign daily limit) further min()'d
+	// with the day's ramp ceiling. Applied via min() only — it can never RAISE a
+	// mailbox above its cold cap (the mailbox-first safety invariant).
+	effectiveCap := func(acct models.Email) int {
+		lim := min(acct.CampaignLimit, campaign.DailyLimit)
+		if campaign.RampEnabled {
+			lim = min(lim, campaignRampCeiling(true, campaign.RampStart, campaign.RampIncrement, campaign.RampCeiling, campaign.RampLevel))
+		}
+		return lim
+	}
+
+	// providerMatches reports whether a mailbox's provider satisfies the
+	// recipient ESP under the current match mode. smtp_imap is a wildcard
+	// (can carry any provider's recipients); an unknown recipient provider is
+	// also a wildcard so matching never blocks first contact.
+	providerMatches := func(acctProvider string) bool {
+		if campaign.ESPMatchMode == "off" || recipientProvider == "" {
+			return true
+		}
+		if acctProvider == "smtp_imap" {
+			return true
+		}
+		return acctProvider == recipientProvider
+	}
+
 	// STEP 8: Build weighted account candidates
 	// Skip accounts whose local time falls outside business hours (8am-8pm)
 	var candidates []AccountCandidate
@@ -103,7 +221,7 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 			return time.Time{}, nil, uuid.Nil, err
 		}
 
-		acctLimit := min(acct.CampaignLimit, campaign.DailyLimit)
+		acctLimit := effectiveCap(acct)
 		remaining := acctLimit - sentToday
 
 		// Skip accounts that have reached their daily limit
@@ -116,6 +234,8 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 		// cold volume (the concentration risk the safety policy warns about):
 		//   - quarantined/blocked (still within blocked_until) → don't send at all
 		//   - throttled → halve today's budget (and the wider min-gap still applies)
+		// This gate runs FIRST, before any rotation/ESP logic, so a degraded
+		// mailbox is always dropped regardless of weighting.
 		if state, blockedUntil, herr := s.warmupRepo.GetHealthState(ctx, acct.ID); herr == nil {
 			switch state {
 			case models.WarmupHealthQuarantined, models.WarmupHealthBlocked:
@@ -145,37 +265,104 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 			warmupAgeDays = int(time.Since(*acct.Warmup).Hours() / 24)
 		}
 
-		candidates = append(candidates, AccountCandidate{
+		cand := AccountCandidate{
 			Account:        acct,
 			RemainingToday: remaining,
 			WarmupAgeDays:  warmupAgeDays,
 			Weight:         computeWeight(remaining, warmupAgeDays),
-		})
+			ProviderMatch:  providerMatches(acct.Provider),
+		}
+		if meta, ok := senderMetaByID[acct.ID]; ok {
+			cand.HasSenderMetadata = true
+			cand.SenderWeight = meta.weight
+			cand.RotationPosition = meta.rotationPosition
+			cand.SenderLastSentAt = meta.lastSentAt
+		}
+		candidates = append(candidates, cand)
 	}
 
-	// STEP 8.5: Select best account via weighted random selection
-	selected := selectAccountWeighted(candidates)
+	// STEP 8.25: Apply ESP matching to the under-budget candidate set.
+	//   strict → only matching mailboxes are eligible; if none, DEFER (never
+	//            send cross-provider).
+	//   prefer → restrict to matching mailboxes when at least one has capacity,
+	//            otherwise fall back to the full eligible set (never starves).
+	if campaign.ESPMatchMode != "off" && recipientProvider != "" {
+		matching := make([]AccountCandidate, 0, len(candidates))
+		for _, c := range candidates {
+			if c.ProviderMatch {
+				matching = append(matching, c)
+			}
+		}
+		switch campaign.ESPMatchMode {
+		case "strict":
+			if len(matching) == 0 {
+				// No matching mailbox under budget today: defer to the next slot
+				// rather than complete or send cross-provider.
+				s.logCampaignDecision(ctx, campaignID, "provider_match_deferred",
+					"No same-provider mailbox available; deferring to next slot",
+					map[string]interface{}{"recipient_provider": recipientProvider})
+				// Deferral, not a send: nil pair + sentinel so the caller reschedules
+				// instead of sending this contact from a cross-provider mailbox.
+				return s.deferToNextDay(campaign), nil, accounts[0].ID, ErrCampaignDeferred
+			}
+			candidates = matching
+		case "prefer":
+			if len(matching) > 0 {
+				candidates = matching
+			}
+		}
+	}
+
+	// STEP 8.5: Select best account per the campaign's rotation mode.
+	selected := selectAccountByRotationMode(campaign.RotationMode, candidates)
 	if selected == nil {
-		// ALL accounts at capacity today — push to next day and pick highest-weight account (all reset tomorrow)
+		// ALL accounts at capacity today — push to next day and recompute with
+		// tomorrow's full (ramp-clamped) capacity. The ramp clamp AND the ESP
+		// filter MUST be re-applied here, or tomorrow's recompute over-budgets a
+		// mailbox past its ramp ceiling / picks a cross-provider sender.
 		candidateTime = candidateTime.Add(24 * time.Hour)
 		candidateTime = findNextValidDay(candidateTime, uint8(campaign.Days), campaignTZ)
 		candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
 
-		// Recompute with full capacity for tomorrow
-		var bestCandidate *AccountCandidate
+		var tomorrow []AccountCandidate
 		for i := range candidates {
-			warmupAgeDays := candidates[i].WarmupAgeDays
-			acctLimit := min(candidates[i].Account.CampaignLimit, campaign.DailyLimit)
-			candidates[i].RemainingToday = acctLimit
-			candidates[i].Weight = computeWeight(acctLimit, warmupAgeDays)
-			if bestCandidate == nil || candidates[i].Weight > bestCandidate.Weight {
-				bestCandidate = &candidates[i]
+			acct := candidates[i].Account
+			// ESP-strict: keep only matching mailboxes for tomorrow too.
+			if campaign.ESPMatchMode == "strict" && recipientProvider != "" && !candidates[i].ProviderMatch {
+				continue
+			}
+			acctLimit := effectiveCap(acct) // same ramp clamp as STEP 8
+			c := candidates[i]
+			c.RemainingToday = acctLimit
+			c.Weight = computeWeight(acctLimit, candidates[i].WarmupAgeDays)
+			tomorrow = append(tomorrow, c)
+		}
+		// ESP-prefer: restrict tomorrow to matching mailboxes when any exist.
+		if campaign.ESPMatchMode == "prefer" && recipientProvider != "" {
+			var matchingTomorrow []AccountCandidate
+			for _, c := range tomorrow {
+				if c.ProviderMatch {
+					matchingTomorrow = append(matchingTomorrow, c)
+				}
+			}
+			if len(matchingTomorrow) > 0 {
+				tomorrow = matchingTomorrow
 			}
 		}
-		if bestCandidate == nil {
+
+		selected = selectAccountByRotationMode(campaign.RotationMode, tomorrow)
+		if selected == nil {
+			// ESP-strict with no matching mailbox at all: defer rather than
+			// complete or send cross-provider.
+			if campaign.ESPMatchMode == "strict" && recipientProvider != "" {
+				s.logCampaignDecision(ctx, campaignID, "provider_match_deferred",
+					"No same-provider mailbox available tomorrow; deferring",
+					map[string]interface{}{"recipient_provider": recipientProvider})
+				// Deferral, not a send (see above).
+				return s.deferToNextDay(campaign), nil, accounts[0].ID, ErrCampaignDeferred
+			}
 			return time.Time{}, nil, uuid.Nil, ErrNoEmailAccounts
 		}
-		selected = bestCandidate
 	}
 
 	account := &selected.Account
@@ -240,4 +427,31 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	candidateTime = ensureTimeWindow(candidateTime, campaign.StartTime, campaign.EndTime, campaignTZ)
 
 	return candidateTime, nextPair, account.ID, nil
+}
+
+// deferToNextDay pushes a candidate time to the next valid campaign day within
+// the campaign's send window. Used by the ESP-strict and new-lead-cap deferral
+// paths so a campaign reschedules instead of completing or busy-looping.
+func (s *schedulerService) deferToNextDay(campaign *models.Campaign) time.Time {
+	tz := loadLocation(campaign.Timezone)
+	t := time.Now().Add(24 * time.Hour)
+	t = findNextValidDay(t, uint8(campaign.Days), tz)
+	t = ensureTimeWindow(t, campaign.StartTime, campaign.EndTime, tz)
+	// Add a small jitter so deferred tasks don't all wake at the same instant.
+	return t.Add(time.Minute * time.Duration(randomJitter(0, 30)))
+}
+
+// logCampaignDecision records a send-path decision (ESP defer, new-lead cap) to
+// the campaign activity log. Best-effort and nil-safe — a logging miss never
+// blocks scheduling.
+func (s *schedulerService) logCampaignDecision(ctx context.Context, campaignID uuid.UUID, eventType, message string, metadata map[string]interface{}) {
+	if s.campaignLogRepo == nil {
+		return
+	}
+	_ = s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+		CampaignID: campaignID,
+		EventType:  eventType,
+		Message:    message,
+		Metadata:   metadata,
+	})
 }

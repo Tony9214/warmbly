@@ -3,6 +3,8 @@ package campaign
 import (
 	"context"
 	"errors"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -159,13 +161,30 @@ func (s *campaignService) StartCampaign(ctx context.Context, orgID uuid.UUID, ca
 		return errx.InternalError()
 	}
 
-	// Validate active email accounts exist for the campaign's email tags
-	accounts, xerr := s.emailRepo.GetByTags(ctx, campaign.UserID, campaign.EmailTags)
-	if xerr != nil {
-		return xerr
-	}
-	if len(accounts) == 0 {
-		return errx.New(errx.BadRequest, "no active email accounts found for campaign's email tags")
+	// Validate active sending mailboxes exist. Explicit-strategy campaigns
+	// resolve through the campaign_senders pool; tag-strategy through tags.
+	if campaign.SenderStrategy == "explicit" {
+		senders, serr := s.campaignRepository.GetCampaignSenders(ctx, cID)
+		if serr != nil {
+			return errx.InternalError()
+		}
+		enabled := 0
+		for _, snd := range senders {
+			if snd.Enabled {
+				enabled++
+			}
+		}
+		if enabled == 0 {
+			return errx.New(errx.BadRequest, "no enabled senders configured for this campaign")
+		}
+	} else {
+		accounts, xerr := s.emailRepo.GetByTags(ctx, campaign.UserID, campaign.EmailTags)
+		if xerr != nil {
+			return xerr
+		}
+		if len(accounts) == 0 {
+			return errx.New(errx.BadRequest, "no active email accounts found for campaign's email tags")
+		}
 	}
 
 	activeCampaigns, err := s.campaignRepository.CountActiveForOrganization(ctx, orgID)
@@ -216,7 +235,10 @@ func (s *campaignService) enqueueCampaignWakeup(ctx context.Context, campaignID 
 	}
 
 	nextTime, _, accountID, err := s.scheduler.CalculateNextCampaignTime(ctx, campaignID)
-	if err != nil {
+	// A deferral still yields a usable first-send slot (nextTime) and a nominal
+	// pool mailbox (accountID), so fall through and schedule the first wakeup at
+	// the defer time rather than failing the campaign start.
+	if err != nil && !errors.Is(err, scheduler.ErrCampaignDeferred) {
 		switch {
 		case errors.Is(err, scheduler.ErrNoEmailAccounts):
 			_ = s.campaignRepository.UpdateStatusWithLock(ctx, campaignID, "paused_no_accounts")
@@ -365,4 +387,83 @@ func (s *campaignService) GetLogs(ctx context.Context, userID, campaignID string
 	}
 
 	return result, nil
+}
+
+// campaignForOrg loads a campaign and verifies it belongs to the given org.
+func (s *campaignService) campaignForOrg(ctx context.Context, orgID uuid.UUID, campaignID string) (*models.Campaign, uuid.UUID, *errx.Error) {
+	cID, parseErr := uuid.Parse(campaignID)
+	if parseErr != nil {
+		return nil, uuid.Nil, errx.ErrUuid
+	}
+	campaign, err := s.campaignRepository.GetByID(ctx, cID)
+	if err != nil {
+		if errors.Is(err, errx.ErrResourceNotFound) {
+			return nil, uuid.Nil, errx.ErrNotFound
+		}
+		return nil, uuid.Nil, errx.InternalError()
+	}
+	if campaign == nil || campaign.OrganizationID == nil || *campaign.OrganizationID != orgID {
+		return nil, uuid.Nil, errx.ErrNotFound
+	}
+	return campaign, cID, nil
+}
+
+// ListCampaignSenders returns the campaign's explicit sender pool.
+func (s *campaignService) ListCampaignSenders(ctx context.Context, orgID uuid.UUID, campaignID string) ([]models.CampaignSender, *errx.Error) {
+	_, cID, xerr := s.campaignForOrg(ctx, orgID, campaignID)
+	if xerr != nil {
+		return nil, xerr
+	}
+	senders, err := s.campaignRepository.GetCampaignSenders(ctx, cID)
+	if err != nil {
+		return nil, errx.InternalError()
+	}
+	return senders, nil
+}
+
+// ReplaceCampaignSenders atomically replaces the explicit sender pool.
+func (s *campaignService) ReplaceCampaignSenders(ctx context.Context, orgID uuid.UUID, campaignID string, in []models.CampaignSenderInput) ([]models.CampaignSender, *errx.Error) {
+	_, cID, xerr := s.campaignForOrg(ctx, orgID, campaignID)
+	if xerr != nil {
+		return nil, xerr
+	}
+	return s.campaignRepository.ReplaceCampaignSenders(ctx, cID, in)
+}
+
+// trackingDomainTarget is the shared host customers point their CNAME at. Kept
+// in sync with the mailbox tracking-domain resolver and the TRACKING_DOMAIN
+// default.
+const trackingDomainTarget = "t.warmbly.com"
+
+// VerifyCampaignTrackingDomain resolves the campaign-scoped tracking domain's
+// CNAME and flips verified on success. Only a verified override is honored at
+// send time, so an unresolved record stays "pending" rather than erroring.
+func (s *campaignService) VerifyCampaignTrackingDomain(ctx context.Context, orgID uuid.UUID, campaignID string) (*models.TrackingDomainStatus, *errx.Error) {
+	campaign, cID, xerr := s.campaignForOrg(ctx, orgID, campaignID)
+	if xerr != nil {
+		return nil, xerr
+	}
+
+	status := &models.TrackingDomainStatus{TrackingDomain: campaign.TrackingDomain}
+	if campaign.TrackingDomain == "" {
+		// No override configured — nothing to verify; ensure verified is cleared.
+		if err := s.campaignRepository.SetCampaignTrackingDomainVerified(ctx, cID, false, nil); err != nil {
+			return nil, errx.InternalError()
+		}
+		return status, nil
+	}
+
+	if cname, err := net.DefaultResolver.LookupCNAME(ctx, campaign.TrackingDomain); err == nil {
+		resolved := strings.TrimSuffix(strings.ToLower(cname), ".")
+		if strings.Contains(resolved, trackingDomainTarget) {
+			now := time.Now().UTC()
+			status.TrackingDomainVerified = true
+			status.TrackingDomainVerifiedAt = &now
+		}
+	}
+
+	if err := s.campaignRepository.SetCampaignTrackingDomainVerified(ctx, cID, status.TrackingDomainVerified, status.TrackingDomainVerifiedAt); err != nil {
+		return nil, errx.InternalError()
+	}
+	return status, nil
 }

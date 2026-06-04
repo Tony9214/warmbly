@@ -32,6 +32,10 @@ type ContactRepository interface {
 	// the batch scheduler can work them off a cap per tick.
 	UpdateContactVerification(ctx context.Context, contactID uuid.UUID, res emailverify.Result) *errx.Error
 	ListUnverifiedContacts(ctx context.Context, limit int) ([]models.Contact, *errx.Error)
+	// SetContactESP caches the recipient ESP/provider resolved from the contact's
+	// domain (control-plane only, no MX dial). Best-effort: a failure should not
+	// block sending.
+	SetContactESP(ctx context.Context, contactID uuid.UUID, provider string) error
 	GetByEmailsAndUser(ctx context.Context, userID uuid.UUID, emails []string) (map[string]models.Contact, *errx.Error)
 	Search(ctx context.Context, userID string, category, cursor *string, filters models.SearchContacts, limit int32) (*models.ContactsResult, *errx.Error)
 	ExportAll(ctx context.Context, userID string, filters *models.SearchContacts, contactIDs []string, max int) ([]models.Contact, *errx.Error)
@@ -340,7 +344,8 @@ func (r *contactRepository) GetByID(ctx context.Context, contactID uuid.UUID) (*
 		SELECT
 			c.id, c.first_name, c.last_name, c.email, c.company, c.phone,
 			c.custom_fields, c.subscribed, c.updated_at, c.created_at,
-			c.verification_status, c.verification_reason, c.is_catch_all, c.verification_checked_at
+			c.verification_status, c.verification_reason, c.is_catch_all, c.verification_checked_at,
+			c.esp_provider, c.esp_resolved_at
 		FROM contacts c
 		WHERE c.id = $1
 	`
@@ -351,6 +356,7 @@ func (r *contactRepository) GetByID(ctx context.Context, contactID uuid.UUID) (*
 		&contact.Company, &contact.Phone, &contact.CustomFields, &contact.Subscribed,
 		&contact.UpdatedAt, &contact.CreatedAt,
 		&contact.VerificationStatus, &contact.VerificationReason, &contact.IsCatchAll, &contact.VerificationCheckedAt,
+		&contact.ESPProvider, &contact.ESPResolvedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -363,6 +369,19 @@ func (r *contactRepository) GetByID(ctx context.Context, contactID uuid.UUID) (*
 	contact.Campaigns = []models.MiniCampaign{}
 	contact.Categories = []models.MiniCategory{}
 	return &contact, nil
+}
+
+// SetContactESP caches the recipient ESP/provider on the contact row. It is a
+// single keyed UPDATE and intentionally tolerant: callers treat any error as a
+// best-effort cache miss and fall back to deriving the provider on the fly.
+func (r *contactRepository) SetContactESP(ctx context.Context, contactID uuid.UUID, provider string) error {
+	query := `
+		UPDATE contacts
+		SET esp_provider = $2, esp_resolved_at = NOW()
+		WHERE id = $1
+	`
+	_, err := r.DB.Exec(ctx, query, contactID, provider)
+	return err
 }
 
 // UpdateContactVerification stores the outcome of a verification pass on the
