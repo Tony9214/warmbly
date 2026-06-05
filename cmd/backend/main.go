@@ -28,6 +28,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/campaign"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/contact"
+	"github.com/warmbly/warmbly/internal/app/credits"
 	"github.com/warmbly/warmbly/internal/app/crm"
 	"github.com/warmbly/warmbly/internal/app/dailythrottle"
 	"github.com/warmbly/warmbly/internal/app/dangerzone"
@@ -124,6 +125,9 @@ func main() {
 	var advancedService advanced.Service
 	var warmupContentRepo repository.WarmupContentRepository
 	var warmupContentService warmupcontent.Service
+	var creditRepository repository.CreditRepository
+	var creditService credits.CreditService
+	var writingGenerator generation.WritingGenerator
 	var emailVerifyService emailverifyapp.Service
 	var placementRepository repository.PlacementRepository
 	var placementService placement.Service
@@ -185,6 +189,7 @@ func main() {
 	var webhookServiceForHandler webhook.Service
 	var integrationServiceForHandler integration.Service
 	var contactRepoForHandler repository.ContactRepository
+	var attachmentRepoForHandler repository.AttachmentRepository
 	var leadSyncServiceForHandler leadsync.Service
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -447,6 +452,7 @@ func main() {
 		campaignRepostory := repository.NewCampaignRepostory(primaryDB)
 		sequenceRepostory := repository.NewSequenceRepostory(primaryDB)
 		contactRepostory := repository.NewContactRepostory(primaryDB)
+		attachmentRepoForHandler = repository.NewAttachmentRepository(primaryDB)
 		uniboxRepository := repository.NewUniboxRepository(primaryDB)
 		encryptedKeys, err = encryptedkeys.FromEnv(
 			encryptedkeys.Deps{DB: primaryDB},
@@ -497,6 +503,18 @@ func main() {
 			generationClient = generation.NewClient(openaiKey)
 		}
 		warmupContentService = warmupcontent.NewService(warmupContentRepo, generationClient)
+
+		// AI writing assistant: prefer Anthropic (claude-haiku free / sonnet paid);
+		// fall back to the existing OpenAI client when ANTHROPIC_API_KEY is unset.
+		// If neither is configured, writingGenerator stays nil and the endpoint
+		// returns 503 "not configured".
+		if anthropicKey := cfg.GetSecretOptional(ctx, "ANTHROPIC_API_KEY", "anthropic_api_key", ""); anthropicKey != "" {
+			writingGenerator = generation.NewAnthropicClient(anthropicKey)
+		} else if generationClient != nil {
+			writingGenerator = generationClient
+		}
+		creditRepository = repository.NewCreditRepository(primaryDB)
+		creditService = credits.NewService(creditRepository, cache)
 		webhookRepository := repository.NewWebhookRepository(primaryDB.Pool)
 		webhookService := webhook.NewService(webhookRepository)
 		webhookServiceForHandler = webhookService
@@ -839,6 +857,7 @@ func main() {
 			contactRepostory,
 			campaignLogRepository,
 			advancedService,
+			attachmentRepoForHandler,
 		)
 
 		// Admin outreach composer — sends from the platform mailer
@@ -997,6 +1016,10 @@ func main() {
 		WarmupContentRepo:    warmupContentRepo,
 		WarmupContentService: warmupContentService,
 
+		// AI writing assistant + credit ledger
+		CreditService:    creditService,
+		WritingGenerator: writingGenerator,
+
 		// Pre-send email verification
 		EmailVerifyService: emailVerifyService,
 
@@ -1020,6 +1043,7 @@ func main() {
 		EmailMessageMap:          emailMessageMapForHandler,
 		UserRepo:                 userRepoForHandler,
 		OrgRepo:                  organizationRepoForHandler,
+		AttachmentRepo:           attachmentRepoForHandler,
 		StorageBackendRepo:       storageBackendRepo,
 		CloudCredentialRepo:      cloudCredentialRepo,
 		ProvisioningTemplateRepo: provisioningTemplateRepo,

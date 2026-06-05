@@ -10,6 +10,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/auth"
 	"github.com/warmbly/warmbly/internal/app/campaign"
 	"github.com/warmbly/warmbly/internal/app/contact"
+	"github.com/warmbly/warmbly/internal/app/credits"
 	"github.com/warmbly/warmbly/internal/app/crm"
 	"github.com/warmbly/warmbly/internal/app/dangerzone"
 	"github.com/warmbly/warmbly/internal/app/discount"
@@ -40,6 +41,8 @@ import (
 	"github.com/warmbly/warmbly/internal/app/webhook"
 	"github.com/warmbly/warmbly/internal/app/worker"
 	"github.com/warmbly/warmbly/internal/app/worker_orchestrator"
+	"github.com/warmbly/warmbly/internal/pkg/generation"
+
 	"github.com/warmbly/warmbly/internal/infrastructure/encryptedkeys"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/notify"
@@ -123,6 +126,10 @@ type Handler struct {
 	WarmupContentRepo    repository.WarmupContentRepository
 	WarmupContentService warmupcontent.Service
 
+	// AI writing assistant + credit ledger.
+	CreditService    credits.CreditService
+	WritingGenerator generation.WritingGenerator
+
 	// Seed inbox-placement testing.
 	PlacementRepo    repository.PlacementRepository
 	PlacementService placement.Service
@@ -161,6 +168,7 @@ type Handler struct {
 	// only when business logic accumulates.
 	UserRepo                 repository.UserRepository
 	OrgRepo                  repository.OrganizationRepository
+	AttachmentRepo           repository.AttachmentRepository
 	StorageBackendRepo       repository.StorageBackendRepository
 	CloudCredentialRepo      repository.CloudCredentialRepository
 	ProvisioningTemplateRepo repository.ProvisioningTemplateRepository

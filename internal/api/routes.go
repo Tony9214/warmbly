@@ -256,6 +256,9 @@ func Run(
 			campaigns.POST("/:id/ab-variants", m.RequireOrganization(), m.RequireAccess(models.PermManageSettings, models.APIPermWriteCampaigns), h.CreateCampaignABVariant)
 			campaigns.PATCH("/:id/ab-variants/:variantId", m.RequireOrganization(), m.RequireAccess(models.PermManageSettings, models.APIPermWriteCampaigns), h.UpdateCampaignABVariant)
 			campaigns.DELETE("/:id/ab-variants/:variantId", m.RequireOrganization(), m.RequireAccess(models.PermManageSettings, models.APIPermWriteCampaigns), h.DeleteCampaignABVariant)
+			campaigns.GET("/:id/attachments", m.RequireOrganization(), m.RequireAccess(models.PermViewCampaigns, models.APIPermReadCampaigns), h.ListCampaignAttachments)
+			campaigns.POST("/:id/attachments", m.RequireOrganization(), m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns), h.UploadCampaignAttachment)
+			campaigns.DELETE("/:id/attachments/:attachmentId", m.RequireOrganization(), m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns), h.DeleteCampaignAttachment)
 			campaigns.POST("/:id/preflight", m.RequireOrganization(), m.RequireAccess(models.PermSendCampaigns, models.APIPermSendCampaigns), h.RunCampaignPreflight)
 			campaigns.GET("/:id/ab-analysis", m.RequireOrganization(), m.RequireAccess(models.PermViewAnalytics, models.APIPermReadAnalytics), h.GetCampaignABAnalysis)
 			campaigns.POST("/:id/test-email", m.RequireOrganization(), m.RequireAccess(models.PermSendCampaigns, models.APIPermSendCampaigns), h.SendTestEmail)
@@ -279,6 +282,12 @@ func Run(
 				sequences.PATCH("/:sid", m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns), h.UpdateSequence)
 				sequences.DELETE("/:sid", m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns), h.DeleteSequence)
 			}
+		}
+
+		generation := protected.Group("/generation")
+		generation.Use(m.RateLimitMiddleware(models.RateLimitWrite))
+		{
+			generation.POST("/write", m.RequireOrganization(), m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns), h.GenerateWriting)
 		}
 
 		contacts := protected.Group("/contacts")
