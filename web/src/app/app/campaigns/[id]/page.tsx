@@ -150,7 +150,7 @@ export default function CampaignOverview() {
                     )}
 
                     <div className="rounded-md border border-slate-200 overflow-hidden bg-white">
-                        <SectionBar label="Sequence performance" count={sequences.length || undefined} />
+                        <SectionBar label="Step performance" count={sequences.length || undefined} />
                         {loading ? (
                             <div className="divide-y divide-slate-200/60">
                                 {[...Array(2)].map((_, i) => (
@@ -163,7 +163,7 @@ export default function CampaignOverview() {
                             </div>
                         ) : sequences.length === 0 ? (
                             <div className="px-5 py-10 text-center">
-                                <p className="text-[12.5px] text-slate-700 font-medium mb-1">No sequence data yet</p>
+                                <p className="text-[12.5px] text-slate-700 font-medium mb-1">No step data yet</p>
                                 <p className="text-[11.5px] text-slate-400 max-w-[34ch] mx-auto leading-relaxed">
                                     Once steps start sending, per-step opens, clicks, and replies show up here.
                                 </p>

@@ -85,12 +85,14 @@ export default function RichTextEditor({
     return (
         <div className="rounded-md border border-slate-200 bg-white focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100 transition-colors">
             <Toolbar editor={editor} variables={variables} />
-            <EditorContent editor={editor} />
-            {placeholder && editor.isEmpty && (
-                <p className="pointer-events-none -mt-[252px] px-3 text-[13px] text-slate-300 select-none">
-                    {placeholder}
-                </p>
-            )}
+            <div className="relative">
+                <EditorContent editor={editor} />
+                {placeholder && editor.isEmpty && (
+                    <p className="pointer-events-none absolute left-3 top-2.5 text-[13px] text-slate-300 select-none">
+                        {placeholder}
+                    </p>
+                )}
+            </div>
         </div>
     );
 }
