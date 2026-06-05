@@ -60,7 +60,10 @@ export default function AnalyticsShareButton({
         let raf2 = 0;
         const raf1 = requestAnimationFrame(() => {
             raf2 = requestAnimationFrame(async () => {
-                const out = await renderPng(ref.current, { pixelRatio: aspect === "1:1" ? 3 : 2 });
+                const out = await renderPng(ref.current, {
+                    pixelRatio: aspect === "1:1" ? 3 : 2,
+                    backgroundColor: "#18abed",
+                });
                 if (alive) setUrl(out);
             });
         });
@@ -180,7 +183,7 @@ export default function AnalyticsShareButton({
                                         <img
                                             src={url}
                                             alt="Analytics share preview"
-                                            className="w-full h-full object-contain"
+                                            className="block w-full h-full object-fill"
                                         />
                                     ) : (
                                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400">

@@ -199,7 +199,7 @@ const StatsShareCard = React.forwardRef<HTMLDivElement, { data: ShareCardData; a
         return (
             <div
                 ref={ref}
-                style={{ width, height, background: SKY_BASE, position: "relative", overflow: "hidden", borderRadius: 24 }}
+                style={{ width, height, background: SKY_BASE, position: "relative", overflow: "hidden", borderRadius: 0 }}
             >
                 <SkyBackdrop />
 

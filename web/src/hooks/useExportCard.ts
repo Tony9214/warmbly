@@ -25,7 +25,7 @@ export default function useExportCard() {
     const renderPng = useCallback(
         async (
             node: HTMLElement | null,
-            options?: { pixelRatio?: number },
+            options?: { pixelRatio?: number; backgroundColor?: string },
         ): Promise<string | null> => {
             if (!node) return null;
             setExporting(true);
@@ -35,9 +35,16 @@ export default function useExportCard() {
                 } catch {
                     /* fonts.ready is best-effort */
                 }
+                const rect = node.getBoundingClientRect();
+                const width = Math.round(rect.width || node.offsetWidth);
+                const height = Math.round(rect.height || node.offsetHeight);
                 const opts = {
                     pixelRatio: options?.pixelRatio ?? 3,
-                    backgroundColor: "#ffffff",
+                    width,
+                    height,
+                    canvasWidth: width,
+                    canvasHeight: height,
+                    backgroundColor: options?.backgroundColor,
                     cacheBust: true,
                 };
                 await toPng(node, opts); // prime font/embed cache
