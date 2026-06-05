@@ -407,6 +407,28 @@ func (s *campaignService) ReplaceCampaignSenders(ctx context.Context, orgID uuid
 	return s.campaignRepository.ReplaceCampaignSenders(ctx, cID, in)
 }
 
+// ListCampaignLeadOrder returns the campaign's enrolled contacts in send order.
+func (s *campaignService) ListCampaignLeadOrder(ctx context.Context, orgID uuid.UUID, campaignID string, limit int) ([]models.CampaignLead, *errx.Error) {
+	_, cID, xerr := s.campaignForOrg(ctx, orgID, campaignID)
+	if xerr != nil {
+		return nil, xerr
+	}
+	return s.campaignRepository.ListCampaignLeads(ctx, cID, limit)
+}
+
+// ReplaceCampaignLeadOrder persists a manual send order and returns the updated
+// ordered list.
+func (s *campaignService) ReplaceCampaignLeadOrder(ctx context.Context, orgID uuid.UUID, campaignID string, contactIDs []uuid.UUID) ([]models.CampaignLead, *errx.Error) {
+	_, cID, xerr := s.campaignForOrg(ctx, orgID, campaignID)
+	if xerr != nil {
+		return nil, xerr
+	}
+	if xerr := s.campaignRepository.SetCampaignLeadOrder(ctx, cID, contactIDs); xerr != nil {
+		return nil, xerr
+	}
+	return s.campaignRepository.ListCampaignLeads(ctx, cID, 500)
+}
+
 // trackingDomainTarget is the shared host customers point their CNAME at. Kept
 // in sync with the mailbox tracking-domain resolver and the TRACKING_DOMAIN
 // default.
