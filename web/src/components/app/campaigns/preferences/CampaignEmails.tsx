@@ -5,6 +5,7 @@
 // icon and anchor. On-theme: slate/sky, rounded-md, 12.5px base, NumberInput
 // for every number.
 
+import { useState } from "react";
 import { AlertCircleIcon } from "lucide-react";
 import type Campaign from "@/lib/api/models/app/campaigns/Campaign";
 import { Label, NumberInput } from "@/components/ui/field";
@@ -13,7 +14,64 @@ import EspCoveragePanel from "./EspCoveragePanel";
 
 type SetCampaign = React.Dispatch<React.SetStateAction<Campaign>>;
 
-/** Rotation — distribution mode + per-mailbox daily ramp-up. */
+/** RampPreview — a small day-by-day projection of the per-mailbox ramp curve
+ *  (Day 1 = start, +increment each day, capped at the ceiling). Highlights the
+ *  bar nearest today's live cap (ramp_level). */
+function RampPreview({
+    start,
+    increment,
+    ceiling,
+    level,
+}: {
+    start: number;
+    increment: number;
+    ceiling: number;
+    level: number;
+}) {
+    if (start <= 0 || ceiling <= 0 || start > ceiling) return null;
+    const days: number[] = [];
+    let v = start;
+    let guard = 0;
+    while (guard < 60) {
+        const capped = Math.min(v, ceiling);
+        days.push(capped);
+        if (capped >= ceiling) break;
+        v += Math.max(1, increment);
+        guard++;
+    }
+    const MAX_BARS = 14;
+    const shown = days.slice(0, MAX_BARS);
+    const more = days.length - shown.length;
+    const todayIdx = days.findIndex((d) => d >= level);
+
+    return (
+        <div>
+            <div className="flex items-end gap-1 h-14">
+                {shown.map((val, i) => {
+                    const today = i === todayIdx;
+                    return (
+                        <div
+                            key={i}
+                            title={`Day ${i + 1}: ${val}/day`}
+                            className={`flex-1 min-w-[4px] rounded-t-sm ${today ? "bg-sky-500" : "bg-sky-200"}`}
+                            style={{ height: `${Math.max(10, (val / ceiling) * 100)}%` }}
+                        />
+                    );
+                })}
+            </div>
+            <div className="flex items-center justify-between mt-1.5 text-[10px] text-slate-400">
+                <span>
+                    Day 1 · {start}/day
+                </span>
+                <span>
+                    {more > 0 ? `+${more} more · ` : ""}Day {days.length} · {ceiling}/day, then steady
+                </span>
+            </div>
+        </div>
+    );
+}
+
+/** Inbox rotation — distribution mode + per-mailbox daily ramp-up. */
 export function RotationRampSection({
     newCampaign,
     setNewCampaign,
@@ -24,32 +82,48 @@ export function RotationRampSection({
     const rampInvalid = newCampaign.ramp_enabled && newCampaign.ramp_start > newCampaign.ramp_ceiling;
     return (
         <div className="space-y-5">
-            <SettingRow
-                title="Rotation"
-                description="How sends are distributed across the resolved mailboxes."
-                stack
-                control={
-                    <OptionSelect
-                        aria-label="Rotation mode"
-                        cols={3}
-                        value={newCampaign.rotation_mode}
-                        onChange={(v) => setNewCampaign((bef) => ({ ...bef, rotation_mode: v }))}
-                        options={[
-                            { value: "weighted", label: "Weighted", hint: "Favor mailboxes with more headroom" },
-                            { value: "round_robin", label: "Round-robin", hint: "Cycle evenly through every mailbox" },
-                            {
-                                value: "least_recently_used",
-                                label: "Least-recently-used",
-                                hint: "Pick the mailbox idle the longest",
-                            },
-                        ]}
-                    />
-                }
-            />
+            {/* Inbox rotation */}
+            <div>
+                <SettingRow
+                    title="Inbox rotation"
+                    description="Send this campaign from several mailboxes so no single inbox sends too much — better deliverability and more total volume."
+                    stack
+                    control={
+                        <OptionSelect
+                            aria-label="Inbox rotation"
+                            cols={1}
+                            value={newCampaign.rotation_mode}
+                            onChange={(v) => setNewCampaign((bef) => ({ ...bef, rotation_mode: v }))}
+                            options={[
+                                {
+                                    value: "least_recently_used",
+                                    label: "Even spacing",
+                                    hint: "Recommended — always picks the mailbox that's been idle longest, for the most natural send pattern.",
+                                },
+                                {
+                                    value: "round_robin",
+                                    label: "Round-robin",
+                                    hint: "Cycles through your mailboxes in order (A → B → C → A). A simple, even split.",
+                                },
+                                {
+                                    value: "weighted",
+                                    label: "Weighted",
+                                    hint: "Sends more from your healthiest, higher-limit mailboxes.",
+                                },
+                            ]}
+                        />
+                    }
+                />
+                <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                    Each mailbox stays within its own daily limit, and follow-ups always come from the mailbox that
+                    sent the first email — so every thread stays consistent.
+                </p>
+            </div>
 
+            {/* Daily ramp-up */}
             <SettingRow
                 title="Daily ramp-up"
-                description="Gradually raise the per-mailbox send volume each day instead of starting at full limit."
+                description="Gradually raise each mailbox's daily volume instead of starting at full limit — a smooth growth curve protects deliverability. (Separate from warmup.)"
                 control={
                     <Toggle
                         id="campaign-pref-ramp"
@@ -73,13 +147,13 @@ export function RotationRampSection({
                             />
                         </div>
                         <div>
-                            <Label>Increment</Label>
+                            <Label>Increase by</Label>
                             <NumberInput
                                 value={newCampaign.ramp_increment}
                                 min={1}
                                 max={100}
                                 onChange={(v) => setNewCampaign((bef) => ({ ...bef, ramp_increment: v }))}
-                                suffix="+ / day"
+                                suffix="/ day"
                                 className="w-36"
                             />
                         </div>
@@ -99,11 +173,18 @@ export function RotationRampSection({
                             <span className="font-mono tabular-nums">{newCampaign.ramp_level}</span>
                         </span>
                     </div>
-                    {rampInvalid && (
+                    {rampInvalid ? (
                         <p className="flex items-center gap-1.5 text-[11px] text-rose-500">
                             <AlertCircleIcon className="w-3.5 h-3.5 shrink-0" />
                             Start must be less than or equal to the ceiling.
                         </p>
+                    ) : (
+                        <RampPreview
+                            start={newCampaign.ramp_start}
+                            increment={newCampaign.ramp_increment}
+                            ceiling={newCampaign.ramp_ceiling}
+                            level={newCampaign.ramp_level}
+                        />
                     )}
                 </div>
             )}
@@ -161,19 +242,19 @@ export function LeadFlowSection({
     return (
         <div className="space-y-5">
             <div>
-                <Label>New leads per day</Label>
+                <Label>New leads contacted per day</Label>
                 <NumberInput
                     value={newCampaign.max_new_leads_per_day}
                     min={0}
                     max={10000}
                     onChange={(v) => setNewCampaign((bef) => ({ ...bef, max_new_leads_per_day: v }))}
-                    suffix="leads / day"
+                    suffix={newCampaign.max_new_leads_per_day === 0 ? "= no limit" : "leads / day"}
                     className="w-48"
                 />
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                    {newCampaign.max_new_leads_per_day === 0
-                        ? "0 = unlimited new leads per day."
-                        : "Caps how many fresh leads enter the campaign each day."}
+                <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                    Limits how many brand-new leads get their <span className="text-slate-500">very first</span>{" "}
+                    email from this campaign each day, so a fresh list goes out as a steady trickle instead of one
+                    big blast. Follow-ups to people already in the campaign still send and don't count against this.
                 </p>
             </div>
             <SettingRow
@@ -202,8 +283,10 @@ export function LeadFlowSection({
     );
 }
 
-/** CC & BCC — extra recipients copied on every send. (Tracking domain is a
- *  per-mailbox setting and lives on the mailbox, not the campaign.) */
+/** CC & BCC — extra recipients copied on every send. Gmail-style: the fields
+ *  stay hidden behind "Add CC / Add BCC" until needed, so the section is calm
+ *  by default. (Tracking domain is a per-mailbox setting and lives on the
+ *  mailbox, not the campaign.) */
 export function CcBccSection({
     newCampaign,
     setNewCampaign,
@@ -211,28 +294,81 @@ export function CcBccSection({
     newCampaign: Campaign;
     setNewCampaign: SetCampaign;
 }) {
+    const [showCc, setShowCc] = useState(newCampaign.cc.length > 0);
+    const [showBcc, setShowBcc] = useState(newCampaign.bcc.length > 0);
+
+    const addBtn =
+        "inline-flex items-center h-7 px-2.5 rounded-md border border-dashed border-slate-300 text-slate-500 hover:border-slate-400 hover:text-slate-700 text-[12px] font-medium transition-colors";
+
     return (
-        <div className="space-y-6">
-            <div>
-                <Label>CC recipients</Label>
-                <EmailListInput
-                    values={newCampaign.cc}
-                    onChange={(v) => setNewCampaign((bef) => ({ ...bef, cc: v }))}
-                />
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                    A copy of each email goes to these addresses (visible to recipients).
-                </p>
-            </div>
-            <div>
-                <Label>BCC recipients</Label>
-                <EmailListInput
-                    values={newCampaign.bcc}
-                    onChange={(v) => setNewCampaign((bef) => ({ ...bef, bcc: v }))}
-                />
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                    A blind copy goes to these addresses (hidden from recipients).
-                </p>
-            </div>
+        <div className="space-y-4">
+            {showCc && (
+                <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                        <Label className="mb-0">CC</Label>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowCc(false);
+                                setNewCampaign((bef) => ({ ...bef, cc: [] }));
+                            }}
+                            className="text-[11px] text-slate-400 hover:text-rose-500 transition-colors"
+                        >
+                            Remove
+                        </button>
+                    </div>
+                    <EmailListInput
+                        values={newCampaign.cc}
+                        onChange={(v) => setNewCampaign((bef) => ({ ...bef, cc: v }))}
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1.5">
+                        Visible to recipients. Paste or type several — separate with a comma, space, or Enter.
+                    </p>
+                </div>
+            )}
+
+            {showBcc && (
+                <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                        <Label className="mb-0">BCC</Label>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowBcc(false);
+                                setNewCampaign((bef) => ({ ...bef, bcc: [] }));
+                            }}
+                            className="text-[11px] text-slate-400 hover:text-rose-500 transition-colors"
+                        >
+                            Remove
+                        </button>
+                    </div>
+                    <EmailListInput
+                        values={newCampaign.bcc}
+                        onChange={(v) => setNewCampaign((bef) => ({ ...bef, bcc: v }))}
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1.5">Hidden from recipients.</p>
+                </div>
+            )}
+
+            {(!showCc || !showBcc) && (
+                <div className="flex flex-wrap items-center gap-2">
+                    {!showCc && (
+                        <button type="button" onClick={() => setShowCc(true)} className={addBtn}>
+                            + Add CC
+                        </button>
+                    )}
+                    {!showBcc && (
+                        <button type="button" onClick={() => setShowBcc(true)} className={addBtn}>
+                            + Add BCC
+                        </button>
+                    )}
+                    {!showCc && !showBcc && (
+                        <span className="text-[11px] text-slate-400">
+                            Optionally copy extra addresses on every email this campaign sends.
+                        </span>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

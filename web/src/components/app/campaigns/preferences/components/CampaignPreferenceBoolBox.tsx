@@ -236,10 +236,12 @@ export function OptionSelect<T extends string>({
  * address and press Enter/Tab/comma to add; backspace on an empty field
  * removes the last chip.
  */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function EmailListInput({
     values,
     onChange,
-    placeholder = "name@example.com — Enter to add",
+    placeholder = "name@example.com",
 }: {
     values: string[];
     onChange: (values: string[]) => void;
@@ -247,38 +249,65 @@ export function EmailListInput({
 }) {
     const [draft, setDraft] = React.useState("");
 
+    // Split on whitespace/comma/semicolon so a pasted or typed list of addresses
+    // becomes individual chips, de-duplicated against what's already there.
+    const addTokens = (text: string) => {
+        const tokens = text
+            .split(/[\s,;]+/)
+            .map((t) => t.trim())
+            .filter(Boolean);
+        if (tokens.length === 0) return;
+        const next = [...values];
+        for (const t of tokens) if (!next.includes(t)) next.push(t);
+        onChange(next);
+    };
+
     const commit = () => {
-        const v = draft.trim().replace(/,$/, "").trim();
-        if (!v) return;
-        if (!values.includes(v)) onChange([...values, v]);
+        if (!draft.trim()) return;
+        addTokens(draft);
         setDraft("");
     };
 
     return (
         <div className="rounded-md border border-slate-200 bg-white min-h-[34px] px-2 py-1.5 flex flex-wrap items-center gap-1 focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100 transition-colors">
-            {values.map((v, i) => (
-                <span
-                    key={`${v}-${i}`}
-                    className="inline-flex items-center gap-1 h-5 pl-1.5 pr-1 rounded bg-sky-50 text-sky-700 text-[11px] font-medium max-w-[calc(100%-4rem)]"
-                >
-                    <span className="truncate">{v}</span>
-                    <button
-                        type="button"
-                        onClick={() => onChange(values.filter((_, idx) => idx !== i))}
-                        aria-label={`Remove ${v}`}
-                        className="opacity-70 hover:opacity-100 shrink-0"
+            {values.map((v, i) => {
+                const invalid = !EMAIL_RE.test(v);
+                return (
+                    <span
+                        key={`${v}-${i}`}
+                        title={invalid ? "This doesn't look like a valid email address" : undefined}
+                        className={`inline-flex items-center gap-1 h-5 pl-1.5 pr-1 rounded text-[11px] font-medium max-w-[calc(100%-4rem)] ${
+                            invalid ? "bg-rose-50 text-rose-600" : "bg-sky-50 text-sky-700"
+                        }`}
                     >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                            <path d="M18 6 6 18M6 6l12 12" />
-                        </svg>
-                    </button>
-                </span>
-            ))}
+                        <span className="truncate">{v}</span>
+                        <button
+                            type="button"
+                            onClick={() => onChange(values.filter((_, idx) => idx !== i))}
+                            aria-label={`Remove ${v}`}
+                            className="opacity-70 hover:opacity-100 shrink-0"
+                        >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                <path d="M18 6 6 18M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </span>
+                );
+            })}
             <input
                 value={draft}
+                inputMode="email"
                 onChange={(e) => setDraft(e.target.value)}
+                onPaste={(e) => {
+                    const text = e.clipboardData.getData("text");
+                    if (/[\s,;]/.test(text)) {
+                        e.preventDefault();
+                        addTokens(text);
+                        setDraft("");
+                    }
+                }}
                 onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === "Tab" || e.key === ",") {
+                    if (e.key === "Enter" || e.key === "Tab" || e.key === "," || e.key === ";") {
                         if (draft.trim()) {
                             e.preventDefault();
                             commit();
