@@ -49,27 +49,30 @@ type UpdateSequence struct {
 }
 
 // BranchConditions is the typed branching tree persisted in the sequence
-// `conditions` jsonb column. Branches are evaluated in declared order; the
-// first branch whose conditions ALL match wins. A winning branch's
-// TargetSequenceID selects the next step, or nil ("stop") ends the contact's
-// journey. When no branch matches (or Branches is empty) the scheduler keeps
-// the default linear progression.
+// `conditions` jsonb column. Branches are evaluated in declared order; the first
+// branch whose conditions ALL match wins. A winning branch routes the contact to
+// its TargetSequenceID (any step in the campaign), or stops them when the target
+// is nil. When no branch matches (or Branches is empty) the scheduler keeps the
+// default linear progression (advance to the next step by position).
 type BranchConditions struct {
 	Branches []Branch `json:"branches,omitempty"`
 }
 
-// Branch is a single conditional route out of a step.
+// Branch is a single conditional route out of a step ("if <conditions> -> go to
+// target, else stop"). A branch with no conditions is an unconditional catch-all
+// ("otherwise").
 type Branch struct {
 	// BranchID is a stable client-supplied identifier (for editor diffing /
 	// logging). Kept as a free-form string: the editor uses crypto.randomUUID()
 	// when available but falls back to a non-UUID token, so this must NOT be a
 	// strict uuid.UUID or unmarshalling the PATCH body would fail.
 	BranchID string `json:"branch_id"`
-	// TargetSequenceID is the step to jump to when this branch matches. nil
-	// means "stop" (do not send the contact any further step).
+	// TargetSequenceID is the step to route to when this branch matches. nil
+	// means STOP (send the contact no further step). A target that no longer
+	// exists (a deleted step) is treated as STOP at schedule time.
 	TargetSequenceID *uuid.UUID `json:"target_sequence_id"`
 	// Conditions are ANDed together — every condition must hold for the branch
-	// to match. An empty list is an unconditional/catch-all branch.
+	// to match. An empty list is an unconditional/catch-all branch ("otherwise").
 	Conditions []BranchCondition `json:"conditions,omitempty"`
 }
 

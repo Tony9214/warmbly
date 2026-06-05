@@ -79,40 +79,113 @@ func validateBranchConditions(bc *models.BranchConditions) *errx.Error {
 	return nil
 }
 
-// evaluateBranchConditions runs a step's branching tree against a contact's
-// engagement timestamps and returns the matched branch (in declared order, AND
-// semantics within a branch). Returns (nil, false) when no branch matches so
-// the caller can fall back to linear progression.
-//
-// `now` is passed in so evaluation is deterministic for a single resolve call.
-func evaluateBranchConditions(bc *models.BranchConditions, prog *CampaignContactProgress, now time.Time) (*models.Branch, bool) {
-	if bc == nil || len(bc.Branches) == 0 {
-		return nil, false
+// BranchState is the three-valued result of evaluating a branch (or a single
+// condition) at a point in time. Crucially, an engagement window that has not
+// elapsed yet is UNDECIDED — neither matched nor not — so the scheduler waits
+// and re-checks instead of guessing. This is what makes "if didn't open within
+// N days" actually wait N days before firing.
+type BranchState int
+
+const (
+	BranchNoMatch   BranchState = iota // definitively does not apply
+	BranchMatch                        // definitively applies now
+	BranchUndecided                    // not knowable yet; re-check at the returned time
+)
+
+// evaluateBranchState evaluates one branch send-relative to when the current
+// step was sent. AND semantics: any NoMatch condition fails the branch; any
+// Undecided condition leaves the branch Undecided (re-check at the latest
+// pending window). An empty condition list is the catch-all (always matches).
+func evaluateBranchState(b *models.Branch, prog *CampaignContactProgress, sentAt, now time.Time) (BranchState, time.Time) {
+	if len(b.Conditions) == 0 {
+		return BranchMatch, time.Time{}
 	}
-	for i := range bc.Branches {
-		b := &bc.Branches[i]
-		if branchMatches(b, prog, now) {
-			return b, true
+	state := BranchMatch
+	var recheck time.Time
+	for i := range b.Conditions {
+		cs, wend := conditionState(b.Conditions[i], prog, b.BranchID, sentAt, now)
+		if cs == BranchNoMatch {
+			return BranchNoMatch, time.Time{}
+		}
+		if cs == BranchUndecided {
+			state = BranchUndecided
+			if wend.After(recheck) {
+				recheck = wend
+			}
 		}
 	}
-	return nil, false
+	return state, recheck
 }
 
-// branchMatches reports whether EVERY condition in the branch holds. An empty
-// condition list is an unconditional catch-all (always matches).
-func branchMatches(b *models.Branch, prog *CampaignContactProgress, now time.Time) bool {
-	for _, cond := range b.Conditions {
-		if cond.Field == "random" {
-			if !randomHolds(cond, prog.ContactID, b.BranchID) {
-				return false
-			}
-			continue
+// conditionState evaluates a single predicate send-relative. For "within_days"
+// the window is [sentAt, sentAt+N days]:
+//   - positive (opened/clicked/replied): Match if it happened in the window;
+//     Undecided while the window is still open; NoMatch once it closes unmet.
+//   - negative (not_*): NoMatch if it happened in the window; Undecided while the
+//     window is still open; Match once it closes without the signal.
+//
+// "ever"/"always" (legacy, no window) decides immediately. random is instant.
+func conditionState(cond models.BranchCondition, prog *CampaignContactProgress, branchID string, sentAt, now time.Time) (BranchState, time.Time) {
+	if cond.Field == "random" {
+		if randomHolds(cond, prog.ContactID, branchID) {
+			return BranchMatch, time.Time{}
 		}
-		if !conditionHolds(cond, prog, now) {
-			return false
-		}
+		return BranchNoMatch, time.Time{}
 	}
-	return true
+
+	var ts *time.Time
+	negate := false
+	switch cond.Field {
+	case "opened":
+		ts = prog.OpenedAt
+	case "clicked":
+		ts = prog.ClickedAt
+	case "replied":
+		ts = prog.RepliedAt
+	case "not_opened":
+		ts, negate = prog.OpenedAt, true
+	case "not_clicked":
+		ts, negate = prog.ClickedAt, true
+	case "not_replied":
+		ts, negate = prog.RepliedAt, true
+	default:
+		return BranchNoMatch, time.Time{}
+	}
+
+	if cond.Operator == "within_days" {
+		days := 0
+		if cond.Value != nil {
+			days = *cond.Value
+		}
+		windowEnd := sentAt.Add(time.Hour * 24 * time.Duration(days))
+		happened := ts != nil && !ts.After(windowEnd)
+		if negate {
+			if happened {
+				return BranchNoMatch, time.Time{}
+			}
+			if now.Before(windowEnd) {
+				return BranchUndecided, windowEnd
+			}
+			return BranchMatch, time.Time{}
+		}
+		if happened {
+			return BranchMatch, time.Time{}
+		}
+		if now.Before(windowEnd) {
+			return BranchUndecided, windowEnd
+		}
+		return BranchNoMatch, time.Time{}
+	}
+
+	// "ever" / "always" / unknown operator: decide immediately, no window.
+	happened := ts != nil
+	if negate {
+		happened = !happened
+	}
+	if happened {
+		return BranchMatch, time.Time{}
+	}
+	return BranchNoMatch, time.Time{}
 }
 
 // randomHolds deterministically routes Value% of contacts down a random-split
@@ -132,49 +205,4 @@ func randomHolds(cond models.BranchCondition, contactID uuid.UUID, branchID stri
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(contactID.String() + ":" + branchID))
 	return int(h.Sum32()%100) < pct
-}
-
-// conditionHolds evaluates a single engagement predicate. The not_* fields
-// invert the positive signal of the same name.
-func conditionHolds(cond models.BranchCondition, prog *CampaignContactProgress, now time.Time) bool {
-	var ts *time.Time
-	negate := false
-
-	switch cond.Field {
-	case "opened":
-		ts = prog.OpenedAt
-	case "clicked":
-		ts = prog.ClickedAt
-	case "replied":
-		ts = prog.RepliedAt
-	case "not_opened":
-		ts, negate = prog.OpenedAt, true
-	case "not_clicked":
-		ts, negate = prog.ClickedAt, true
-	case "not_replied":
-		ts, negate = prog.RepliedAt, true
-	default:
-		// Unknown field never matches (validation should have caught it).
-		return false
-	}
-
-	var positive bool
-	switch cond.Operator {
-	case "ever", "always":
-		positive = ts != nil
-	case "within_days":
-		if ts == nil || cond.Value == nil {
-			positive = false
-		} else {
-			cutoff := now.Add(-time.Hour * 24 * time.Duration(*cond.Value))
-			positive = ts.After(cutoff)
-		}
-	default:
-		return false
-	}
-
-	if negate {
-		return !positive
-	}
-	return positive
 }

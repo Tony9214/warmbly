@@ -90,7 +90,7 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 			excludeNewLeads = true
 		}
 	}
-	nextPair, err := s.campaignProgressRepo.FindNextRoutedPair(
+	nextPair, recheckAt, err := s.campaignProgressRepo.FindNextRoutedPair(
 		ctx,
 		campaignID,
 		campaign.ContactOrderBy,
@@ -105,11 +105,11 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 
 	if nextPair == nil {
 		// When the new-lead cap is active and only new-lead pairs remain,
-		// FindNextContactSequence returns nil with exclude on but WOULD return a
-		// pair without it. In that case defer to the next day so follow-ups keep
+		// FindNextRoutedPair returns nil with exclude on but WOULD return a pair
+		// without it. In that case defer to the next day so follow-ups keep
 		// progressing and new leads resume tomorrow — do NOT complete.
 		if excludeNewLeads {
-			if again, aerr := s.campaignProgressRepo.FindNextRoutedPair(
+			if again, _, aerr := s.campaignProgressRepo.FindNextRoutedPair(
 				ctx, campaignID, campaign.ContactOrderBy, campaign.ContactOrderDir, orderField,
 				campaign.PrioritizeNewLeads, false,
 			); aerr == nil && again != nil {
@@ -122,6 +122,15 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 				// blow past the cap. nil pair + sentinel = reschedule, don't send.
 				return deferTime, nil, accounts[0].ID, ErrCampaignDeferred
 			}
+		}
+		// Some contacts are waiting on a condition window (e.g. "if didn't open
+		// within 3 days"). Defer and re-check exactly when the soonest window
+		// elapses, instead of marking the campaign complete.
+		if recheckAt != nil {
+			s.logCampaignDecision(ctx, campaignID, "awaiting_condition_window",
+				"Waiting on a branch condition window; re-checking when it elapses",
+				map[string]interface{}{"recheck_at": recheckAt.UTC().Format(time.RFC3339)})
+			return *recheckAt, nil, accounts[0].ID, ErrCampaignDeferred
 		}
 		return time.Time{}, nil, uuid.Nil, ErrCampaignCompleted
 	}
