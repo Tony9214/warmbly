@@ -161,31 +161,8 @@ func (s *campaignService) StartCampaign(ctx context.Context, orgID uuid.UUID, ca
 		return errx.InternalError()
 	}
 
-	// Validate active sending mailboxes exist. Explicit-strategy campaigns
-	// resolve through the campaign_senders pool; tag-strategy through tags.
-	if campaign.SenderStrategy == "explicit" {
-		senders, serr := s.campaignRepository.GetCampaignSenders(ctx, cID)
-		if serr != nil {
-			return errx.InternalError()
-		}
-		enabled := 0
-		for _, snd := range senders {
-			if snd.Enabled {
-				enabled++
-			}
-		}
-		if enabled == 0 {
-			return errx.New(errx.BadRequest, "no enabled senders configured for this campaign")
-		}
-	} else {
-		accounts, xerr := s.emailRepo.GetByTags(ctx, campaign.UserID, campaign.EmailTags)
-		if xerr != nil {
-			return xerr
-		}
-		if len(accounts) == 0 {
-			return errx.New(errx.BadRequest, "no active email accounts found for campaign's email tags")
-		}
-	}
+	// Sender-pool validity (explicit senders OR tags OR "all" fallback) is part
+	// of ValidateCampaignReady above, so no separate strategy-gated check here.
 
 	activeCampaigns, err := s.campaignRepository.CountActiveForOrganization(ctx, orgID)
 	if err != nil {

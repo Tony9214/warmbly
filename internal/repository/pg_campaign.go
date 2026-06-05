@@ -51,7 +51,8 @@ type CampaignRepository interface {
 	GetCampaignSenders(ctx context.Context, campaignID uuid.UUID) ([]models.CampaignSender, error)
 	// ReplaceCampaignSenders atomically replaces the explicit sender pool
 	// (delete-all + multi-insert in one tx). Every account must belong to the
-	// campaign owner; an empty list is rejected (use sender_strategy='tags').
+	// campaign owner; an empty list clears the pool (the campaign then resolves
+	// from its email tags, or all active mailboxes when it has none).
 	ReplaceCampaignSenders(ctx context.Context, campaignID uuid.UUID, in []models.CampaignSenderInput) ([]models.CampaignSender, *errx.Error)
 	// AdvanceCampaignSender bumps the round-robin cursor and stamps last_sent_at
 	// for the chosen mailbox in a single atomic UPDATE. Fires only on a genuine
@@ -1231,36 +1232,30 @@ func (r *campaignRepository) ValidateCampaignReady(ctx context.Context, campaign
 		return errx.New(errx.BadRequest, "campaign must have at least one contact")
 	}
 
-	// Check sender pool. The required shape depends on the strategy:
-	//   - 'tags'     → at least one campaign_email_tag (legacy behavior)
-	//   - 'explicit' → at least one ENABLED campaign_senders row
-	// An explicit-sender campaign legitimately has no tags, so the old
-	// tag-only check would wrongly reject it.
-	var senderStrategy string
-	if err := r.DB.QueryRow(ctx, `SELECT sender_strategy FROM campaigns WHERE id = $1`, campaignID).Scan(&senderStrategy); err != nil {
+	// Sender pool (unified): valid if it has any enabled explicit sender OR any
+	// email tag OR — when neither is selected ("all") — at least one active
+	// mailbox for the owner to fall back to.
+	var senderCount int
+	if err := r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_senders WHERE campaign_id = $1 AND enabled`, campaignID).Scan(&senderCount); err != nil {
 		return err
 	}
-	if senderStrategy == "explicit" {
-		var senderCount int
-		err = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_senders WHERE campaign_id = $1 AND enabled`, campaignID).Scan(&senderCount)
-		if err != nil {
-			return err
-		}
-		if senderCount == 0 {
-			return errx.New(errx.BadRequest, "campaign must have at least one enabled sender")
-		}
+	var tagCount int
+	if err := r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_email_tags WHERE campaign_id = $1`, campaignID).Scan(&tagCount); err != nil {
+		return err
+	}
+	if senderCount > 0 || tagCount > 0 {
 		return nil
 	}
-
-	var tagCount int
-	err = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_email_tags WHERE campaign_id = $1`, campaignID).Scan(&tagCount)
-	if err != nil {
+	var activeMailboxes int
+	if err := r.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM email_accounts
+		WHERE user_id = (SELECT user_id FROM campaigns WHERE id = $1) AND status = 'active'
+	`, campaignID).Scan(&activeMailboxes); err != nil {
 		return err
 	}
-	if tagCount == 0 {
-		return errx.New(errx.BadRequest, "campaign must have at least one email tag")
+	if activeMailboxes == 0 {
+		return errx.New(errx.BadRequest, "campaign must have at least one active sending mailbox")
 	}
-
 	return nil
 }
 
@@ -1311,6 +1306,7 @@ func (r *campaignRepository) CountActiveForOrganization(ctx context.Context, org
 func (r *campaignRepository) AccountHasActiveCampaign(ctx context.Context, accountID uuid.UUID) (bool, error) {
 	query := `
 		SELECT EXISTS (
+			-- tag-resolved
 			SELECT 1
 			FROM email_accounts ea
 			JOIN email_tags et ON et.email_id = ea.id
@@ -1319,8 +1315,8 @@ func (r *campaignRepository) AccountHasActiveCampaign(ctx context.Context, accou
 			WHERE ea.id = $1
 			  AND ea.status = 'active'
 			  AND c.status = 'active'
-			  AND c.sender_strategy = 'tags'
 			UNION ALL
+			-- explicit sender
 			SELECT 1
 			FROM campaign_senders cs
 			JOIN campaigns c ON c.id = cs.campaign_id
@@ -1329,7 +1325,16 @@ func (r *campaignRepository) AccountHasActiveCampaign(ctx context.Context, accou
 			  AND cs.enabled
 			  AND ea.status = 'active'
 			  AND c.status = 'active'
-			  AND c.sender_strategy = 'explicit'
+			UNION ALL
+			-- "all" campaigns (no tags, no enabled senders) back every active mailbox of their owner
+			SELECT 1
+			FROM campaigns c
+			JOIN email_accounts ea ON ea.user_id = c.user_id
+			WHERE ea.id = $1
+			  AND ea.status = 'active'
+			  AND c.status = 'active'
+			  AND NOT EXISTS (SELECT 1 FROM campaign_email_tags cet2 WHERE cet2.campaign_id = c.id)
+			  AND NOT EXISTS (SELECT 1 FROM campaign_senders cs2 WHERE cs2.campaign_id = c.id AND cs2.enabled)
 		)
 	`
 	var exists bool
@@ -1343,21 +1348,31 @@ func (r *campaignRepository) AccountHasActiveCampaign(ctx context.Context, accou
 func (r *campaignRepository) CountActiveCampaignsForAccount(ctx context.Context, accountID uuid.UUID) (int, error) {
 	query := `
 		SELECT COUNT(*) FROM (
+			-- tag-resolved
 			SELECT c.id
 			FROM campaigns c
 			JOIN campaign_email_tags cet ON cet.campaign_id = c.id
 			JOIN email_tags et ON et.tag_id = cet.tag_id
 			WHERE et.email_id = $1
 			  AND c.status = 'active'
-			  AND c.sender_strategy = 'tags'
 			UNION
+			-- explicit sender
 			SELECT c.id
 			FROM campaigns c
 			JOIN campaign_senders cs ON cs.campaign_id = c.id
 			WHERE cs.email_account_id = $1
 			  AND cs.enabled
 			  AND c.status = 'active'
-			  AND c.sender_strategy = 'explicit'
+			UNION
+			-- "all" campaigns (no tags, no enabled senders) count for every active mailbox of their owner
+			SELECT c.id
+			FROM campaigns c
+			JOIN email_accounts ea ON ea.user_id = c.user_id
+			WHERE ea.id = $1
+			  AND ea.status = 'active'
+			  AND c.status = 'active'
+			  AND NOT EXISTS (SELECT 1 FROM campaign_email_tags cet2 WHERE cet2.campaign_id = c.id)
+			  AND NOT EXISTS (SELECT 1 FROM campaign_senders cs2 WHERE cs2.campaign_id = c.id AND cs2.enabled)
 		) AS active_campaigns`
 	var count int
 	err := r.DB.QueryRow(ctx, query, accountID).Scan(&count)
@@ -1497,9 +1512,10 @@ func (r *campaignRepository) GetCampaignSenders(ctx context.Context, campaignID 
 // list is rejected — clearing senders should be done by switching the campaign
 // back to sender_strategy='tags'.
 func (r *campaignRepository) ReplaceCampaignSenders(ctx context.Context, campaignID uuid.UUID, in []models.CampaignSenderInput) ([]models.CampaignSender, *errx.Error) {
-	if len(in) == 0 {
-		return nil, errx.New(errx.BadRequest, "explicit sender strategy requires at least one sender")
-	}
+	// An empty list is allowed: it clears the explicit sender pool, so the
+	// campaign falls back to its email tags or, with neither, to every active
+	// mailbox of the owner. syncCampaignSendersTx handles the empty set safely
+	// (it deletes all current rows and inserts none).
 
 	// Resolve the campaign owner + organization so we can validate mailbox
 	// ownership against the org (the senders route is org-scoped).

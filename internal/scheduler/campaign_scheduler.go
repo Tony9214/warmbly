@@ -46,28 +46,43 @@ func (s *schedulerService) CalculateNextCampaignTime(ctx context.Context, campai
 	}
 	accounts := []models.Email{}
 	senderMetaByID := map[uuid.UUID]senderMeta{}
-	if campaign.SenderStrategy == "explicit" {
-		senders, serr := s.emailRepo.GetByCampaignSenders(ctx, campaign.UserID, campaignID)
-		if serr != nil {
-			return time.Time{}, nil, uuid.Nil, serr
-		}
-		for _, snd := range senders {
-			accounts = append(accounts, snd.Account)
-			senderMetaByID[snd.Account.ID] = senderMeta{
-				weight:           snd.Weight,
-				rotationPosition: snd.RotationPosition,
-				lastSentAt:       snd.LastSentAt,
-				hasMeta:          true,
-			}
+	seen := map[uuid.UUID]bool{}
+	// UNION of the explicit campaign_senders pool and the tag-resolved mailboxes
+	// (one dropdown picks both — they're no longer mutually exclusive). When the
+	// campaign selects NEITHER tags nor explicit accounts, it sends from ALL of
+	// the owner's active mailboxes ("all").
+	senders, serr := s.emailRepo.GetByCampaignSenders(ctx, campaign.UserID, campaignID)
+	if serr != nil {
+		return time.Time{}, nil, uuid.Nil, serr
+	}
+	for _, snd := range senders {
+		accounts = append(accounts, snd.Account)
+		seen[snd.Account.ID] = true
+		senderMetaByID[snd.Account.ID] = senderMeta{
+			weight:           snd.Weight,
+			rotationPosition: snd.RotationPosition,
+			lastSentAt:       snd.LastSentAt,
+			hasMeta:          true,
 		}
 	}
-	if len(accounts) == 0 {
+	if len(campaign.EmailTags) > 0 {
 		tagAccounts, terr := s.emailRepo.GetByTags(ctx, campaign.UserID, campaign.EmailTags)
 		if terr != nil {
 			return time.Time{}, nil, uuid.Nil, terr
 		}
-		accounts = tagAccounts
-		senderMetaByID = map[uuid.UUID]senderMeta{}
+		for _, ta := range tagAccounts {
+			if !seen[ta.ID] {
+				accounts = append(accounts, ta)
+				seen[ta.ID] = true
+			}
+		}
+	}
+	if len(senders) == 0 && len(campaign.EmailTags) == 0 {
+		allAccts, aerr := s.emailRepo.GetAllActiveByUser(ctx, campaign.UserID)
+		if aerr != nil {
+			return time.Time{}, nil, uuid.Nil, aerr
+		}
+		accounts = allAccts
 	}
 
 	if len(accounts) == 0 {

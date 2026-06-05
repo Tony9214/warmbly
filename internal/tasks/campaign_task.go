@@ -529,12 +529,11 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 
 	// STEP 18.5: Advance the explicit-sender rotation cursor on a GENUINE send
 	// only (single atomic UPDATE), so round_robin/least_recently_used cursors
-	// stay coherent and a send-failure/skip never bumps them. Tag-strategy
-	// campaigns have no sender rows and skip this.
-	if campaign.SenderStrategy == "explicit" {
-		if err := s.campaignRepo.AdvanceCampaignSender(ctx, campaign.ID, account.ID); err != nil {
-			log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to advance campaign sender cursor")
-		}
+	// stay coherent and a send-failure/skip never bumps them. The UPDATE is
+	// scoped to (campaign_id, email_account_id), so it's a harmless no-op for
+	// tag/all-resolved mailboxes that have no campaign_senders row.
+	if err := s.campaignRepo.AdvanceCampaignSender(ctx, campaign.ID, account.ID); err != nil {
+		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to advance campaign sender cursor")
 	}
 
 	// Publish task completion to Pub/Sub
