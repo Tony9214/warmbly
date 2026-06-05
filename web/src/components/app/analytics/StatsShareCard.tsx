@@ -3,16 +3,11 @@ import { Logo } from "@/components/svg";
 import { type ChartPoint } from "@/components/ui/charts";
 
 // A branded analytics card rasterized to a shareable PNG (see useExportCard).
-// Design: the marketing-site hero sky (deep-blue .sky-base + the real cloud
-// WebP images), the Warmbly logo white on the sky, and ONE clean white panel
-// floating on it holding the title, a divided metric row, and a long
-// Instantly-style area chart. One soft shadow — no scattered heavy-shadow
-// boxes.
+// Design: a flat branded sky background, the Warmbly logo white on the sky, and
+// one clean white panel holding the title, metrics, and area chart.
 //
 // Capture-safe for html-to-image (SVG foreignObject):
 //   - sky / glow / haze are pure CSS gradients set inline.
-//   - clouds are SAME-ORIGIN WebP images (web/public/backdrops, from the site)
-//     so html-to-image inlines them without tainting the canvas.
 //   - NO CSS filter: blur() (unreliable in capture) and NO mix-blend-mode.
 //   - the chart is an inline SVG with an internal <linearGradient>.
 
@@ -54,30 +49,11 @@ const SKY_BREATHE =
 const HAZE_BOTTOM =
     "linear-gradient(to top, rgba(186,230,253,0.40) 0%, rgba(125,211,252,0.16) 42%, transparent 100%)";
 
-// NO dark shadow — any dark-toned shadow on the blue sky pools into a visible
-// "shadow band" along the card edge. Instead the panel lifts with a faint WHITE
-// halo (lighter than the sky), so it separates without darkening anything.
 const PANEL: React.CSSProperties = {
     background: "#ffffff",
     borderRadius: 26,
     border: "1px solid rgba(255,255,255,0.85)",
-    boxShadow: "0 16px 50px -18px rgba(255,255,255,0.55), 0 2px 12px -6px rgba(255,255,255,0.45)",
 };
-
-const LOGO_LIFT: React.CSSProperties = {
-    filter: "drop-shadow(0 3px 10px rgba(8,47,73,0.40)) drop-shadow(0 1px 2px rgba(8,47,73,0.30))",
-};
-const onSky: React.CSSProperties = { textShadow: "0 1px 4px rgba(8,47,73,0.45)" };
-
-// Real WebP clouds in the hero's arrangement (big top-left + top-right framing
-// the logo, softer puffs drifting through the lower sky band). Same-origin so
-// html-to-image inlines them without tainting the canvas.
-const CLOUDS: { v: number; style: React.CSSProperties }[] = [
-    { v: 5, style: { top: "-5%", left: "-5%", width: "44%", opacity: 0.95 } },
-    { v: 2, style: { top: "2%", right: "-4%", width: "40%", opacity: 0.9 } },
-    { v: 3, style: { bottom: "-3%", left: "12%", width: "28%", opacity: 0.62 } },
-    { v: 4, style: { bottom: "3%", right: "8%", width: "26%", opacity: 0.58 } },
-];
 
 function SkyBackdrop() {
     return (
@@ -86,15 +62,6 @@ function SkyBackdrop() {
             <div className="absolute inset-0" style={{ background: SKY_BREATHE, opacity: 0.6 }} />
             {/* lift the bottom band */}
             <div className="absolute inset-x-0 bottom-0" style={{ height: "55%", background: HAZE_BOTTOM }} />
-            {CLOUDS.map((c, i) => (
-                <img
-                    key={i}
-                    src={`/backdrops/cloud-${c.v}.webp`}
-                    alt=""
-                    aria-hidden="true"
-                    style={{ position: "absolute", height: "auto", pointerEvents: "none", userSelect: "none", ...c.style }}
-                />
-            ))}
         </div>
     );
 }
@@ -206,7 +173,7 @@ const StatsShareCard = React.forwardRef<HTMLDivElement, { data: ShareCardData; a
                 <div className="relative z-10 flex flex-col h-full" style={{ padding: pad }}>
                     {/* logo on the sky */}
                     <div className="flex items-center justify-between">
-                        <div className="inline-flex items-center gap-3.5" style={LOGO_LIFT}>
+                        <div className="inline-flex items-center gap-3.5">
                             <Logo className={`${logoClass} text-white`} />
                             <span
                                 className="text-white font-extrabold tracking-tight"
@@ -215,7 +182,7 @@ const StatsShareCard = React.forwardRef<HTMLDivElement, { data: ShareCardData; a
                                 Warmbly
                             </span>
                         </div>
-                        <span className="font-mono text-[15px] tabular-nums text-white/85" style={onSky}>
+                        <span className="font-mono text-[15px] tabular-nums text-white/85">
                             {todayLabel()}
                         </span>
                     </div>
@@ -262,10 +229,10 @@ const StatsShareCard = React.forwardRef<HTMLDivElement, { data: ShareCardData; a
 
                     {/* footer on the sky */}
                     <div className="mt-5 flex items-center justify-between text-[16px]">
-                        <span className="text-white font-semibold" style={onSky}>
+                        <span className="text-white font-semibold">
                             warmbly.com
                         </span>
-                        <span className="text-white/80" style={onSky}>
+                        <span className="text-white/80">
                             Cold email, warmed up.
                         </span>
                     </div>
