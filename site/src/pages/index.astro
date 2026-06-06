@@ -447,11 +447,13 @@ const softwareJsonLd = {
           </p>
           <div class="mt-auto pt-5 grid grid-cols-4 gap-1.5">
             {['Healthy','Watch','Quarantined','Blocked'].map((b, i) => (
-              <div class={`rounded-md px-1.5 py-1 text-center text-[10px] font-semibold tracking-wider ring-1 ${
+              <div class={`bento-band rounded-md px-1.5 py-1 text-center text-[10px] font-semibold tracking-wider ring-1 ${
                 i === 0 ? 'ring-emerald-200 text-emerald-700 bg-emerald-50' :
                 i === 1 ? 'ring-amber-200 text-amber-700 bg-amber-50' :
                 i === 2 ? 'ring-orange-200 text-orange-700 bg-orange-50' :
-                          'ring-rose-200 text-rose-700 bg-rose-50'}`}>{b}</div>
+                          'ring-rose-200 text-rose-700 bg-rose-50'}`}>
+                {i === 0 && <span class="inline-block w-1 h-1 rounded-full bg-emerald-500 align-middle mr-1 animate-pulse-soft"></span>}{b}
+              </div>
             ))}
           </div>
         </div>
@@ -466,7 +468,7 @@ const softwareJsonLd = {
             <div class="relative w-28 h-28">
               <svg viewBox="0 0 36 36" class="w-full h-full -rotate-90">
                 <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" stroke-width="2.6"></circle>
-                <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--brand)" stroke-width="2.6" stroke-dasharray="96 100" stroke-linecap="round" class="animate-ring-fill"></circle>
+                <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--brand)" stroke-width="2.6" stroke-dasharray="96 100" stroke-linecap="round" class="animate-ring-fill bento-ring"></circle>
               </svg>
               <div class="absolute inset-0 flex flex-col items-center justify-center">
                 <span class="text-xl font-semibold tracking-tight text-heading">96%</span>
@@ -493,7 +495,7 @@ const softwareJsonLd = {
                   <span>{w.name}</span><span>{w.pct}%</span>
                 </div>
                 <div class="h-1.5 rounded-full bg-[color:var(--surface-2)] overflow-hidden">
-                  <div class="h-full rounded-full bg-[color:var(--brand)] animate-bar-grow" style={`--target:${w.pct}%`}></div>
+                  <div class="h-full rounded-full bg-[color:var(--brand)] animate-bar-grow bento-bar" style={`--target:${w.pct}%`}></div>
                 </div>
               </div>
             ))}
@@ -513,7 +515,7 @@ const softwareJsonLd = {
               { n: 'Step 3', t: 'Follow-up · context', m: '4 variants' },
               { n: 'Step 4', t: 'Soft break · 7 days', m: 'if no open' },
             ].map((s) => (
-              <div class="rounded-[10px] ring-1 ring-[color:var(--border)] p-2.5">
+              <div class="bento-step rounded-[10px] ring-1 ring-[color:var(--border)] p-2.5">
                 <div class="flex items-center justify-between text-[9.5px] font-mono text-muted-foreground uppercase tracking-wider">
                   <span>{s.n}</span><span class="text-foreground/60">{s.m}</span>
                 </div>
@@ -801,6 +803,42 @@ const softwareJsonLd = {
     .feature-window:hover .demo-cursor,
     .feature-window:hover .demo-cursor-ripple {
       animation-play-state: paused;
+    }
+
+    /* "One platform" bento: continuous, living data viz. */
+    @media (prefers-reduced-motion: no-preference) {
+      /* health states: a highlight walks Healthy -> Blocked on a loop */
+      .bento-band { animation: bento-band 5s ease-in-out infinite; }
+      .bento-band:nth-child(1) { animation-delay: 0s; }
+      .bento-band:nth-child(2) { animation-delay: -3.75s; }
+      .bento-band:nth-child(3) { animation-delay: -2.5s; }
+      .bento-band:nth-child(4) { animation-delay: -1.25s; }
+      @keyframes bento-band {
+        0%, 16%, 100% { transform: translateY(0); filter: none; }
+        8%            { transform: translateY(-3px); filter: brightness(1.07); }
+      }
+      /* worker bars: a shimmer sweeps the filled bar (live sending) */
+      .bento-bar { position: relative; overflow: hidden; }
+      .bento-bar::after {
+        content: ''; position: absolute; inset: 0;
+        background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.6) 50%, transparent 100%);
+        transform: translateX(-130%);
+        animation: bento-shimmer 3.4s ease-in-out infinite;
+      }
+      @keyframes bento-shimmer { 0% { transform: translateX(-130%); } 55%, 100% { transform: translateX(260%); } }
+      /* sequence steps: a sky highlight steps through 1 -> 4 */
+      .bento-step { animation: bento-step 5.6s ease-in-out infinite; }
+      .bento-step:nth-child(1) { animation-delay: 0s; }
+      .bento-step:nth-child(2) { animation-delay: -4.2s; }
+      .bento-step:nth-child(3) { animation-delay: -2.8s; }
+      .bento-step:nth-child(4) { animation-delay: -1.4s; }
+      @keyframes bento-step {
+        0%, 16%, 100% { box-shadow: none; }
+        8%            { box-shadow: 0 0 0 2px var(--brand-soft); }
+      }
+    }
+    @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+      .bento-card:hover .bento-ring { animation: ring-fill 1.1s cubic-bezier(0.22, 1, 0.36, 1) both; }
     }
   </style>
   <script is:inline>
