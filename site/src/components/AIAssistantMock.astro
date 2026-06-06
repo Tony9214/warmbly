@@ -80,9 +80,9 @@ const draftLines = [
           <div class="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">Step 1</div>
           <p class="mt-0.5 truncate text-[11px] text-slate-400">Compose the email this step sends.</p>
         </div>
-        <div class="flex flex-wrap shrink-0 items-center gap-2">
+        <div class="flex flex-nowrap shrink-0 items-center gap-2">
           <!-- Templates (SelectButton) -->
-          <button type="button" class="h-7 px-2 rounded-md border border-slate-200 bg-white text-slate-700 inline-flex items-center gap-1.5 text-[12px] font-medium">
+          <button type="button" class="h-7 px-2 rounded-md border border-slate-200 bg-white text-slate-700 inline-flex items-center gap-1.5 text-[12px] font-medium whitespace-nowrap shrink-0">
             <span class="text-slate-400 shrink-0">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/></svg>
             </span>
@@ -90,25 +90,24 @@ const draftLines = [
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-slate-400 shrink-0"><path d="M6 9l6 6 6-6"/></svg>
           </button>
 
-          <!-- Save as template -->
-          <button type="button" class="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700">
+          <!-- Save as template (icon-only at 900px to keep the row on one line) -->
+          <button type="button" aria-label="Save as template" title="Save as template" class="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 shrink-0">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 22v-8.4a.6.6 0 0 0-.6-.6H9.1a.6.6 0 0 0-.6.6V22l3.5-2.5z"/><path d="M4 19V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v15"/><line x1="12" y1="7" x2="12" y2="11"/><line x1="10" y1="9" x2="14" y2="9"/></svg>
-            Save as template
           </button>
 
           <!-- Write with AI (highlighted, popover open) -->
-          <button type="button" class="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-sky-300 bg-sky-100 text-[12px] font-medium text-sky-700">
+          <button type="button" class="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-sky-300 bg-sky-100 text-[12px] font-medium text-sky-700 whitespace-nowrap shrink-0">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/></svg>
             Write with AI
           </button>
 
-          <div class="h-4 w-px bg-slate-200"></div>
+          <div class="h-4 w-px bg-slate-200 shrink-0"></div>
 
           <!-- Reset -->
-          <button type="button" class="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 opacity-40">Reset</button>
+          <button type="button" class="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 opacity-40 whitespace-nowrap shrink-0">Reset</button>
 
           <!-- Save changes -->
-          <button type="button" class="h-7 px-3 rounded-md bg-sky-600 text-[12px] font-medium text-white inline-flex items-center gap-1.5 opacity-40">Save changes</button>
+          <button type="button" class="h-7 px-3 rounded-md bg-sky-600 text-[12px] font-medium text-white inline-flex items-center gap-1.5 opacity-40 whitespace-nowrap shrink-0">Save changes</button>
         </div>
       </div>
 
@@ -227,7 +226,7 @@ const draftLines = [
       ────────────────────────────────────────────────────────────── -->
       <div
         class="absolute z-40 rounded-md border border-slate-200 bg-white p-3 overflow-hidden"
-        style="top:48px; right:12px; min-width:336px; box-shadow:0 4px 12px -2px rgba(15,23,42,0.10),0 12px 32px -8px rgba(15,23,42,0.18);"
+        style="top:48px; right:12px; min-width:408px; box-shadow:0 4px 12px -2px rgba(15,23,42,0.10),0 12px 32px -8px rgba(15,23,42,0.18);"
       >
         <div class="space-y-3">
           <!-- Prompt (textarea, focused state: sky border + ring) -->
