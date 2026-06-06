@@ -430,6 +430,65 @@ func (h *Handler) ListDeals(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// SearchDeals is the faceted, server-paginated deals surface that powers the
+// cross-pipeline table view. Filters arrive in the JSON body; limit + offset
+// are query params (mirrors the contacts search ergonomics).
+func (h *Handler) SearchDeals(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
+	var filters models.SearchDeals
+	if err := c.ShouldBindJSON(&filters); err != nil {
+		errx.Handle(c, errx.ErrInvalid)
+		return
+	}
+
+	limit := 50
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 200 {
+		limit = l
+	}
+	offset := 0
+	if o, err := strconv.Atoi(c.Query("offset")); err == nil && o > 0 {
+		offset = o
+	}
+
+	result, xerr := h.CRMService.SearchDeals(c.Request.Context(), *orgID, filters, limit, offset)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// DealsSummary returns COUNT + SUM(value) aggregates over the SAME filter body
+// as SearchDeals, so header totals and per-stage board headers are true totals
+// over the whole matching set rather than a client reduce over a loaded page.
+func (h *Handler) DealsSummary(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
+	var filters models.SearchDeals
+	if err := c.ShouldBindJSON(&filters); err != nil {
+		errx.Handle(c, errx.ErrInvalid)
+		return
+	}
+
+	summary, xerr := h.CRMService.DealsSummary(c.Request.Context(), *orgID, filters)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, summary)
+}
+
 func (h *Handler) GetDeal(c *gin.Context) {
 	orgID := middleware.GetOrganizationID(c)
 	if orgID == nil {

@@ -10,9 +10,11 @@
 import React from "react";
 import {
     CircleDollarSignIcon,
+    LayoutGridIcon,
     Loader2Icon,
     PlusIcon,
     SearchIcon,
+    Table2Icon,
     TrashIcon,
     TrophyIcon,
     UserIcon,
@@ -47,6 +49,7 @@ import type Deal from "@/lib/api/models/app/crm/Deal";
 import type { Stage } from "@/lib/api/models/app/crm/Pipeline";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
+import DealsTable from "@/components/app/crm/DealsTable";
 
 const STATUS_LABEL = {
     open: { label: "Open",  tone: "text-slate-700",   dot: "bg-slate-400" },
@@ -56,7 +59,9 @@ const STATUS_LABEL = {
 
 export default function DealsPage() {
     const pipelines = usePipelines();
-    const list = pipelines.data ?? [];
+    // Memoised so it's a stable dependency for the effect + memos below
+    // (a fresh `?? []` each render would re-fire them every time).
+    const list = React.useMemo(() => pipelines.data ?? [], [pipelines.data]);
 
     const [pipelineId, setPipelineId] = React.useState<string | undefined>(undefined);
     React.useEffect(() => {
@@ -71,6 +76,18 @@ export default function DealsPage() {
     const [search, setSearch] = React.useState("");
     const [newOpen, setNewOpen] = React.useState(false);
     const [editing, setEditing] = React.useState<Deal | null>(null);
+    // Table = the cross-pipeline, server-driven "see everything" view (default).
+    // Board = the focused single-pipeline kanban for moving deals through stages.
+    const [view, setView] = React.useState<"table" | "board">("table");
+
+    // When editing a deal opened from the cross-pipeline table, scope the stage
+    // picker to that deal's OWN pipeline, not whichever pipeline the board has
+    // selected — otherwise the picker shows the wrong pipeline's stages.
+    const editingStages = React.useMemo(() => {
+        if (!editing) return stages;
+        const p = list.find((x) => x.id === editing.pipeline_id);
+        return p ? [...(p.stages ?? [])].sort((a, b) => a.position - b.position) : stages;
+    }, [editing, list, stages]);
 
     const allDeals = deals.data?.data ?? [];
     const filtered = search.trim()
@@ -116,12 +133,17 @@ export default function DealsPage() {
             >
                 {list.length > 0 && (
                     <>
-                        <PipelinePicker
-                            pipelines={list}
-                            currentId={pipelineId}
-                            onChange={setPipelineId}
-                        />
-                        <SearchPill value={search} onChange={setSearch} />
+                        <ViewToggle view={view} onChange={setView} />
+                        {view === "board" && (
+                            <>
+                                <PipelinePicker
+                                    pipelines={list}
+                                    currentId={pipelineId}
+                                    onChange={setPipelineId}
+                                />
+                                <SearchPill value={search} onChange={setSearch} />
+                            </>
+                        )}
                         <TopbarAction
                             icon={<PlusIcon className="w-3 h-3" />}
                             onClick={() => currentPipeline && setNewOpen(true)}
@@ -132,30 +154,40 @@ export default function DealsPage() {
                 )}
             </PageTopbar>
 
-            <StatStrip cols={4}>
-                <Stat label="Open" value={openCount} sub="active deals" />
-                <Stat label="Pipeline value" value={formatMoney(totalValue)} sub="all filtered" />
-                <Stat label="Won" value={wonCount} sub="this view" />
-                <Stat label="Stages" value={stages.length} sub="on this pipeline" last />
-            </StatStrip>
-
-            <SectionBar label={deals.isPending ? "Loading…" : `${stages.length} stages`} />
-            <PageBody className="px-5 py-5">
-                {pipelines.isPending ? (
+            {pipelines.isPending ? (
+                <PageBody className="px-5 py-5">
                     <BoardSkeleton />
-                ) : list.length === 0 ? (
+                </PageBody>
+            ) : list.length === 0 ? (
+                <PageBody className="px-5 py-5">
                     <NoPipelinesYet />
-                ) : !currentPipeline || stages.length === 0 ? (
-                    <NoStagesYet />
-                ) : (
-                    <Board
-                        stages={stages}
-                        deals={filtered}
-                        onMove={moveDeal}
-                        onOpen={(d) => setEditing(d)}
-                    />
-                )}
-            </PageBody>
+                </PageBody>
+            ) : view === "table" ? (
+                <DealsTable pipelines={list} onOpenDeal={(d) => setEditing(d)} />
+            ) : (
+                <>
+                    <StatStrip cols={4}>
+                        <Stat label="Open" value={openCount} sub="active deals" />
+                        <Stat label="Pipeline value" value={formatMoney(totalValue)} sub="loaded · this pipeline" />
+                        <Stat label="Won" value={wonCount} sub="this view" />
+                        <Stat label="Stages" value={stages.length} sub="on this pipeline" last />
+                    </StatStrip>
+
+                    <SectionBar label={deals.isPending ? "Loading…" : `${stages.length} stages`} />
+                    <PageBody className="px-5 py-5">
+                        {!currentPipeline || stages.length === 0 ? (
+                            <NoStagesYet />
+                        ) : (
+                            <Board
+                                stages={stages}
+                                deals={filtered}
+                                onMove={moveDeal}
+                                onOpen={(d) => setEditing(d)}
+                            />
+                        )}
+                    </PageBody>
+                </>
+            )}
 
             <DealDialog
                 open={newOpen}
@@ -166,11 +198,44 @@ export default function DealsPage() {
             <DealDialog
                 open={!!editing}
                 onClose={() => setEditing(null)}
-                pipelineId={pipelineId}
-                stages={stages}
+                pipelineId={editing?.pipeline_id ?? pipelineId}
+                stages={editingStages}
                 editing={editing ?? undefined}
             />
         </Page>
+    );
+}
+
+function ViewToggle({
+    view,
+    onChange,
+}: {
+    view: "table" | "board";
+    onChange: (v: "table" | "board") => void;
+}) {
+    return (
+        <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5">
+            {(
+                [
+                    ["table", "Table", Table2Icon],
+                    ["board", "Board", LayoutGridIcon],
+                ] as const
+            ).map(([id, label, Icon]) => (
+                <button
+                    key={id}
+                    type="button"
+                    onClick={() => onChange(id)}
+                    className={`h-6 px-2 rounded text-[11px] font-medium inline-flex items-center gap-1.5 transition-colors ${
+                        view === id
+                            ? "bg-slate-900 text-white"
+                            : "text-slate-500 hover:text-slate-900"
+                    }`}
+                >
+                    <Icon className="w-3 h-3" />
+                    {label}
+                </button>
+            ))}
+        </div>
     );
 }
 

@@ -36,6 +36,8 @@ type CRMService interface {
 	CreateDeal(ctx context.Context, orgID uuid.UUID, data *models.CreateDeal) (*models.Deal, *errx.Error)
 	GetDeal(ctx context.Context, orgID, dealID uuid.UUID) (*models.Deal, *errx.Error)
 	ListDeals(ctx context.Context, orgID uuid.UUID, pipelineID, stageID *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.DealsResult, *errx.Error)
+	SearchDeals(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals, limit, offset int) (*models.DealsSearchResult, *errx.Error)
+	DealsSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals) (*models.DealsSummary, *errx.Error)
 	UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID, userID *uuid.UUID, data *models.UpdateDeal) (*models.Deal, *errx.Error)
 	DeleteDeal(ctx context.Context, orgID, dealID uuid.UUID) *errx.Error
 	GetDealsByContact(ctx context.Context, contactID uuid.UUID) ([]models.Deal, *errx.Error)
@@ -266,6 +268,28 @@ func (s *crmService) ListDeals(ctx context.Context, orgID uuid.UUID, pipelineID,
 		limit = 50
 	}
 	result, err := s.repo.ListDeals(ctx, orgID, pipelineID, stageID, status, limit, cursor)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return result, nil
+}
+
+func (s *crmService) SearchDeals(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals, limit, offset int) (*models.DealsSearchResult, *errx.Error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	result, err := s.repo.SearchDeals(ctx, orgID, filters, limit, offset)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return result, nil
+}
+
+func (s *crmService) DealsSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals) (*models.DealsSummary, *errx.Error) {
+	result, err := s.repo.DealsSummary(ctx, orgID, filters)
 	if err != nil {
 		return nil, toErrx(err)
 	}

@@ -41,6 +41,8 @@ type CRMRepository interface {
 	CreateDeal(ctx context.Context, orgID uuid.UUID, data *models.CreateDeal) (*models.Deal, error)
 	GetDeal(ctx context.Context, orgID, dealID uuid.UUID) (*models.Deal, error)
 	ListDeals(ctx context.Context, orgID uuid.UUID, pipelineID, stageID *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.DealsResult, error)
+	SearchDeals(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals, limit, offset int) (*models.DealsSearchResult, error)
+	DealsSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals) (*models.DealsSummary, error)
 	UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID, data *models.UpdateDeal) (*models.Deal, error)
 	DeleteDeal(ctx context.Context, orgID, dealID uuid.UUID) error
 	GetDealsByContact(ctx context.Context, contactID uuid.UUID) ([]models.Deal, error)
@@ -493,20 +495,21 @@ func (r *crmRepository) CreateDeal(ctx context.Context, orgID uuid.UUID, data *m
 	}
 
 	query := `
-		INSERT INTO deals (organization_id, pipeline_id, stage_id, contact_id, name, value, currency, expected_close_date, assigned_to)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO deals (organization_id, pipeline_id, stage_id, contact_id, name, value, currency, expected_close_date, assigned_to, campaign_id, source_mailbox_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		          expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		          expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 	`
 	var deal models.Deal
 	err := r.db.QueryRow(ctx, query,
 		orgID, data.PipelineID, data.StageID, data.ContactID,
 		data.Name, data.Value, currency, data.ExpectedCloseDate, data.AssignedTo,
+		data.CampaignID, data.SourceMailboxID,
 	).Scan(
 		&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 		&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 		&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-		&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -517,7 +520,7 @@ func (r *crmRepository) CreateDeal(ctx context.Context, orgID uuid.UUID, data *m
 func (r *crmRepository) GetDeal(ctx context.Context, orgID, dealID uuid.UUID) (*models.Deal, error) {
 	query := `
 		SELECT id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 		FROM deals
 		WHERE organization_id = $1 AND id = $2
 	`
@@ -526,7 +529,7 @@ func (r *crmRepository) GetDeal(ctx context.Context, orgID, dealID uuid.UUID) (*
 		&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 		&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 		&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-		&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -566,7 +569,7 @@ func (r *crmRepository) ListDeals(ctx context.Context, orgID uuid.UUID, pipeline
 
 	query := fmt.Sprintf(`
 		SELECT id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 		FROM deals
 		WHERE %s
 		ORDER BY created_at DESC, id DESC
@@ -587,7 +590,7 @@ func (r *crmRepository) ListDeals(ctx context.Context, orgID uuid.UUID, pipeline
 			&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 			&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 			&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-			&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+			&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -675,7 +678,7 @@ func (r *crmRepository) UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID,
 		UPDATE deals SET %s
 		WHERE organization_id = $1 AND id = $2
 		RETURNING id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		          expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		          expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 	`, strings.Join(setClauses, ", "))
 
 	var deal models.Deal
@@ -683,7 +686,7 @@ func (r *crmRepository) UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID,
 		&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 		&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 		&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-		&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -708,7 +711,7 @@ func (r *crmRepository) DeleteDeal(ctx context.Context, orgID, dealID uuid.UUID)
 func (r *crmRepository) GetDealsByContact(ctx context.Context, contactID uuid.UUID) ([]models.Deal, error) {
 	query := `
 		SELECT id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 		FROM deals
 		WHERE contact_id = $1
 		ORDER BY created_at DESC
@@ -726,13 +729,276 @@ func (r *crmRepository) GetDealsByContact(ctx context.Context, contactID uuid.UU
 			&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 			&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 			&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-			&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+			&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		deals = append(deals, deal)
 	}
 	return deals, nil
+}
+
+// =====================
+// Deal search + summary
+// =====================
+
+// dealSearchWhere builds the shared WHERE clause for SearchDeals / DealsSummary
+// from a filter body. It returns the clause list and the bound args, starting
+// at $1 = orgID. Both the paginated search and the aggregate summary call this
+// so a header total always reflects the exact same filter as the rows below it.
+func dealSearchWhere(orgID uuid.UUID, f models.SearchDeals) ([]string, []any) {
+	clauses := []string{"d.organization_id = $1"}
+	args := []any{orgID}
+	pos := 2
+
+	if f.Query != "" {
+		clauses = append(clauses, fmt.Sprintf("d.name ILIKE $%d", pos))
+		args = append(args, "%"+f.Query+"%")
+		pos++
+	}
+	appendIn := func(col string, vals []string) {
+		if len(vals) == 0 {
+			return
+		}
+		ph := make([]string, len(vals))
+		for i, v := range vals {
+			ph[i] = fmt.Sprintf("$%d", pos)
+			args = append(args, v)
+			pos++
+		}
+		clauses = append(clauses, fmt.Sprintf("d.%s IN (%s)", col, strings.Join(ph, ",")))
+	}
+	appendIn("status", f.Statuses)
+	appendIn("pipeline_id", f.PipelineIDs)
+	appendIn("stage_id", f.StageIDs)
+	appendIn("assigned_to", f.AssignedTo)
+	appendIn("campaign_id", f.CampaignIDs)
+
+	if f.MinValue != nil {
+		clauses = append(clauses, fmt.Sprintf("d.value >= $%d", pos))
+		args = append(args, *f.MinValue)
+		pos++
+	}
+	if f.MaxValue != nil {
+		clauses = append(clauses, fmt.Sprintf("d.value <= $%d", pos))
+		args = append(args, *f.MaxValue)
+		pos++
+	}
+	if f.CloseAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("d.expected_close_date >= $%d", pos))
+		args = append(args, *f.CloseAfter)
+		pos++
+	}
+	if f.CloseBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("d.expected_close_date <= $%d", pos))
+		args = append(args, *f.CloseBefore)
+		pos++
+	}
+	if f.CreatedAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("d.created_at >= $%d", pos))
+		args = append(args, *f.CreatedAfter)
+		pos++
+	}
+	if f.CreatedBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("d.created_at <= $%d", pos))
+		args = append(args, *f.CreatedBefore)
+		pos++
+	}
+
+	return clauses, args
+}
+
+// dealSortColumn whitelists the sortable columns so SortBy can never inject SQL.
+func dealSortColumn(sortBy string) string {
+	switch sortBy {
+	case "value":
+		return "d.value"
+	case "expected_close_date":
+		return "d.expected_close_date"
+	case "name":
+		return "d.name"
+	case "updated_at":
+		return "d.updated_at"
+	default:
+		return "d.created_at"
+	}
+}
+
+func (r *crmRepository) SearchDeals(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals, limit, offset int) (*models.DealsSearchResult, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	clauses, args := dealSearchWhere(orgID, filters)
+	whereSQL := strings.Join(clauses, " AND ")
+
+	// Exact total over the same filter, so the UI can show "N of M" honestly.
+	var total int64
+	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM deals d WHERE "+whereSQL, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	sortCol := dealSortColumn(filters.SortBy)
+	dir := "DESC"
+	if filters.Reverse {
+		dir = "ASC"
+	}
+
+	limitPos := len(args) + 1
+	offsetPos := len(args) + 2
+	query := fmt.Sprintf(`
+		SELECT d.id, d.organization_id, d.pipeline_id, d.stage_id, d.contact_id, d.name, d.value, d.currency, d.status,
+		       d.expected_close_date, d.won_at, d.lost_at, d.lost_reason, d.assigned_to, d.campaign_id, d.source_mailbox_id,
+		       d.created_at, d.updated_at,
+		       co.id, co.first_name, co.last_name, co.email, co.company,
+		       ps.name, ps.color, ps.position,
+		       cam.name
+		FROM deals d
+		LEFT JOIN contacts co ON co.id = d.contact_id
+		LEFT JOIN pipeline_stages ps ON ps.id = d.stage_id
+		LEFT JOIN campaigns cam ON cam.id = d.campaign_id
+		WHERE %s
+		ORDER BY %s %s NULLS LAST, d.id DESC
+		LIMIT $%d OFFSET $%d
+	`, whereSQL, sortCol, dir, limitPos, offsetPos)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	deals := make([]models.Deal, 0, limit)
+	for rows.Next() {
+		var deal models.Deal
+		var (
+			coID                            *uuid.UUID
+			coFirst, coLast, coEmail, coCmp *string
+			stName, stColor                 *string
+			stPos                           *int
+			camName                         *string
+		)
+		if err := rows.Scan(
+			&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
+			&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
+			&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
+			&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
+			&coID, &coFirst, &coLast, &coEmail, &coCmp,
+			&stName, &stColor, &stPos,
+			&camName,
+		); err != nil {
+			return nil, err
+		}
+		if coID != nil {
+			deal.Contact = &models.Contact{ID: *coID}
+			if coFirst != nil {
+				deal.Contact.FirstName = *coFirst
+			}
+			if coLast != nil {
+				deal.Contact.LastName = *coLast
+			}
+			if coEmail != nil {
+				deal.Contact.Email = *coEmail
+			}
+			if coCmp != nil {
+				deal.Contact.Company = *coCmp
+			}
+		}
+		if stName != nil {
+			deal.Stage = &models.PipelineStage{ID: deal.StageID, Name: *stName}
+			if stColor != nil {
+				deal.Stage.Color = *stColor
+			}
+			if stPos != nil {
+				deal.Stage.Position = *stPos
+			}
+		}
+		deal.CampaignName = camName
+		deals = append(deals, deal)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	hasMore := int64(offset+len(deals)) < total
+	var nextOffset *int
+	if hasMore {
+		n := offset + limit
+		nextOffset = &n
+	}
+
+	return &models.DealsSearchResult{
+		Data: deals,
+		Pagination: models.DealsSearchPagination{
+			Total:      total,
+			Limit:      limit,
+			Offset:     offset,
+			HasMore:    hasMore,
+			NextOffset: nextOffset,
+		},
+	}, nil
+}
+
+func (r *crmRepository) DealsSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals) (*models.DealsSummary, error) {
+	clauses, args := dealSearchWhere(orgID, filters)
+	whereSQL := strings.Join(clauses, " AND ")
+
+	var s models.DealsSummary
+	headline := fmt.Sprintf(`
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE d.status = 'open'),
+			COALESCE(SUM(d.value) FILTER (WHERE d.status = 'open'), 0),
+			COUNT(*) FILTER (WHERE d.status = 'won'),
+			COALESCE(SUM(d.value) FILTER (WHERE d.status = 'won'), 0),
+			COUNT(*) FILTER (WHERE d.status = 'lost'),
+			COALESCE(SUM(d.value) FILTER (WHERE d.status = 'lost'), 0),
+			COUNT(DISTINCT d.currency),
+			COALESCE(MAX(d.currency), 'USD')
+		FROM deals d
+		WHERE %s
+	`, whereSQL)
+	var distinctCurrencies int64
+	if err := r.db.QueryRow(ctx, headline, args...).Scan(
+		&s.Total, &s.OpenCount, &s.OpenValue, &s.WonCount, &s.WonValue,
+		&s.LostCount, &s.LostValue, &distinctCurrencies, &s.Currency,
+	); err != nil {
+		return nil, err
+	}
+	// More than one currency in the matched set means a single blended SUM is
+	// not meaningful; flag it so the UI can warn instead of lying with a total.
+	s.MixedCurrency = distinctCurrencies > 1
+
+	// Per-stage rollup for accurate board column headers (count + open value).
+	stageQuery := fmt.Sprintf(`
+		SELECT d.stage_id, COUNT(*), COALESCE(SUM(d.value) FILTER (WHERE d.status = 'open'), 0)
+		FROM deals d
+		WHERE %s
+		GROUP BY d.stage_id
+	`, whereSQL)
+	rows, err := r.db.Query(ctx, stageQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	s.Stages = []models.DealStageSummary{}
+	for rows.Next() {
+		var st models.DealStageSummary
+		if err := rows.Scan(&st.StageID, &st.Count, &st.Value); err != nil {
+			return nil, err
+		}
+		s.Stages = append(s.Stages, st)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &s, nil
 }
 
 // =====================

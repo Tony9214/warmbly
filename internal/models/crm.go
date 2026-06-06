@@ -149,11 +149,16 @@ type Deal struct {
 	LostAt            *time.Time `json:"lost_at,omitempty"`
 	LostReason        *string    `json:"lost_reason,omitempty"`
 	AssignedTo        *uuid.UUID `json:"assigned_to,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	// Joined
-	Contact *Contact       `json:"contact,omitempty"`
-	Stage   *PipelineStage `json:"stage,omitempty"`
+	// Attribution: the campaign + sender mailbox that produced the reply this
+	// deal was created from. Nullable; editable (best-guess, not ground truth).
+	CampaignID      *uuid.UUID `json:"campaign_id,omitempty"`
+	SourceMailboxID *uuid.UUID `json:"source_mailbox_id,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	// Joined (populated by the search/list query, not by single-row reads).
+	Contact      *Contact       `json:"contact,omitempty"`
+	Stage        *PipelineStage `json:"stage,omitempty"`
+	CampaignName *string        `json:"campaign_name,omitempty"`
 }
 
 type DealsResult struct {
@@ -170,6 +175,75 @@ type CreateDeal struct {
 	Currency          string     `json:"currency,omitempty"`
 	ExpectedCloseDate *time.Time `json:"expected_close_date,omitempty"`
 	AssignedTo        *uuid.UUID `json:"assigned_to,omitempty"`
+	CampaignID        *uuid.UUID `json:"campaign_id,omitempty"`
+	SourceMailboxID   *uuid.UUID `json:"source_mailbox_id,omitempty"`
+}
+
+// =====================
+// Deal search + summary
+// =====================
+
+// SearchDeals is the faceted, server-side filter body shared by
+// POST /crm/deals/search and POST /crm/deals/summary. Every facet is
+// optional; an empty body matches every deal in the organization. This is
+// the surface that makes the deals views correct at scale instead of paging
+// 100 rows and reducing client-side.
+type SearchDeals struct {
+	Query         string     `json:"query"`          // name ILIKE
+	Statuses      []string   `json:"statuses"`       // open | won | lost (any of)
+	PipelineIDs   []string   `json:"pipeline_ids"`   // any of (cross-pipeline by default)
+	StageIDs      []string   `json:"stage_ids"`      // any of
+	AssignedTo    []string   `json:"assigned_to"`    // owner is any of
+	CampaignIDs   []string   `json:"campaign_ids"`   // attributed campaign is any of
+	MinValue      *float64   `json:"min_value"`      // value >=
+	MaxValue      *float64   `json:"max_value"`      // value <=
+	CloseAfter    *time.Time `json:"close_after"`    // expected_close_date >=
+	CloseBefore   *time.Time `json:"close_before"`   // expected_close_date <=
+	CreatedAfter  *time.Time `json:"created_after"`  // created_at >=
+	CreatedBefore *time.Time `json:"created_before"` // created_at <=
+	SortBy        string     `json:"sort_by"`        // created_at|updated_at|value|expected_close_date|name
+	Reverse       bool       `json:"reverse"`        // true = ASC, false = DESC (default)
+}
+
+// DealsSearchResult is the offset-paginated result of POST /crm/deals/search.
+// Offset (not keyset) pagination is used because the sortable columns include
+// nullable value/expected_close_date, where a keyset cursor would silently
+// drop NULL-valued rows. Total is exact so the UI can show "N of M".
+type DealsSearchResult struct {
+	Data       []Deal                `json:"data"`
+	Pagination DealsSearchPagination `json:"pagination"`
+}
+
+type DealsSearchPagination struct {
+	Total      int64 `json:"total"`
+	Limit      int   `json:"limit"`
+	Offset     int   `json:"offset"`
+	HasMore    bool  `json:"has_more"`
+	NextOffset *int  `json:"next_offset,omitempty"`
+}
+
+// DealsSummary is the server-side aggregate over the SAME filter body as a
+// search, so every header total and per-stage column total is a true SUM/COUNT
+// over the whole matching set — never a client reduce over a truncated page.
+type DealsSummary struct {
+	Total         int64              `json:"total"`
+	OpenCount     int64              `json:"open_count"`
+	OpenValue     float64            `json:"open_value"`
+	WonCount      int64              `json:"won_count"`
+	WonValue      float64            `json:"won_value"`
+	LostCount     int64              `json:"lost_count"`
+	LostValue     float64            `json:"lost_value"`
+	Currency      string             `json:"currency"`
+	Stages        []DealStageSummary `json:"stages"`
+	MixedCurrency bool               `json:"mixed_currency"`
+}
+
+// DealStageSummary feeds an accurate per-column header on the kanban board:
+// the count of deals in the stage and the open-deal value in it.
+type DealStageSummary struct {
+	StageID uuid.UUID `json:"stage_id"`
+	Count   int64     `json:"count"`
+	Value   float64   `json:"value"`
 }
 
 type UpdateDeal struct {

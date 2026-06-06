@@ -528,6 +528,8 @@ func Run(
 			{
 				deals.GET("", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.ListDeals)
 				deals.POST("", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.CreateDeal)
+				deals.POST("/search", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.SearchDeals)
+				deals.POST("/summary", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.DealsSummary)
 				deals.GET("/:id", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.GetDeal)
 				deals.PATCH("/:id", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.UpdateDeal)
 				deals.DELETE("/:id", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.DeleteDeal)
