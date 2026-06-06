@@ -503,7 +503,7 @@ function EmptyDeals({ hasFilters, onClear }: { hasFilters: boolean; onClear: () 
             <p className="text-[11.5px] text-slate-400 mb-4 max-w-[40ch] mx-auto leading-relaxed">
                 {hasFilters
                     ? "Try widening or clearing the filters to see more."
-                    : "Deals you create across any pipeline show up here — searchable, sortable, and totalled across every pipeline."}
+                    : "Deals you create across any pipeline show up here: searchable, sortable, and totalled across every pipeline."}
             </p>
             {hasFilters && (
                 <button
