@@ -590,9 +590,9 @@ const softwareJsonLd = {
 
         <!-- Edge-to-edge grid: cards share borders via gap-px, no per-card ring.
              The whole grid sits inside a single rounded ring. -->
-        <div class="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-[color:var(--border)] ring-1 ring-[color:var(--border)] rounded-[10px] overflow-hidden">
+        <div class="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 ring-1 ring-[color:var(--border-strong)] rounded-[10px] overflow-hidden">
           {plans.map((p, idx) => (
-            <div class="pricing-card relative flex flex-col bg-white p-7" data-card-idx={idx}>
+            <div class={`pricing-card relative flex flex-col bg-white p-7 border-[color:var(--border-strong)] ${idx === 0 ? '' : idx === 1 ? 'border-t sm:border-t-0 sm:border-l' : idx === 2 ? 'border-t lg:border-t-0 lg:border-l' : 'border-t lg:border-t-0 sm:border-l'}`} data-card-idx={idx}>
               <div class="relative flex flex-col h-full">
                 {p.highlight && (
                   <span class="absolute -top-2 right-0 inline-flex items-center h-6 px-2.5 rounded-full text-[10px] font-semibold uppercase tracking-[0.10em] bg-[color:var(--brand)] text-white shadow-[0_4px_12px_-2px_rgba(2,132,199,0.55)]">
