@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, Outlet, useLocation, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -15,6 +16,7 @@ import useStartCampaign from "@/lib/api/hooks/app/campaigns/useStartCampaign";
 import useStopCampaign from "@/lib/api/hooks/app/campaigns/useStopCampaign";
 import { CampaignContext } from "@/hooks/context/campaign";
 import { useConfirm } from "@/hooks/context/confirm";
+import LaunchCampaignDialog from "@/components/app/campaigns/LaunchCampaignDialog";
 
 const TABS = [
     { label: "Overview", path: "", Icon: BarChart3Icon },
@@ -38,6 +40,7 @@ export default function CampaignLayout() {
     const confirm = useConfirm();
     const startCampaign = useStartCampaign();
     const stopCampaign = useStopCampaign();
+    const [launchOpen, setLaunchOpen] = useState(false);
 
     if (campaignData.isLoading) {
         return (
@@ -82,14 +85,13 @@ export default function CampaignLayout() {
     const pending = isActive ? stopCampaign.isPending : startCampaign.isPending;
 
     const onToggle = () => {
-        const action = isActive ? "Pause" : "Start";
-        confirm?.show(`${action} ${campaign.name}?`, () => {
-            if (isActive) {
+        if (isActive) {
+            confirm?.show(`Pause ${campaign.name}?`, () => {
                 stopCampaign.mutate(campaign.id);
-            } else {
-                startCampaign.mutate(campaign.id);
-            }
-        });
+            });
+        } else {
+            setLaunchOpen(true);
+        }
     };
 
     return (
@@ -161,6 +163,11 @@ export default function CampaignLayout() {
                     <Outlet />
                 </div>
             </div>
+            <LaunchCampaignDialog
+                campaign={launchOpen ? campaign : null}
+                onClose={() => setLaunchOpen(false)}
+                onConfirm={(cid) => startCampaign.mutateAsync(cid)}
+            />
         </CampaignContext.Provider>
     );
 }

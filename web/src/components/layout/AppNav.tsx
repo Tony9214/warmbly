@@ -27,6 +27,7 @@ import {
 import { useMemo } from "react";
 import { useAppStore } from "@/stores";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
+import useCampaigns from "@/lib/api/hooks/app/campaigns/useCampaigns";
 import { UserNav } from "./UserNav";
 import { Logo } from "@/components/svg";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,8 @@ interface NavItem {
     requires?: "inbox" | "advanced";
     /** Role gate — when set, sidebar hides the row entirely for non-matching roles. */
     rolesAllowed?: "manage";
+    /** Live indicator key — renders an ambient, realtime activity cluster. */
+    indicator?: "campaigns";
 }
 
 // Plan badge shown on locked sidebar rows. Plan names + colors come
@@ -73,7 +76,7 @@ const sections: NavSection[] = [
         label: "Email",
         items: [
             { title: "Accounts", url: "/app/emails", icon: MailIcon },
-            { title: "Campaigns", url: "/app/campaigns", icon: MegaphoneIcon },
+            { title: "Campaigns", url: "/app/campaigns", icon: MegaphoneIcon, indicator: "campaigns" },
             { title: "Contacts", url: "/app/contacts", icon: UsersIcon },
             { title: "Analytics", url: "/app/analytics", icon: BarChart3Icon },
         ],
@@ -143,6 +146,7 @@ function NavRow({ item }: { item: NavItem }) {
                 strokeWidth={active ? 2 : 1.6}
             />
             <span className="truncate flex-1">{item.title}</span>
+            {item.indicator === "campaigns" && !locked && <CampaignActivity />}
             {planBadge ? (
                 <span
                     className={cn(
@@ -160,6 +164,34 @@ function NavRow({ item }: { item: NavItem }) {
                 )
             )}
         </Link>
+    );
+}
+
+// CampaignActivity is the ambient, realtime indicator on the Campaigns nav
+// row: a small 3x3 dot-grid loader + a count of campaigns sending right now,
+// and nothing when none are sending. The count comes from the shared
+// campaigns-list cache, which the realtime layer invalidates on campaign
+// events, so it stays live without a refresh. Draft / paused / completed are
+// review states surfaced inside the Campaigns page, not here.
+function CampaignActivity() {
+    const { campaigns } = useCampaigns({ query: "", folder: "" });
+    const active = useMemo(
+        () => campaigns.filter((c) => c.status === "active").length,
+        [campaigns],
+    );
+
+    if (active === 0) return null;
+
+    return (
+        <span
+            className="ml-auto inline-flex items-center gap-1.5 shrink-0 text-sky-600"
+            title={`${active} campaign${active === 1 ? "" : "s"} sending now`}
+        >
+            <span className="campaign-grid" aria-hidden />
+            <span className="text-[10.5px] font-semibold tabular-nums leading-none">
+                {active}
+            </span>
+        </span>
     );
 }
 

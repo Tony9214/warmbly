@@ -15,6 +15,7 @@ import {
     RotationRampSection,
 } from "@/components/app/campaigns/preferences/CampaignEmails";
 import CampaignContactOrder from "@/components/app/campaigns/preferences/CampaignContactOrder";
+import CampaignFolderField from "@/components/app/campaigns/CampaignFolderField";
 import useUpdateCampaign from "@/lib/api/hooks/app/campaigns/useUpdateCampaign";
 import toast from "react-hot-toast";
 import type { AppError } from "@/lib/api/client/normalizeError";
@@ -29,6 +30,7 @@ const DAILY_MAX = 100;
 // scrollspy over these ids.
 const SECTIONS = [
     { id: "general", label: "General", description: "Name and description for this campaign." },
+    { id: "folders", label: "Folders", description: "Organize this campaign into folders." },
     {
         id: "senders",
         label: "Sending accounts",
@@ -126,6 +128,15 @@ function useScrollSpy(ids: readonly string[]) {
     return { activeId, scrollTo };
 }
 
+// Order-independent set equality for id arrays. Toggling a folder/tag on then
+// off produces a new array reference with the same contents — a plain `!==`
+// would flag that as a phantom unsaved change, so compare by membership.
+function sameIdSet(a: string[] = [], b: string[] = []): boolean {
+    if (a.length !== b.length) return false;
+    const set = new Set(a);
+    return b.every((id) => set.has(id));
+}
+
 export default function CampaignPreferences() {
     const campaign = useCampaign();
     if (!campaign) {
@@ -168,9 +179,14 @@ export default function CampaignPreferences() {
         return {
             ...(newData.name !== campaign.name && { name: newData.name }),
             ...(newData.description !== campaign.description && { description: newData.description }),
+            ...(!sameIdSet(newData.folders ?? [], campaign.folders ?? []) && {
+                folders: newData.folders ?? [],
+            }),
 
             // Sending + deliverability
-            ...(newData.email_tags !== campaign.email_tags && { email_tags: newData.email_tags }),
+            ...(!sameIdSet(newData.email_tags ?? [], campaign.email_tags ?? []) && {
+                email_tags: newData.email_tags,
+            }),
             ...(newData.daily_limit !== campaign.daily_limit && { daily_limit: newData.daily_limit }),
             ...(newData.stop_on_reply !== campaign.stop_on_reply && { stop_on_reply: newData.stop_on_reply }),
             ...(newData.text_only !== campaign.text_only && { text_only: newData.text_only }),
@@ -278,6 +294,20 @@ export default function CampaignPreferences() {
         switch (id) {
             case "general":
                 return <GeneralSection campaign={campaign} newCampaign={newData} setNewCampaign={setNewData} />;
+            case "folders":
+                return (
+                    <CampaignFolderField
+                        selected={newData.folders ?? []}
+                        onToggle={(id) =>
+                            setNewData({
+                                ...newData,
+                                folders: (newData.folders ?? []).includes(id)
+                                    ? (newData.folders ?? []).filter((x) => x !== id)
+                                    : [...(newData.folders ?? []), id],
+                            })
+                        }
+                    />
+                );
             case "senders":
                 return (
                     <SendingAccountsSection

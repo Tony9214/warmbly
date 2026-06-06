@@ -32,6 +32,10 @@ export default interface Campaign {
 
     email_tags: string[];
 
+    // Folder membership (folder ids). Returned by the API; set via PATCH with a
+    // `folders` array (empty array clears membership, omitting leaves it as-is).
+    folders?: string[];
+
     contact_order_by: 'created_at' | 'email' | 'name' | 'custom_field' | 'manual';
     contact_order_dir: 'asc' | 'desc';
     contact_order_field?: string;
