@@ -161,7 +161,7 @@ export function Stat({
     onClick,
 }: {
     label: string;
-    value: string | number;
+    value: React.ReactNode;
     sub?: string;
     accent?: boolean;
     href?: string;
