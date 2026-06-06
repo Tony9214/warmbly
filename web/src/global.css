@@ -305,8 +305,24 @@ svg.loading circle {
     19px 19px  0 5px, 38px 19px  0 0px, 57px 19px  0 0px; }
 }
 
+/* Flame flicker — the warmup ("heat") motif for the sidebar Accounts row.
+   Deliberately a DIFFERENT motion than .campaign-grid so each nav row reads
+   distinct. A small living-flame wobble: scale + tilt + opacity, anchored at
+   the base so it dances like a candle. Tint via currentColor (orange). */
+.flame-flicker {
+  transform-origin: center bottom;
+  animation: flame-flicker 1.1s ease-in-out infinite;
+}
+
+@keyframes flame-flicker {
+  0%, 100% { transform: scale(1) rotate(-1.5deg); opacity: 0.82; }
+  25%      { transform: scale(1.09) rotate(1.5deg); opacity: 1; }
+  50%      { transform: scale(0.97) rotate(-1deg); opacity: 0.9; }
+  75%      { transform: scale(1.05) rotate(1deg); opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .sky-breathe, .sun-glow, .cloud-drift, .animate-card-float, .animate-fade-in, .campaign-grid::before { animation: none !important; }
+  .sky-breathe, .sun-glow, .cloud-drift, .animate-card-float, .animate-fade-in, .campaign-grid::before, .flame-flicker { animation: none !important; }
 }
 
 /* ── Utilities ─────────────────────── */

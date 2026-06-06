@@ -29,6 +29,7 @@ import {
     XIcon,
 } from "lucide-react";
 import { SearchInput } from "@/components/ui/field";
+import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import {
     PopoverMenu,
     PopoverMenuContent,
@@ -60,12 +61,12 @@ const DefaultFolder = {
 // can proactively toast the user (continuous health reporting).
 const HEALTH_RANK: Record<string, number> = { healthy: 0, warning: 1, error: 2 };
 
-function healthTone(status?: AccountStatus): { dot: string; text: string; label: string } {
+function healthTone(status?: AccountStatus): { dot: string; text: string; label: string; pulse: boolean } {
     const h = status?.health;
-    if (!h) return { dot: "bg-slate-300", text: "text-slate-500", label: "—" };
-    if (h.status === "healthy") return { dot: "bg-emerald-500", text: "text-emerald-600", label: `Healthy ${h.score}` };
-    if (h.status === "warning") return { dot: "bg-amber-500", text: "text-amber-600", label: `At risk ${h.score}` };
-    return { dot: "bg-rose-500", text: "text-rose-600", label: `Issue ${h.score}` };
+    if (!h) return { dot: "bg-slate-300", text: "text-slate-500", label: "—", pulse: false };
+    if (h.status === "healthy") return { dot: "bg-emerald-500", text: "text-emerald-600", label: `Healthy ${h.score}`, pulse: false };
+    if (h.status === "warning") return { dot: "bg-amber-500", text: "text-amber-600", label: `At risk ${h.score}`, pulse: true };
+    return { dot: "bg-rose-500", text: "text-rose-600", label: `Issue ${h.score}`, pulse: true };
 }
 
 export default function AddressesPage() {
@@ -199,10 +200,10 @@ export default function AddressesPage() {
             </PageTopbar>
 
             <StatStrip cols={4}>
-                <Stat label="Total" value={stats.total} sub="connected" />
-                <Stat label="Healthy" value={stats.healthy} sub="sending now" accent={stats.healthy > 0} />
-                <Stat label="Warming" value={stats.warming} sub="ramping up" />
-                <Stat label="Needs attention" value={stats.issues} sub="paused or failing" last />
+                <Stat label="Total" value={<AnimatedNumber value={stats.total} />} sub="connected" />
+                <Stat label="Healthy" value={<AnimatedNumber value={stats.healthy} />} sub="sending now" accent={stats.healthy > 0} />
+                <Stat label="Warming" value={<AnimatedNumber value={stats.warming} />} sub="ramping up" />
+                <Stat label="Needs attention" value={<AnimatedNumber value={stats.issues} />} sub="paused or failing" last />
             </StatStrip>
 
             <SectionBar label="Mailboxes" count={emailsData.emails?.length ?? 0}>
@@ -478,7 +479,19 @@ function MailboxRow({
                     )}
                 </button>
             </td>
-            <td className={`px-3 text-[12px] tabular-nums text-right font-mono ${warmupTone}`}>{warmupLabel}</td>
+            <td className={`px-3 text-[12px] tabular-nums text-right font-mono ${warmupTone}`}>
+                {active ? (
+                    <span className="inline-flex items-center justify-end gap-1.5">
+                        <span className="campaign-grid shrink-0" aria-hidden />
+                        <span>
+                            <AnimatedNumber value={ws?.current_volume ?? 0} />/
+                            {ws?.target_volume ?? box.warmup_base}
+                        </span>
+                    </span>
+                ) : (
+                    warmupLabel
+                )}
+            </td>
             <td className="px-3">
                 <button
                     type="button"
@@ -486,7 +499,12 @@ function MailboxRow({
                     className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${tone.text}`}
                     title="View mailbox health"
                 >
-                    <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+                    <span className="relative flex w-1.5 h-1.5">
+                        {tone.pulse && (
+                            <span className={`absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping ${tone.dot}`} />
+                        )}
+                        <span className={`relative inline-flex w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+                    </span>
                     <span className="uppercase tracking-[0.08em]">{tone.label}</span>
                 </button>
             </td>

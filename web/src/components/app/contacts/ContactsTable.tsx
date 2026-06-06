@@ -723,13 +723,14 @@ function ContactsTableBody({
                                     <td className="px-3">
                                         {lead?.current_step ? (
                                             <span
-                                                className={`inline-flex items-center h-5 px-1.5 rounded text-[11px] font-medium ${
+                                                title={lead.current_step}
+                                                className={`inline-flex items-center h-5 px-1.5 rounded text-[11px] font-medium max-w-[108px] ${
                                                     processed
                                                         ? "bg-slate-100 text-slate-400"
-                                                        : "bg-sky-50 text-sky-700"
+                                                        : "bg-sky-100 text-sky-700"
                                                 }`}
                                             >
-                                                {lead.current_step}
+                                                <span className="truncate">{lead.current_step}</span>
                                             </span>
                                         ) : (
                                             <span className="text-[11px] text-slate-300">Not started</span>
