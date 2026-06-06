@@ -349,14 +349,13 @@ const chevronDownIcon = '<path d="m6 9 6 6 6-6"/>';
     .cb-react{position:absolute;z-index:40;opacity:0;animation:cb-react 11s ease-out infinite;}
     /* press #1 feedback on the First email node */
     .cb-node{animation:cb-node-press 11s ease-in-out infinite;}
-    /* press #2 feedback on the drawer Save changes button */
-    .cb-save{animation:cb-save-press 11s ease-in-out infinite;}
-    @keyframes cb-move{0%{left:18%;top:78%}22%{left:50%;top:24%}32%{left:50%;top:24%}58%{left:90%;top:14%}68%{left:90%;top:14%}88%{left:90%;top:14%}100%{left:18%;top:78%}}
+    /* press #1 lands on the First email node center (50%, 17.5%); press #2 dismisses the
+       drawer by clicking the canvas to its LEFT (40%, 60%); start/return is a neutral spot. */
+    @keyframes cb-move{0%{left:18%;top:78%}22%{left:50%;top:17.5%}32%{left:50%;top:17.5%}58%{left:40%;top:60%}68%{left:40%;top:60%}88%{left:40%;top:60%}100%{left:18%;top:78%}}
     @keyframes cb-press{0%,26%{transform:scale(1)}28%{transform:scale(.82)}31%,62%{transform:scale(1)}64%{transform:scale(.82)}67%,100%{transform:scale(1)}}
     @keyframes cb-rip{0%,26%{transform:scale(0);opacity:0}29%{transform:scale(.25);opacity:.7}41%{transform:scale(1.9);opacity:0}60%{transform:scale(0);opacity:0}63%{transform:scale(.25);opacity:.7}75%{transform:scale(1.9);opacity:0}100%{transform:scale(0);opacity:0}}
-    @keyframes cb-react{0%,29%{opacity:0;transform:translateX(18px)}33%{opacity:1;transform:translateX(0)}88%{opacity:1;transform:translateX(0)}95%{opacity:0;transform:translateX(18px)}100%{opacity:0;transform:translateX(18px)}}
+    @keyframes cb-react{0%,29%{opacity:0;transform:translateX(18px)}33%{opacity:1;transform:translateX(0)}60%{opacity:1;transform:translateX(0)}66%{opacity:0;transform:translateX(18px)}100%{opacity:0;transform:translateX(18px)}}
     @keyframes cb-node-press{0%,26%{box-shadow:none}28%{box-shadow:0 0 0 4px rgba(186,230,253,.9)}31%,100%{box-shadow:none}}
-    @keyframes cb-save-press{0%,62%{background-color:#0284c7}64%{background-color:#075985;box-shadow:0 0 0 4px rgba(186,230,253,.9)}67%,100%{background-color:#0284c7}}
     @media (prefers-reduced-motion: reduce){.cb-cursor{display:none}.cb-react{display:none}}
   </style>
 </div>
