@@ -795,30 +795,6 @@ const softwareJsonLd = {
       }
     }
 
-    /* Schedule grid — window blocks grow up once their feature frame enters
-       view. JS-gated (html.js-ready) so blocks stay visible if JS never runs;
-       reduced-motion shows them in their final state. */
-    html.js-ready .showcase-frame .sched-block {
-      transform: scaleY(0);
-      transform-origin: top;
-      opacity: 0;
-    }
-    html.js-ready .showcase-frame.is-in .sched-block {
-      animation: sched-grow 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
-    }
-    @keyframes sched-grow {
-      from { transform: scaleY(0); opacity: 0; }
-      to   { transform: scaleY(1); opacity: 1; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      html.js-ready .showcase-frame .sched-block,
-      html.js-ready .showcase-frame.is-in .sched-block {
-        transform: none;
-        opacity: 1;
-        animation: none;
-      }
-    }
-
     /* Pause the demo cursor while a visitor is inspecting a feature window. */
     .feature-window:hover .demo-cursor,
     .feature-window:hover .demo-cursor-ripple {
@@ -870,7 +846,6 @@ const softwareJsonLd = {
     tag('.feature-card',    0.10);
     tag('.metric-cell',     0.06);
     tag('.bento-card',      0.06);
-    tag('.showcase-frame',  0.12);
 
     // ── Bar grow on scroll ──────────────────────────────────────────
     document.querySelectorAll('.bar-fill').forEach((el) => {
