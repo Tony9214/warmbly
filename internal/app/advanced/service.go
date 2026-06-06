@@ -58,6 +58,10 @@ type Service interface {
 	// integration actions (Slack ping, CRM upsert).
 	WireDispatcher(d EventDispatcher)
 
+	// EmitCampaignEvent dispatches a campaign event (e.g. from a sequence
+	// "notify" action node) to customer webhooks and wired integrations.
+	EmitCampaignEvent(ctx context.Context, orgID uuid.UUID, eventType models.WebhookEventType, data map[string]any)
+
 	// DLQ auto-retry
 	ProcessRetryableDeadLetters(ctx context.Context) (int, *errx.Error)
 }

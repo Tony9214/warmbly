@@ -174,6 +174,7 @@ func Run(
 		protectedAuth.DELETE("/sessions/:id", h.SessionRevoke)
 
 		protectedAuth.GET("/me", h.GetUser)
+		protectedAuth.PATCH("/me", h.UpdateUserProfile)
 		protectedAuth.PATCH("/me/onboarding", h.CompleteOnboarding)
 		protectedAuth.POST("/me/avatar", h.UploadUserAvatar)
 		protectedAuth.DELETE("/me/avatar", h.DeleteUserAvatar)
@@ -271,10 +272,6 @@ func Run(
 			// Explicit sender pool (rotation/weighting).
 			campaigns.GET("/:id/senders", m.RequireOrganization(), m.RequireAccess(models.PermViewCampaigns, models.APIPermReadCampaigns), h.ListCampaignSenders)
 			campaigns.PUT("/:id/senders", m.RequireOrganization(), m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns), h.ReplaceCampaignSenders)
-
-			// Manual lead order (contact_order_by = 'manual').
-			campaigns.GET("/:id/leads/order", m.RequireOrganization(), m.RequireAccess(models.PermViewCampaigns, models.APIPermReadCampaigns), h.ListCampaignLeadOrder)
-			campaigns.PUT("/:id/leads/order", m.RequireOrganization(), m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns), h.ReplaceCampaignLeadOrder)
 
 			// Campaign-scoped tracking-domain verification.
 			campaigns.POST("/:id/tracking-domain/verify", m.RequireOrganization(), m.RequireAccess(models.PermManageCampaigns, models.APIPermWriteCampaigns), h.VerifyCampaignTrackingDomain)

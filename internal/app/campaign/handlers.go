@@ -3,6 +3,7 @@ package campaign
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
 	"github.com/warmbly/warmbly/internal/scheduler"
+	"github.com/warmbly/warmbly/internal/tasks"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
@@ -163,6 +165,25 @@ func (s *campaignService) StartCampaign(ctx context.Context, orgID uuid.UUID, ca
 
 	// Sender-pool validity (explicit senders OR tags OR "all" fallback) is part
 	// of ValidateCampaignReady above, so no separate strategy-gated check here.
+
+	// Block start if any step's template is malformed. Without this, a broken
+	// conditional (e.g. an {{if}} with no {{end}}) silently degrades to literal
+	// template text in the sent email — better to catch it here with a clear,
+	// step-scoped error than to ship {{if ...}} to recipients.
+	if seqs, serr := s.campaignRepository.GetSequencesByCampaignID(ctx, cID); serr == nil {
+		for i, seq := range seqs {
+			for _, f := range []struct {
+				name, val string
+			}{{"subject", seq.Subject}, {"body", seq.BodyHTML}, {"plain-text body", seq.BodyPlain}} {
+				if terr := tasks.TemplateError(f.val); terr != nil {
+					return errx.New(errx.BadRequest, fmt.Sprintf(
+						"Step %d's %s has a template error — fix the {{if}}/{{end}} or {{eq}} syntax before starting.",
+						i+1, f.name,
+					))
+				}
+			}
+		}
+	}
 
 	activeCampaigns, err := s.campaignRepository.CountActiveForOrganization(ctx, orgID)
 	if err != nil {
@@ -405,28 +426,6 @@ func (s *campaignService) ReplaceCampaignSenders(ctx context.Context, orgID uuid
 		return nil, xerr
 	}
 	return s.campaignRepository.ReplaceCampaignSenders(ctx, cID, in)
-}
-
-// ListCampaignLeadOrder returns the campaign's enrolled contacts in send order.
-func (s *campaignService) ListCampaignLeadOrder(ctx context.Context, orgID uuid.UUID, campaignID string, limit int) ([]models.CampaignLead, *errx.Error) {
-	_, cID, xerr := s.campaignForOrg(ctx, orgID, campaignID)
-	if xerr != nil {
-		return nil, xerr
-	}
-	return s.campaignRepository.ListCampaignLeads(ctx, cID, limit)
-}
-
-// ReplaceCampaignLeadOrder persists a manual send order and returns the updated
-// ordered list.
-func (s *campaignService) ReplaceCampaignLeadOrder(ctx context.Context, orgID uuid.UUID, campaignID string, contactIDs []uuid.UUID) ([]models.CampaignLead, *errx.Error) {
-	_, cID, xerr := s.campaignForOrg(ctx, orgID, campaignID)
-	if xerr != nil {
-		return nil, xerr
-	}
-	if xerr := s.campaignRepository.SetCampaignLeadOrder(ctx, cID, contactIDs); xerr != nil {
-		return nil, xerr
-	}
-	return s.campaignRepository.ListCampaignLeads(ctx, cID, 500)
 }
 
 // trackingDomainTarget is the shared host customers point their CNAME at. Kept

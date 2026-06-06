@@ -27,8 +27,32 @@ type Sequence struct {
 	// (or stop) comes next. Stored as a single jsonb column on `sequences`.
 	Conditions json.RawMessage `json:"conditions,omitempty"`
 
+	// Kind is "email" (default — subject/body are rendered and sent) or a
+	// non-email control node: "action" (Action.Type names the side effect) or
+	// "wait" (delay only). Routing (Conditions) is identical regardless of Kind.
+	Kind string `json:"kind"`
+	// Action is the typed config for non-email nodes; an empty object for email
+	// nodes. Stored in the sequences.action jsonb column.
+	Action json.RawMessage `json:"action,omitempty"`
+
 	UpdatedAt time.Time `json:"updated_at"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// ActionConfig is the persisted config for a non-email (action/wait) node. Type
+// is the switch the task executes on; the remaining fields are type-scoped.
+type ActionConfig struct {
+	Type string `json:"type"` // wait | add_tag | remove_tag | unsubscribe | notify | end
+
+	// wait
+	WaitMinutes *int `json:"wait_minutes,omitempty"`
+
+	// add_tag / remove_tag — a contact category id (product "tags" == categories)
+	CategoryID *uuid.UUID `json:"category_id,omitempty"`
+
+	// notify — webhook / integration fan-out
+	NotifyEvent string         `json:"notify_event,omitempty"`
+	NotifyData  map[string]any `json:"notify_data,omitempty"`
 }
 
 type UpdateSequence struct {
@@ -46,6 +70,10 @@ type UpdateSequence struct {
 	// (or an object with an empty `branches` array) to clear branching and fall
 	// back to linear progression.
 	Conditions *BranchConditions `json:"conditions"`
+
+	// Kind / Action, when non-nil, switch the node between email and action/wait.
+	Kind   *string       `json:"kind"`
+	Action *ActionConfig `json:"action"`
 }
 
 // BranchConditions is the typed branching tree persisted in the sequence

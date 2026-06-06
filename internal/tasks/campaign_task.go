@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -200,6 +201,19 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 					Message:    "Campaign completed: all emails sent",
 				})
 			}
+			// Broadcast live so the dashboard (and the sidebar campaign counters)
+			// flip from "sending" to "finished" without a manual refresh.
+			if s.streamingPublisher != nil {
+				s.streamingPublisher.PublishCampaignEvent(ctx, &pubsub.CampaignEvent{
+					BaseEvent: pubsub.BaseEvent{
+						EventType: pubsub.EventCampaignCompleted,
+						UserID:    campaign.UserID,
+					},
+					CampaignID: campaign.ID.String(),
+					Name:       campaign.Name,
+					Status:     "completed",
+				})
+			}
 		}
 		s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
 		executionStatus = "completed"
@@ -237,7 +251,9 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 
 	// Pre-send verification gate: drop addresses already known to be invalid
 	// (bad syntax / no MX / 550 RCPT) before a worker sends and earns a hard
-	// bounce. Only 'invalid' is dropped — 'risky'/'unknown'/'valid' still send.
+	// bounce. 'invalid' is always dropped; 'risky' is dropped only when the
+	// campaign's "send to risky emails" toggle is off (see the next gate).
+	// 'unknown'/'valid' always send.
 	if contact.VerificationStatus == "invalid" {
 		_ = s.taskRepo.UpdateTaskStatusWithLock(ctx, taskID, "skipped_suppressed")
 		if s.campaignLogRepo != nil {
@@ -253,10 +269,66 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		return nil
 	}
 
+	// Risky-recipient gate: when "send to risky emails" is off, also drop
+	// addresses verification flagged 'risky' (catch-all / role / low-quality),
+	// which raise bounce risk. Enforces the campaign.RiskyEmails toggle that the
+	// settings UI exposes — without this the toggle is stored but inert.
+	if !campaign.RiskyEmails && contact.VerificationStatus == "risky" {
+		_ = s.taskRepo.UpdateTaskStatusWithLock(ctx, taskID, "skipped_suppressed")
+		if s.campaignLogRepo != nil {
+			_ = s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+				CampaignID: campaign.ID,
+				EventType:  "suppressed",
+				Message:    fmt.Sprintf("Risky recipient skipped (send to risky emails is off): %s", contact.Email),
+				Metadata:   map[string]interface{}{"reason": contact.VerificationReason},
+			})
+		}
+		_ = s.createCampaignTask(ctx, campaign.ID, accountID, nextTime)
+		executionStatus = "completed"
+		return nil
+	}
+
 	sequence, err := s.campaignRepo.GetSequenceByID(ctx, nextPair.SequenceID)
 	if err != nil {
 		sentry.CaptureException(err)
 		return errx.InternalError()
+	}
+
+	// STEP 7.6: Non-email nodes (action / wait). These run a control-plane side
+	// effect and route onward WITHOUT sending mail — the render/send block below
+	// is reached only for email nodes. We stamp the node visited so routing
+	// advances past it next tick, then schedule the next campaign tick (now for
+	// instant actions and "end", now+wait for a wait node). An "end" node has no
+	// outgoing connection, so the contact drops out of routing afterwards while
+	// the campaign keeps processing other contacts.
+	if sequence.Kind != "email" {
+		var cfg models.ActionConfig
+		if len(sequence.Action) > 0 {
+			_ = json.Unmarshal(sequence.Action, &cfg)
+		}
+		if aerr := s.executeActionNode(ctx, campaign, contact, &cfg); aerr != nil {
+			log.Warn().Err(aerr).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Str("action", cfg.Type).Msg("Action node execution failed")
+		}
+		resumeAt := nextTime
+		if cfg.Type == "wait" && cfg.WaitMinutes != nil && *cfg.WaitMinutes > 0 {
+			resumeAt = time.Now().UTC().Add(time.Duration(*cfg.WaitMinutes) * time.Minute)
+		}
+		if rerr := s.campaignProgressRepo.RecordEmailSent(ctx, campaign.ID, contact.ID, sequence.ID); rerr != nil {
+			log.Warn().Err(rerr).Str("campaign_id", campaign.ID.String()).Msg("Failed to record action node progress")
+		}
+		if cerr := s.createCampaignTask(ctx, campaign.ID, accountID, resumeAt); cerr != nil {
+			log.Warn().Err(cerr).Str("campaign_id", campaign.ID.String()).Msg("Failed to schedule next task after action node")
+		}
+		if s.campaignLogRepo != nil {
+			_ = s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+				CampaignID: campaign.ID,
+				EventType:  "action",
+				Message:    fmt.Sprintf("Ran '%s' action for %s", cfg.Type, contact.Email),
+			})
+		}
+		s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
+		executionStatus = "completed"
+		return nil
 	}
 
 	// Load campaign attachments (campaign-wide; metadata only — the worker
@@ -610,6 +682,62 @@ func (s *tasksService) autoPauseCampaign(ctx context.Context, campaignID, taskID
 			EventType:  "auto_paused",
 			Message:    "Campaign auto-paused: no active email accounts available",
 		})
+	}
+}
+
+// executeActionNode runs the control-plane side effect for a non-email node.
+// "wait" and "end" have no side effect (their behaviour is timing / routing
+// only); the others reuse existing repos/services. Everything here is
+// control-plane — the worker is never involved for an action node.
+func (s *tasksService) executeActionNode(ctx context.Context, campaign *models.Campaign, contact *models.Contact, cfg *models.ActionConfig) error {
+	switch cfg.Type {
+	case "wait", "end", "":
+		return nil
+	case "add_tag":
+		if cfg.CategoryID == nil {
+			return nil
+		}
+		if _, xerr := s.contactRepo.Update(ctx, campaign.UserID, contact.ID.String(), &models.UpdateContact{
+			AddCategories: []string{cfg.CategoryID.String()},
+		}); xerr != nil {
+			return xerr
+		}
+		return nil
+	case "remove_tag":
+		if cfg.CategoryID == nil {
+			return nil
+		}
+		if _, xerr := s.contactRepo.Update(ctx, campaign.UserID, contact.ID.String(), &models.UpdateContact{
+			RemoveCategories: []string{cfg.CategoryID.String()},
+		}); xerr != nil {
+			return xerr
+		}
+		return nil
+	case "unsubscribe":
+		if xerr := s.advanced.Unsubscribe(ctx, campaign.ID, contact.ID); xerr != nil {
+			return xerr
+		}
+		return nil
+	case "notify":
+		if s.advanced == nil || campaign.OrganizationID == nil {
+			return nil
+		}
+		event := models.WebhookEventCampaignAction
+		if cfg.NotifyEvent != "" {
+			event = models.WebhookEventType(cfg.NotifyEvent)
+		}
+		data := map[string]any{
+			"campaign_id":   campaign.ID.String(),
+			"contact_id":    contact.ID.String(),
+			"contact_email": contact.Email,
+		}
+		for k, v := range cfg.NotifyData {
+			data[k] = v
+		}
+		s.advanced.EmitCampaignEvent(ctx, *campaign.OrganizationID, event, data)
+		return nil
+	default:
+		return nil
 	}
 }
 

@@ -59,14 +59,6 @@ type CampaignRepository interface {
 	// send so the round-robin/LRU cursors stay coherent under concurrency.
 	AdvanceCampaignSender(ctx context.Context, campaignID, accountID uuid.UUID) error
 
-	// ── Manual lead order (contact_order_by = 'manual') ─────────────────
-	// ListCampaignLeads returns the campaign's enrolled contacts in send order
-	// (cl.position NULLS LAST, c.created_at), capped at limit.
-	ListCampaignLeads(ctx context.Context, campaignID uuid.UUID, limit int) ([]models.CampaignLead, *errx.Error)
-	// SetCampaignLeadOrder writes campaign_leads.position = index for the given
-	// ordered contacts (others are left untouched). Idempotent.
-	SetCampaignLeadOrder(ctx context.Context, campaignID uuid.UUID, orderedContactIDs []uuid.UUID) *errx.Error
-
 	// ── Per-campaign ramp + daily counters (features 2 & 4) ─────────────
 	// AdvanceRampLevel advances the persisted ramp level once per UTC day.
 	// Idempotent and a no-op when ramp is disabled or already advanced today.
@@ -468,6 +460,9 @@ func (r *campaignRepository) Create(ctx context.Context, userID string, orgID *u
 				waitAfter = 3
 			}
 			if seq.WaitAfter != nil {
+				if *seq.WaitAfter < 0 || *seq.WaitAfter > config.SequenceWaitAfterMax {
+					return nil, errx.ErrSequenceWaitAfter
+				}
 				waitAfter = *seq.WaitAfter
 			}
 			bodySync := true
@@ -1103,7 +1098,7 @@ func (r *campaignRepository) GetByID(ctx context.Context, campaignID uuid.UUID) 
 // GetSequenceByID retrieves a sequence by ID
 func (r *campaignRepository) GetSequenceByID(ctx context.Context, sequenceID uuid.UUID) (*models.Sequence, error) {
 	query := `
-		SELECT id, name, subject, body_plain, body_html, body_sync, body_code, wait_after, updated_at, created_at
+		SELECT id, name, subject, body_plain, body_html, body_sync, body_code, wait_after, kind, action, updated_at, created_at
 		FROM sequences
 		WHERE id = $1
 	`
@@ -1111,7 +1106,7 @@ func (r *campaignRepository) GetSequenceByID(ctx context.Context, sequenceID uui
 	var seq models.Sequence
 	err := r.DB.QueryRow(ctx, query, sequenceID).Scan(
 		&seq.ID, &seq.Name, &seq.Subject, &seq.BodyPlain, &seq.BodyHTML,
-		&seq.BodySync, &seq.BodyCode, &seq.WaitAfter, &seq.UpdatedAt, &seq.CreatedAt,
+		&seq.BodySync, &seq.BodyCode, &seq.WaitAfter, &seq.Kind, &seq.Action, &seq.UpdatedAt, &seq.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1576,63 +1571,6 @@ func (r *campaignRepository) AdvanceCampaignSender(ctx context.Context, campaign
 		WHERE campaign_id = $1 AND email_account_id = $2
 	`, campaignID, accountID)
 	return err
-}
-
-// ListCampaignLeads returns the campaign's enrolled contacts in send order. The
-// ordering mirrors the manual-mode contact selection in the scheduler
-// (pg_campaign_progress.go): cl.position NULLS LAST, then creation time.
-func (r *campaignRepository) ListCampaignLeads(ctx context.Context, campaignID uuid.UUID, limit int) ([]models.CampaignLead, *errx.Error) {
-	if limit <= 0 || limit > 2000 {
-		limit = 500
-	}
-	rows, err := r.DB.Query(ctx, `
-		SELECT c.id, c.email, c.first_name, c.last_name, cl.position
-		FROM campaign_leads cl
-		JOIN contacts c ON c.id = cl.contact_id
-		WHERE cl.campaign_id = $1
-		ORDER BY cl.position NULLS LAST, c.created_at ASC
-		LIMIT $2
-	`, campaignID, limit)
-	if err != nil {
-		db.CaptureError(err, "campaign_leads list", []any{campaignID}, "query")
-		return nil, errx.InternalError()
-	}
-	defer rows.Close()
-
-	leads := make([]models.CampaignLead, 0, limit)
-	for rows.Next() {
-		var l models.CampaignLead
-		if err := rows.Scan(&l.ContactID, &l.Email, &l.FirstName, &l.LastName, &l.Position); err != nil {
-			db.CaptureError(err, "campaign_leads scan", []any{campaignID}, "scan")
-			return nil, errx.InternalError()
-		}
-		leads = append(leads, l)
-	}
-	if err := rows.Err(); err != nil {
-		db.CaptureError(err, "campaign_leads rows", []any{campaignID}, "rows")
-		return nil, errx.InternalError()
-	}
-	return leads, nil
-}
-
-// SetCampaignLeadOrder stamps campaign_leads.position = index for the given
-// ordered contacts (only those already enrolled in the campaign are touched).
-// Idempotent: re-sending the same order is a no-op; unknown ids are ignored.
-func (r *campaignRepository) SetCampaignLeadOrder(ctx context.Context, campaignID uuid.UUID, orderedContactIDs []uuid.UUID) *errx.Error {
-	if len(orderedContactIDs) == 0 {
-		return nil
-	}
-	_, err := r.DB.Exec(ctx, `
-		UPDATE campaign_leads cl
-		SET position = v.ord - 1
-		FROM unnest($2::uuid[]) WITH ORDINALITY AS v(cid, ord)
-		WHERE cl.campaign_id = $1 AND cl.contact_id = v.cid
-	`, campaignID, orderedContactIDs)
-	if err != nil {
-		db.CaptureError(err, "campaign_leads set order", []any{campaignID}, "exec")
-		return errx.InternalError()
-	}
-	return nil
 }
 
 // AdvanceRampLevel advances the persisted ramp level once per UTC day. It is a

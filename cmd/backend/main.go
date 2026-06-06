@@ -548,6 +548,13 @@ func main() {
 		}
 		organizationService = organization.NewService(organizationRepository, subscriptionRepository, userRepostory, dailyThrottleService)
 
+		// Plan-based webhook/integration fan-out throttle. The cap scales with
+		// the org's effective mailbox allowance (see WebhookDispatchLimit) so a
+		// campaign "notify" action can't flood a customer's endpoints. Wired here
+		// now that organizationService exists; the resolved cap is cached so this
+		// resolver is not hit on every dispatched event.
+		webhookServiceForHandler.WireThrottle(cache, organizationService.WebhookDispatchLimit)
+
 		// Load Stripe config and initialize service
 		stripeCfg, err := cfg.LoadStripeConfig(ctx)
 		if err != nil {
