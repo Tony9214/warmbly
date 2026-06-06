@@ -32,6 +32,12 @@ Commit hygiene:
 - when instructed to make a commit, use the subject format `feat: one line explanation`
 - commit messages on this repo do not include `Co-Authored-By:` or other AI/agent attribution footers. Keep messages to subject + body explaining the why. If a commit slips through with an attribution footer, rewrite it before opening or updating a PR.
 
+Data modeling / representation:
+
+- we are happiest with the most **type-safe** option, but the rule is: pick the **most effective option for the actual use case**, not type-safety for its own sake.
+- prefer real typed columns / enums when the data is fixed-shape, queried or filtered in SQL, or benefits from FK integrity.
+- a `jsonb` column is the right call when the data is a free-form, evolving, read-then-execute blob that isn't filtered in SQL (e.g. the `sequences.conditions` branching tree and `sequences.action` node config) — keep it type-safe at the app boundary with a Go struct + validation on write, and a DB `CHECK` on any discriminator column.
+
 ### Verification: what to run, what to skip
 
 Keep the loop fast. The signals that matter are formatting, lint, and typecheck — not local builds or browser automation.
