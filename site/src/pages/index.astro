@@ -14,6 +14,7 @@ import DeveloperMock from '../components/DeveloperMock.astro';
 import CRMMock from '../components/CRMMock.astro';
 import TemplatingShowcase from '../components/TemplatingShowcase.astro';
 import ChangelogShowcase from '../components/ChangelogShowcase.astro';
+import OpenSourceShowcase from '../components/OpenSourceShowcase.astro';
 
 const compare = [
   ['Per-mailbox cold cap',     '50 / day default',                 '200 / day if you ask for it'],
@@ -370,8 +371,9 @@ const softwareJsonLd = {
       <CRMMock />
     </FeatureSection>
 
-    <!-- Changelog + Go templating: useful content sections after the feature showcase -->
+    <!-- Changelog, open-source CTA, and Go templating sections after the feature showcase -->
     <ChangelogShowcase />
+    <OpenSourceShowcase />
     <TemplatingShowcase />
 
     <!-- ============================================================
