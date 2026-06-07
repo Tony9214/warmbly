@@ -356,3 +356,57 @@ type UpdateCRMTask struct {
 	Type        *string    `json:"type,omitempty"`
 	Status      *string    `json:"status,omitempty"`
 }
+
+// =====================
+// Task search + summary
+// =====================
+
+// SearchTasks is the faceted, server-side filter body shared by
+// POST /crm/tasks/search and POST /crm/tasks/summary. Every facet is optional;
+// an empty body matches every task in the organization. This is the surface
+// that makes the tasks view correct at scale instead of paging a cursor and
+// reducing client-side.
+type SearchTasks struct {
+	Query      string     `json:"query"`       // title ILIKE
+	Statuses   []string   `json:"statuses"`    // pending | in_progress | completed | cancelled (any of)
+	Priorities []string   `json:"priorities"`  // low | medium | high | urgent (any of)
+	Types      []string   `json:"types"`       // task type NAME is any of
+	AssignedTo []string   `json:"assigned_to"` // assignee user id is any of
+	ContactID  *string    `json:"contact_id"`  // linked contact
+	DealID     *string    `json:"deal_id"`     // linked deal
+	DueAfter   *time.Time `json:"due_after"`   // due_date >=
+	DueBefore  *time.Time `json:"due_before"`  // due_date <=
+	Overdue    bool       `json:"overdue"`     // due_date < now() AND not completed/cancelled
+	SortBy     string     `json:"sort_by"`     // created_at|due_date|priority|title|updated_at
+	Reverse    bool       `json:"reverse"`     // true = ASC, false = DESC (default)
+}
+
+// TasksSearchResult is the offset-paginated result of POST /crm/tasks/search.
+// Offset (not keyset) pagination is used because the sortable columns include
+// the nullable due_date, where a keyset cursor would silently drop NULL-valued
+// rows. Total is exact so the UI can show "N of M".
+type TasksSearchResult struct {
+	Data       []CRMTask             `json:"data"`
+	Pagination TasksSearchPagination `json:"pagination"`
+}
+
+type TasksSearchPagination struct {
+	Total      int64 `json:"total"`
+	Limit      int   `json:"limit"`
+	Offset     int   `json:"offset"`
+	HasMore    bool  `json:"has_more"`
+	NextOffset *int  `json:"next_offset,omitempty"`
+}
+
+// TasksSummary is the server-side aggregate over the SAME filter body as a
+// search, so every header total is a true COUNT over the whole matching set
+// rather than a client reduce over a truncated page.
+type TasksSummary struct {
+	Total          int64 `json:"total"`
+	PendingCount   int64 `json:"pending_count"`
+	InProgress     int64 `json:"in_progress_count"`
+	CompletedCount int64 `json:"completed_count"`
+	CancelledCount int64 `json:"cancelled_count"`
+	OverdueCount   int64 `json:"overdue_count"`
+	HighPriority   int64 `json:"high_priority_count"`
+}

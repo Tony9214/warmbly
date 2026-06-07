@@ -51,6 +51,8 @@ type CRMRepository interface {
 	CreateCRMTask(ctx context.Context, orgID, userID uuid.UUID, data *models.CreateCRMTask) (*models.CRMTask, error)
 	GetCRMTask(ctx context.Context, orgID, taskID uuid.UUID) (*models.CRMTask, error)
 	ListCRMTasks(ctx context.Context, orgID uuid.UUID, contactID, dealID, assignedTo *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.CRMTasksResult, error)
+	SearchCRMTasks(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks, limit, offset int) (*models.TasksSearchResult, error)
+	TasksSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks) (*models.TasksSummary, error)
 	UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, error)
 	DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) error
 
@@ -1187,6 +1189,192 @@ func (r *crmRepository) ListCRMTasks(ctx context.Context, orgID uuid.UUID, conta
 		Data:       tasks,
 		Pagination: models.Pagination{NextCursor: nextCursor, HasMore: hasMore},
 	}, nil
+}
+
+// =====================
+// Task search + summary
+// =====================
+
+// taskSearchWhere builds the shared WHERE clause for SearchCRMTasks / TasksSummary
+// from a filter body. It returns the clause list and the bound args, starting at
+// $1 = orgID. Both the paginated search and the aggregate summary call this so a
+// header total always reflects the exact same filter as the rows below it.
+func taskSearchWhere(orgID uuid.UUID, f models.SearchTasks) ([]string, []any) {
+	clauses := []string{"t.organization_id = $1"}
+	args := []any{orgID}
+	pos := 2
+
+	if f.Query != "" {
+		clauses = append(clauses, fmt.Sprintf("t.title ILIKE $%d", pos))
+		args = append(args, "%"+f.Query+"%")
+		pos++
+	}
+	appendIn := func(col string, vals []string) {
+		if len(vals) == 0 {
+			return
+		}
+		ph := make([]string, len(vals))
+		for i, v := range vals {
+			ph[i] = fmt.Sprintf("$%d", pos)
+			args = append(args, v)
+			pos++
+		}
+		clauses = append(clauses, fmt.Sprintf("t.%s IN (%s)", col, strings.Join(ph, ",")))
+	}
+	appendIn("status", f.Statuses)
+	appendIn("priority", f.Priorities)
+	appendIn("type", f.Types)
+	appendIn("assigned_to", f.AssignedTo)
+
+	if f.ContactID != nil {
+		clauses = append(clauses, fmt.Sprintf("t.contact_id = $%d", pos))
+		args = append(args, *f.ContactID)
+		pos++
+	}
+	if f.DealID != nil {
+		clauses = append(clauses, fmt.Sprintf("t.deal_id = $%d", pos))
+		args = append(args, *f.DealID)
+		pos++
+	}
+	if f.DueAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("t.due_date >= $%d", pos))
+		args = append(args, *f.DueAfter)
+		pos++
+	}
+	if f.DueBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("t.due_date <= $%d", pos))
+		args = append(args, *f.DueBefore)
+		pos++
+	}
+	if f.Overdue {
+		// Overdue = a deadline in the past that is still actionable. Completed and
+		// cancelled tasks are never overdue, and tasks without a due_date can't be.
+		clauses = append(clauses, "t.due_date IS NOT NULL AND t.due_date < now() AND t.status NOT IN ('completed', 'cancelled')")
+	}
+
+	return clauses, args
+}
+
+// taskSortColumn whitelists the sortable columns so SortBy can never inject SQL.
+// priority sorts by its semantic weight (urgent first when DESC), not the enum
+// string, so "priority" ordering matches user intent rather than alphabetical.
+func taskSortColumn(sortBy string) string {
+	switch sortBy {
+	case "due_date":
+		return "t.due_date"
+	case "title":
+		return "t.title"
+	case "updated_at":
+		return "t.updated_at"
+	case "priority":
+		return "CASE t.priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END"
+	default:
+		return "t.created_at"
+	}
+}
+
+func (r *crmRepository) SearchCRMTasks(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks, limit, offset int) (*models.TasksSearchResult, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	clauses, args := taskSearchWhere(orgID, filters)
+	whereSQL := strings.Join(clauses, " AND ")
+
+	// Exact total over the same filter, so the UI can show "N of M" honestly.
+	var total int64
+	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM crm_tasks t WHERE "+whereSQL, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	sortCol := taskSortColumn(filters.SortBy)
+	dir := "DESC"
+	if filters.Reverse {
+		dir = "ASC"
+	}
+
+	limitPos := len(args) + 1
+	offsetPos := len(args) + 2
+	query := fmt.Sprintf(`
+		SELECT t.id, t.organization_id, t.contact_id, t.deal_id, t.assigned_to, t.created_by, t.title, t.description,
+		       t.due_date, t.priority, t.type, t.status, t.completed_at, t.created_at, t.updated_at
+		FROM crm_tasks t
+		WHERE %s
+		ORDER BY %s %s NULLS LAST, t.id DESC
+		LIMIT $%d OFFSET $%d
+	`, whereSQL, sortCol, dir, limitPos, offsetPos)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tasks := make([]models.CRMTask, 0, limit)
+	for rows.Next() {
+		var task models.CRMTask
+		if err := rows.Scan(
+			&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
+			&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
+			&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
+			&task.CreatedAt, &task.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	hasMore := int64(offset+len(tasks)) < total
+	var nextOffset *int
+	if hasMore {
+		n := offset + limit
+		nextOffset = &n
+	}
+
+	return &models.TasksSearchResult{
+		Data: tasks,
+		Pagination: models.TasksSearchPagination{
+			Total:      total,
+			Limit:      limit,
+			Offset:     offset,
+			HasMore:    hasMore,
+			NextOffset: nextOffset,
+		},
+	}, nil
+}
+
+func (r *crmRepository) TasksSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks) (*models.TasksSummary, error) {
+	clauses, args := taskSearchWhere(orgID, filters)
+	whereSQL := strings.Join(clauses, " AND ")
+
+	var s models.TasksSummary
+	query := fmt.Sprintf(`
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE t.status = 'pending'),
+			COUNT(*) FILTER (WHERE t.status = 'in_progress'),
+			COUNT(*) FILTER (WHERE t.status = 'completed'),
+			COUNT(*) FILTER (WHERE t.status = 'cancelled'),
+			COUNT(*) FILTER (WHERE t.due_date IS NOT NULL AND t.due_date < now() AND t.status NOT IN ('completed', 'cancelled')),
+			COUNT(*) FILTER (WHERE t.priority IN ('high', 'urgent'))
+		FROM crm_tasks t
+		WHERE %s
+	`, whereSQL)
+	if err := r.db.QueryRow(ctx, query, args...).Scan(
+		&s.Total, &s.PendingCount, &s.InProgress, &s.CompletedCount,
+		&s.CancelledCount, &s.OverdueCount, &s.HighPriority,
+	); err != nil {
+		return nil, err
+	}
+
+	return &s, nil
 }
 
 func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, error) {

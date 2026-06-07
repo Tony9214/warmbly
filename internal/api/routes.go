@@ -558,6 +558,8 @@ func Run(
 			{
 				crmTasks.GET("", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.ListCRMTasks)
 				crmTasks.POST("", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.CreateCRMTask)
+				crmTasks.POST("/search", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.SearchCRMTasks)
+				crmTasks.POST("/summary", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.TasksSummary)
 				crmTasks.GET("/:id", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.GetCRMTask)
 				crmTasks.PATCH("/:id", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.UpdateCRMTask)
 				crmTasks.DELETE("/:id", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.DeleteCRMTask)

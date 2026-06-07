@@ -47,6 +47,8 @@ type CRMService interface {
 	CreateCRMTask(ctx context.Context, orgID, userID uuid.UUID, data *models.CreateCRMTask) (*models.CRMTask, *errx.Error)
 	GetCRMTask(ctx context.Context, orgID, taskID uuid.UUID) (*models.CRMTask, *errx.Error)
 	ListCRMTasks(ctx context.Context, orgID uuid.UUID, contactID, dealID, assignedTo *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.CRMTasksResult, *errx.Error)
+	SearchTasks(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks, limit, offset int) (*models.TasksSearchResult, *errx.Error)
+	TasksSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks) (*models.TasksSummary, *errx.Error)
 	UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, userID *uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, *errx.Error)
 	DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) *errx.Error
 
@@ -396,6 +398,28 @@ func (s *crmService) ListCRMTasks(ctx context.Context, orgID uuid.UUID, contactI
 		limit = 50
 	}
 	result, err := s.repo.ListCRMTasks(ctx, orgID, contactID, dealID, assignedTo, status, limit, cursor)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return result, nil
+}
+
+func (s *crmService) SearchTasks(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks, limit, offset int) (*models.TasksSearchResult, *errx.Error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	result, err := s.repo.SearchCRMTasks(ctx, orgID, filters, limit, offset)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return result, nil
+}
+
+func (s *crmService) TasksSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks) (*models.TasksSummary, *errx.Error) {
+	result, err := s.repo.TasksSummary(ctx, orgID, filters)
 	if err != nil {
 		return nil, toErrx(err)
 	}

@@ -745,6 +745,65 @@ func (h *Handler) ListCRMTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// SearchCRMTasks is the faceted, server-paginated tasks surface that powers the
+// tasks list view at scale. Filters arrive in the JSON body; limit + offset are
+// query params (mirrors the deals search ergonomics).
+func (h *Handler) SearchCRMTasks(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
+	var filters models.SearchTasks
+	if err := c.ShouldBindJSON(&filters); err != nil {
+		errx.Handle(c, errx.ErrInvalid)
+		return
+	}
+
+	limit := 50
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 200 {
+		limit = l
+	}
+	offset := 0
+	if o, err := strconv.Atoi(c.Query("offset")); err == nil && o > 0 {
+		offset = o
+	}
+
+	result, xerr := h.CRMService.SearchTasks(c.Request.Context(), *orgID, filters, limit, offset)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// TasksSummary returns COUNT aggregates over the SAME filter body as
+// SearchCRMTasks, so header totals (by status, overdue, high priority) are true
+// totals over the whole matching set rather than a client reduce over a page.
+func (h *Handler) TasksSummary(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
+	var filters models.SearchTasks
+	if err := c.ShouldBindJSON(&filters); err != nil {
+		errx.Handle(c, errx.ErrInvalid)
+		return
+	}
+
+	summary, xerr := h.CRMService.TasksSummary(c.Request.Context(), *orgID, filters)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+
+	c.JSON(http.StatusOK, summary)
+}
+
 func (h *Handler) GetCRMTask(c *gin.Context) {
 	orgID := middleware.GetOrganizationID(c)
 	if orgID == nil {
