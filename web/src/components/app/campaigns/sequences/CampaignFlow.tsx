@@ -53,7 +53,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import type Sequence from "@/lib/api/models/app/campaigns/sequences/Sequence";
 import type { SequenceBranch, BranchCondition, BranchField } from "@/lib/api/models/app/campaigns/sequences/Branching";
-import { BRANCH_FIELD_LABELS } from "@/lib/api/models/app/campaigns/sequences/Branching";
+import { BRANCH_FIELD_LABELS, isReplyBranchField } from "@/lib/api/models/app/campaigns/sequences/Branching";
 import useSequences from "@/lib/api/hooks/app/campaigns/sequences/useSequences";
 import useCreateSequence from "@/lib/api/hooks/app/campaigns/sequences/useCreateSequence";
 import useDeleteSequence from "@/lib/api/hooks/app/campaigns/sequences/useDeleteSequence";
@@ -102,6 +102,8 @@ function conditionText(b: SequenceBranch): string {
         .map((c) => {
             if (c.field === "random") return `${c.value ?? 50}% random`;
             const f = BRANCH_FIELD_LABELS[c.field] ?? c.field;
+            // Reply-class conditions are "ever" (no day window).
+            if (isReplyBranchField(c.field)) return f;
             return `${f} within ${c.value ?? 3}d`;
         })
         .join(" + ");
@@ -1144,7 +1146,10 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
 // ── Stop-on-reply toggle ────────────────────────────────────────────────────
 function StopOnReplyToggle({ on, onToggle }: { on: boolean; onToggle: (next: boolean) => void }) {
     return (
-        <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
+        <div
+            className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm"
+            title="Auto-replies and out-of-office messages don't count as a reply, so the sequence keeps going."
+        >
             <span className="text-[11.5px] text-slate-600">Stop on reply</span>
             <button
                 type="button"
@@ -1221,6 +1226,7 @@ function ConnectionEditor({
         "h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-800 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100";
     const isAlways = field === "always";
     const isRandom = field === "random";
+    const isReply = isReplyBranchField(field as BranchField);
     const isNegative = field === "not_opened" || field === "not_clicked" || field === "not_replied";
     const target = steps.find((s) => s.id === branch.target_sequence_id);
     const targetLabel = branch.target_sequence_id === null ? "Stop the sequence" : target ? `“${stepName(target)}”` : "—";
@@ -1228,6 +1234,8 @@ function ConnectionEditor({
     const buildConditions = (): BranchCondition[] => {
         if (isAlways) return [];
         if (isRandom) return [{ field: "random", operator: "chance", value }];
+        // Reply-class conditions are checked once, ever (no day window / value).
+        if (isReply) return [{ field: field as BranchField, operator: "ever" }];
         return [{ field: field as BranchField, operator: "within_days", value }];
     };
     const save = (target_sequence_id: string | null) =>
@@ -1296,16 +1304,25 @@ function ConnectionEditor({
                             const f = e.target.value;
                             setField(f);
                             if (f === "random") setValue((v) => (v >= 1 && v <= 99 ? v : 50));
-                            else if (f !== "always") setValue((v) => (v >= 1 && v <= 60 ? v : 3));
+                            else if (f !== "always" && !isReplyBranchField(f as BranchField))
+                                setValue((v) => (v >= 1 && v <= 60 ? v : 3));
                         }}
                     >
                         <option value="always">always (right after the wait)</option>
-                        <option value="opened">if opened the email</option>
-                        <option value="clicked">if clicked a link</option>
-                        <option value="replied">if replied</option>
-                        <option value="not_opened">if didn’t open</option>
-                        <option value="not_clicked">if didn’t click</option>
-                        <option value="not_replied">if didn’t reply</option>
+                        <optgroup label="Engagement">
+                            <option value="opened">if opened the email</option>
+                            <option value="clicked">if clicked a link</option>
+                            <option value="replied">if replied</option>
+                            <option value="not_opened">if didn’t open</option>
+                            <option value="not_clicked">if didn’t click</option>
+                            <option value="not_replied">if didn’t reply</option>
+                        </optgroup>
+                        <optgroup label="Reply intent">
+                            <option value="reply_positive">if replied: positive</option>
+                            <option value="reply_negative">if replied: negative</option>
+                            <option value="reply_neutral">if replied: neutral</option>
+                            <option value="reply_automated">if auto-reply / out of office</option>
+                        </optgroup>
                         <option value="random">random split</option>
                     </select>
                 </div>
@@ -1316,12 +1333,19 @@ function ConnectionEditor({
                         <span>% of contacts (chosen at random)</span>
                     </div>
                 )}
-                {!isAlways && !isRandom && (
+                {!isAlways && !isRandom && !isReply && (
                     <div className="flex flex-wrap items-center gap-1.5">
                         <span>within</span>
                         <NumberInput value={value} onChange={(v) => setValue(Math.max(1, Math.min(60, Math.round(v) || 1)))} min={1} max={60} className="w-16" align="center" />
                         <span>days</span>
                     </div>
+                )}
+                {isReply && (
+                    <p className="text-[10.5px] text-slate-400">
+                        {field === "reply_automated"
+                            ? "Routes when the contact's reply is an auto-reply or out-of-office bounce, not a real human reply. Pair this with action steps (create deal, move stage, notify) to react."
+                            : "Routes when the contact's reply is classified this way. Chain action steps after it, for example create deal then move stage then notify."}
+                    </p>
                 )}
                 {isNegative && (
                     <p className="text-[10.5px] text-slate-400">

@@ -16,9 +16,29 @@ export type BranchField =
     | "not_opened"
     | "not_clicked"
     | "not_replied"
-    | "random";
+    | "random"
+    // Reply-classification routes. The contact's most-recent inbound reply was
+    // classified (see internal/app/replyclassify) and stored on
+    // campaign_contact_progress.reply_class. Operator is "ever" (no value).
+    // reply_automated == reply_class is auto_reply OR out_of_office.
+    | "reply_positive"
+    | "reply_negative"
+    | "reply_neutral"
+    | "reply_automated";
 
 export type BranchOperator = "within_days" | "ever" | "chance";
+
+// The reply-class fields are evaluated with operator "ever" and carry no value.
+export const REPLY_BRANCH_FIELDS: BranchField[] = [
+    "reply_positive",
+    "reply_negative",
+    "reply_neutral",
+    "reply_automated",
+];
+
+export function isReplyBranchField(field: BranchField): boolean {
+    return REPLY_BRANCH_FIELDS.includes(field);
+}
 
 export interface BranchCondition {
     field: BranchField;
@@ -48,4 +68,8 @@ export const BRANCH_FIELD_LABELS: Record<BranchField, string> = {
     not_clicked: "didn’t click",
     not_replied: "didn’t reply",
     random: "random split",
+    reply_positive: "replied: positive",
+    reply_negative: "replied: negative",
+    reply_neutral: "replied: neutral",
+    reply_automated: "auto-reply / out of office",
 };
