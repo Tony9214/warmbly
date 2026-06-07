@@ -60,7 +60,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import type Sequence from "@/lib/api/models/app/campaigns/sequences/Sequence";
 import type { SequenceBranch, BranchCondition, BranchField } from "@/lib/api/models/app/campaigns/sequences/Branching";
-import { BRANCH_FIELD_LABELS, isReplyBranchField } from "@/lib/api/models/app/campaigns/sequences/Branching";
+import { BRANCH_FIELD_LABELS, isReplyBranchField, isInstantCapableField } from "@/lib/api/models/app/campaigns/sequences/Branching";
 import useSequences from "@/lib/api/hooks/app/campaigns/sequences/useSequences";
 import useCreateSequence from "@/lib/api/hooks/app/campaigns/sequences/useCreateSequence";
 import useDeleteSequence from "@/lib/api/hooks/app/campaigns/sequences/useDeleteSequence";
@@ -105,6 +105,28 @@ function newBranchId(): string {
 
 const isCond = (b: SequenceBranch) => (b.conditions?.length ?? 0) > 0;
 const stepName = (s: Sequence | undefined) => (s?.name?.trim() ? s.name : "Untitled step");
+
+// "Positive" reply fields are the ones that route a contact INTO a reply flow
+// (a human reply, or a classified reply intent). Mirrors the backend's
+// branchHasPositiveReplyCondition. not_replied is excluded — that is the cold
+// sequence's "didn't reply" continuation, not reply handling. Used to decide
+// whether a campaign has any reply handling at all (the stop-on-reply warning).
+const POSITIVE_REPLY_FIELDS: BranchField[] = [
+    "replied",
+    "reply_positive",
+    "reply_negative",
+    "reply_neutral",
+    "reply_automated",
+];
+const isPositiveReplyField = (f: BranchField) => POSITIVE_REPLY_FIELDS.includes(f);
+
+// A branch is "instant" when its condition is an instant-capable signal
+// (reply intent, opened, or clicked) and the per-branch toggle isn't opted out.
+// Such a branch's action chain fires the moment the event lands (reply recorded,
+// or open / click tracked), so the target step's wait_after is irrelevant.
+function isInstantBranch(b: SequenceBranch): boolean {
+    return (b.conditions ?? []).some((c) => isInstantCapableField(c.field)) && b.instant !== false;
+}
 
 // Conditions first-match; unconditional ("just go there") paths are the fallback.
 function ordered(branches: SequenceBranch[]): SequenceBranch[] {
@@ -299,15 +321,16 @@ type IfNodeData = { label: string; instant: boolean; onDelete: () => void };
 
 function IfNode({ data, selected }: NodeProps) {
     const d = data as IfNodeData;
-    // Reply-class branches fire the moment the contact replies, not at the next
-    // scheduled step. A violet "instant" badge distinguishes them from the
-    // engagement (opened / clicked / within-N-days) branches that are checked at
-    // the next step boundary. The whole node carries a tooltip explaining it.
+    // Instant-capable branches (reply intent, opened, clicked) fire the moment
+    // the event lands, not at the next scheduled step. A violet "instant" badge
+    // distinguishes them from the branches checked at the next step boundary
+    // (negative "didn't" signals, within-N-days windows, random / always). The
+    // whole node carries a tooltip explaining it.
     return (
         <div
             title={
                 d.instant
-                    ? "Runs the moment the contact replies, not at the next scheduled step."
+                    ? "Runs the moment it happens (reply / open / click), not at the next scheduled step."
                     : undefined
             }
             className={`rounded-lg border bg-gradient-to-b from-sky-50 to-white px-2 py-1 shadow-sm transition-shadow duration-200 hover:shadow-md ${
@@ -934,8 +957,9 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                     position: { x: 0, y: 0 },
                     data: {
                         label: conditionText(b),
-                        // Reply-class branches run instantly on reply; flag the node.
-                        instant: (b.conditions ?? []).some((c) => isReplyBranchField(c.field)),
+                        // Instant-capable branches (reply intent / opened / clicked)
+                        // run the moment the event lands; flag the node.
+                        instant: isInstantBranch(b),
                         onDelete: () => deleteBranchRef.current(s.id, b.branch_id),
                     } satisfies IfNodeData,
                 });
@@ -965,12 +989,20 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         data: { sourceId: s.id, branchId: b.branch_id },
                     });
                 }
-                // THEN path -> the condition's target. A reply branch fires the
-                // moment the contact replies, so the target step's wait_after is
-                // irrelevant. Showing "wait 10d" there is misleading. Label it
-                // "instant" instead.
-                const isReplyBr = (b.conditions ?? []).some((c) => isReplyBranchField(c.field));
-                const wt = isReplyBr ? "instant" : waitTag(b.target_sequence_id);
+                // THEN path -> the condition's target. Engagement branches
+                // (opened/clicked) carry a window the event must land inside; an
+                // instant branch fires the MOMENT it happens BUT only within that
+                // window, so surface it ("instant <=10d") rather than just
+                // "instant" or the target step's (irrelevant) wait_after. Reply
+                // branches have no window.
+                const withinDays = (b.conditions ?? []).find((c) => c.operator === "within_days")?.value;
+                const wt = isInstantBranch(b)
+                    ? withinDays
+                        ? `instant <=${withinDays}d`
+                        : "instant"
+                    : withinDays
+                      ? `within ${withinDays}d`
+                      : waitTag(b.target_sequence_id);
                 flowEdges.push({
                     id: `then-${b.branch_id}`,
                     source: nid,
@@ -1417,10 +1449,16 @@ function ConnectionEditor({
     const c0 = branch.conditions?.[0];
     const [field, setField] = React.useState<string>(c0 ? c0.field : "always");
     const [value, setValue] = React.useState<number>(c0?.value ?? (c0?.field === "random" ? 50 : 3));
+    // Instant-capable branches (reply intent, opened, clicked) fire the moment
+    // the event lands by default; this lets the user opt out so the path routes
+    // at the next step boundary instead.
+    const [instant, setInstant] = React.useState<boolean>(branch.instant !== false);
 
     const isAlways = field === "always";
     const isRandom = field === "random";
     const isReply = isReplyBranchField(field as BranchField);
+    const isInstantCapable = isInstantCapableField(field as BranchField);
+    const instantVerb = field === "opened" ? "open" : field === "clicked" ? "click" : "reply";
     const isNegative = field === "not_opened" || field === "not_clicked" || field === "not_replied";
     const target = steps.find((s) => s.id === branch.target_sequence_id);
     const targetLabel = branch.target_sequence_id === null ? "Stop the sequence" : target ? `“${stepName(target)}”` : "—";
@@ -1433,7 +1471,14 @@ function ConnectionEditor({
         return [{ field: field as BranchField, operator: "within_days", value }];
     };
     const save = (target_sequence_id: string | null) =>
-        onSave({ branch_id: branch.branch_id, target_sequence_id, conditions: buildConditions() });
+        onSave({
+            branch_id: branch.branch_id,
+            target_sequence_id,
+            conditions: buildConditions(),
+            // Persist the instant opt-out for any instant-capable signal (reply
+            // intent, opened, clicked). Other fields can't fire instantly.
+            instant: isInstantCapable ? instant : undefined,
+        });
 
     return (
         <div className="absolute right-3 top-3 z-20 w-[300px] max-w-[calc(100vw-1.5rem)] rounded-md border border-slate-200 bg-white p-3 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]">
@@ -1517,20 +1562,61 @@ function ConnectionEditor({
                         <span>days</span>
                     </div>
                 )}
-                {isReply && (
+                {isInstantCapable && (
                     <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 rounded-md bg-violet-50 px-2 py-1 text-[10.5px] font-medium text-violet-600 ring-1 ring-violet-200">
-                            <ZapIcon className="w-3 h-3 shrink-0" />
-                            Instant: runs the moment they reply (no wait)
+                        <div
+                            className={`flex items-center gap-2 rounded-md px-2 py-1.5 ring-1 transition-colors ${
+                                instant ? "bg-violet-50 ring-violet-200" : "bg-slate-50 ring-slate-200"
+                            }`}
+                        >
+                            <ZapIcon
+                                className={`w-3.5 h-3.5 shrink-0 transition-colors ${
+                                    instant ? "text-violet-600" : "text-slate-400"
+                                }`}
+                            />
+                            <span
+                                className={`min-w-0 flex-1 text-[11px] font-medium leading-tight transition-colors ${
+                                    instant ? "text-violet-700" : "text-slate-500"
+                                }`}
+                            >
+                                {instant ? `Instant: runs the moment they ${instantVerb}` : "Routes at the next step"}
+                            </span>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={instant}
+                                aria-label="Run instantly"
+                                onClick={() => setInstant((v) => !v)}
+                                title="Toggle whether this path fires the moment it happens or waits for the next step"
+                                className={`relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 ${
+                                    instant ? "bg-violet-600" : "bg-slate-300"
+                                }`}
+                            >
+                                <span
+                                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                                        instant ? "translate-x-[15px]" : "translate-x-[2px]"
+                                    }`}
+                                />
+                            </button>
                         </div>
-                        <p className="text-[10.5px] text-slate-400">
-                            {field === "reply_automated"
-                                ? "Routes when the contact's reply is an auto-reply or out-of-office bounce, not a real human reply. Pair this with action steps (create deal, move stage, notify) to react."
-                                : "Routes when the contact's reply is classified this way. Chain action steps after it, for example create deal then move stage then notify."}
-                        </p>
-                        <p className="text-[10.5px] text-amber-600">
-                            A reply is matched to the email it answers. If a contact replies to an earlier email after later steps already sent, it still triggers that email's reply path (and pauses the sequence when stop-on-reply is on).
-                        </p>
+                        {isReply ? (
+                            <>
+                                <p className="text-[10.5px] text-slate-400">
+                                    {field === "reply_automated"
+                                        ? "Routes when the contact's reply is an auto-reply or out-of-office bounce, not a real human reply. Pair this with action steps (create deal, move stage, notify) to react."
+                                        : "Routes when the contact's reply is classified this way. Chain action steps after it, for example create deal then move stage then notify."}
+                                </p>
+                                <p className="text-[10.5px] text-amber-600">
+                                    A reply triggers the reply path of the specific email it answers (matched by the reply's threading headers): the earlier email, not the latest step, and never both. It falls back to the latest step only when the reply can't be threaded. With stop-on-reply on, the sequence also pauses.
+                                </p>
+                            </>
+                        ) : (
+                            <p className="text-[10.5px] text-slate-400">
+                                {instant
+                                    ? `Runs the moment they ${instantVerb}, as long as they ${instantVerb} within the ${value}-day window above. If they don't ${instantVerb} in that time, this path never runs. Chain action steps after it (create deal, move stage, notify).`
+                                    : `Waits up to ${value} day${value === 1 ? "" : "s"} for them to ${instantVerb}, then checks at the next step. If they don't ${instantVerb} in that window, this path never runs.`}
+                            </p>
+                        )}
                     </div>
                 )}
                 {isNegative && (
@@ -1539,7 +1625,9 @@ function ConnectionEditor({
                     </p>
                 )}
 
-                {branch.target_sequence_id !== null && !isReply && <WaitRow value={waitDays} onCommit={onSetWait} />}
+                {branch.target_sequence_id !== null && !(isInstantCapable && instant) && (
+                    <WaitRow value={waitDays} onCommit={onSetWait} />
+                )}
             </div>
 
             <div className="mt-3 flex items-center gap-2">
