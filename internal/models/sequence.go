@@ -116,12 +116,24 @@ type Branch struct {
 // BranchCondition is a single engagement predicate evaluated against the
 // contact's campaign_contact_progress row for the current step.
 type BranchCondition struct {
-	// Field is the engagement signal: "opened" | "clicked" | "replied" and
-	// their negations "not_opened" | "not_clicked" | "not_replied".
+	// Field is the engagement signal:
+	//   "opened" | "clicked" | "replied" and their negations
+	//   "not_opened" | "not_clicked" | "not_replied",
+	// plus the reply-classification fields (operator "ever", no Value), read
+	// from campaign_contact_progress.reply_class:
+	//   "reply_positive"  — reply_class is positive
+	//   "reply_negative"  — reply_class is negative
+	//   "reply_neutral"   — reply_class is neutral
+	//   "reply_automated" — reply_class is auto_reply OR out_of_office
+	// IMPORTANT: the plain "replied"/"not_replied" fields IGNORE automated
+	// replies (auto_reply / out_of_office) — only a human reply sets replied_at,
+	// so a vacation autoresponder never trips "replied" or stop_on_reply. Use the
+	// reply_automated field to branch specifically on an automated reply.
 	Field string `json:"field"`
-	// Operator is the comparison. Currently "within_days" (the signal occurred
-	// in the last Value days) and "ever" (the signal occurred at all). For the
-	// not_* fields the meaning inverts (did NOT happen within / ever).
+	// Operator is the comparison. "within_days" (the signal occurred in the last
+	// Value days) and "ever" (the signal occurred at all). For the not_* fields
+	// the meaning inverts (did NOT happen within / ever). The reply_* fields take
+	// operator "ever" (no Value).
 	Operator string `json:"operator"`
 	// Value is the day window for "within_days". nil for operators that take no
 	// argument (e.g. "ever").

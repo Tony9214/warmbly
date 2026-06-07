@@ -18,6 +18,15 @@ var branchConditionFields = map[string]bool{
 	"not_opened":  true,
 	"not_clicked": true,
 	"not_replied": true,
+	// Reply-classification branches (operator "ever", no Value). Read from
+	// campaign_contact_progress.reply_class. reply_automated == reply_class is
+	// auto_reply OR out_of_office. The plain "replied" field above intentionally
+	// EXCLUDES automated replies (only a human reply stamps replied_at), so these
+	// are the only way to route on an automated reply.
+	"reply_positive":  true,
+	"reply_negative":  true,
+	"reply_neutral":   true,
+	"reply_automated": true,
 	// "random" routes a deterministic percentage of contacts down this branch
 	// (a random split / split-test). Pairs with operator "chance", Value = %.
 	"random": true,
@@ -133,6 +142,17 @@ func conditionState(cond models.BranchCondition, prog *CampaignContactProgress, 
 		return BranchNoMatch, time.Time{}
 	}
 
+	// Reply-classification fields decide immediately off the stored reply_class
+	// (no time window): the class is set when the reply arrives, so there is
+	// nothing to wait for. reply_automated folds auto_reply + out_of_office.
+	switch cond.Field {
+	case "reply_positive", "reply_negative", "reply_neutral", "reply_automated":
+		if replyClassMatches(cond.Field, prog.ReplyClass) {
+			return BranchMatch, time.Time{}
+		}
+		return BranchNoMatch, time.Time{}
+	}
+
 	var ts *time.Time
 	negate := false
 	switch cond.Field {
@@ -186,6 +206,25 @@ func conditionState(cond models.BranchCondition, prog *CampaignContactProgress, 
 		return BranchMatch, time.Time{}
 	}
 	return BranchNoMatch, time.Time{}
+}
+
+// replyClassMatches maps a reply_* branch field to the stored reply_class
+// string. reply_automated is the union of the two automated classes. Mirrors
+// replyclassify's class constants (kept as literals here so this package stays
+// free of an app-layer import).
+func replyClassMatches(field, class string) bool {
+	switch field {
+	case "reply_positive":
+		return class == "positive"
+	case "reply_negative":
+		return class == "negative"
+	case "reply_neutral":
+		return class == "neutral"
+	case "reply_automated":
+		return class == "auto_reply" || class == "out_of_office"
+	default:
+		return false
+	}
 }
 
 // randomHolds deterministically routes Value% of contacts down a random-split
