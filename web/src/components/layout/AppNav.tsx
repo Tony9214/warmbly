@@ -25,15 +25,36 @@ import {
     UsersIcon,
     XIcon,
 } from "lucide-react";
-import { useMemo } from "react";
+import { type ReactNode, useMemo } from "react";
 import { useAppStore } from "@/stores";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
 import useCampaigns from "@/lib/api/hooks/app/campaigns/useCampaigns";
 import useEmails from "@/lib/api/hooks/app/emails/useEmails";
-import useCRMTasks from "@/lib/api/hooks/app/crm/tasks/useCRMTasks";
+import useTasksSummary from "@/lib/api/hooks/app/crm/tasks/useTasksSummary";
+import useDealsSummary from "@/lib/api/hooks/app/crm/deals/useDealsSummary";
+import { EMPTY_TASK_SEARCH } from "@/lib/api/models/app/crm/SearchTasks";
+import { EMPTY_DEAL_SEARCH } from "@/lib/api/models/app/crm/SearchDeals";
+import useSearchContacts from "@/lib/api/hooks/app/contacts/useSearchContacts";
+import type SearchContacts from "@/lib/api/models/app/contacts/SearchContacts";
+import usePipelines from "@/lib/api/hooks/app/crm/pipelines/usePipelines";
+import useTemplates from "@/lib/api/hooks/app/templates/useTemplates";
+import useUsageOverview from "@/lib/api/hooks/app/analytics/useUsageOverview";
+import useAPIKeys from "@/lib/api/hooks/app/api-keys/useAPIKeys";
+import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import { UserNav } from "./UserNav";
 import { Logo } from "@/components/svg";
 import { cn } from "@/lib/utils";
+
+// Stable (module-level) empty contacts search so the sidebar's contact-count
+// query key never changes identity between renders (which would refetch-loop).
+// limit 1 keeps the payload tiny — we only read pagination.total.
+const CONTACTS_COUNT_SEARCH: SearchContacts = {
+    query: "",
+    filters: [],
+    campaign_ids: [],
+    sort_by: "created_at",
+    reverse: false,
+};
 
 interface NavItem {
     title: string;
@@ -48,7 +69,16 @@ interface NavItem {
      *  Each key has its OWN motif (campaigns = dot-grid, accounts = flame,
      *  tasks = red attention dot) so the rows stay visually distinct rather
      *  than a column of identical loaders. */
-    indicator?: "campaigns" | "accounts" | "tasks";
+    indicator?:
+        | "campaigns"
+        | "accounts"
+        | "tasks"
+        | "contacts"
+        | "deals"
+        | "pipelines"
+        | "templates"
+        | "analytics"
+        | "apikeys";
 }
 
 // Plan badge shown on locked sidebar rows. Plan names + colors come
@@ -83,24 +113,24 @@ const sections: NavSection[] = [
         items: [
             { title: "Accounts", url: "/app/emails", icon: MailIcon, indicator: "accounts" },
             { title: "Campaigns", url: "/app/campaigns", icon: MegaphoneIcon, indicator: "campaigns" },
-            { title: "Contacts", url: "/app/contacts", icon: UsersIcon },
-            { title: "Analytics", url: "/app/analytics", icon: BarChart3Icon },
+            { title: "Contacts", url: "/app/contacts", icon: UsersIcon, indicator: "contacts" },
+            { title: "Analytics", url: "/app/analytics", icon: BarChart3Icon, indicator: "analytics" },
         ],
     },
     {
         label: "CRM",
         items: [
-            { title: "Pipelines", url: "/app/crm/pipelines", icon: GitBranchIcon },
-            { title: "Deals", url: "/app/crm/deals", icon: CircleDollarSignIcon },
+            { title: "Pipelines", url: "/app/crm/pipelines", icon: GitBranchIcon, indicator: "pipelines" },
+            { title: "Deals", url: "/app/crm/deals", icon: CircleDollarSignIcon, indicator: "deals" },
             { title: "Tasks", url: "/app/crm/tasks", icon: CheckSquareIcon, indicator: "tasks" },
         ],
     },
     {
         label: "Resources",
         items: [
-            { title: "Templates", url: "/app/templates", icon: FileTextIcon },
+            { title: "Templates", url: "/app/templates", icon: FileTextIcon, indicator: "templates" },
             { title: "Integrations", url: "/app/integrations", icon: CableIcon },
-            { title: "API Keys", url: "/app/api-keys", icon: KeyIcon },
+            { title: "API Keys", url: "/app/api-keys", icon: KeyIcon, indicator: "apikeys" },
             { title: "Audit log", url: "/app/audit", icon: ListChecksIcon, rolesAllowed: "manage" },
         ],
     },
@@ -151,10 +181,19 @@ function NavRow({ item }: { item: NavItem }) {
                 )}
                 strokeWidth={active ? 2 : 1.6}
             />
-            <span className="truncate flex-1">{item.title}</span>
+            {/* min-w-0 lets the label shrink/truncate so the count cluster (and its
+                separator) is never pushed off the row — longer labels like
+                "Campaigns"/"Accounts" used to clip it at narrower widths. */}
+            <span className="truncate flex-1 min-w-0">{item.title}</span>
             {item.indicator === "campaigns" && !locked && <CampaignActivity />}
             {item.indicator === "accounts" && !locked && <MailboxActivity />}
-            {item.indicator === "tasks" && !locked && <TasksOverdueActivity />}
+            {item.indicator === "tasks" && !locked && <TasksActivity />}
+            {item.indicator === "contacts" && !locked && <ContactsActivity />}
+            {item.indicator === "deals" && !locked && <DealsActivity />}
+            {item.indicator === "pipelines" && !locked && <PipelinesActivity />}
+            {item.indicator === "templates" && !locked && <TemplatesActivity />}
+            {item.indicator === "analytics" && !locked && <AnalyticsActivity />}
+            {item.indicator === "apikeys" && !locked && <ApiKeysActivity />}
             {planBadge ? (
                 <span
                     className={cn(
@@ -175,31 +214,113 @@ function NavRow({ item }: { item: NavItem }) {
     );
 }
 
-// CampaignActivity is the ambient, realtime indicator on the Campaigns nav
-// row: a small 3x3 dot-grid loader + a count of campaigns sending right now,
-// and nothing when none are sending. The count comes from the shared
-// campaigns-list cache, which the realtime layer invalidates on campaign
-// events, so it stays live without a refresh. Draft / paused / completed are
-// review states surfaced inside the Campaigns page, not here.
+// compactN renders large counts tersely (12.3k, 1.2M) so a headline number like
+// total emails sent fits a nav row.
+function compactN(n: number): string {
+    const v = Math.round(n);
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (v >= 10_000) return `${Math.round(v / 1000)}k`;
+    if (v >= 1_000) return `${(v / 1000).toFixed(1)}k`;
+    return String(v);
+}
+
+// The "how many" total at the end of a nav row. Light slate so it reads as
+// ambient metadata (lifting a touch on row hover), but visible, and it tweens
+// (AnimatedNumber) on change. An optional `glyph` — a small coloured activity
+// motif (sending dot-grid, warming flame, overdue ping) — sits in front to flag
+// a live state without stealing the number, which stays the plain total. Hidden
+// only when there's truly nothing to show.
+const COUNT_LIGHT =
+    "text-[10.5px] font-medium tabular-nums leading-none text-slate-300 transition-colors group-hover:text-slate-500";
+
+function TabStat({
+    total,
+    glyph,
+    format = compactN,
+    title,
+}: {
+    total: number;
+    glyph?: ReactNode;
+    format?: (n: number) => string;
+    title?: string;
+}) {
+    // Always render the number (including 0) so every data tab visibly carries a
+    // count instead of going blank — it just tweens up as the query resolves.
+    return (
+        <span
+            className="ml-auto inline-flex items-center gap-1.5 shrink-0"
+            title={title}
+        >
+            {glyph}
+            <AnimatedNumber value={total} format={format} className={COUNT_LIGHT} />
+        </span>
+    );
+}
+
+// TabDualStat shows TWO numbers on a row: the light "how many in total" (the calm
+// baseline, e.g. all campaigns / all mailboxes) plus, when there's a live subset,
+// a coloured sub-count with its motif (e.g. how many are sending / warming). Both
+// tween. The total stays the faint baseline; the active subset is the coloured
+// attention.
+function TabDualStat({
+    total,
+    active,
+    activeGlyph,
+    activeClass,
+    title,
+}: {
+    total: number;
+    active: number;
+    activeGlyph: ReactNode;
+    activeClass: string;
+    title?: string;
+}) {
+    return (
+        <span
+            className="ml-auto inline-flex items-center gap-2.5 shrink-0"
+            title={title}
+        >
+            <AnimatedNumber value={total} format={compactN} className={COUNT_LIGHT} />
+            {/* Hairline divider so the light total and the active count read as two
+                separate values. Always present on a dual row so every one of them
+                (campaigns, accounts, tasks) shows both numbers consistently. */}
+            <span className="h-3 w-px shrink-0 bg-slate-200" aria-hidden />
+            <span
+                className={`inline-flex items-center gap-1 ${active > 0 ? activeClass : "text-slate-300"}`}
+            >
+                {/* The motif (sending dot-grid / warming flame / overdue ping) only
+                    appears when there's actually a live subset; at 0 it's a calm
+                    muted number. */}
+                {active > 0 && activeGlyph}
+                <AnimatedNumber
+                    value={active}
+                    format={compactN}
+                    className="text-[10.5px] font-semibold tabular-nums leading-none"
+                />
+            </span>
+        </span>
+    );
+}
+
+// CampaignActivity is the ambient, realtime indicator on the Campaigns nav row.
+// While campaigns are sending it escalates to a sky 3x3 dot-grid + a live count;
+// otherwise it shows a faint total of all campaigns. The counts come from the
+// shared campaigns-list cache, which the realtime layer invalidates on campaign
+// events, so it stays live without a refresh.
 function CampaignActivity() {
     const { campaigns } = useCampaigns({ query: "", folder: "" });
     const active = useMemo(
         () => campaigns.filter((c) => c.status === "active").length,
         [campaigns],
     );
-
-    if (active === 0) return null;
-
     return (
-        <span
-            className="ml-auto inline-flex items-center gap-1.5 shrink-0 text-sky-600"
-            title={`${active} campaign${active === 1 ? "" : "s"} sending now`}
-        >
-            <span className="campaign-grid" aria-hidden />
-            <span className="text-[10.5px] font-semibold tabular-nums leading-none">
-                {active}
-            </span>
-        </span>
+        <TabDualStat
+            total={campaigns.length}
+            active={active}
+            activeClass="text-sky-600"
+            activeGlyph={<span className="campaign-grid" aria-hidden />}
+            title={`${campaigns.length} campaign${campaigns.length === 1 ? "" : "s"}${active > 0 ? `, ${active} sending now` : ""}`}
+        />
     );
 }
 
@@ -214,58 +335,106 @@ function MailboxActivity() {
         () => emails.filter((e) => !!e.warmup && !e.warmup_paused_at).length,
         [emails],
     );
-
-    if (warming === 0) return null;
-
     return (
-        <span
-            className="ml-auto inline-flex items-center gap-1.5 shrink-0 text-orange-500"
-            title={`${warming} mailbox${warming === 1 ? "" : "es"} warming up`}
-        >
-            <FlameIcon className="w-3.5 h-3.5 flame-flicker" strokeWidth={2.2} />
-            <span className="text-[10.5px] font-semibold tabular-nums leading-none text-orange-600">
-                {warming}
-            </span>
-        </span>
+        <TabDualStat
+            total={emails.length}
+            active={warming}
+            activeClass="text-orange-500"
+            activeGlyph={
+                <FlameIcon className="w-3.5 h-3.5 flame-flicker" strokeWidth={2.2} />
+            }
+            title={`${emails.length} mailbox${emails.length === 1 ? "" : "es"}${warming > 0 ? `, ${warming} warming up` : ""}`}
+        />
     );
 }
 
-// TasksOverdueActivity is the Tasks-row indicator — its own motif again: a
-// subtle red attention dot (with a soft ping pulse) + a count of CRM tasks
-// that are past due and still open. "Overdue" = due_date in the past AND the
-// task is not completed or cancelled. Hidden when nothing is overdue, so the
-// row stays quiet until it actually needs attention. The count comes from the
-// shared, cached CRM tasks list, which the realtime layer invalidates on task
-// events, so it stays live without a manual refresh.
-function TasksOverdueActivity() {
-    const { data } = useCRMTasks();
-    const overdue = useMemo(() => {
-        const tasks = data?.data ?? [];
-        const now = Date.now();
-        return tasks.filter(
-            (t) =>
-                !!t.due_date &&
-                new Date(t.due_date).getTime() < now &&
-                t.status !== "completed" &&
-                t.status !== "cancelled",
-        ).length;
-    }, [data]);
-
-    if (overdue === 0) return null;
-
+// TasksActivity is the Tasks-row indicator — its own motif again. Overdue is the
+// urgent state (a soft red ping + count); when nothing is overdue it falls back
+// to a quiet count of open tasks (todo) so the row still tells you how much work
+// is waiting instead of going blank. Counts are SERVER aggregates (useTasksSummary)
+// so "how many" is correct over the whole set, not a truncated page, and the
+// realtime layer invalidates ["crm","tasks"] so they stay live. The number tweens
+// (AnimatedNumber) when it changes.
+function TasksActivity() {
+    const { data } = useTasksSummary(EMPTY_TASK_SEARCH);
+    const overdue = data?.overdue_count ?? 0;
+    const todo = (data?.pending_count ?? 0) + (data?.in_progress_count ?? 0);
     return (
-        <span
-            className="ml-auto inline-flex items-center gap-1.5 shrink-0 text-red-600"
-            title={`${overdue} overdue task${overdue === 1 ? "" : "s"}`}
-        >
-            <span className="relative inline-flex shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                <span className="absolute inset-0 rounded-full bg-red-500/40 animate-ping" />
-            </span>
-            <span className="text-[10.5px] font-semibold tabular-nums leading-none">
-                {overdue > 99 ? "99+" : overdue}
-            </span>
-        </span>
+        <TabDualStat
+            total={todo}
+            active={overdue}
+            activeClass="text-red-600"
+            activeGlyph={
+                <span className="relative inline-flex shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    <span className="absolute inset-0 rounded-full bg-red-500/40 animate-ping" />
+                </span>
+            }
+            title={`${todo} open task${todo === 1 ? "" : "s"}${overdue > 0 ? `, ${overdue} overdue` : ""}`}
+        />
+    );
+}
+
+// Contacts row: total contacts. Reads pagination.total from a small search — the
+// limit MUST be >= the backend LimitMin (10) or validate.Limit rejects it (400)
+// and the whole count comes back as 0.
+function ContactsActivity() {
+    const { data } = useSearchContacts({ options: CONTACTS_COUNT_SEARCH, limit: 10 });
+    const total = data?.pages?.[0]?.pagination?.total ?? 0;
+    return <TabStat total={total} title={`${total.toLocaleString()} contacts`} />;
+}
+
+// Deals row: open (not won/lost) deals.
+function DealsActivity() {
+    const { data } = useDealsSummary(EMPTY_DEAL_SEARCH);
+    const open = data?.open_count ?? 0;
+    return (
+        <TabStat total={open} title={`${open} open deal${open === 1 ? "" : "s"}`} />
+    );
+}
+
+// Pipelines row: how many pipelines exist.
+function PipelinesActivity() {
+    const { data } = usePipelines();
+    const n = data?.length ?? 0;
+    return (
+        <TabStat total={n} title={`${n} pipeline${n === 1 ? "" : "s"}`} />
+    );
+}
+
+// Templates row: how many saved templates.
+function TemplatesActivity() {
+    const { data } = useTemplates();
+    const n = data?.length ?? 0;
+    return (
+        <TabStat total={n} title={`${n} template${n === 1 ? "" : "s"}`} />
+    );
+}
+
+// Analytics row: a live, compact tally of emails sent this period — the headline
+// throughput metric, surfaced right in the nav. From the org-wide usage overview.
+function AnalyticsActivity() {
+    const { data } = useUsageOverview();
+    const sent = data?.campaigns?.emails_sent ?? 0;
+    return (
+        <TabStat
+            total={sent}
+            format={compactN}
+            title={`${sent.toLocaleString()} emails sent this period`}
+        />
+    );
+}
+
+// API keys row: how many keys are currently active (not revoked / expired).
+function ApiKeysActivity() {
+    const { data } = useAPIKeys();
+    const active = (data?.data ?? []).filter((k) => k.status === "active").length;
+    return (
+        <TabStat
+            total={active}
+            format={(v) => String(Math.round(v))}
+            title={`${active} active API key${active === 1 ? "" : "s"}`}
+        />
     );
 }
 
