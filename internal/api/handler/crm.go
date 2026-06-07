@@ -585,6 +585,85 @@ func (h *Handler) GetDealsByContact(c *gin.Context) {
 }
 
 // =====================
+// CRM Task Types
+// =====================
+
+func (h *Handler) ListTaskTypes(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+	types, xerr := h.CRMService.ListTaskTypes(c.Request.Context(), *orgID)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": types})
+}
+
+func (h *Handler) CreateTaskType(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+	var data models.CreateCRMTaskType
+	if err := c.ShouldBindJSON(&data); err != nil {
+		errx.Handle(c, errx.ErrInvalid)
+		return
+	}
+	t, xerr := h.CRMService.CreateTaskType(c.Request.Context(), *orgID, &data)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+	c.JSON(http.StatusCreated, t)
+}
+
+func (h *Handler) UpdateTaskType(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+	typeID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		errx.Handle(c, errx.ErrUuid)
+		return
+	}
+	var data models.UpdateCRMTaskType
+	if err := c.ShouldBindJSON(&data); err != nil {
+		errx.Handle(c, errx.ErrInvalid)
+		return
+	}
+	t, xerr := h.CRMService.UpdateTaskType(c.Request.Context(), *orgID, typeID, &data)
+	if xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+	c.JSON(http.StatusOK, t)
+}
+
+func (h *Handler) DeleteTaskType(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+	typeID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		errx.Handle(c, errx.ErrUuid)
+		return
+	}
+	if xerr := h.CRMService.DeleteTaskType(c.Request.Context(), *orgID, typeID); xerr != nil {
+		errx.Handle(c, xerr)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// =====================
 // CRM Tasks
 // =====================
 

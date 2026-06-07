@@ -546,6 +546,14 @@ func Run(
 				deals.DELETE("/:id", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.DeleteDeal)
 			}
 
+			taskTypes := crmGroup.Group("/task-types")
+			{
+				taskTypes.GET("", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.ListTaskTypes)
+				taskTypes.POST("", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.CreateTaskType)
+				taskTypes.PATCH("/:id", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.UpdateTaskType)
+				taskTypes.DELETE("/:id", m.RequireAccess(models.PermManageContacts, models.APIPermWriteCRM), h.DeleteTaskType)
+			}
+
 			crmTasks := crmGroup.Group("/tasks")
 			{
 				crmTasks.GET("", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.ListCRMTasks)

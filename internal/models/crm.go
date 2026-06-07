@@ -280,6 +280,39 @@ const (
 	CRMTaskStatusCancelled  CRMTaskStatus = "cancelled"
 )
 
+// CRMTaskType is a user-managed task type — the kind of work a task represents
+// (e.g. Call / Email / Meeting). Org-scoped. A task references its type by NAME
+// (crm_tasks.type), so deleting a type never orphans existing tasks; they keep
+// the label and fall back to a neutral colour.
+type CRMTaskType struct {
+	ID             uuid.UUID `json:"id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Color          string    `json:"color"`
+	Position       int       `json:"position"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type CreateCRMTaskType struct {
+	Name  string `json:"name" binding:"required,min=1,max=60"`
+	Color string `json:"color,omitempty"`
+}
+
+type UpdateCRMTaskType struct {
+	Name     *string `json:"name,omitempty"`
+	Color    *string `json:"color,omitempty"`
+	Position *int    `json:"position,omitempty"`
+}
+
+// DefaultCRMTaskTypes seed an org's set the first time its types are listed, so
+// there's a usable starting point the user can rename, recolour, or delete.
+var DefaultCRMTaskTypes = []CreateCRMTaskType{
+	{Name: "Call", Color: "#8b5cf6"},
+	{Name: "Email", Color: "#0ea5e9"},
+	{Name: "Meeting", Color: "#f59e0b"},
+}
+
 type CRMTask struct {
 	ID             uuid.UUID       `json:"id"`
 	OrganizationID uuid.UUID       `json:"organization_id"`
@@ -291,6 +324,7 @@ type CRMTask struct {
 	Description    *string         `json:"description,omitempty"`
 	DueDate        *time.Time      `json:"due_date,omitempty"`
 	Priority       CRMTaskPriority `json:"priority"`
+	Type           string          `json:"type"`
 	Status         CRMTaskStatus   `json:"status"`
 	CompletedAt    *time.Time      `json:"completed_at,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
@@ -310,6 +344,7 @@ type CreateCRMTask struct {
 	Description *string    `json:"description,omitempty"`
 	DueDate     *time.Time `json:"due_date,omitempty"`
 	Priority    string     `json:"priority,omitempty"`
+	Type        string     `json:"type,omitempty"`
 }
 
 type UpdateCRMTask struct {
@@ -318,5 +353,6 @@ type UpdateCRMTask struct {
 	Description *string    `json:"description,omitempty"`
 	DueDate     *time.Time `json:"due_date,omitempty"`
 	Priority    *string    `json:"priority,omitempty"`
+	Type        *string    `json:"type,omitempty"`
 	Status      *string    `json:"status,omitempty"`
 }

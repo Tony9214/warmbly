@@ -53,6 +53,12 @@ type CRMRepository interface {
 	ListCRMTasks(ctx context.Context, orgID uuid.UUID, contactID, dealID, assignedTo *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.CRMTasksResult, error)
 	UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, error)
 	DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) error
+
+	// CRM Task Types (user-managed)
+	ListTaskTypes(ctx context.Context, orgID uuid.UUID) ([]models.CRMTaskType, error)
+	CreateTaskType(ctx context.Context, orgID uuid.UUID, data *models.CreateCRMTaskType) (*models.CRMTaskType, error)
+	UpdateTaskType(ctx context.Context, orgID, typeID uuid.UUID, data *models.UpdateCRMTaskType) (*models.CRMTaskType, error)
+	DeleteTaskType(ctx context.Context, orgID, typeID uuid.UUID) error
 }
 
 type crmRepository struct {
@@ -1059,21 +1065,23 @@ func (r *crmRepository) CreateCRMTask(ctx context.Context, orgID, userID uuid.UU
 	if priority == "" {
 		priority = "medium"
 	}
+	// Empty type = untyped; types are user-managed, so no enum coercion here.
+	taskType := data.Type
 
 	query := `
-		INSERT INTO crm_tasks (organization_id, contact_id, deal_id, assigned_to, created_by, title, description, due_date, priority)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO crm_tasks (organization_id, contact_id, deal_id, assigned_to, created_by, title, description, due_date, priority, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, organization_id, contact_id, deal_id, assigned_to, created_by, title, description,
-		          due_date, priority, status, completed_at, created_at, updated_at
+		          due_date, priority, type, status, completed_at, created_at, updated_at
 	`
 	var task models.CRMTask
 	err := r.db.QueryRow(ctx, query,
 		orgID, data.ContactID, data.DealID, data.AssignedTo, userID,
-		data.Title, data.Description, data.DueDate, priority,
+		data.Title, data.Description, data.DueDate, priority, taskType,
 	).Scan(
 		&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
 		&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
-		&task.DueDate, &task.Priority, &task.Status, &task.CompletedAt,
+		&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 	if err != nil {
@@ -1085,7 +1093,7 @@ func (r *crmRepository) CreateCRMTask(ctx context.Context, orgID, userID uuid.UU
 func (r *crmRepository) GetCRMTask(ctx context.Context, orgID, taskID uuid.UUID) (*models.CRMTask, error) {
 	query := `
 		SELECT id, organization_id, contact_id, deal_id, assigned_to, created_by, title, description,
-		       due_date, priority, status, completed_at, created_at, updated_at
+		       due_date, priority, type, status, completed_at, created_at, updated_at
 		FROM crm_tasks
 		WHERE organization_id = $1 AND id = $2
 	`
@@ -1093,7 +1101,7 @@ func (r *crmRepository) GetCRMTask(ctx context.Context, orgID, taskID uuid.UUID)
 	err := r.db.QueryRow(ctx, query, orgID, taskID).Scan(
 		&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
 		&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
-		&task.DueDate, &task.Priority, &task.Status, &task.CompletedAt,
+		&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 	if err != nil {
@@ -1139,7 +1147,7 @@ func (r *crmRepository) ListCRMTasks(ctx context.Context, orgID uuid.UUID, conta
 
 	query := fmt.Sprintf(`
 		SELECT id, organization_id, contact_id, deal_id, assigned_to, created_by, title, description,
-		       due_date, priority, status, completed_at, created_at, updated_at
+		       due_date, priority, type, status, completed_at, created_at, updated_at
 		FROM crm_tasks
 		WHERE %s
 		ORDER BY created_at DESC, id DESC
@@ -1159,7 +1167,7 @@ func (r *crmRepository) ListCRMTasks(ctx context.Context, orgID uuid.UUID, conta
 		if err := rows.Scan(
 			&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
 			&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
-			&task.DueDate, &task.Priority, &task.Status, &task.CompletedAt,
+			&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
 			&task.CreatedAt, &task.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -1211,6 +1219,11 @@ func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UU
 		args = append(args, *data.Priority)
 		argPos++
 	}
+	if data.Type != nil {
+		setClauses = append(setClauses, fmt.Sprintf("type = $%d", argPos))
+		args = append(args, *data.Type)
+		argPos++
+	}
 	if data.Status != nil {
 		setClauses = append(setClauses, fmt.Sprintf("status = $%d", argPos))
 		args = append(args, *data.Status)
@@ -1231,14 +1244,14 @@ func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UU
 		UPDATE crm_tasks SET %s
 		WHERE organization_id = $1 AND id = $2
 		RETURNING id, organization_id, contact_id, deal_id, assigned_to, created_by, title, description,
-		          due_date, priority, status, completed_at, created_at, updated_at
+		          due_date, priority, type, status, completed_at, created_at, updated_at
 	`, strings.Join(setClauses, ", "))
 
 	var task models.CRMTask
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
 		&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
-		&task.DueDate, &task.Priority, &task.Status, &task.CompletedAt,
+		&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 	if err != nil {
@@ -1248,6 +1261,126 @@ func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UU
 		return nil, err
 	}
 	return &task, nil
+}
+
+// =====================
+// CRM Task Types
+// =====================
+
+func (r *crmRepository) scanTaskType(row interface {
+	Scan(dest ...any) error
+}) (*models.CRMTaskType, error) {
+	var t models.CRMTaskType
+	if err := row.Scan(&t.ID, &t.OrganizationID, &t.Name, &t.Color, &t.Position, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (r *crmRepository) ListTaskTypes(ctx context.Context, orgID uuid.UUID) ([]models.CRMTaskType, error) {
+	// Types are seeded at org creation (see SeedDefaultTaskTypes), so this is a
+	// plain read — it never re-creates defaults, which would resurrect types the
+	// user deliberately deleted.
+	rows, err := r.db.Query(ctx, `
+		SELECT id, organization_id, name, color, position, created_at, updated_at
+		FROM crm_task_types
+		WHERE organization_id = $1
+		ORDER BY position ASC, name ASC
+	`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	types := []models.CRMTaskType{}
+	for rows.Next() {
+		var t models.CRMTaskType
+		if err := rows.Scan(&t.ID, &t.OrganizationID, &t.Name, &t.Color, &t.Position, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		types = append(types, t)
+	}
+	return types, rows.Err()
+}
+
+// SeedDefaultTaskTypes inserts the org's starter task types (idempotent). Called
+// when an organization is created so the CRM tasks UI is usable out of the box;
+// the user can rename, recolour, or delete them afterwards.
+func SeedDefaultTaskTypes(ctx context.Context, db *pgxpool.Pool, orgID uuid.UUID) error {
+	for i, d := range models.DefaultCRMTaskTypes {
+		if _, err := db.Exec(ctx,
+			`INSERT INTO crm_task_types (organization_id, name, color, position)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (organization_id, name) DO NOTHING`,
+			orgID, d.Name, d.Color, i,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *crmRepository) CreateTaskType(ctx context.Context, orgID uuid.UUID, data *models.CreateCRMTaskType) (*models.CRMTaskType, error) {
+	color := data.Color
+	if color == "" {
+		color = "#94a3b8"
+	}
+	row := r.db.QueryRow(ctx, `
+		INSERT INTO crm_task_types (organization_id, name, color, position)
+		VALUES ($1, $2, $3, COALESCE((SELECT MAX(position) + 1 FROM crm_task_types WHERE organization_id = $1), 0))
+		RETURNING id, organization_id, name, color, position, created_at, updated_at
+	`, orgID, data.Name, color)
+	return r.scanTaskType(row)
+}
+
+func (r *crmRepository) UpdateTaskType(ctx context.Context, orgID, typeID uuid.UUID, data *models.UpdateCRMTaskType) (*models.CRMTaskType, error) {
+	setClauses := []string{}
+	args := []any{orgID, typeID}
+	argPos := 3
+	if data.Name != nil {
+		setClauses = append(setClauses, fmt.Sprintf("name = $%d", argPos))
+		args = append(args, *data.Name)
+		argPos++
+	}
+	if data.Color != nil {
+		setClauses = append(setClauses, fmt.Sprintf("color = $%d", argPos))
+		args = append(args, *data.Color)
+		argPos++
+	}
+	if data.Position != nil {
+		setClauses = append(setClauses, fmt.Sprintf("position = $%d", argPos))
+		args = append(args, *data.Position)
+		argPos++
+	}
+	if len(setClauses) == 0 {
+		return nil, errx.ErrNotEnough
+	}
+	setClauses = append(setClauses, "updated_at = NOW()")
+
+	query := fmt.Sprintf(`
+		UPDATE crm_task_types SET %s
+		WHERE organization_id = $1 AND id = $2
+		RETURNING id, organization_id, name, color, position, created_at, updated_at
+	`, strings.Join(setClauses, ", "))
+	row := r.db.QueryRow(ctx, query, args...)
+	t, err := r.scanTaskType(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrNotFound
+		}
+		return nil, err
+	}
+	return t, nil
+}
+
+func (r *crmRepository) DeleteTaskType(ctx context.Context, orgID, typeID uuid.UUID) error {
+	cmd, err := r.db.Exec(ctx, `DELETE FROM crm_task_types WHERE organization_id = $1 AND id = $2`, orgID, typeID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return errx.ErrNotFound
+	}
+	return nil
 }
 
 func (r *crmRepository) DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) error {

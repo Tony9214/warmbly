@@ -3,6 +3,7 @@ package crm
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
@@ -48,6 +49,12 @@ type CRMService interface {
 	ListCRMTasks(ctx context.Context, orgID uuid.UUID, contactID, dealID, assignedTo *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.CRMTasksResult, *errx.Error)
 	UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, userID *uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, *errx.Error)
 	DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) *errx.Error
+
+	// CRM Task Types (user-managed)
+	ListTaskTypes(ctx context.Context, orgID uuid.UUID) ([]models.CRMTaskType, *errx.Error)
+	CreateTaskType(ctx context.Context, orgID uuid.UUID, data *models.CreateCRMTaskType) (*models.CRMTaskType, *errx.Error)
+	UpdateTaskType(ctx context.Context, orgID, typeID uuid.UUID, data *models.UpdateCRMTaskType) (*models.CRMTaskType, *errx.Error)
+	DeleteTaskType(ctx context.Context, orgID, typeID uuid.UUID) *errx.Error
 }
 
 type crmService struct {
@@ -410,6 +417,49 @@ func (s *crmService) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID,
 	}
 
 	return task, nil
+}
+
+func (s *crmService) ListTaskTypes(ctx context.Context, orgID uuid.UUID) ([]models.CRMTaskType, *errx.Error) {
+	types, err := s.repo.ListTaskTypes(ctx, orgID)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return types, nil
+}
+
+func (s *crmService) CreateTaskType(ctx context.Context, orgID uuid.UUID, data *models.CreateCRMTaskType) (*models.CRMTaskType, *errx.Error) {
+	name := strings.TrimSpace(data.Name)
+	if name == "" || len(name) > 60 {
+		return nil, errx.New(errx.BadRequest, "task type name must be between 1 and 60 characters")
+	}
+	data.Name = name
+	t, err := s.repo.CreateTaskType(ctx, orgID, data)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return t, nil
+}
+
+func (s *crmService) UpdateTaskType(ctx context.Context, orgID, typeID uuid.UUID, data *models.UpdateCRMTaskType) (*models.CRMTaskType, *errx.Error) {
+	if data.Name != nil {
+		name := strings.TrimSpace(*data.Name)
+		if name == "" || len(name) > 60 {
+			return nil, errx.New(errx.BadRequest, "task type name must be between 1 and 60 characters")
+		}
+		data.Name = &name
+	}
+	t, err := s.repo.UpdateTaskType(ctx, orgID, typeID, data)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return t, nil
+}
+
+func (s *crmService) DeleteTaskType(ctx context.Context, orgID, typeID uuid.UUID) *errx.Error {
+	if err := s.repo.DeleteTaskType(ctx, orgID, typeID); err != nil {
+		return toErrx(err)
+	}
+	return nil
 }
 
 func (s *crmService) DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) *errx.Error {
