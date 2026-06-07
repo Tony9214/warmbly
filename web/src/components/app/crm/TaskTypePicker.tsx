@@ -2,6 +2,14 @@
 // create, rename, recolour, delete. The selected value is the type NAME
 // (empty string = no type). Shared by the tasks dialog and the campaign
 // "Create task" action editor so types stay consistent everywhere.
+//
+// The dropdown shell is the shared PopoverMenu primitive (portal +
+// framer-motion animation + click-outside/Esc handled for us), so it
+// stays smooth and consistent with the rest of the app chrome. The
+// rich rows — select, inline rename/recolour, inline "New type" form —
+// live as arbitrary children inside PopoverMenuContent. The edit/create
+// forms stopPropagation on their interactions so typing or picking a
+// swatch never bubbles up to close the menu.
 
 import React from "react";
 import toast from "react-hot-toast";
@@ -14,7 +22,13 @@ import {
     Trash2Icon,
     XIcon,
 } from "lucide-react";
-import useClickOutside from "@/hooks/useClickOutside";
+import {
+    PopoverMenu,
+    PopoverMenuTrigger,
+    PopoverMenuContent,
+    PopoverMenuItem,
+    PopoverMenuSeparator,
+} from "@/components/ui/popover-menu";
 import { useConfirm } from "@/hooks/context/confirm";
 import useTaskTypes from "@/lib/api/hooks/app/crm/taskTypes/useTaskTypes";
 import useCreateTaskType from "@/lib/api/hooks/app/crm/taskTypes/useCreateTaskType";
@@ -36,68 +50,61 @@ export default function TaskTypePicker({
 }) {
     const { data: types = [], isPending } = useTaskTypes();
     const [open, setOpen] = React.useState(false);
-    const ref = React.useRef<HTMLDivElement>(null);
-    useClickOutside(ref, () => setOpen(false));
 
     const selected = types.find((t) => t.name === value);
 
     return (
-        <div ref={ref} className={`relative ${className ?? ""}`}>
-            <button
-                type="button"
-                onClick={() => setOpen((o) => !o)}
-                className="h-7 w-full px-2.5 rounded-md border border-slate-200 hover:border-slate-300 bg-white text-[12px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1.5 transition-colors"
-            >
-                <span
-                    className="size-2 rounded-full shrink-0"
-                    style={{ backgroundColor: selected?.color ?? "#cbd5e1" }}
-                />
-                <span className="truncate flex-1 text-left">{value || "No type"}</span>
-                <ChevronDownIcon className="w-3 h-3 text-slate-400" />
-            </button>
+        <PopoverMenu open={open} onOpenChange={setOpen} align="start">
+            <PopoverMenuTrigger asChild>
+                <button
+                    type="button"
+                    className={`h-7 w-full px-2.5 rounded-md border border-slate-200 hover:border-slate-300 bg-white text-[12px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1.5 transition-colors ${className ?? ""}`}
+                >
+                    <span
+                        className="size-2 rounded-full shrink-0"
+                        style={{ backgroundColor: selected?.color ?? "#cbd5e1" }}
+                    />
+                    <span className="truncate flex-1 text-left">{value || "No type"}</span>
+                    <ChevronDownIcon className="w-3 h-3 text-slate-400" />
+                </button>
+            </PopoverMenuTrigger>
 
-            {open && (
-                <div className="absolute left-0 top-full z-40 mt-1 w-64 rounded-md border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            onChange("");
-                            setOpen(false);
-                        }}
-                        className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-[12px] transition-colors hover:bg-slate-50 ${
-                            value === "" ? "text-slate-900 font-medium" : "text-slate-600"
-                        }`}
-                    >
-                        <span className="size-2 rounded-full bg-slate-300" />
-                        No type
-                    </button>
+            <PopoverMenuContent minWidth={256} className="w-64">
+                <PopoverMenuItem
+                    onSelect={() => onChange("")}
+                    selected={value === ""}
+                    icon={<span className="size-2 rounded-full bg-slate-300 block" />}
+                    trailing={
+                        value === "" ? <CheckIcon className="w-3 h-3 text-sky-600" /> : null
+                    }
+                >
+                    No type
+                </PopoverMenuItem>
 
-                    <div className="max-h-48 overflow-y-auto">
-                        {isPending ? (
-                            <div className="px-2.5 py-2 text-[11.5px] text-slate-400">Loading…</div>
-                        ) : (
-                            types.map((t) => (
-                                <TypeRow
-                                    key={t.id}
-                                    type={t}
-                                    selected={t.name === value}
-                                    onSelect={() => {
-                                        onChange(t.name);
-                                        setOpen(false);
-                                    }}
-                                    onDeletedSelected={() => onChange("")}
-                                    isSelectedValue={t.name === value}
-                                />
-                            ))
-                        )}
-                    </div>
-
-                    <div className="border-t border-slate-100 mt-1 pt-1">
-                        <NewTypeRow onCreated={(name) => onChange(name)} />
-                    </div>
+                <div className="max-h-48 overflow-y-auto">
+                    {isPending ? (
+                        <div className="px-3 py-2 text-[11.5px] text-slate-400">Loading…</div>
+                    ) : (
+                        types.map((t) => (
+                            <TypeRow
+                                key={t.id}
+                                type={t}
+                                selected={t.name === value}
+                                onSelect={() => {
+                                    onChange(t.name);
+                                    setOpen(false);
+                                }}
+                                onDeletedSelected={() => onChange("")}
+                                isSelectedValue={t.name === value}
+                            />
+                        ))
+                    )}
                 </div>
-            )}
-        </div>
+
+                <PopoverMenuSeparator />
+                <NewTypeRow onCreated={(name) => onChange(name)} />
+            </PopoverMenuContent>
+        </PopoverMenu>
     );
 }
 
@@ -148,16 +155,25 @@ function TypeRow({
         });
     }
 
+    // The inline edit form is interactive — typing, swatch picks and the
+    // Save/Cancel buttons must never bubble up to the row's select handler
+    // or close the menu, so the wrapper stops propagation outright.
     if (editing) {
         return (
-            <div className="px-2 py-1.5 space-y-1.5 bg-slate-50/60">
+            <div
+                className="px-2 py-1.5 space-y-1.5 bg-slate-50/60"
+                onClick={(e) => e.stopPropagation()}
+            >
                 <input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     autoFocus
                     onKeyDown={(e) => {
                         if (e.key === "Enter") save();
-                        if (e.key === "Escape") setEditing(false);
+                        if (e.key === "Escape") {
+                            e.stopPropagation();
+                            setEditing(false);
+                        }
                     }}
                     className="w-full h-7 px-2 rounded-md border border-slate-200 text-[12px] outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 />
@@ -186,7 +202,7 @@ function TypeRow({
 
     return (
         <div
-            className={`group flex items-center gap-2 px-2.5 py-1.5 text-[12px] cursor-pointer transition-colors hover:bg-slate-50 ${
+            className={`group flex items-center gap-2 px-3 py-1.5 text-[12px] cursor-pointer transition-colors hover:bg-slate-50 ${
                 selected ? "text-slate-900 font-medium" : "text-slate-700"
             }`}
             onClick={onSelect}
@@ -239,8 +255,11 @@ function NewTypeRow({ onCreated }: { onCreated: (name: string) => void }) {
         return (
             <button
                 type="button"
-                onClick={() => setAdding(true)}
-                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[12px] text-sky-700 hover:bg-sky-50 transition-colors"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setAdding(true);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-[12px] text-sky-700 hover:bg-sky-50 transition-colors"
             >
                 <PlusIcon className="w-3 h-3" />
                 New type
@@ -248,8 +267,10 @@ function NewTypeRow({ onCreated }: { onCreated: (name: string) => void }) {
         );
     }
 
+    // Inline create form — stop propagation so typing, swatch picks and the
+    // Add button stay inside the menu instead of selecting/closing it.
     return (
-        <div className="px-2 py-1.5 space-y-1.5">
+        <div className="px-2 py-1.5 space-y-1.5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-1.5">
                 <input
                     value={name}
@@ -258,7 +279,10 @@ function NewTypeRow({ onCreated }: { onCreated: (name: string) => void }) {
                     autoFocus
                     onKeyDown={(e) => {
                         if (e.key === "Enter") submit();
-                        if (e.key === "Escape") setAdding(false);
+                        if (e.key === "Escape") {
+                            e.stopPropagation();
+                            setAdding(false);
+                        }
                     }}
                     className="w-full h-7 px-2 rounded-md border border-slate-200 text-[12px] outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 />
