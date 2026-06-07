@@ -40,6 +40,29 @@ export function isReplyBranchField(field: BranchField): boolean {
     return REPLY_BRANCH_FIELDS.includes(field);
 }
 
+// Instant-capable fields are the "it happened" signals the backend can react to
+// the moment the event lands (a reply is recorded, or an open / click is
+// tracked), rather than at the next scheduled step boundary. That is the same
+// per-branch Instant toggle the reply paths use, generalized to engagement.
+//
+// Excluded on purpose: negative signals (not_opened / not_clicked / not_replied)
+// and "within N days" windows can only be resolved at a step boundary because
+// they assert something did NOT happen in a window; and random / always are not
+// event-driven at all. `replied` is also excluded here because it carries a day
+// window in this canvas; use the reply_* intent fields for an instant reply path.
+export const INSTANT_CAPABLE_FIELDS: BranchField[] = [
+    "reply_positive",
+    "reply_negative",
+    "reply_neutral",
+    "reply_automated",
+    "opened",
+    "clicked",
+];
+
+export function isInstantCapableField(field: BranchField): boolean {
+    return INSTANT_CAPABLE_FIELDS.includes(field);
+}
+
 export interface BranchCondition {
     field: BranchField;
     operator: BranchOperator;
@@ -53,6 +76,10 @@ export interface SequenceBranch {
     target_sequence_id: string | null;
     // ANDed conditions. An empty list is the catch-all "else" branch.
     conditions: BranchCondition[];
+    // For an instant-capable branch: whether its action chain fires the moment
+    // the signal lands. Absent/true = instant; false = route at the next step
+    // boundary. Ignored for fields that are not event-driven.
+    instant?: boolean;
 }
 
 // The full conditions payload carried on the sequence record + PATCH body.
