@@ -82,6 +82,18 @@ type Service interface {
 	// "notify" action node) to customer webhooks and wired integrations.
 	EmitCampaignEvent(ctx context.Context, orgID uuid.UUID, eventType models.WebhookEventType, data map[string]any)
 
+	// FireInstantActions runs the matched INSTANT branch's action chain for a
+	// contact the moment an engagement signal lands for them, instead of waiting
+	// for the next scheduled step boundary. eventKind is "reply", "open", or
+	// "click" and selects which branch fields can fire (reply -> reply_* intent
+	// fields; open -> "opened"; click -> "clicked"). The signal must already be
+	// recorded on the contact's progress row before this is called. Best-effort
+	// and non-blocking: it never returns an error and must never block the caller's
+	// hot path. The tracking consumer calls this after RecordEmailOpened /
+	// RecordEmailClicked; ProcessIncomingReply calls the unexported path with
+	// "reply".
+	FireInstantActions(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID, eventKind string)
+
 	// DLQ auto-retry
 	ProcessRetryableDeadLetters(ctx context.Context) (int, *errx.Error)
 }
@@ -775,14 +787,16 @@ func (s *service) ProcessIncomingReply(ctx context.Context, emailAccountID uuid.
 			_ = s.repo.MarkVariantEvent(ctx, cID, ctID, string(models.DeliverabilityEventReply))
 		}
 
-		// INSTANT reply trigger: if the contact's CURRENT step has a reply_* branch
-		// matching this just-classified reply, run that branch's action chain for
-		// THIS contact right now (instead of waiting for the next scheduled step
-		// boundary). Best-effort and non-blocking like the rest of reply handling —
-		// a failure must never block inbox ingest. Fires for both human and
-		// automated replies (reply_automated drives the auto-reply case) and exactly
-		// once per reply event via the reply_actions_fired_at gate.
-		s.fireInstantReplyActions(ctx, cID, ctID, sID, replyResult.Class)
+		// INSTANT reply trigger: if the contact's CURRENT step has a reply_* intent
+		// branch matching this just-classified reply, run that branch's
+		// action chain for THIS contact right now (instead of waiting for the next
+		// scheduled step boundary). Best-effort and non-blocking like the rest of
+		// reply handling — a failure must never block inbox ingest. Fires for both
+		// human and automated replies (reply_automated drives the auto-reply case)
+		// and exactly once per reply event via the instant_fired["reply"] gate. The
+		// just-classified reply_class and (human-only) replied_at have already been
+		// persisted above, so the matcher reads them off the loaded progress row.
+		s.fireInstantActions(ctx, cID, ctID, sID, "reply")
 	}
 
 	actionTaken := ""

@@ -14,29 +14,47 @@ import (
 	"github.com/warmbly/warmbly/internal/repository"
 )
 
-// maxInstantReplyChain bounds how many action nodes a single reply event can run
-// in one walk, so a malformed loop in the flow graph (a chain that routes back
-// into itself) can never spin. The flow editor links chains linearly, so a real
-// reply automation is far shorter than this.
-const maxInstantReplyChain = 32
+// maxInstantChain bounds how many action nodes a single instant event can run in
+// one walk, so a malformed loop in the flow graph (a chain that routes back into
+// itself) can never spin. The flow editor links chains linearly, so a real
+// automation is far shorter than this.
+const maxInstantChain = 32
 
-// fireInstantReplyActions runs the matched reply branch's action chain for a
-// single contact the moment their reply is classified, instead of waiting for
-// the contact's next scheduled step boundary. It is the instant, contact-targeted
-// half of the reply-branch system: the scheduler still handles engagement
-// branches (opened/clicked) and the email steps; this only short-circuits the
-// reply_* branches so "on reply, do X then Y" happens immediately.
+// FireInstantActions is the exported entrypoint for instant engagement triggers
+// (the tracking consumer calls it with "open" / "click" after recording the
+// signal). It guards the eventKind and forwards to the unexported walker. Reply
+// triggers go through ProcessIncomingReply, which calls fireInstantActions
+// directly with "reply". Best-effort and non-blocking, like the rest of the path.
+func (s *service) FireInstantActions(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID, eventKind string) {
+	switch eventKind {
+	case "reply", "open", "click":
+	default:
+		return // unknown event kind: nothing instant to fire
+	}
+	s.fireInstantActions(ctx, campaignID, contactID, sequenceID, eventKind)
+}
+
+// fireInstantActions runs the matched INSTANT branch's action chain for a single
+// contact the MOMENT a signal lands for them (a reply is classified, an open is
+// tracked, or a click is tracked), instead of waiting for the contact's next
+// scheduled step boundary. eventKind selects which "it happened" fields can fire:
+// "reply" (the reply_* intent fields), "open" ("opened"), or "click"
+// ("clicked"). It is the instant, contact-targeted half of the branch system: the
+// scheduler still handles negative branches (not_opened/not_clicked), "wait N
+// days" windows, and the email steps; this only short-circuits the positive,
+// instant-capable branches so "on click, do X then Y" happens immediately.
 //
-// Everything here is best-effort and swallows errors (logging only): reply
-// detection runs in the consumer's inbox hot path, so a CRM hiccup must never
-// block ingest. Exactly-once is enforced by ClaimReplyActionFire before any side
-// effect runs, so a redelivered reply event (or an auto-reply followed by a human
-// reply on the same step) cannot double-fire the chain.
-func (s *service) fireInstantReplyActions(ctx context.Context, campaignID, contactID, currentStepID uuid.UUID, replyClass string) {
+// Everything here is best-effort and swallows errors (logging only): the callers
+// run in hot paths (the consumer's inbox path for replies, the tracking consumer
+// for opens/clicks), so a CRM hiccup must never block ingest. Exactly-once PER
+// (step, eventKind) is enforced by ClaimInstantFire before any side effect runs,
+// so a redelivered event of the same kind cannot double-fire that kind's chain,
+// while open/click/reply on the same step each fire their own chain once.
+func (s *service) fireInstantActions(ctx context.Context, campaignID, contactID, currentStepID uuid.UUID, eventKind string) {
 	// Load the campaign's steps with routing fields (kind/action/conditions).
 	steps, err := s.campaignRepo.GetSequencesRoutingByCampaignID(ctx, campaignID)
 	if err != nil {
-		log.Warn().Err(err).Str("campaign_id", campaignID.String()).Msg("instant reply actions: failed to load campaign steps")
+		log.Warn().Err(err).Str("campaign_id", campaignID.String()).Str("event", eventKind).Msg("instant actions: failed to load campaign steps")
 		return
 	}
 	if len(steps) == 0 {
@@ -52,51 +70,55 @@ func (s *service) fireInstantReplyActions(ctx context.Context, campaignID, conta
 		return
 	}
 
-	// Decode the current step's branching tree and find the matched reply branch.
+	// Decode the current step's branching tree and find the matched instant branch.
 	var bc models.BranchConditions
 	if len(current.Conditions) > 0 {
 		if uerr := json.Unmarshal(current.Conditions, &bc); uerr != nil {
-			log.Warn().Err(uerr).Str("campaign_id", campaignID.String()).Str("step_id", currentStepID.String()).Msg("instant reply actions: bad conditions json")
+			log.Warn().Err(uerr).Str("campaign_id", campaignID.String()).Str("step_id", currentStepID.String()).Str("event", eventKind).Msg("instant actions: bad conditions json")
 			return
 		}
 	}
-	// REUSE the scheduler's matchers (replyClassMatches / conditionState) via the
-	// exported MatchReplyBranchTarget: first reply_* branch in declared order whose
-	// conditions all hold wins. prog carries the just-classified reply class.
-	prog := &repository.CampaignContactProgress{
-		CampaignID: campaignID,
-		ContactID:  contactID,
-		SequenceID: currentStepID,
-		ReplyClass: replyClass,
-	}
-	matched, target := repository.MatchReplyBranchTarget(&bc, prog)
+	// Load the contact's CURRENT progress for this step so any engagement/window
+	// conditions ANDed alongside the trigger field evaluate against real stored
+	// timestamps (e.g. "clicked AND opened"). Falls back to a freshly-stamped row
+	// for the trigger signal itself when no progress row is loadable yet.
+	prog := s.instantProgress(ctx, campaignID, contactID, currentStepID, eventKind)
+
+	// REUSE the scheduler's evaluator via the exported MatchInstantBranchTarget:
+	// first instant branch for this eventKind in declared order whose conditions
+	// all hold wins.
+	matched, target, instant := repository.MatchInstantBranchTarget(&bc, prog, eventKind)
 	if !matched {
-		return // no reply branch on this step matches this reply
+		return // no instant branch on this step matches this signal
+	}
+	if !instant {
+		return // branch opted out of instant: the scheduler routes it at the next step boundary
 	}
 	if target == nil {
 		return // matched a STOP branch: nothing to execute instantly
 	}
 
-	// IDEMPOTENCY: claim the one-time fire right BEFORE any side effect. If another
-	// reply event already fired this step's chain, stop here.
-	claimed, cerr := s.campaignProgressRepo.ClaimReplyActionFire(ctx, campaignID, contactID, currentStepID)
+	// IDEMPOTENCY: claim the one-time fire for THIS event kind right BEFORE any
+	// side effect. If another event of the same kind already fired this step's
+	// chain, stop here.
+	claimed, cerr := s.campaignProgressRepo.ClaimInstantFire(ctx, campaignID, contactID, currentStepID, eventKind)
 	if cerr != nil {
-		log.Warn().Err(cerr).Str("campaign_id", campaignID.String()).Str("contact_id", contactID.String()).Msg("instant reply actions: claim failed")
+		log.Warn().Err(cerr).Str("campaign_id", campaignID.String()).Str("contact_id", contactID.String()).Str("event", eventKind).Msg("instant actions: claim failed")
 		return
 	}
 	if !claimed {
-		return // already fired for this step (or no progress row): no-op
+		return // already fired this kind for this step (or no progress row): no-op
 	}
 
 	// Load the contact once for templating / activity records.
 	contact, xerr := s.contactRepo.GetByID(ctx, contactID)
 	if xerr != nil || contact == nil {
-		log.Warn().Str("campaign_id", campaignID.String()).Str("contact_id", contactID.String()).Msg("instant reply actions: contact load failed")
+		log.Warn().Str("campaign_id", campaignID.String()).Str("contact_id", contactID.String()).Str("event", eventKind).Msg("instant actions: contact load failed")
 		return
 	}
 	campaign, cmErr := s.campaignRepo.GetByID(ctx, campaignID)
 	if cmErr != nil || campaign == nil {
-		log.Warn().Str("campaign_id", campaignID.String()).Msg("instant reply actions: campaign load failed")
+		log.Warn().Str("campaign_id", campaignID.String()).Str("event", eventKind).Msg("instant actions: campaign load failed")
 		return
 	}
 
@@ -104,7 +126,7 @@ func (s *service) fireInstantReplyActions(ctx context.Context, campaignID, conta
 	// non-action node (an email step resumes via the normal scheduler), an "end",
 	// or a "wait" (a wait means "not instant" — hand back to the scheduler).
 	stepID := *target
-	for hops := 0; hops < maxInstantReplyChain; hops++ {
+	for hops := 0; hops < maxInstantChain; hops++ {
 		node, live := byID[stepID]
 		if !live {
 			return // deleted / dangling target ends the instant chain
@@ -115,7 +137,7 @@ func (s *service) fireInstantReplyActions(ctx context.Context, campaignID, conta
 		var cfg models.ActionConfig
 		if len(node.Action) > 0 {
 			if uerr := json.Unmarshal(node.Action, &cfg); uerr != nil {
-				log.Warn().Err(uerr).Str("campaign_id", campaignID.String()).Str("step_id", node.ID.String()).Msg("instant reply actions: bad action json")
+				log.Warn().Err(uerr).Str("campaign_id", campaignID.String()).Str("step_id", node.ID.String()).Str("event", eventKind).Msg("instant actions: bad action json")
 				return
 			}
 		}
@@ -128,17 +150,17 @@ func (s *service) fireInstantReplyActions(ctx context.Context, campaignID, conta
 			return
 		}
 
-		s.executeReplyActionNode(ctx, campaign, contact, &cfg)
+		s.executeInstantActionNode(ctx, campaign, contact, &cfg, eventKind)
 
 		// Stamp this action node as "sent" for the contact. The scheduler's
 		// FindNextRoutedPair loop-guard (sentIDs) skips steps with sent_at set, so
 		// this is what stops the scheduler from re-running the very same chain when
-		// it later routes the contact through the reply branch at the next step
-		// boundary. Without it the chain would double-fire (deals/tasks/webhooks)
-		// whenever stop_on_reply is off or the reply was automated. Mirrors the
+		// it later routes the contact through this branch at the next step boundary.
+		// Without it the chain would double-fire (deals/tasks/webhooks) whenever the
+		// scheduler later routes the same opened/clicked/replied branch. Mirrors the
 		// scheduler's own action-node bookkeeping (tasks.campaign_task).
 		if rerr := s.campaignProgressRepo.RecordEmailSent(ctx, campaignID, contactID, node.ID); rerr != nil {
-			log.Warn().Err(rerr).Str("campaign_id", campaignID.String()).Str("step_id", node.ID.String()).Msg("instant reply actions: failed to stamp action node sent")
+			log.Warn().Err(rerr).Str("campaign_id", campaignID.String()).Str("step_id", node.ID.String()).Str("event", eventKind).Msg("instant actions: failed to stamp action node sent")
 		}
 
 		// Advance to the next node in the chain by following this action node's
@@ -151,7 +173,46 @@ func (s *service) fireInstantReplyActions(ctx context.Context, campaignID, conta
 		}
 		stepID = next
 	}
-	log.Warn().Str("campaign_id", campaignID.String()).Str("contact_id", contactID.String()).Msg("instant reply actions: chain exceeded max hops; stopping")
+	log.Warn().Str("campaign_id", campaignID.String()).Str("contact_id", contactID.String()).Str("event", eventKind).Msg("instant actions: chain exceeded max hops; stopping")
+}
+
+// instantProgress builds the CampaignContactProgress the instant matcher reads.
+// It loads the contact's stored progress row for this step (which already
+// reflects the just-applied signal: RecordEmailOpened / RecordEmailClicked /
+// RecordReplyClassification all run before this) so composite conditions like
+// "clicked AND opened" evaluate against real timestamps. If no row is loadable
+// yet (a rare materialization race), it falls back to a minimal row that stamps
+// only the trigger signal for this eventKind, so the trigger field itself still
+// matches. The reply class is always taken from the loaded row.
+func (s *service) instantProgress(ctx context.Context, campaignID, contactID, stepID uuid.UUID, eventKind string) *repository.CampaignContactProgress {
+	prog := &repository.CampaignContactProgress{
+		CampaignID: campaignID,
+		ContactID:  contactID,
+		SequenceID: stepID,
+	}
+	if rows, err := s.campaignProgressRepo.GetContactProgress(ctx, campaignID, contactID); err == nil {
+		for i := range rows {
+			if rows[i].SequenceID == stepID {
+				r := rows[i]
+				prog = &r
+				break
+			}
+		}
+	}
+	// Guarantee the trigger signal is present even if the just-applied write has
+	// not propagated into the read above. Never clears a signal already loaded.
+	now := time.Now().UTC()
+	switch eventKind {
+	case "open":
+		if prog.OpenedAt == nil {
+			prog.OpenedAt = &now
+		}
+	case "click":
+		if prog.ClickedAt == nil {
+			prog.ClickedAt = &now
+		}
+	}
+	return prog
 }
 
 // nextChainTarget returns the single unconditional onward target of an action
@@ -176,13 +237,15 @@ func nextChainTarget(node *models.Sequence) (uuid.UUID, bool) {
 	return uuid.Nil, false
 }
 
-// executeReplyActionNode runs one action node's control-plane side effect for a
-// contact, NOW, in response to a reply. It mirrors tasks.executeActionNode but
-// stays inside the advanced service (advanced cannot import tasks — tasks imports
-// advanced), reusing the same repos and the CreateContactDeal / MoveContactDealStage
-// methods. Best-effort: each action logs and continues so one bad node never
-// aborts the rest of the chain or blocks inbox ingest.
-func (s *service) executeReplyActionNode(ctx context.Context, campaign *models.Campaign, contact *models.Contact, cfg *models.ActionConfig) {
+// executeInstantActionNode runs one action node's control-plane side effect for a
+// contact, NOW, in response to an instant signal (reply / open / click).
+// eventKind is surfaced as the "trigger" on emitted events / logs. It mirrors
+// tasks.executeActionNode but stays inside the advanced service (advanced cannot
+// import tasks — tasks imports advanced), reusing the same repos and the
+// CreateContactDeal / MoveContactDealStage methods. Best-effort: each action logs
+// and continues so one bad node never aborts the rest of the chain or blocks the
+// caller's hot path.
+func (s *service) executeInstantActionNode(ctx context.Context, campaign *models.Campaign, contact *models.Contact, cfg *models.ActionConfig, eventKind string) {
 	switch cfg.Type {
 	case "add_tag":
 		if cfg.CategoryID == nil {
@@ -191,7 +254,7 @@ func (s *service) executeReplyActionNode(ctx context.Context, campaign *models.C
 		if _, xerr := s.contactRepo.Update(ctx, campaign.UserID, contact.ID.String(), &models.UpdateContact{
 			AddCategories: []string{cfg.CategoryID.String()},
 		}); xerr != nil {
-			s.logActionErr(campaign, contact, cfg.Type, xerr)
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
 	case "remove_tag":
 		if cfg.CategoryID == nil {
@@ -200,11 +263,11 @@ func (s *service) executeReplyActionNode(ctx context.Context, campaign *models.C
 		if _, xerr := s.contactRepo.Update(ctx, campaign.UserID, contact.ID.String(), &models.UpdateContact{
 			RemoveCategories: []string{cfg.CategoryID.String()},
 		}); xerr != nil {
-			s.logActionErr(campaign, contact, cfg.Type, xerr)
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
 	case "unsubscribe":
 		if xerr := s.Unsubscribe(ctx, campaign.ID, contact.ID); xerr != nil {
-			s.logActionErr(campaign, contact, cfg.Type, xerr)
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
 	case "notify":
 		if campaign.OrganizationID == nil {
@@ -218,7 +281,7 @@ func (s *service) executeReplyActionNode(ctx context.Context, campaign *models.C
 			"campaign_id":   campaign.ID.String(),
 			"contact_id":    contact.ID.String(),
 			"contact_email": contact.Email,
-			"trigger":       "reply",
+			"trigger":       eventKind,
 		}
 		for k, v := range cfg.NotifyData {
 			data[k] = v
@@ -253,7 +316,7 @@ func (s *service) executeReplyActionNode(ctx context.Context, campaign *models.C
 			data.DueDate = &due
 		}
 		if _, xerr := s.CreateContactTask(ctx, *campaign.OrganizationID, owner, data); xerr != nil {
-			s.logActionErr(campaign, contact, cfg.Type, xerr)
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
 	case "create_deal":
 		if campaign.OrganizationID == nil {
@@ -287,7 +350,7 @@ func (s *service) executeReplyActionNode(ctx context.Context, campaign *models.C
 			AssignedTo: &owner,
 		}
 		if _, xerr := s.CreateContactDeal(ctx, *campaign.OrganizationID, owner, data); xerr != nil {
-			s.logActionErr(campaign, contact, cfg.Type, xerr)
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
 	case "move_deal_stage":
 		if campaign.OrganizationID == nil {
@@ -297,7 +360,7 @@ func (s *service) executeReplyActionNode(ctx context.Context, campaign *models.C
 			return
 		}
 		if _, xerr := s.MoveContactDealStage(ctx, *campaign.OrganizationID, contact.ID, *cfg.DealPipelineID, *cfg.DealStageID); xerr != nil {
-			s.logActionErr(campaign, contact, cfg.Type, xerr)
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
 	default:
 		// "wait" / "end" are handled by the chain walker (they stop the walk);
@@ -305,13 +368,13 @@ func (s *service) executeReplyActionNode(ctx context.Context, campaign *models.C
 	}
 }
 
-func (s *service) logActionErr(campaign *models.Campaign, contact *models.Contact, action string, err error) {
+func (s *service) logActionErr(campaign *models.Campaign, contact *models.Contact, action, eventKind string, err error) {
 	log.Warn().
 		Str("campaign_id", campaign.ID.String()).
 		Str("contact_id", contact.ID.String()).
 		Str("action", action).
-		Str("trigger", "reply").
-		Msg(fmt.Sprintf("instant reply action failed: %v", err))
+		Str("trigger", eventKind).
+		Msg(fmt.Sprintf("instant action failed: %v", err))
 }
 
 func contactDisplayName(contact *models.Contact) string {
