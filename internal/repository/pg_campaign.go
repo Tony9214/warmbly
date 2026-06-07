@@ -248,7 +248,10 @@ func (r *campaignRepository) Create(ctx context.Context, userID string, orgID *u
 		bcc = []string{}
 	}
 
-	stopOnReply := false
+	// Default stop_on_reply ON: continuing to cold-email someone who already
+	// replied is the classic deliverability / complaint-rate mistake, so new
+	// campaigns ship with it on unless the caller explicitly opts out.
+	stopOnReply := true
 	if data.StopOnReply != nil {
 		stopOnReply = *data.StopOnReply
 	}
