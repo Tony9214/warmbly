@@ -1531,6 +1531,9 @@ function ConnectionEditor({
                                 ? "Routes when the contact's reply is an auto-reply or out-of-office bounce, not a real human reply. Pair this with action steps (create deal, move stage, notify) to react."
                                 : "Routes when the contact's reply is classified this way. Chain action steps after it, for example create deal then move stage then notify."}
                         </p>
+                        <p className="text-[10.5px] text-amber-600">
+                            A reply is matched to the email it answers. If a contact replies to an earlier email after later steps already sent, it still triggers that email's reply path (and pauses the sequence when stop-on-reply is on).
+                        </p>
                     </div>
                 )}
                 {isNegative && (
