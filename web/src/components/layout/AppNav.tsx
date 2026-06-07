@@ -30,6 +30,7 @@ import { useAppStore } from "@/stores";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
 import useCampaigns from "@/lib/api/hooks/app/campaigns/useCampaigns";
 import useEmails from "@/lib/api/hooks/app/emails/useEmails";
+import useCRMTasks from "@/lib/api/hooks/app/crm/tasks/useCRMTasks";
 import { UserNav } from "./UserNav";
 import { Logo } from "@/components/svg";
 import { cn } from "@/lib/utils";
@@ -44,9 +45,10 @@ interface NavItem {
     /** Role gate — when set, sidebar hides the row entirely for non-matching roles. */
     rolesAllowed?: "manage";
     /** Live indicator key — renders an ambient, realtime activity cluster.
-     *  Each key has its OWN motif (campaigns = dot-grid, accounts = flame) so
-     *  the rows stay visually distinct rather than a column of identical loaders. */
-    indicator?: "campaigns" | "accounts";
+     *  Each key has its OWN motif (campaigns = dot-grid, accounts = flame,
+     *  tasks = red attention dot) so the rows stay visually distinct rather
+     *  than a column of identical loaders. */
+    indicator?: "campaigns" | "accounts" | "tasks";
 }
 
 // Plan badge shown on locked sidebar rows. Plan names + colors come
@@ -90,7 +92,7 @@ const sections: NavSection[] = [
         items: [
             { title: "Pipelines", url: "/app/crm/pipelines", icon: GitBranchIcon },
             { title: "Deals", url: "/app/crm/deals", icon: CircleDollarSignIcon },
-            { title: "Tasks", url: "/app/crm/tasks", icon: CheckSquareIcon },
+            { title: "Tasks", url: "/app/crm/tasks", icon: CheckSquareIcon, indicator: "tasks" },
         ],
     },
     {
@@ -152,6 +154,7 @@ function NavRow({ item }: { item: NavItem }) {
             <span className="truncate flex-1">{item.title}</span>
             {item.indicator === "campaigns" && !locked && <CampaignActivity />}
             {item.indicator === "accounts" && !locked && <MailboxActivity />}
+            {item.indicator === "tasks" && !locked && <TasksOverdueActivity />}
             {planBadge ? (
                 <span
                     className={cn(
@@ -222,6 +225,45 @@ function MailboxActivity() {
             <FlameIcon className="w-3.5 h-3.5 flame-flicker" strokeWidth={2.2} />
             <span className="text-[10.5px] font-semibold tabular-nums leading-none text-orange-600">
                 {warming}
+            </span>
+        </span>
+    );
+}
+
+// TasksOverdueActivity is the Tasks-row indicator — its own motif again: a
+// subtle red attention dot (with a soft ping pulse) + a count of CRM tasks
+// that are past due and still open. "Overdue" = due_date in the past AND the
+// task is not completed or cancelled. Hidden when nothing is overdue, so the
+// row stays quiet until it actually needs attention. The count comes from the
+// shared, cached CRM tasks list, which the realtime layer invalidates on task
+// events, so it stays live without a manual refresh.
+function TasksOverdueActivity() {
+    const { data } = useCRMTasks();
+    const overdue = useMemo(() => {
+        const tasks = data?.data ?? [];
+        const now = Date.now();
+        return tasks.filter(
+            (t) =>
+                !!t.due_date &&
+                new Date(t.due_date).getTime() < now &&
+                t.status !== "completed" &&
+                t.status !== "cancelled",
+        ).length;
+    }, [data]);
+
+    if (overdue === 0) return null;
+
+    return (
+        <span
+            className="ml-auto inline-flex items-center gap-1.5 shrink-0 text-red-600"
+            title={`${overdue} overdue task${overdue === 1 ? "" : "s"}`}
+        >
+            <span className="relative inline-flex shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                <span className="absolute inset-0 rounded-full bg-red-500/40 animate-ping" />
+            </span>
+            <span className="text-[10.5px] font-semibold tabular-nums leading-none">
+                {overdue > 99 ? "99+" : overdue}
             </span>
         </span>
     );
