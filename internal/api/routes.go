@@ -564,6 +564,20 @@ func Run(
 			}
 		}
 
+		// Teams — group existing org members into named teams (for CRM
+		// ownership / routing). Built from members; managed by team managers.
+		teamsGroup := protected.Group("/teams")
+		teamsGroup.Use(m.RequireOrganization(), m.RateLimitMiddleware(models.RateLimitWrite))
+		{
+			teamsGroup.GET("", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.ListTeams)
+			teamsGroup.POST("", m.RequireAccess(models.PermManageTeam, models.APIPermWriteCRM), h.CreateTeam)
+			teamsGroup.GET("/:id", m.RequireAccess(models.PermViewContacts, models.APIPermReadCRM), h.GetTeam)
+			teamsGroup.PATCH("/:id", m.RequireAccess(models.PermManageTeam, models.APIPermWriteCRM), h.UpdateTeam)
+			teamsGroup.DELETE("/:id", m.RequireAccess(models.PermManageTeam, models.APIPermWriteCRM), h.DeleteTeam)
+			teamsGroup.POST("/:id/members", m.RequireAccess(models.PermManageTeam, models.APIPermWriteCRM), h.AddTeamMember)
+			teamsGroup.DELETE("/:id/members/:userId", m.RequireAccess(models.PermManageTeam, models.APIPermWriteCRM), h.RemoveTeamMember)
+		}
+
 		// Plans and timezones are essentially public reference data — auth
 		// gates them only to avoid being scraped. Cheap to expose to keys.
 		protected.GET("/plans", h.ListPlans)

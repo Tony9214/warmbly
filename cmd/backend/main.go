@@ -53,6 +53,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/socket"
 	"github.com/warmbly/warmbly/internal/app/stripe"
 	"github.com/warmbly/warmbly/internal/app/subscription"
+	"github.com/warmbly/warmbly/internal/app/team"
 	"github.com/warmbly/warmbly/internal/app/template"
 	"github.com/warmbly/warmbly/internal/app/token"
 	"github.com/warmbly/warmbly/internal/app/trial"
@@ -136,6 +137,7 @@ func main() {
 	var tagService group.GroupService
 	var categoryService group.GroupService
 	var crmService crm.CRMService
+	var teamService team.TeamService
 	var apiKeyService apikey.APIKeyService
 	var idempotencyService idempotencyapp.Service
 
@@ -802,6 +804,8 @@ func main() {
 
 		apiKeyService = apikey.NewService(cache, apiKeyRepository)
 		crmService = crm.NewService(crmRepository)
+		teamRepository := repository.NewTeamRepository(primaryDB.Pool)
+		teamService = team.NewService(teamRepository)
 		socketService = socket.NewService(cache, tokenService)
 
 		// Cloud Tasks client
@@ -993,6 +997,9 @@ func main() {
 
 		// CRM
 		CRMService: crmService,
+
+		// Teams
+		TeamService: teamService,
 
 		// Email send & templates
 		TemplateService:  templateService,
