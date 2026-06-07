@@ -1546,10 +1546,11 @@ function ConnectionEditor({
                 <button
                     type="button"
                     onClick={onDelete}
-                    title="Delete connection"
-                    className="inline-flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    title="Remove this line and the branch it represents"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-rose-500 transition-colors hover:bg-rose-50 hover:text-rose-600"
                 >
                     <Trash2Icon className="w-3.5 h-3.5" />
+                    Disconnect
                 </button>
                 <button
                     type="button"
