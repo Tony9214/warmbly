@@ -39,6 +39,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/pkg/argon2"
 	"github.com/warmbly/warmbly/internal/seed"
 )
@@ -76,6 +77,14 @@ func main() {
 		log.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
+
+	// Apply embedded migrations before seeding. `make seed` is documented to
+	// assume migrations are already applied, but running them here makes it
+	// robust standalone: without it, new tables (e.g. crm_task_types) are
+	// missing and the seed aborts partway, which looks like "nothing seeded".
+	if err := db.RunMigrations(dsn); err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
 
 	if err := seedBaseline(ctx, pool); err != nil {
 		log.Fatalf("baseline: %v", err)
