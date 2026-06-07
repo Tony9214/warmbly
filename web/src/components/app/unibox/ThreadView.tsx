@@ -33,6 +33,7 @@ import ContactContextPanel from "./ContactContextPanel";
 import { CategoryChip } from "@/components/app/contacts/CategoryPicker";
 import { SectionBar } from "@/components/layout/Page";
 import useThread from "@/lib/api/hooks/app/unibox/useThread";
+import useMarkSeen from "@/lib/api/hooks/app/unibox/useMarkSeen";
 import useThreadLabels from "@/lib/api/hooks/app/unibox/useThreadLabels";
 import useThreadScheduled from "@/lib/api/hooks/app/unibox/useThreadScheduled";
 import cancelScheduled from "@/lib/api/client/app/unibox/cancelScheduled";
@@ -197,6 +198,20 @@ export function ThreadView({ threadId, emailId }: ThreadViewProps) {
   React.useEffect(() => {
     setReplyState(null);
   }, [threadId]);
+
+  // Opening a thread marks its unseen messages as read. The hook invalidates
+  // ["unibox"], so the unread badge, the collapsed list, and the overview all
+  // refresh. Once everything is seen the id list is empty and this no-ops, so
+  // it self-terminates after the post-mark refetch (no loop).
+  const markSeen = useMarkSeen();
+  const markSeenMutate = markSeen.mutate;
+  React.useEffect(() => {
+    const unseenIds = (q.data?.data ?? [])
+      .filter((m) => !m.seen)
+      .map((m) => m.id);
+    if (unseenIds.length === 0) return;
+    markSeenMutate({ ids: unseenIds });
+  }, [threadId, q.data, markSeenMutate]);
 
   const snooze = useMutation({
     mutationFn: (until: Date) =>
