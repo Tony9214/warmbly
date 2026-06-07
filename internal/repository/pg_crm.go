@@ -357,19 +357,68 @@ func (r *crmRepository) ListPipelines(ctx context.Context, orgID uuid.UUID) ([]m
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var pipelines []models.Pipeline
+	pipelines := []models.Pipeline{}
+	indexByID := make(map[uuid.UUID]int)
 	for rows.Next() {
 		var p models.Pipeline
 		if err := rows.Scan(
 			&p.ID, &p.OrganizationID, &p.Name,
 			&p.Position, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		p.Stages = []models.PipelineStage{}
+		indexByID[p.ID] = len(pipelines)
 		pipelines = append(pipelines, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(pipelines) == 0 {
+		return pipelines, nil
+	}
+
+	// Hydrate stages (with open-deal counts) for every pipeline in one pass and
+	// attach each to its owner, so the list view renders stages just like
+	// GetPipeline. Without this the Pipelines tab and the deals board always saw
+	// empty stage arrays — a newly added stage "succeeded" but never appeared.
+	pipelineIDs := make([]uuid.UUID, 0, len(pipelines))
+	for _, p := range pipelines {
+		pipelineIDs = append(pipelineIDs, p.ID)
+	}
+
+	stageQuery := `
+		SELECT ps.id, ps.pipeline_id, ps.name, ps.color, ps.position, ps.created_at, ps.updated_at,
+		       COUNT(d.id) AS deal_count
+		FROM pipeline_stages ps
+		LEFT JOIN deals d ON d.stage_id = ps.id AND d.status = 'open'
+		WHERE ps.pipeline_id = ANY($1)
+		GROUP BY ps.id
+		ORDER BY ps.position ASC
+	`
+	stageRows, err := r.db.Query(ctx, stageQuery, pipelineIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer stageRows.Close()
+
+	for stageRows.Next() {
+		var stage models.PipelineStage
+		if err := stageRows.Scan(
+			&stage.ID, &stage.PipelineID, &stage.Name, &stage.Color,
+			&stage.Position, &stage.CreatedAt, &stage.UpdatedAt, &stage.DealCount,
+		); err != nil {
+			return nil, err
+		}
+		if idx, ok := indexByID[stage.PipelineID]; ok {
+			pipelines[idx].Stages = append(pipelines[idx].Stages, stage)
+		}
+	}
+	if err := stageRows.Err(); err != nil {
+		return nil, err
 	}
 
 	return pipelines, nil
