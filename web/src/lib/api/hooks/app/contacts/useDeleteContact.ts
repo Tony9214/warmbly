@@ -27,6 +27,11 @@ export default function useDeleteContact(contact_id: string) {
             queryClient.invalidateQueries({
                 queryKey: ["contacts", contact_id]
             });
+            // The contacts table reads ["contacts","list",...]; without this the
+            // deleted row lingers until a manual reload.
+            queryClient.invalidateQueries({
+                queryKey: ["contacts", "list"]
+            });
         }
     })
 }
