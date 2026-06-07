@@ -25,6 +25,10 @@ type ContactRepository interface {
 	Add(ctx context.Context, userID string, contacts []models.AddContact) ([]models.Contact, *errx.Error)
 	GetByID(ctx context.Context, contactID uuid.UUID) (*models.Contact, *errx.Error)
 	GetByEmailAndOrganization(ctx context.Context, organizationID uuid.UUID, email string) (*models.Contact, *errx.Error)
+	// GetByIDsAndOrganization fetches the org's contacts for a set of IDs. Used
+	// by the synchronous "push to CRM" action so a member can only push contacts
+	// that belong to their organization. Foreign/missing IDs are omitted.
+	GetByIDsAndOrganization(ctx context.Context, organizationID uuid.UUID, ids []uuid.UUID) ([]models.Contact, *errx.Error)
 
 	// Pre-send email verification round-trip. UpdateContactVerification stores
 	// the outcome of a verify pass; ListUnverifiedContacts returns contacts that
@@ -495,6 +499,46 @@ func (r *contactRepository) GetByEmailAndOrganization(ctx context.Context, organ
 	contact.Campaigns = []models.MiniCampaign{}
 	contact.Categories = []models.MiniCategory{}
 	return &contact, nil
+}
+
+func (r *contactRepository) GetByIDsAndOrganization(ctx context.Context, organizationID uuid.UUID, ids []uuid.UUID) ([]models.Contact, *errx.Error) {
+	if len(ids) == 0 {
+		return []models.Contact{}, nil
+	}
+	query := `
+		SELECT
+			c.id, c.first_name, c.last_name, c.email, c.company, c.phone,
+			c.custom_fields, c.subscribed, c.updated_at, c.created_at
+		FROM contacts c
+		WHERE c.organization_id = $1 AND c.id = ANY($2)
+	`
+	rows, err := r.DB.Query(ctx, query, organizationID, ids)
+	if err != nil {
+		db.CaptureError(err, query, []any{organizationID, ids}, "query")
+		return nil, errx.InternalError()
+	}
+	defer rows.Close()
+
+	out := make([]models.Contact, 0, len(ids))
+	for rows.Next() {
+		var c models.Contact
+		if err := rows.Scan(
+			&c.ID, &c.FirstName, &c.LastName, &c.Email,
+			&c.Company, &c.Phone, &c.CustomFields, &c.Subscribed,
+			&c.UpdatedAt, &c.CreatedAt,
+		); err != nil {
+			db.CaptureError(err, "", nil, "GetByIDsAndOrganization scan")
+			return nil, errx.InternalError()
+		}
+		c.Campaigns = []models.MiniCampaign{}
+		c.Categories = []models.MiniCategory{}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		db.CaptureError(err, "", nil, "GetByIDsAndOrganization rows")
+		return nil, errx.InternalError()
+	}
+	return out, nil
 }
 
 func (r *contactRepository) Search(

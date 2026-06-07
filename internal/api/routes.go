@@ -471,6 +471,17 @@ func Run(
 			integrations.GET("/bookings", h.ListMeetingBookings)
 		}
 
+		// Operating a connected integration (pushing contacts to a CRM on
+		// demand) is an operational action, gated on the lower-privilege
+		// PermUseIntegrations rather than the PermManageSettings the rest of the
+		// integrations group requires for connecting/configuring. Registered on
+		// `protected` directly so it does not inherit the group's settings gate.
+		protected.POST("/integrations/connections/:id/push",
+			m.RequireOrganization(),
+			m.RequireAccess(models.PermUseIntegrations, models.APIPermIntegrations),
+			m.RateLimitMiddleware(models.RateLimitWrite),
+			h.PushContactsToIntegration)
+
 		// On-demand Google Sheets -> leads sync (org-scoped). A saved "sync
 		// source" the user re-runs with "Sync now"; new rows create contacts and
 		// existing rows (matched by email) update. Gated under the contacts

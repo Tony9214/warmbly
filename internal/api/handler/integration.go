@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -359,6 +360,102 @@ func (h *Handler) ListConnectionSyncRuns(c *gin.Context) {
 		runs = []models.IntegrationSyncRun{}
 	}
 	c.JSON(http.StatusOK, gin.H{"runs": runs})
+}
+
+// --- Synchronous contact push -----------------------------------------------
+
+type pushContactsPayload struct {
+	ContactIDs []string `json:"contact_ids"`
+}
+
+// PushContactsToIntegration synchronously upserts the given org contacts into a
+// connected CRM (HubSpot, Pipedrive, Salesforce, Close). This is the contextual
+// "push to CRM" action surfaced in Contacts. It is gated on the operational
+// PermUseIntegrations / APIPermIntegrations (see routes.go) rather than the
+// settings permission, so an operator can push without full settings access.
+//
+// Retries are naturally safe: every provider upsert is keyed by email, so a
+// repeated push converges rather than duplicating records — no Idempotency-Key
+// bookkeeping is required. Per-record results are returned so the dashboard can
+// report exactly which contacts synced.
+func (h *Handler) PushContactsToIntegration(c *gin.Context) {
+	orgID, userID, ok := h.requireIntegrationActor(c, true)
+	if !ok {
+		return
+	}
+	connID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid id"))
+		return
+	}
+	var p pushContactsPayload
+	if err := c.ShouldBindJSON(&p); err != nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "invalid payload"))
+		return
+	}
+
+	// Parse + dedupe the requested contact IDs.
+	seen := make(map[uuid.UUID]struct{}, len(p.ContactIDs))
+	ids := make([]uuid.UUID, 0, len(p.ContactIDs))
+	for _, raw := range p.ContactIDs {
+		id, perr := uuid.Parse(strings.TrimSpace(raw))
+		if perr != nil {
+			errx.JSON(c, errx.New(errx.BadRequest, "invalid contact id: "+raw))
+			return
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		errx.JSON(c, errx.New(errx.BadRequest, "no contacts provided"))
+		return
+	}
+	if len(ids) > 500 {
+		errx.JSON(c, errx.New(errx.BadRequest, "too many contacts in one push (max 500)"))
+		return
+	}
+	if h.ContactRepo == nil {
+		errx.JSON(c, errx.New(errx.Internal, "contacts unavailable"))
+		return
+	}
+
+	contacts, xerr := h.ContactRepo.GetByIDsAndOrganization(c.Request.Context(), orgID, ids)
+	if xerr != nil {
+		errx.JSON(c, xerr)
+		return
+	}
+	if len(contacts) == 0 {
+		errx.JSON(c, errx.New(errx.NotFound, "no matching contacts found"))
+		return
+	}
+
+	push := make([]integration.PushContact, 0, len(contacts))
+	for _, ct := range contacts {
+		push = append(push, integration.PushContact{
+			ID:        ct.ID,
+			Email:     ct.Email,
+			FirstName: ct.FirstName,
+			LastName:  ct.LastName,
+			Company:   ct.Company,
+			Phone:     ct.Phone,
+		})
+	}
+
+	res, perr := h.IntegrationService.PushContacts(c.Request.Context(), orgID, connID, push)
+	if perr != nil {
+		switch {
+		case errors.Is(perr, integration.ErrPushReauth):
+			errx.JSON(c, errx.New(errx.Conflict, perr.Error()))
+		default:
+			errx.JSON(c, errx.New(errx.BadRequest, perr.Error()))
+		}
+		return
+	}
+	h.auditIntegration(c, userID, models.AuditActionUpdate, connID, fmt.Sprintf("push:%d", res.Pushed))
+	c.JSON(http.StatusOK, res)
 }
 
 // --- Inbound webhooks (Calendly / Cal.com) ----------------------------------

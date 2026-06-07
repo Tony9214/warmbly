@@ -64,6 +64,11 @@ type Service interface {
 	// ListSyncRuns returns recent observability records for a connection.
 	ListSyncRuns(ctx context.Context, orgID, connID uuid.UUID, limit int) ([]models.IntegrationSyncRun, error)
 
+	// PushContacts upserts a batch of contacts into a connected CRM on demand.
+	// Used by the contextual "push to CRM" action in the dashboard. Per-record
+	// results are returned so the UI can report exactly what synced.
+	PushContacts(ctx context.Context, orgID, connID uuid.UUID, contacts []PushContact) (*PushResult, error)
+
 	// MarkSynced records a successful/failed round-trip against a connection.
 	MarkSynced(ctx context.Context, id uuid.UUID, status models.IntegrationStatus, displayFields map[string]any, errMsg string) error
 
@@ -304,6 +309,11 @@ func (s *service) OAuthFinish(ctx context.Context, userID uuid.UUID, code, state
 	display := map[string]any{}
 	if account.Name != "" {
 		display["account"] = account.Name
+	}
+	// Persist the provider API host (Salesforce per-org domain) as a non-secret
+	// display field so action handlers know which host to call.
+	if account.InstanceURL != "" {
+		display["instance_url"] = account.InstanceURL
 	}
 	df, _ := json.Marshal(display)
 
