@@ -124,6 +124,21 @@ func (s *service) execAction(ctx context.Context, target repository.DispatchTarg
 		}
 		return pipedriveUpsertPerson(ctx, token, data)
 
+	case models.IntegrationActionSalesforceUpsert:
+		token, terr := s.accessTokenFor(ctx, &target.Secrets)
+		if terr != nil {
+			return errReauthRequired
+		}
+		instanceURL := configString(target.Secrets.Conn.DisplayFields, "instance_url")
+		return salesforceUpsertContact(ctx, token, instanceURL, data)
+
+	case models.IntegrationActionCloseUpsert:
+		apiKey := stringFromMap(cfg, "api_key", "api_token")
+		if apiKey == "" {
+			return errors.New("no close api key configured")
+		}
+		return closeUpsertLead(ctx, apiKey, data)
+
 	default:
 		return fmt.Errorf("unknown action: %s", sub.Action)
 	}

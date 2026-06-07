@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -95,6 +96,12 @@ func hubspotUpsertContact(ctx context.Context, token string, data map[string]any
 	}
 	if lastName != "" {
 		props["lastname"] = lastName
+	}
+	if company := stringFromMap(data, "company"); company != "" {
+		props["company"] = company
+	}
+	if phone := stringFromMap(data, "phone"); phone != "" {
+		props["phone"] = phone
 	}
 
 	// Find existing contact by email.
@@ -206,10 +213,14 @@ func pipedriveUpsertPerson(ctx context.Context, token string, data map[string]an
 		return nil // already present; nothing to do
 	}
 
-	create, _ := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"name":  name,
 		"email": []string{email},
-	})
+	}
+	if phone := stringFromMap(data, "phone"); phone != "" {
+		payload["phone"] = []string{phone}
+	}
+	create, _ := json.Marshal(payload)
 	return pipedriveJSON(ctx, http.MethodPost, "https://api.pipedrive.com/v1/persons", token, create, nil)
 }
 
@@ -246,4 +257,163 @@ func shortURL(u string) string {
 		return u[i:]
 	}
 	return u
+}
+
+// closeUpsertLead creates a Close lead (with an embedded contact) keyed by
+// email. Close has no native upsert, so we search by email first and skip when
+// a lead already carries the address — this keeps the action idempotent so
+// retries and repeated pushes don't fan out duplicate leads. Auth is HTTP Basic
+// with the API key as the username and a blank password.
+func closeUpsertLead(ctx context.Context, apiKey string, data map[string]any) error {
+	email := stringFromMap(data, "contact_email", "invitee_email", "email")
+	if email == "" {
+		return nil
+	}
+
+	// Idempotency guard: skip if a lead already has this email address.
+	searchURL := "https://api.close.com/api/v1/lead/?_fields=id&query=" +
+		url.QueryEscape("email_address:\""+email+"\"")
+	var search struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := closeJSON(ctx, http.MethodGet, searchURL, apiKey, nil, &search); err != nil {
+		return err
+	}
+	if len(search.Data) > 0 {
+		return nil
+	}
+
+	name := stringFromMap(data, "contact_name", "first_name")
+	if last := stringFromMap(data, "last_name"); last != "" {
+		name = strings.TrimSpace(name + " " + last)
+	}
+	if name == "" {
+		name = email
+	}
+	leadName := stringFromMap(data, "company")
+	if leadName == "" {
+		leadName = name
+	}
+
+	contact := map[string]any{
+		"name":   name,
+		"emails": []map[string]any{{"email": email, "type": "office"}},
+	}
+	if phone := stringFromMap(data, "phone"); phone != "" {
+		contact["phones"] = []map[string]any{{"phone": phone, "type": "office"}}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"name":     leadName,
+		"contacts": []map[string]any{contact},
+	})
+	return closeJSON(ctx, http.MethodPost, "https://api.close.com/api/v1/lead/", apiKey, body, nil)
+}
+
+func closeJSON(ctx context.Context, method, reqURL, apiKey string, body []byte, dst any) error {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, reader)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(apiKey, "")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := actionHTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("close %s: HTTP %d", method, resp.StatusCode)
+	}
+	if dst != nil && len(raw) > 0 {
+		return json.Unmarshal(raw, dst)
+	}
+	return nil
+}
+
+// salesforceAPIVersion is the REST API version actions target. Salesforce keeps
+// old versions live for years, so pinning one keeps request shapes stable.
+const salesforceAPIVersion = "v59.0"
+
+// salesforceUpsertContact creates or updates a Salesforce Contact keyed by
+// email. instanceURL is the connected org's API host, captured at OAuth time
+// and stored in the connection's display fields. LastName is mandatory on the
+// Contact object, so we fall back to the email when no surname is known.
+func salesforceUpsertContact(ctx context.Context, token, instanceURL string, data map[string]any) error {
+	instanceURL = strings.TrimRight(strings.TrimSpace(instanceURL), "/")
+	if instanceURL == "" {
+		return fmt.Errorf("salesforce instance url unavailable; reconnect the integration")
+	}
+	email := stringFromMap(data, "contact_email", "invitee_email", "email")
+	if email == "" {
+		return nil
+	}
+
+	lastName := stringFromMap(data, "last_name", "contact_last_name")
+	if lastName == "" {
+		lastName = email // LastName is a required Contact field.
+	}
+	fields := map[string]any{"LastName": lastName, "Email": email}
+	if firstName := stringFromMap(data, "first_name", "contact_first_name"); firstName != "" {
+		fields["FirstName"] = firstName
+	}
+	if phone := stringFromMap(data, "phone"); phone != "" {
+		fields["Phone"] = phone
+	}
+
+	// Find an existing contact by email (SOQL — escape embedded single quotes).
+	soql := "SELECT Id FROM Contact WHERE Email = '" + strings.ReplaceAll(email, "'", "\\'") + "' LIMIT 1"
+	queryURL := instanceURL + "/services/data/" + salesforceAPIVersion + "/query?q=" + url.QueryEscape(soql)
+	var q struct {
+		Records []struct {
+			ID string `json:"Id"`
+		} `json:"records"`
+	}
+	if err := salesforceJSON(ctx, http.MethodGet, queryURL, token, nil, &q); err != nil {
+		return err
+	}
+
+	base := instanceURL + "/services/data/" + salesforceAPIVersion + "/sobjects/Contact"
+	body, _ := json.Marshal(fields)
+	if len(q.Records) > 0 {
+		// PATCH returns 204 No Content on success.
+		return salesforceJSON(ctx, http.MethodPatch, base+"/"+q.Records[0].ID, token, body, nil)
+	}
+	return salesforceJSON(ctx, http.MethodPost, base+"/", token, body, nil)
+}
+
+func salesforceJSON(ctx context.Context, method, reqURL, token string, body []byte, dst any) error {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := actionHTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("salesforce %s: HTTP %d", method, resp.StatusCode)
+	}
+	if dst != nil && len(raw) > 0 {
+		return json.Unmarshal(raw, dst)
+	}
+	return nil
 }
