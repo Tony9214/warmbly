@@ -41,6 +41,8 @@ type CRMRepository interface {
 	CreateDeal(ctx context.Context, orgID uuid.UUID, data *models.CreateDeal) (*models.Deal, error)
 	GetDeal(ctx context.Context, orgID, dealID uuid.UUID) (*models.Deal, error)
 	ListDeals(ctx context.Context, orgID uuid.UUID, pipelineID, stageID *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.DealsResult, error)
+	SearchDeals(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals, limit, offset int) (*models.DealsSearchResult, error)
+	DealsSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals) (*models.DealsSummary, error)
 	UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID, data *models.UpdateDeal) (*models.Deal, error)
 	DeleteDeal(ctx context.Context, orgID, dealID uuid.UUID) error
 	GetDealsByContact(ctx context.Context, contactID uuid.UUID) ([]models.Deal, error)
@@ -49,8 +51,16 @@ type CRMRepository interface {
 	CreateCRMTask(ctx context.Context, orgID, userID uuid.UUID, data *models.CreateCRMTask) (*models.CRMTask, error)
 	GetCRMTask(ctx context.Context, orgID, taskID uuid.UUID) (*models.CRMTask, error)
 	ListCRMTasks(ctx context.Context, orgID uuid.UUID, contactID, dealID, assignedTo *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.CRMTasksResult, error)
+	SearchCRMTasks(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks, limit, offset int) (*models.TasksSearchResult, error)
+	TasksSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks) (*models.TasksSummary, error)
 	UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, error)
 	DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) error
+
+	// CRM Task Types (user-managed)
+	ListTaskTypes(ctx context.Context, orgID uuid.UUID) ([]models.CRMTaskType, error)
+	CreateTaskType(ctx context.Context, orgID uuid.UUID, data *models.CreateCRMTaskType) (*models.CRMTaskType, error)
+	UpdateTaskType(ctx context.Context, orgID, typeID uuid.UUID, data *models.UpdateCRMTaskType) (*models.CRMTaskType, error)
+	DeleteTaskType(ctx context.Context, orgID, typeID uuid.UUID) error
 }
 
 type crmRepository struct {
@@ -355,19 +365,68 @@ func (r *crmRepository) ListPipelines(ctx context.Context, orgID uuid.UUID) ([]m
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var pipelines []models.Pipeline
+	pipelines := []models.Pipeline{}
+	indexByID := make(map[uuid.UUID]int)
 	for rows.Next() {
 		var p models.Pipeline
 		if err := rows.Scan(
 			&p.ID, &p.OrganizationID, &p.Name,
 			&p.Position, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		p.Stages = []models.PipelineStage{}
+		indexByID[p.ID] = len(pipelines)
 		pipelines = append(pipelines, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(pipelines) == 0 {
+		return pipelines, nil
+	}
+
+	// Hydrate stages (with open-deal counts) for every pipeline in one pass and
+	// attach each to its owner, so the list view renders stages just like
+	// GetPipeline. Without this the Pipelines tab and the deals board always saw
+	// empty stage arrays — a newly added stage "succeeded" but never appeared.
+	pipelineIDs := make([]uuid.UUID, 0, len(pipelines))
+	for _, p := range pipelines {
+		pipelineIDs = append(pipelineIDs, p.ID)
+	}
+
+	stageQuery := `
+		SELECT ps.id, ps.pipeline_id, ps.name, ps.color, ps.position, ps.created_at, ps.updated_at,
+		       COUNT(d.id) AS deal_count
+		FROM pipeline_stages ps
+		LEFT JOIN deals d ON d.stage_id = ps.id AND d.status = 'open'
+		WHERE ps.pipeline_id = ANY($1)
+		GROUP BY ps.id
+		ORDER BY ps.position ASC
+	`
+	stageRows, err := r.db.Query(ctx, stageQuery, pipelineIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer stageRows.Close()
+
+	for stageRows.Next() {
+		var stage models.PipelineStage
+		if err := stageRows.Scan(
+			&stage.ID, &stage.PipelineID, &stage.Name, &stage.Color,
+			&stage.Position, &stage.CreatedAt, &stage.UpdatedAt, &stage.DealCount,
+		); err != nil {
+			return nil, err
+		}
+		if idx, ok := indexByID[stage.PipelineID]; ok {
+			pipelines[idx].Stages = append(pipelines[idx].Stages, stage)
+		}
+	}
+	if err := stageRows.Err(); err != nil {
+		return nil, err
 	}
 
 	return pipelines, nil
@@ -493,20 +552,21 @@ func (r *crmRepository) CreateDeal(ctx context.Context, orgID uuid.UUID, data *m
 	}
 
 	query := `
-		INSERT INTO deals (organization_id, pipeline_id, stage_id, contact_id, name, value, currency, expected_close_date, assigned_to)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO deals (organization_id, pipeline_id, stage_id, contact_id, name, value, currency, expected_close_date, assigned_to, campaign_id, source_mailbox_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		          expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		          expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 	`
 	var deal models.Deal
 	err := r.db.QueryRow(ctx, query,
 		orgID, data.PipelineID, data.StageID, data.ContactID,
 		data.Name, data.Value, currency, data.ExpectedCloseDate, data.AssignedTo,
+		data.CampaignID, data.SourceMailboxID,
 	).Scan(
 		&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 		&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 		&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-		&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -517,7 +577,7 @@ func (r *crmRepository) CreateDeal(ctx context.Context, orgID uuid.UUID, data *m
 func (r *crmRepository) GetDeal(ctx context.Context, orgID, dealID uuid.UUID) (*models.Deal, error) {
 	query := `
 		SELECT id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 		FROM deals
 		WHERE organization_id = $1 AND id = $2
 	`
@@ -526,7 +586,7 @@ func (r *crmRepository) GetDeal(ctx context.Context, orgID, dealID uuid.UUID) (*
 		&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 		&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 		&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-		&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -566,7 +626,7 @@ func (r *crmRepository) ListDeals(ctx context.Context, orgID uuid.UUID, pipeline
 
 	query := fmt.Sprintf(`
 		SELECT id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 		FROM deals
 		WHERE %s
 		ORDER BY created_at DESC, id DESC
@@ -587,7 +647,7 @@ func (r *crmRepository) ListDeals(ctx context.Context, orgID uuid.UUID, pipeline
 			&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 			&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 			&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-			&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+			&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -675,7 +735,7 @@ func (r *crmRepository) UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID,
 		UPDATE deals SET %s
 		WHERE organization_id = $1 AND id = $2
 		RETURNING id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		          expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		          expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 	`, strings.Join(setClauses, ", "))
 
 	var deal models.Deal
@@ -683,7 +743,7 @@ func (r *crmRepository) UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID,
 		&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 		&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 		&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-		&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -708,7 +768,7 @@ func (r *crmRepository) DeleteDeal(ctx context.Context, orgID, dealID uuid.UUID)
 func (r *crmRepository) GetDealsByContact(ctx context.Context, contactID uuid.UUID) ([]models.Deal, error) {
 	query := `
 		SELECT id, organization_id, pipeline_id, stage_id, contact_id, name, value, currency, status,
-		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, created_at, updated_at
+		       expected_close_date, won_at, lost_at, lost_reason, assigned_to, campaign_id, source_mailbox_id, created_at, updated_at
 		FROM deals
 		WHERE contact_id = $1
 		ORDER BY created_at DESC
@@ -726,13 +786,276 @@ func (r *crmRepository) GetDealsByContact(ctx context.Context, contactID uuid.UU
 			&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
 			&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
 			&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
-			&deal.AssignedTo, &deal.CreatedAt, &deal.UpdatedAt,
+			&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		deals = append(deals, deal)
 	}
 	return deals, nil
+}
+
+// =====================
+// Deal search + summary
+// =====================
+
+// dealSearchWhere builds the shared WHERE clause for SearchDeals / DealsSummary
+// from a filter body. It returns the clause list and the bound args, starting
+// at $1 = orgID. Both the paginated search and the aggregate summary call this
+// so a header total always reflects the exact same filter as the rows below it.
+func dealSearchWhere(orgID uuid.UUID, f models.SearchDeals) ([]string, []any) {
+	clauses := []string{"d.organization_id = $1"}
+	args := []any{orgID}
+	pos := 2
+
+	if f.Query != "" {
+		clauses = append(clauses, fmt.Sprintf("d.name ILIKE $%d", pos))
+		args = append(args, "%"+f.Query+"%")
+		pos++
+	}
+	appendIn := func(col string, vals []string) {
+		if len(vals) == 0 {
+			return
+		}
+		ph := make([]string, len(vals))
+		for i, v := range vals {
+			ph[i] = fmt.Sprintf("$%d", pos)
+			args = append(args, v)
+			pos++
+		}
+		clauses = append(clauses, fmt.Sprintf("d.%s IN (%s)", col, strings.Join(ph, ",")))
+	}
+	appendIn("status", f.Statuses)
+	appendIn("pipeline_id", f.PipelineIDs)
+	appendIn("stage_id", f.StageIDs)
+	appendIn("assigned_to", f.AssignedTo)
+	appendIn("campaign_id", f.CampaignIDs)
+
+	if f.MinValue != nil {
+		clauses = append(clauses, fmt.Sprintf("d.value >= $%d", pos))
+		args = append(args, *f.MinValue)
+		pos++
+	}
+	if f.MaxValue != nil {
+		clauses = append(clauses, fmt.Sprintf("d.value <= $%d", pos))
+		args = append(args, *f.MaxValue)
+		pos++
+	}
+	if f.CloseAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("d.expected_close_date >= $%d", pos))
+		args = append(args, *f.CloseAfter)
+		pos++
+	}
+	if f.CloseBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("d.expected_close_date <= $%d", pos))
+		args = append(args, *f.CloseBefore)
+		pos++
+	}
+	if f.CreatedAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("d.created_at >= $%d", pos))
+		args = append(args, *f.CreatedAfter)
+		pos++
+	}
+	if f.CreatedBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("d.created_at <= $%d", pos))
+		args = append(args, *f.CreatedBefore)
+		pos++
+	}
+
+	return clauses, args
+}
+
+// dealSortColumn whitelists the sortable columns so SortBy can never inject SQL.
+func dealSortColumn(sortBy string) string {
+	switch sortBy {
+	case "value":
+		return "d.value"
+	case "expected_close_date":
+		return "d.expected_close_date"
+	case "name":
+		return "d.name"
+	case "updated_at":
+		return "d.updated_at"
+	default:
+		return "d.created_at"
+	}
+}
+
+func (r *crmRepository) SearchDeals(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals, limit, offset int) (*models.DealsSearchResult, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	clauses, args := dealSearchWhere(orgID, filters)
+	whereSQL := strings.Join(clauses, " AND ")
+
+	// Exact total over the same filter, so the UI can show "N of M" honestly.
+	var total int64
+	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM deals d WHERE "+whereSQL, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	sortCol := dealSortColumn(filters.SortBy)
+	dir := "DESC"
+	if filters.Reverse {
+		dir = "ASC"
+	}
+
+	limitPos := len(args) + 1
+	offsetPos := len(args) + 2
+	query := fmt.Sprintf(`
+		SELECT d.id, d.organization_id, d.pipeline_id, d.stage_id, d.contact_id, d.name, d.value, d.currency, d.status,
+		       d.expected_close_date, d.won_at, d.lost_at, d.lost_reason, d.assigned_to, d.campaign_id, d.source_mailbox_id,
+		       d.created_at, d.updated_at,
+		       co.id, co.first_name, co.last_name, co.email, co.company,
+		       ps.name, ps.color, ps.position,
+		       cam.name
+		FROM deals d
+		LEFT JOIN contacts co ON co.id = d.contact_id
+		LEFT JOIN pipeline_stages ps ON ps.id = d.stage_id
+		LEFT JOIN campaigns cam ON cam.id = d.campaign_id
+		WHERE %s
+		ORDER BY %s %s NULLS LAST, d.id DESC
+		LIMIT $%d OFFSET $%d
+	`, whereSQL, sortCol, dir, limitPos, offsetPos)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	deals := make([]models.Deal, 0, limit)
+	for rows.Next() {
+		var deal models.Deal
+		var (
+			coID                            *uuid.UUID
+			coFirst, coLast, coEmail, coCmp *string
+			stName, stColor                 *string
+			stPos                           *int
+			camName                         *string
+		)
+		if err := rows.Scan(
+			&deal.ID, &deal.OrganizationID, &deal.PipelineID, &deal.StageID,
+			&deal.ContactID, &deal.Name, &deal.Value, &deal.Currency, &deal.Status,
+			&deal.ExpectedCloseDate, &deal.WonAt, &deal.LostAt, &deal.LostReason,
+			&deal.AssignedTo, &deal.CampaignID, &deal.SourceMailboxID, &deal.CreatedAt, &deal.UpdatedAt,
+			&coID, &coFirst, &coLast, &coEmail, &coCmp,
+			&stName, &stColor, &stPos,
+			&camName,
+		); err != nil {
+			return nil, err
+		}
+		if coID != nil {
+			deal.Contact = &models.Contact{ID: *coID}
+			if coFirst != nil {
+				deal.Contact.FirstName = *coFirst
+			}
+			if coLast != nil {
+				deal.Contact.LastName = *coLast
+			}
+			if coEmail != nil {
+				deal.Contact.Email = *coEmail
+			}
+			if coCmp != nil {
+				deal.Contact.Company = *coCmp
+			}
+		}
+		if stName != nil {
+			deal.Stage = &models.PipelineStage{ID: deal.StageID, Name: *stName}
+			if stColor != nil {
+				deal.Stage.Color = *stColor
+			}
+			if stPos != nil {
+				deal.Stage.Position = *stPos
+			}
+		}
+		deal.CampaignName = camName
+		deals = append(deals, deal)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	hasMore := int64(offset+len(deals)) < total
+	var nextOffset *int
+	if hasMore {
+		n := offset + limit
+		nextOffset = &n
+	}
+
+	return &models.DealsSearchResult{
+		Data: deals,
+		Pagination: models.DealsSearchPagination{
+			Total:      total,
+			Limit:      limit,
+			Offset:     offset,
+			HasMore:    hasMore,
+			NextOffset: nextOffset,
+		},
+	}, nil
+}
+
+func (r *crmRepository) DealsSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals) (*models.DealsSummary, error) {
+	clauses, args := dealSearchWhere(orgID, filters)
+	whereSQL := strings.Join(clauses, " AND ")
+
+	var s models.DealsSummary
+	headline := fmt.Sprintf(`
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE d.status = 'open'),
+			COALESCE(SUM(d.value) FILTER (WHERE d.status = 'open'), 0),
+			COUNT(*) FILTER (WHERE d.status = 'won'),
+			COALESCE(SUM(d.value) FILTER (WHERE d.status = 'won'), 0),
+			COUNT(*) FILTER (WHERE d.status = 'lost'),
+			COALESCE(SUM(d.value) FILTER (WHERE d.status = 'lost'), 0),
+			COUNT(DISTINCT d.currency),
+			COALESCE(MAX(d.currency), 'USD')
+		FROM deals d
+		WHERE %s
+	`, whereSQL)
+	var distinctCurrencies int64
+	if err := r.db.QueryRow(ctx, headline, args...).Scan(
+		&s.Total, &s.OpenCount, &s.OpenValue, &s.WonCount, &s.WonValue,
+		&s.LostCount, &s.LostValue, &distinctCurrencies, &s.Currency,
+	); err != nil {
+		return nil, err
+	}
+	// More than one currency in the matched set means a single blended SUM is
+	// not meaningful; flag it so the UI can warn instead of lying with a total.
+	s.MixedCurrency = distinctCurrencies > 1
+
+	// Per-stage rollup for accurate board column headers (count + open value).
+	stageQuery := fmt.Sprintf(`
+		SELECT d.stage_id, COUNT(*), COALESCE(SUM(d.value) FILTER (WHERE d.status = 'open'), 0)
+		FROM deals d
+		WHERE %s
+		GROUP BY d.stage_id
+	`, whereSQL)
+	rows, err := r.db.Query(ctx, stageQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	s.Stages = []models.DealStageSummary{}
+	for rows.Next() {
+		var st models.DealStageSummary
+		if err := rows.Scan(&st.StageID, &st.Count, &st.Value); err != nil {
+			return nil, err
+		}
+		s.Stages = append(s.Stages, st)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &s, nil
 }
 
 // =====================
@@ -744,21 +1067,23 @@ func (r *crmRepository) CreateCRMTask(ctx context.Context, orgID, userID uuid.UU
 	if priority == "" {
 		priority = "medium"
 	}
+	// Empty type = untyped; types are user-managed, so no enum coercion here.
+	taskType := data.Type
 
 	query := `
-		INSERT INTO crm_tasks (organization_id, contact_id, deal_id, assigned_to, created_by, title, description, due_date, priority)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, organization_id, contact_id, deal_id, assigned_to, created_by, title, description,
-		          due_date, priority, status, completed_at, created_at, updated_at
+		INSERT INTO crm_tasks (organization_id, contact_id, deal_id, assigned_to, assigned_team_id, created_by, title, description, due_date, priority, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		RETURNING id, organization_id, contact_id, deal_id, assigned_to, assigned_team_id, created_by, title, description,
+		          due_date, priority, type, status, completed_at, created_at, updated_at
 	`
 	var task models.CRMTask
 	err := r.db.QueryRow(ctx, query,
-		orgID, data.ContactID, data.DealID, data.AssignedTo, userID,
-		data.Title, data.Description, data.DueDate, priority,
+		orgID, data.ContactID, data.DealID, data.AssignedTo, data.AssignedTeamID, userID,
+		data.Title, data.Description, data.DueDate, priority, taskType,
 	).Scan(
 		&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
-		&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
-		&task.DueDate, &task.Priority, &task.Status, &task.CompletedAt,
+		&task.AssignedTo, &task.AssignedTeamID, &task.CreatedBy, &task.Title, &task.Description,
+		&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 	if err != nil {
@@ -769,16 +1094,16 @@ func (r *crmRepository) CreateCRMTask(ctx context.Context, orgID, userID uuid.UU
 
 func (r *crmRepository) GetCRMTask(ctx context.Context, orgID, taskID uuid.UUID) (*models.CRMTask, error) {
 	query := `
-		SELECT id, organization_id, contact_id, deal_id, assigned_to, created_by, title, description,
-		       due_date, priority, status, completed_at, created_at, updated_at
+		SELECT id, organization_id, contact_id, deal_id, assigned_to, assigned_team_id, created_by, title, description,
+		       due_date, priority, type, status, completed_at, created_at, updated_at
 		FROM crm_tasks
 		WHERE organization_id = $1 AND id = $2
 	`
 	var task models.CRMTask
 	err := r.db.QueryRow(ctx, query, orgID, taskID).Scan(
 		&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
-		&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
-		&task.DueDate, &task.Priority, &task.Status, &task.CompletedAt,
+		&task.AssignedTo, &task.AssignedTeamID, &task.CreatedBy, &task.Title, &task.Description,
+		&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 	if err != nil {
@@ -823,8 +1148,8 @@ func (r *crmRepository) ListCRMTasks(ctx context.Context, orgID uuid.UUID, conta
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, organization_id, contact_id, deal_id, assigned_to, created_by, title, description,
-		       due_date, priority, status, completed_at, created_at, updated_at
+		SELECT id, organization_id, contact_id, deal_id, assigned_to, assigned_team_id, created_by, title, description,
+		       due_date, priority, type, status, completed_at, created_at, updated_at
 		FROM crm_tasks
 		WHERE %s
 		ORDER BY created_at DESC, id DESC
@@ -843,8 +1168,8 @@ func (r *crmRepository) ListCRMTasks(ctx context.Context, orgID uuid.UUID, conta
 		var task models.CRMTask
 		if err := rows.Scan(
 			&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
-			&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
-			&task.DueDate, &task.Priority, &task.Status, &task.CompletedAt,
+			&task.AssignedTo, &task.AssignedTeamID, &task.CreatedBy, &task.Title, &task.Description,
+			&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
 			&task.CreatedAt, &task.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -866,6 +1191,205 @@ func (r *crmRepository) ListCRMTasks(ctx context.Context, orgID uuid.UUID, conta
 	}, nil
 }
 
+// =====================
+// Task search + summary
+// =====================
+
+// taskSearchWhere builds the shared WHERE clause for SearchCRMTasks / TasksSummary
+// from a filter body. It returns the clause list and the bound args, starting at
+// $1 = orgID. Both the paginated search and the aggregate summary call this so a
+// header total always reflects the exact same filter as the rows below it.
+func taskSearchWhere(orgID uuid.UUID, f models.SearchTasks) ([]string, []any) {
+	clauses := []string{"t.organization_id = $1"}
+	args := []any{orgID}
+	pos := 2
+
+	if f.Query != "" {
+		clauses = append(clauses, fmt.Sprintf("t.title ILIKE $%d", pos))
+		args = append(args, "%"+f.Query+"%")
+		pos++
+	}
+	appendIn := func(col string, vals []string) {
+		if len(vals) == 0 {
+			return
+		}
+		ph := make([]string, len(vals))
+		for i, v := range vals {
+			ph[i] = fmt.Sprintf("$%d", pos)
+			args = append(args, v)
+			pos++
+		}
+		clauses = append(clauses, fmt.Sprintf("t.%s IN (%s)", col, strings.Join(ph, ",")))
+	}
+	appendIn("status", f.Statuses)
+	appendIn("priority", f.Priorities)
+	appendIn("type", f.Types)
+	appendIn("assigned_to", f.AssignedTo)
+
+	// Team filter: a task matches when it is directly assigned to one of the
+	// given teams, OR its individual assignee is a member of one of them. Bound
+	// once as a uuid[] so the same predicate (and the same $N) is reused
+	// identically by the search rows query and the summary aggregate.
+	if len(f.TeamIDs) > 0 {
+		clauses = append(clauses, fmt.Sprintf(
+			"(t.assigned_team_id = ANY($%d) OR t.assigned_to IN (SELECT user_id FROM team_members WHERE team_id = ANY($%d)))",
+			pos, pos,
+		))
+		args = append(args, f.TeamIDs)
+		pos++
+	}
+
+	if f.ContactID != nil {
+		clauses = append(clauses, fmt.Sprintf("t.contact_id = $%d", pos))
+		args = append(args, *f.ContactID)
+		pos++
+	}
+	if f.DealID != nil {
+		clauses = append(clauses, fmt.Sprintf("t.deal_id = $%d", pos))
+		args = append(args, *f.DealID)
+		pos++
+	}
+	if f.DueAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("t.due_date >= $%d", pos))
+		args = append(args, *f.DueAfter)
+		pos++
+	}
+	if f.DueBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("t.due_date <= $%d", pos))
+		args = append(args, *f.DueBefore)
+		pos++
+	}
+	if f.Overdue {
+		// Overdue = a deadline in the past that is still actionable. Completed and
+		// cancelled tasks are never overdue, and tasks without a due_date can't be.
+		clauses = append(clauses, "t.due_date IS NOT NULL AND t.due_date < now() AND t.status NOT IN ('completed', 'cancelled')")
+	}
+
+	return clauses, args
+}
+
+// taskSortColumn whitelists the sortable columns so SortBy can never inject SQL.
+// priority sorts by its semantic weight (urgent first when DESC), not the enum
+// string, so "priority" ordering matches user intent rather than alphabetical.
+func taskSortColumn(sortBy string) string {
+	switch sortBy {
+	case "due_date":
+		return "t.due_date"
+	case "title":
+		return "t.title"
+	case "updated_at":
+		return "t.updated_at"
+	case "priority":
+		return "CASE t.priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END"
+	default:
+		return "t.created_at"
+	}
+}
+
+func (r *crmRepository) SearchCRMTasks(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks, limit, offset int) (*models.TasksSearchResult, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	clauses, args := taskSearchWhere(orgID, filters)
+	whereSQL := strings.Join(clauses, " AND ")
+
+	// Exact total over the same filter, so the UI can show "N of M" honestly.
+	var total int64
+	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM crm_tasks t WHERE "+whereSQL, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	sortCol := taskSortColumn(filters.SortBy)
+	dir := "DESC"
+	if filters.Reverse {
+		dir = "ASC"
+	}
+
+	limitPos := len(args) + 1
+	offsetPos := len(args) + 2
+	query := fmt.Sprintf(`
+		SELECT t.id, t.organization_id, t.contact_id, t.deal_id, t.assigned_to, t.assigned_team_id, t.created_by, t.title, t.description,
+		       t.due_date, t.priority, t.type, t.status, t.completed_at, t.created_at, t.updated_at
+		FROM crm_tasks t
+		WHERE %s
+		ORDER BY %s %s NULLS LAST, t.id DESC
+		LIMIT $%d OFFSET $%d
+	`, whereSQL, sortCol, dir, limitPos, offsetPos)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tasks := make([]models.CRMTask, 0, limit)
+	for rows.Next() {
+		var task models.CRMTask
+		if err := rows.Scan(
+			&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
+			&task.AssignedTo, &task.AssignedTeamID, &task.CreatedBy, &task.Title, &task.Description,
+			&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
+			&task.CreatedAt, &task.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	hasMore := int64(offset+len(tasks)) < total
+	var nextOffset *int
+	if hasMore {
+		n := offset + limit
+		nextOffset = &n
+	}
+
+	return &models.TasksSearchResult{
+		Data: tasks,
+		Pagination: models.TasksSearchPagination{
+			Total:      total,
+			Limit:      limit,
+			Offset:     offset,
+			HasMore:    hasMore,
+			NextOffset: nextOffset,
+		},
+	}, nil
+}
+
+func (r *crmRepository) TasksSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks) (*models.TasksSummary, error) {
+	clauses, args := taskSearchWhere(orgID, filters)
+	whereSQL := strings.Join(clauses, " AND ")
+
+	var s models.TasksSummary
+	query := fmt.Sprintf(`
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE t.status = 'pending'),
+			COUNT(*) FILTER (WHERE t.status = 'in_progress'),
+			COUNT(*) FILTER (WHERE t.status = 'completed'),
+			COUNT(*) FILTER (WHERE t.status = 'cancelled'),
+			COUNT(*) FILTER (WHERE t.due_date IS NOT NULL AND t.due_date < now() AND t.status NOT IN ('completed', 'cancelled')),
+			COUNT(*) FILTER (WHERE t.priority IN ('high', 'urgent'))
+		FROM crm_tasks t
+		WHERE %s
+	`, whereSQL)
+	if err := r.db.QueryRow(ctx, query, args...).Scan(
+		&s.Total, &s.PendingCount, &s.InProgress, &s.CompletedCount,
+		&s.CancelledCount, &s.OverdueCount, &s.HighPriority,
+	); err != nil {
+		return nil, err
+	}
+
+	return &s, nil
+}
+
 func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, error) {
 	setClauses := []string{}
 	args := []any{orgID, taskID}
@@ -874,6 +1398,11 @@ func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UU
 	if data.AssignedTo != nil {
 		setClauses = append(setClauses, fmt.Sprintf("assigned_to = $%d", argPos))
 		args = append(args, *data.AssignedTo)
+		argPos++
+	}
+	if data.AssignedTeamID != nil {
+		setClauses = append(setClauses, fmt.Sprintf("assigned_team_id = $%d", argPos))
+		args = append(args, *data.AssignedTeamID)
 		argPos++
 	}
 	if data.Title != nil {
@@ -896,6 +1425,11 @@ func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UU
 		args = append(args, *data.Priority)
 		argPos++
 	}
+	if data.Type != nil {
+		setClauses = append(setClauses, fmt.Sprintf("type = $%d", argPos))
+		args = append(args, *data.Type)
+		argPos++
+	}
 	if data.Status != nil {
 		setClauses = append(setClauses, fmt.Sprintf("status = $%d", argPos))
 		args = append(args, *data.Status)
@@ -915,15 +1449,15 @@ func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UU
 	query := fmt.Sprintf(`
 		UPDATE crm_tasks SET %s
 		WHERE organization_id = $1 AND id = $2
-		RETURNING id, organization_id, contact_id, deal_id, assigned_to, created_by, title, description,
-		          due_date, priority, status, completed_at, created_at, updated_at
+		RETURNING id, organization_id, contact_id, deal_id, assigned_to, assigned_team_id, created_by, title, description,
+		          due_date, priority, type, status, completed_at, created_at, updated_at
 	`, strings.Join(setClauses, ", "))
 
 	var task models.CRMTask
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&task.ID, &task.OrganizationID, &task.ContactID, &task.DealID,
-		&task.AssignedTo, &task.CreatedBy, &task.Title, &task.Description,
-		&task.DueDate, &task.Priority, &task.Status, &task.CompletedAt,
+		&task.AssignedTo, &task.AssignedTeamID, &task.CreatedBy, &task.Title, &task.Description,
+		&task.DueDate, &task.Priority, &task.Type, &task.Status, &task.CompletedAt,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 	if err != nil {
@@ -933,6 +1467,126 @@ func (r *crmRepository) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UU
 		return nil, err
 	}
 	return &task, nil
+}
+
+// =====================
+// CRM Task Types
+// =====================
+
+func (r *crmRepository) scanTaskType(row interface {
+	Scan(dest ...any) error
+}) (*models.CRMTaskType, error) {
+	var t models.CRMTaskType
+	if err := row.Scan(&t.ID, &t.OrganizationID, &t.Name, &t.Color, &t.Position, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (r *crmRepository) ListTaskTypes(ctx context.Context, orgID uuid.UUID) ([]models.CRMTaskType, error) {
+	// Types are seeded at org creation (see SeedDefaultTaskTypes), so this is a
+	// plain read — it never re-creates defaults, which would resurrect types the
+	// user deliberately deleted.
+	rows, err := r.db.Query(ctx, `
+		SELECT id, organization_id, name, color, position, created_at, updated_at
+		FROM crm_task_types
+		WHERE organization_id = $1
+		ORDER BY position ASC, name ASC
+	`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	types := []models.CRMTaskType{}
+	for rows.Next() {
+		var t models.CRMTaskType
+		if err := rows.Scan(&t.ID, &t.OrganizationID, &t.Name, &t.Color, &t.Position, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		types = append(types, t)
+	}
+	return types, rows.Err()
+}
+
+// SeedDefaultTaskTypes inserts the org's starter task types (idempotent). Called
+// when an organization is created so the CRM tasks UI is usable out of the box;
+// the user can rename, recolour, or delete them afterwards.
+func SeedDefaultTaskTypes(ctx context.Context, db *pgxpool.Pool, orgID uuid.UUID) error {
+	for i, d := range models.DefaultCRMTaskTypes {
+		if _, err := db.Exec(ctx,
+			`INSERT INTO crm_task_types (organization_id, name, color, position)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (organization_id, name) DO NOTHING`,
+			orgID, d.Name, d.Color, i,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *crmRepository) CreateTaskType(ctx context.Context, orgID uuid.UUID, data *models.CreateCRMTaskType) (*models.CRMTaskType, error) {
+	color := data.Color
+	if color == "" {
+		color = "#94a3b8"
+	}
+	row := r.db.QueryRow(ctx, `
+		INSERT INTO crm_task_types (organization_id, name, color, position)
+		VALUES ($1, $2, $3, COALESCE((SELECT MAX(position) + 1 FROM crm_task_types WHERE organization_id = $1), 0))
+		RETURNING id, organization_id, name, color, position, created_at, updated_at
+	`, orgID, data.Name, color)
+	return r.scanTaskType(row)
+}
+
+func (r *crmRepository) UpdateTaskType(ctx context.Context, orgID, typeID uuid.UUID, data *models.UpdateCRMTaskType) (*models.CRMTaskType, error) {
+	setClauses := []string{}
+	args := []any{orgID, typeID}
+	argPos := 3
+	if data.Name != nil {
+		setClauses = append(setClauses, fmt.Sprintf("name = $%d", argPos))
+		args = append(args, *data.Name)
+		argPos++
+	}
+	if data.Color != nil {
+		setClauses = append(setClauses, fmt.Sprintf("color = $%d", argPos))
+		args = append(args, *data.Color)
+		argPos++
+	}
+	if data.Position != nil {
+		setClauses = append(setClauses, fmt.Sprintf("position = $%d", argPos))
+		args = append(args, *data.Position)
+		argPos++
+	}
+	if len(setClauses) == 0 {
+		return nil, errx.ErrNotEnough
+	}
+	setClauses = append(setClauses, "updated_at = NOW()")
+
+	query := fmt.Sprintf(`
+		UPDATE crm_task_types SET %s
+		WHERE organization_id = $1 AND id = $2
+		RETURNING id, organization_id, name, color, position, created_at, updated_at
+	`, strings.Join(setClauses, ", "))
+	row := r.db.QueryRow(ctx, query, args...)
+	t, err := r.scanTaskType(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrNotFound
+		}
+		return nil, err
+	}
+	return t, nil
+}
+
+func (r *crmRepository) DeleteTaskType(ctx context.Context, orgID, typeID uuid.UUID) error {
+	cmd, err := r.db.Exec(ctx, `DELETE FROM crm_task_types WHERE organization_id = $1 AND id = $2`, orgID, typeID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return errx.ErrNotFound
+	}
+	return nil
 }
 
 func (r *crmRepository) DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) error {

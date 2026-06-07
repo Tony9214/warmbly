@@ -9,7 +9,7 @@ export default function useDeleteContactNote() {
             deleteContactNote(contactId, noteId),
         onSuccess: (_data, variables) => {
             queryClient.invalidateQueries({
-                queryKey: ["contacts", variables.contactId, "notes"],
+                queryKey: ["contacts", variables.contactId],
             })
         }
     })

@@ -18,6 +18,15 @@ var branchConditionFields = map[string]bool{
 	"not_opened":  true,
 	"not_clicked": true,
 	"not_replied": true,
+	// Reply-classification branches (operator "ever", no Value). Read from
+	// campaign_contact_progress.reply_class. reply_automated == reply_class is
+	// auto_reply OR out_of_office. The plain "replied" field above intentionally
+	// EXCLUDES automated replies (only a human reply stamps replied_at), so these
+	// are the only way to route on an automated reply.
+	"reply_positive":  true,
+	"reply_negative":  true,
+	"reply_neutral":   true,
+	"reply_automated": true,
 	// "random" routes a deterministic percentage of contacts down this branch
 	// (a random split / split-test). Pairs with operator "chance", Value = %.
 	"random": true,
@@ -133,6 +142,17 @@ func conditionState(cond models.BranchCondition, prog *CampaignContactProgress, 
 		return BranchNoMatch, time.Time{}
 	}
 
+	// Reply-classification fields decide immediately off the stored reply_class
+	// (no time window): the class is set when the reply arrives, so there is
+	// nothing to wait for. reply_automated folds auto_reply + out_of_office.
+	switch cond.Field {
+	case "reply_positive", "reply_negative", "reply_neutral", "reply_automated":
+		if replyClassMatches(cond.Field, prog.ReplyClass) {
+			return BranchMatch, time.Time{}
+		}
+		return BranchNoMatch, time.Time{}
+	}
+
 	var ts *time.Time
 	negate := false
 	switch cond.Field {
@@ -186,6 +206,118 @@ func conditionState(cond models.BranchCondition, prog *CampaignContactProgress, 
 		return BranchMatch, time.Time{}
 	}
 	return BranchNoMatch, time.Time{}
+}
+
+// replyClassMatches maps a reply_* branch field to the stored reply_class
+// string. reply_automated is the union of the two automated classes. Mirrors
+// replyclassify's class constants (kept as literals here so this package stays
+// free of an app-layer import).
+//
+// Note: there is intentionally no reply_unsubscribe branch field. An
+// unsubscribe-classified reply is handled by suppression (advanced.Unsubscribe),
+// not routed through the canvas, so it matches no instant branch here.
+func replyClassMatches(field, class string) bool {
+	switch field {
+	case "reply_positive":
+		return class == "positive"
+	case "reply_negative":
+		return class == "negative"
+	case "reply_neutral":
+		return class == "neutral"
+	case "reply_automated":
+		return class == "auto_reply" || class == "out_of_office"
+	default:
+		return false
+	}
+}
+
+// fieldBelongsToEvent reports whether a branch condition field is one of the
+// positive "it happened" predicates owned by an instant trigger eventKind. These
+// are the only fields that can fire the instant the signal lands:
+//
+//   - "reply": the reply-classification predicates plus the plain "replied"
+//     (a human reply). A reply event carries the just-classified class on prog.
+//   - "open":  "opened".
+//   - "click": "clicked".
+//
+// Negative predicates (not_opened / not_clicked / not_replied) and time windows
+// are deliberately excluded here: you cannot instantly fire "did NOT happen", so
+// those stay step-boundary and are routed by the scheduler.
+func fieldBelongsToEvent(field, eventKind string) bool {
+	switch eventKind {
+	case "reply":
+		switch field {
+		// Only the reply_* intent fields fire instantly. The plain "replied" field
+		// carries a day window and the editor presents it as a step-boundary path
+		// with no instant toggle, so it must NOT instant-fire here (parity with the
+		// frontend's INSTANT_CAPABLE_FIELDS, which also excludes "replied").
+		case "reply_positive", "reply_negative", "reply_neutral", "reply_automated":
+			return true
+		}
+	case "open":
+		return field == "opened"
+	case "click":
+		return field == "clicked"
+	}
+	return false
+}
+
+// MatchInstantBranchTarget evaluates a step's branches at signal time and returns
+// the route out of the step for an INSTANT trigger of the given eventKind
+// ("reply" / "open" / "click"). It walks branches in declared order (first match
+// wins, identical to the scheduler) and returns the first branch that (a) carries
+// at least one condition whose field belongs to this eventKind (reply -> the
+// reply_* intent fields; open -> "opened"; click -> "clicked"), and (b) has
+// ALL of its conditions decidably matching right now against prog (which must
+// carry the just-recorded signal: ReplyClass / OpenedAt / ClickedAt).
+//
+// Returns:
+//   - matched=false when no instant branch for this eventKind applies (caller
+//     does nothing instant);
+//   - matched=true, target=nil for a STOP / deleted-target branch;
+//   - matched=true, target=<step id> for a branch that routes onward.
+//
+// It reuses conditionState (the same predicate evaluator the scheduler uses), so
+// matching lives in exactly one place. Branches with no condition owned by this
+// eventKind are skipped here (a click event must not run a reply branch, and a
+// negative-only branch can never fire instantly); they keep being routed at the
+// step boundary by the scheduler. The caller resolves whether target is a live
+// step.
+func MatchInstantBranchTarget(bc *models.BranchConditions, prog *CampaignContactProgress, eventKind string) (matched bool, target *uuid.UUID, instant bool) {
+	if bc == nil || prog == nil {
+		return false, nil, false
+	}
+	// The instant-capable fields decide off stored state with no time window
+	// (reply_* off ReplyClass; opened/clicked/replied off their *At via the "ever"
+	// path when no within_days operator is set), so sentAt/now are immaterial for
+	// them. A fixed reference time keeps any window conditions ANDed alongside a
+	// signal condition decidable (Match/NoMatch) rather than Undecided here.
+	now := time.Now()
+	sentAt := now
+	if prog.SentAt != nil {
+		sentAt = *prog.SentAt
+	}
+	for i := range bc.Branches {
+		b := &bc.Branches[i]
+		hasSignal := false
+		allMatch := true
+		for j := range b.Conditions {
+			if fieldBelongsToEvent(b.Conditions[j].Field, eventKind) {
+				hasSignal = true
+			}
+			cs, _ := conditionState(b.Conditions[j], prog, b.BranchID, sentAt, now)
+			if cs != BranchMatch {
+				allMatch = false
+				break
+			}
+		}
+		if hasSignal && allMatch {
+			// Instant defaults to true for an instant-capable branch; an explicit
+			// false opts out, deferring the branch to the step-boundary scheduler.
+			return true, b.TargetSequenceID, b.Instant == nil || *b.Instant
+		}
+	}
+	return false, nil, false
 }
 
 // randomHolds deterministically routes Value% of contacts down a random-split

@@ -10,9 +10,11 @@
 import React from "react";
 import {
     CircleDollarSignIcon,
+    LayoutGridIcon,
     Loader2Icon,
     PlusIcon,
     SearchIcon,
+    Table2Icon,
     TrashIcon,
     TrophyIcon,
     UserIcon,
@@ -38,7 +40,10 @@ import {
     PopoverMenuItem,
 } from "@/components/ui/popover-menu";
 import usePipelines from "@/lib/api/hooks/app/crm/pipelines/usePipelines";
-import useDeals from "@/lib/api/hooks/app/crm/deals/useDeals";
+import useSearchDeals from "@/lib/api/hooks/app/crm/deals/useSearchDeals";
+import useDealsSummary from "@/lib/api/hooks/app/crm/deals/useDealsSummary";
+import { EMPTY_DEAL_SEARCH } from "@/lib/api/models/app/crm/SearchDeals";
+import type DealsSummary from "@/lib/api/models/app/crm/DealsSummary";
 import useCreateDeal from "@/lib/api/hooks/app/crm/deals/useCreateDeal";
 import useUpdateDeal from "@/lib/api/hooks/app/crm/deals/useUpdateDeal";
 import useDeleteDeal from "@/lib/api/hooks/app/crm/deals/useDeleteDeal";
@@ -47,6 +52,7 @@ import type Deal from "@/lib/api/models/app/crm/Deal";
 import type { Stage } from "@/lib/api/models/app/crm/Pipeline";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
+import DealsTable from "@/components/app/crm/DealsTable";
 
 const STATUS_LABEL = {
     open: { label: "Open",  tone: "text-slate-700",   dot: "bg-slate-400" },
@@ -56,7 +62,9 @@ const STATUS_LABEL = {
 
 export default function DealsPage() {
     const pipelines = usePipelines();
-    const list = pipelines.data ?? [];
+    // Memoised so it's a stable dependency for the effect + memos below
+    // (a fresh `?? []` each render would re-fire them every time).
+    const list = React.useMemo(() => pipelines.data ?? [], [pipelines.data]);
 
     const [pipelineId, setPipelineId] = React.useState<string | undefined>(undefined);
     React.useEffect(() => {
@@ -65,39 +73,38 @@ export default function DealsPage() {
 
     const currentPipeline = list.find((p) => p.id === pipelineId);
     const stages = [...(currentPipeline?.stages ?? [])].sort((a, b) => a.position - b.position);
-    const deals = useDeals({ pipeline_id: pipelineId, limit: 100 });
     const updateDeal = useUpdateDeal();
 
     const [search, setSearch] = React.useState("");
     const [newOpen, setNewOpen] = React.useState(false);
     const [editing, setEditing] = React.useState<Deal | null>(null);
+    // Table = the cross-pipeline, server-driven "see everything" view (default).
+    // Board = the focused single-pipeline kanban for moving deals through stages.
+    const [view, setView] = React.useState<"table" | "board">("table");
 
-    const allDeals = deals.data?.data ?? [];
-    const filtered = search.trim()
-        ? allDeals.filter((d) =>
-              d.name.toLowerCase().includes(search.trim().toLowerCase()) ||
-              (d.contact?.email ?? "").toLowerCase().includes(search.trim().toLowerCase()),
-          )
-        : allDeals;
+    // When editing a deal opened from the cross-pipeline table, scope the stage
+    // picker to that deal's OWN pipeline, not whichever pipeline the board has
+    // selected — otherwise the picker shows the wrong pipeline's stages.
+    const editingStages = React.useMemo(() => {
+        if (!editing) return stages;
+        const p = list.find((x) => x.id === editing.pipeline_id);
+        return p ? [...(p.stages ?? [])].sort((a, b) => a.position - b.position) : stages;
+    }, [editing, list, stages]);
 
-    const totalValue = filtered.reduce((acc, d) => acc + (d.value ?? 0), 0);
-    const wonCount = filtered.filter((d) => d.status === "won").length;
-    const openCount = filtered.filter((d) => d.status === "open").length;
+    // The board reads totals + per-column counts/values from the server summary
+    // (computed over the whole pipeline, not the loaded cards), and each column
+    // pages its own deals — so it stays accurate and fast at any size.
+    const boardFilters = React.useMemo(
+        () => ({ ...EMPTY_DEAL_SEARCH, query: search, pipeline_ids: pipelineId ? [pipelineId] : [] }),
+        [search, pipelineId],
+    );
+    const boardSummary = useDealsSummary(boardFilters, view === "board" && !!pipelineId).data;
 
     async function moveDeal(dealId: string, newStageId: string) {
-        const cur = allDeals.find((d) => d.id === dealId);
-        if (!cur || cur.stage_id === newStageId) return;
         try {
             await toast.promise(
-                updateDeal.mutateAsync({
-                    id: dealId,
-                    data: { stage_id: newStageId } as Partial<Deal>,
-                }),
-                {
-                    loading: "Moving…",
-                    success: "Moved",
-                    error: (e: AppError) => buildError(e),
-                },
+                updateDeal.mutateAsync({ id: dealId, data: { stage_id: newStageId } as Partial<Deal> }),
+                { loading: "Moving…", success: "Moved", error: (e: AppError) => buildError(e) },
             );
         } catch {
             /* surfaced */
@@ -111,17 +118,24 @@ export default function DealsPage() {
                 subtitle={
                     list.length === 0
                         ? "Create a pipeline first to start tracking deals."
-                        : `${allDeals.length} ${allDeals.length === 1 ? "deal" : "deals"} on ${currentPipeline?.name ?? "—"}`
+                        : view === "board"
+                          ? (currentPipeline?.name ?? "—")
+                          : "Every deal, across all pipelines"
                 }
             >
                 {list.length > 0 && (
                     <>
-                        <PipelinePicker
-                            pipelines={list}
-                            currentId={pipelineId}
-                            onChange={setPipelineId}
-                        />
-                        <SearchPill value={search} onChange={setSearch} />
+                        <ViewToggle view={view} onChange={setView} />
+                        {view === "board" && (
+                            <>
+                                <PipelinePicker
+                                    pipelines={list}
+                                    currentId={pipelineId}
+                                    onChange={setPipelineId}
+                                />
+                                <SearchPill value={search} onChange={setSearch} />
+                            </>
+                        )}
                         <TopbarAction
                             icon={<PlusIcon className="w-3 h-3" />}
                             onClick={() => currentPipeline && setNewOpen(true)}
@@ -132,30 +146,50 @@ export default function DealsPage() {
                 )}
             </PageTopbar>
 
-            <StatStrip cols={4}>
-                <Stat label="Open" value={openCount} sub="active deals" />
-                <Stat label="Pipeline value" value={formatMoney(totalValue)} sub="all filtered" />
-                <Stat label="Won" value={wonCount} sub="this view" />
-                <Stat label="Stages" value={stages.length} sub="on this pipeline" last />
-            </StatStrip>
-
-            <SectionBar label={deals.isPending ? "Loading…" : `${stages.length} stages`} />
-            <PageBody className="px-5 py-5">
-                {pipelines.isPending ? (
+            {pipelines.isPending ? (
+                <PageBody className="px-5 py-5">
                     <BoardSkeleton />
-                ) : list.length === 0 ? (
+                </PageBody>
+            ) : list.length === 0 ? (
+                <PageBody className="px-5 py-5">
                     <NoPipelinesYet />
-                ) : !currentPipeline || stages.length === 0 ? (
-                    <NoStagesYet />
-                ) : (
-                    <Board
-                        stages={stages}
-                        deals={filtered}
-                        onMove={moveDeal}
-                        onOpen={(d) => setEditing(d)}
-                    />
-                )}
-            </PageBody>
+                </PageBody>
+            ) : view === "table" ? (
+                <DealsTable pipelines={list} onOpenDeal={(d) => setEditing(d)} />
+            ) : (
+                <>
+                    <StatStrip cols={4}>
+                        <Stat label="Open" value={boardSummary ? boardSummary.open_count : "—"} sub="open deals" />
+                        <Stat
+                            label="Pipeline value"
+                            value={boardSummary ? formatMoney(boardSummary.open_value, boardSummary.currency) : "—"}
+                            sub={boardSummary?.mixed_currency ? "mixed currencies" : "open · server total"}
+                        />
+                        <Stat
+                            label="Won"
+                            value={boardSummary ? formatMoney(boardSummary.won_value, boardSummary.currency) : "—"}
+                            sub="closed won"
+                        />
+                        <Stat label="Stages" value={stages.length} sub="on this pipeline" last />
+                    </StatStrip>
+
+                    <SectionBar label={`${stages.length} stages`} />
+                    <PageBody className="px-5 py-5">
+                        {!currentPipeline || stages.length === 0 ? (
+                            <NoStagesYet />
+                        ) : (
+                            <Board
+                                pipelineId={pipelineId}
+                                stages={stages}
+                                query={search}
+                                summary={boardSummary}
+                                onMove={moveDeal}
+                                onOpen={(d) => setEditing(d)}
+                            />
+                        )}
+                    </PageBody>
+                </>
+            )}
 
             <DealDialog
                 open={newOpen}
@@ -166,32 +200,71 @@ export default function DealsPage() {
             <DealDialog
                 open={!!editing}
                 onClose={() => setEditing(null)}
-                pipelineId={pipelineId}
-                stages={stages}
+                pipelineId={editing?.pipeline_id ?? pipelineId}
+                stages={editingStages}
                 editing={editing ?? undefined}
             />
         </Page>
     );
 }
 
+function ViewToggle({
+    view,
+    onChange,
+}: {
+    view: "table" | "board";
+    onChange: (v: "table" | "board") => void;
+}) {
+    return (
+        <div className="inline-flex rounded-md bg-slate-100 p-0.5 gap-0.5">
+            {(
+                [
+                    ["table", "Table", Table2Icon],
+                    ["board", "Board", LayoutGridIcon],
+                ] as const
+            ).map(([id, label, Icon]) => (
+                <button
+                    key={id}
+                    type="button"
+                    onClick={() => onChange(id)}
+                    className={`h-6 px-2 rounded text-[11px] font-medium inline-flex items-center gap-1.5 transition-colors ${
+                        view === id
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-500 hover:text-slate-900"
+                    }`}
+                >
+                    <Icon className="w-3 h-3" />
+                    {label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
 function Board({
+    pipelineId,
     stages,
-    deals,
+    query,
+    summary,
     onMove,
     onOpen,
 }: {
+    pipelineId?: string;
     stages: Stage[];
-    deals: Deal[];
+    query: string;
+    summary?: DealsSummary;
     onMove: (dealId: string, stageId: string) => void | Promise<void>;
     onOpen: (deal: Deal) => void;
 }) {
     return (
         <div className="grid gap-3 grid-flow-col auto-cols-[280px] overflow-x-auto pb-2">
             {stages.map((stage) => (
-                <Column
+                <BoardColumn
                     key={stage.id}
+                    pipelineId={pipelineId}
                     stage={stage}
-                    deals={deals.filter((d) => d.stage_id === stage.id)}
+                    query={query}
+                    stat={summary?.stages.find((s) => s.stage_id === stage.id)}
                     onDrop={(dealId) => onMove(dealId, stage.id)}
                     onOpen={onOpen}
                 />
@@ -200,19 +273,40 @@ function Board({
     );
 }
 
-function Column({
+// Each column is its own server-paginated query scoped to its stage, so a
+// 5,000-deal pipeline renders ~15 cards per column (with "load more") instead
+// of every node at once. The header count + open value come from the server
+// summary, so they stay accurate no matter how many are loaded.
+function BoardColumn({
+    pipelineId,
     stage,
-    deals,
+    query,
+    stat,
     onDrop,
     onOpen,
 }: {
+    pipelineId?: string;
     stage: Stage;
-    deals: Deal[];
+    query: string;
+    stat?: { count: number; value: number };
     onDrop: (dealId: string) => void;
     onOpen: (deal: Deal) => void;
 }) {
     const [hover, setHover] = React.useState(false);
-    const total = deals.reduce((acc, d) => acc + (d.value ?? 0), 0);
+    const filters = React.useMemo(
+        () => ({
+            ...EMPTY_DEAL_SEARCH,
+            query,
+            pipeline_ids: pipelineId ? [pipelineId] : [],
+            stage_ids: [stage.id],
+            sort_by: "updated_at" as const,
+        }),
+        [query, pipelineId, stage.id],
+    );
+    const q = useSearchDeals({ filters, limit: 15 });
+    const deals = q.deals ?? [];
+    const count = stat?.count ?? q.total;
+    const value = stat?.value ?? 0;
 
     return (
         <div
@@ -227,11 +321,11 @@ function Column({
                 const dealId = e.dataTransfer.getData("text/deal");
                 if (dealId) onDrop(dealId);
             }}
-            className={`flex flex-col rounded-md min-h-[300px] transition-colors ${
+            className={`flex flex-col rounded-md min-h-[300px] max-h-[calc(100vh-230px)] transition-colors ${
                 hover ? "bg-sky-50 border-sky-300" : "bg-slate-50 border-slate-200"
             } border`}
         >
-            <div className="h-9 px-3 flex items-center gap-2 border-b border-slate-200">
+            <div className="h-9 px-3 flex items-center gap-2 border-b border-slate-200 shrink-0">
                 <span
                     className="size-1.5 rounded-full shrink-0"
                     style={{ backgroundColor: stage.color || "#94a3b8" }}
@@ -239,24 +333,45 @@ function Column({
                 <span className="text-[11px] uppercase tracking-[0.1em] font-semibold text-slate-700 truncate">
                     {stage.name}
                 </span>
-                <span className="ml-auto font-mono text-[10.5px] text-slate-400 tabular-nums">
-                    {deals.length}
-                </span>
+                <span className="ml-auto font-mono text-[10.5px] text-slate-400 tabular-nums">{count}</span>
             </div>
-            {total > 0 && (
-                <div className="px-3 py-1 border-b border-slate-200/60 bg-white">
+            {value > 0 && (
+                <div className="px-3 py-1 border-b border-slate-200/60 bg-white shrink-0">
                     <span className="text-[10.5px] text-emerald-700 font-mono tabular-nums">
-                        {formatMoney(total)} total
+                        {formatMoney(value)} open
                     </span>
                 </div>
             )}
-            <div className="p-2 space-y-1.5 flex-1">
-                {deals.length === 0 ? (
+            <div className="p-2 space-y-1.5 flex-1 overflow-y-auto">
+                {q.isPending ? (
+                    <>
+                        <div className="h-16 rounded-md bg-white border border-slate-200 animate-pulse" />
+                        <div className="h-16 rounded-md bg-white border border-slate-200 animate-pulse" />
+                    </>
+                ) : deals.length === 0 ? (
                     <div className="h-20 rounded-md border border-dashed border-slate-200 flex items-center justify-center text-[10.5px] text-slate-400">
                         Drop deals here
                     </div>
                 ) : (
-                    deals.map((d) => <DealCard key={d.id} deal={d} onOpen={onOpen} />)
+                    <>
+                        {deals.map((d) => (
+                            <DealCard key={d.id} deal={d} onOpen={onOpen} />
+                        ))}
+                        {q.hasNextPage && (
+                            <button
+                                type="button"
+                                onClick={() => q.fetchNextPage()}
+                                disabled={q.isFetchingNextPage}
+                                className="w-full h-7 rounded-md border border-slate-200 hover:border-slate-300 text-[11px] text-slate-600 hover:text-slate-900 inline-flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                            >
+                                {q.isFetchingNextPage ? (
+                                    <Loader2Icon className="w-3 h-3 animate-spin" />
+                                ) : (
+                                    `Load ${Math.max(0, count - deals.length)} more`
+                                )}
+                            </button>
+                        )}
+                    </>
                 )}
             </div>
         </div>
@@ -588,7 +703,7 @@ function DealDialog({
                                 {editing && (
                                     <div>
                                         <Label>Status</Label>
-                                        <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 w-full">
+                                        <div className="inline-flex rounded-md bg-slate-100 p-0.5 gap-0.5 w-full">
                                             {(["open", "won", "lost"] as const).map((s) => (
                                                 <button
                                                     key={s}
@@ -596,7 +711,7 @@ function DealDialog({
                                                     onClick={() => setStatus(s)}
                                                     className={`flex-1 h-6 px-2 rounded text-[11px] font-medium transition-colors ${
                                                         status === s
-                                                            ? "bg-slate-900 text-white"
+                                                            ? "bg-white text-slate-900 shadow-sm"
                                                             : "text-slate-500 hover:text-slate-900"
                                                     }`}
                                                 >

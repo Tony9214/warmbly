@@ -10,7 +10,7 @@ export default function useUpdateContactNote() {
             updateContactNote(contactId, noteId, data),
         onSuccess: (_data, variables) => {
             queryClient.invalidateQueries({
-                queryKey: ["contacts", variables.contactId, "notes"],
+                queryKey: ["contacts", variables.contactId],
             })
         }
     })

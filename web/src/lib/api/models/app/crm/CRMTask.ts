@@ -7,11 +7,14 @@ export default interface CRMTask {
     contact_id?: string;
     deal_id?: string;
     assigned_to?: string;
+    assigned_team_id?: string;
     created_by: string;
     title: string;
     description?: string;
     due_date?: string;
     priority: CRMTaskPriority;
+    // The task type's name (user-managed; empty = no type).
+    type: string;
     status: CRMTaskStatus;
     completed_at?: string;
     created_at: string;

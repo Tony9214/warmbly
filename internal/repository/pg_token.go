@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -105,6 +106,14 @@ func (r *tokenRepository) GetSession(ctx context.Context, sessionID uuid.UUID) (
 		&sess.OSName, &sess.BrowserName, &sess.AuthProvider,
 	)
 	if err != nil {
+		// A missing session row is an expected auth outcome, not a server
+		// fault: the session expired, was revoked and purged, or the token
+		// references one that no longer exists. Surface it as a clean 401 so
+		// the client refreshes/logs out, instead of a 500 that also pages
+		// Sentry on every stale refresh.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errx.ErrToken
+		}
 		db.CaptureError(err, query, params, "queryrow")
 		return nil, errx.InternalError()
 	}

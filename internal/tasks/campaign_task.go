@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -357,18 +358,11 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to update campaign task tracking")
 	}
 
-	// STEP 8: Check stop_on_reply
-	if campaign.StopOnReply {
-		hasReplied, err := s.campaignProgressRepo.CheckContactHasReplied(ctx, contact.ID, campaign.ID)
-		if err == nil && hasReplied {
-			// Contact has replied, skip
-			s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
-			// Create next task anyway for next contact
-			s.createCampaignTask(ctx, campaign.ID, accountID, nextTime)
-			executionStatus = "completed"
-			return nil
-		}
-	}
+	// stop_on_reply is enforced inside FindNextRoutedPair (STEP 6), and it is now
+	// ROUTE-AWARE: a contact who replied is only handed back when their next step
+	// is part of the reply flow (the reply branch's own path). The normal cold
+	// sequence stops there, so there is no longer a blanket "contact has replied,
+	// skip" check here — that would also kill the reply branch's follow-up emails.
 
 	// STEP 9: Load email account
 	account, xerr := s.emailRepo.GetByID(ctx, accountID)
@@ -735,6 +729,109 @@ func (s *tasksService) executeActionNode(ctx context.Context, campaign *models.C
 			data[k] = v
 		}
 		s.advanced.EmitCampaignEvent(ctx, *campaign.OrganizationID, event, data)
+		return nil
+	case "create_task":
+		if s.advanced == nil || campaign.OrganizationID == nil {
+			return nil
+		}
+		owner, perr := uuid.Parse(campaign.UserID)
+		if perr != nil {
+			return nil
+		}
+		title := strings.TrimSpace(cfg.TaskTitle)
+		if title == "" {
+			name := strings.TrimSpace(contact.FirstName + " " + contact.LastName)
+			if name == "" {
+				name = contact.Email
+			}
+			title = "Follow up: " + name
+		}
+		// Per-step assignee; fall back to the campaign owner when unset.
+		assignee := cfg.TaskAssignedTo
+		if assignee == nil {
+			assignee = &owner
+		}
+		// Task types are user-managed free text; pass the configured name
+		// through (empty = untyped).
+		cid := contact.ID
+		data := &models.CreateCRMTask{
+			ContactID:  &cid,
+			Title:      title,
+			Type:       cfg.TaskType,
+			Priority:   cfg.TaskPriority,
+			AssignedTo: assignee,
+		}
+		if cfg.TaskDueOffsetDays != nil {
+			due := time.Now().UTC().AddDate(0, 0, *cfg.TaskDueOffsetDays)
+			data.DueDate = &due
+		}
+		if _, xerr := s.advanced.CreateContactTask(ctx, *campaign.OrganizationID, owner, data); xerr != nil {
+			return xerr
+		}
+		return nil
+	case "create_deal":
+		if s.advanced == nil || campaign.OrganizationID == nil {
+			return nil
+		}
+		if cfg.DealPipelineID == nil || cfg.DealStageID == nil {
+			// Misconfigured node (no pipeline/stage chosen): skip rather than fail
+			// the whole chain.
+			return nil
+		}
+		owner, perr := uuid.Parse(campaign.UserID)
+		if perr != nil {
+			return nil
+		}
+		// Deal name supports the same {{first_name}}/{{company}} templating other
+		// campaign copy uses; fall back to a contact-derived name when blank.
+		name := RenderTemplate(strings.TrimSpace(cfg.DealName), *contact)
+		if name == "" {
+			cn := strings.TrimSpace(contact.FirstName + " " + contact.LastName)
+			if cn == "" {
+				cn = contact.Email
+			}
+			name = "Deal: " + cn
+		}
+		currency := strings.TrimSpace(cfg.DealCurrency)
+		if currency == "" {
+			currency = "USD"
+		}
+		cid := contact.ID
+		cmpID := campaign.ID
+		data := &models.CreateDeal{
+			PipelineID: *cfg.DealPipelineID,
+			StageID:    *cfg.DealStageID,
+			ContactID:  &cid,
+			Name:       name,
+			Value:      cfg.DealValue,
+			Currency:   currency,
+			CampaignID: &cmpID,
+			AssignedTo: &owner,
+		}
+		if _, xerr := s.advanced.CreateContactDeal(ctx, *campaign.OrganizationID, owner, data); xerr != nil {
+			return xerr
+		}
+		return nil
+	case "move_deal_stage":
+		if s.advanced == nil || campaign.OrganizationID == nil {
+			return nil
+		}
+		if cfg.DealPipelineID == nil || cfg.DealStageID == nil {
+			return nil
+		}
+		moved, xerr := s.advanced.MoveContactDealStage(ctx, *campaign.OrganizationID, contact.ID, *cfg.DealPipelineID, *cfg.DealStageID)
+		if xerr != nil {
+			return xerr
+		}
+		if moved == nil {
+			// No open deal in the target pipeline: documented no-op. Log it so the
+			// gap is observable instead of silently doing nothing.
+			log.Info().
+				Str("campaign_id", campaign.ID.String()).
+				Str("contact_id", contact.ID.String()).
+				Str("pipeline_id", cfg.DealPipelineID.String()).
+				Msg("move_deal_stage no-op: contact has no open deal in pipeline")
+		}
 		return nil
 	default:
 		return nil

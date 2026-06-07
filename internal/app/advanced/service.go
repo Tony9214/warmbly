@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/warmbly/warmbly/internal/app/replyclassify"
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/gtasks"
@@ -53,6 +54,25 @@ type Service interface {
 	ProcessIncomingReply(ctx context.Context, emailAccountID uuid.UUID, msg *models.EmailMessageStoreData) *errx.Error
 	GetABWinnerAnalysis(ctx context.Context, organizationID, campaignID uuid.UUID) (*models.ABWinnerAnalysis, *errx.Error)
 
+	// CreateContactTask creates a CRM task for a contact, used by the campaign
+	// "create task" action node. createdBy is the campaign owner; the task's
+	// AssignedTo (set in data) is the teammate chosen on the step. Records a
+	// task_created activity on the contact.
+	CreateContactTask(ctx context.Context, orgID, createdBy uuid.UUID, data *models.CreateCRMTask) (*models.CRMTask, *errx.Error)
+
+	// CreateContactDeal opens a CRM deal for a contact, used by the campaign
+	// "create_deal" action node (typically off a positive reply branch). data
+	// carries pipeline/stage/name/value/currency; CampaignID is stamped for deal
+	// attribution. Records a deal-created activity on the contact.
+	CreateContactDeal(ctx context.Context, orgID uuid.UUID, createdBy uuid.UUID, data *models.CreateDeal) (*models.Deal, *errx.Error)
+
+	// MoveContactDealStage moves the contact's most-recent OPEN deal in
+	// pipelineID to stageID, used by the campaign "move_deal_stage" action node.
+	// When the contact has no open deal in that pipeline it is a no-op (returns
+	// nil, nil) rather than an error, so a chained reply automation doesn't fail
+	// just because a deal hasn't been created yet.
+	MoveContactDealStage(ctx context.Context, orgID, contactID, pipelineID, stageID uuid.UUID) (*models.Deal, *errx.Error)
+
 	// WireDispatcher attaches the event dispatcher that fans classified
 	// replies + deliverability events out to customer webhooks and third-party
 	// integration actions (Slack ping, CRM upsert).
@@ -61,6 +81,18 @@ type Service interface {
 	// EmitCampaignEvent dispatches a campaign event (e.g. from a sequence
 	// "notify" action node) to customer webhooks and wired integrations.
 	EmitCampaignEvent(ctx context.Context, orgID uuid.UUID, eventType models.WebhookEventType, data map[string]any)
+
+	// FireInstantActions runs the matched INSTANT branch's action chain for a
+	// contact the moment an engagement signal lands for them, instead of waiting
+	// for the next scheduled step boundary. eventKind is "reply", "open", or
+	// "click" and selects which branch fields can fire (reply -> reply_* intent
+	// fields; open -> "opened"; click -> "clicked"). The signal must already be
+	// recorded on the contact's progress row before this is called. Best-effort
+	// and non-blocking: it never returns an error and must never block the caller's
+	// hot path. The tracking consumer calls this after RecordEmailOpened /
+	// RecordEmailClicked; ProcessIncomingReply calls the unexported path with
+	// "reply".
+	FireInstantActions(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID, eventKind string)
 
 	// DLQ auto-retry
 	ProcessRetryableDeadLetters(ctx context.Context) (int, *errx.Error)
@@ -281,6 +313,86 @@ func (s *service) ShouldSuppressRecipient(ctx context.Context, organizationID uu
 // Unsubscribe resolves the campaign + contact behind a List-Unsubscribe link and
 // suppresses the recipient org-wide. Always suppresses (an explicit recipient
 // request), then fans out the campaign.unsubscribed event for Slack/CRM.
+func (s *service) CreateContactTask(ctx context.Context, orgID, createdBy uuid.UUID, data *models.CreateCRMTask) (*models.CRMTask, *errx.Error) {
+	if s.crmRepo == nil {
+		return nil, errx.InternalError()
+	}
+	task, err := s.crmRepo.CreateCRMTask(ctx, orgID, createdBy, data)
+	if err != nil {
+		return nil, errx.InternalError()
+	}
+	if task.ContactID != nil {
+		_ = s.crmRepo.RecordActivity(ctx, orgID, *task.ContactID, &createdBy, models.ActivityTaskCreated, map[string]interface{}{
+			"task_id":    task.ID.String(),
+			"task_title": task.Title,
+			"source":     "campaign",
+		})
+	}
+	return task, nil
+}
+
+// CreateContactDeal opens a deal for the contact (campaign "create_deal" node)
+// and records a deal_created activity. Mirrors CreateContactTask.
+func (s *service) CreateContactDeal(ctx context.Context, orgID uuid.UUID, createdBy uuid.UUID, data *models.CreateDeal) (*models.Deal, *errx.Error) {
+	if s.crmRepo == nil {
+		return nil, errx.InternalError()
+	}
+	deal, err := s.crmRepo.CreateDeal(ctx, orgID, data)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	if deal.ContactID != nil {
+		_ = s.crmRepo.RecordActivity(ctx, orgID, *deal.ContactID, &createdBy, models.ActivityDealCreated, map[string]interface{}{
+			"deal_id":   deal.ID.String(),
+			"deal_name": deal.Name,
+			"source":    "campaign",
+		})
+	}
+	return deal, nil
+}
+
+// MoveContactDealStage moves the contact's most-recent OPEN deal in pipelineID
+// to stageID. "Most-recent open deal" is resolved by scanning the contact's
+// deals (GetDealsByContact returns them created_at DESC) and taking the first
+// one whose pipeline matches and whose status is still "open". No open deal in
+// that pipeline is a deliberate no-op (returns nil, nil) so a chained reply
+// automation doesn't error just because nothing has been created yet.
+func (s *service) MoveContactDealStage(ctx context.Context, orgID, contactID, pipelineID, stageID uuid.UUID) (*models.Deal, *errx.Error) {
+	if s.crmRepo == nil {
+		return nil, errx.InternalError()
+	}
+	deals, err := s.crmRepo.GetDealsByContact(ctx, contactID)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	var target *models.Deal
+	for i := range deals {
+		d := deals[i]
+		if d.PipelineID == pipelineID && d.Status == models.DealStatusOpen {
+			target = &d
+			break // GetDealsByContact is created_at DESC => first match is newest
+		}
+	}
+	if target == nil {
+		// No open deal in this pipeline: documented no-op (not an error).
+		return nil, nil
+	}
+	if target.StageID == stageID {
+		return target, nil // already there
+	}
+	updated, uerr := s.crmRepo.UpdateDeal(ctx, orgID, target.ID, &models.UpdateDeal{StageID: &stageID})
+	if uerr != nil {
+		return nil, toErrx(uerr)
+	}
+	_ = s.crmRepo.RecordActivity(ctx, orgID, contactID, nil, models.ActivityDealStageChange, map[string]interface{}{
+		"deal_id": updated.ID.String(),
+		"from":    target.StageID.String(),
+		"to":      stageID.String(),
+		"source":  "campaign",
+	})
+	return updated, nil
+}
+
 func (s *service) Unsubscribe(ctx context.Context, campaignID, contactID uuid.UUID) *errx.Error {
 	campaign, err := s.campaignRepo.GetByID(ctx, campaignID)
 	if err != nil || campaign == nil || campaign.OrganizationID == nil {
@@ -451,6 +563,44 @@ func cleanMessageID(mid string) string {
 	return strings.TrimSpace(strings.Trim(mid, "<>"))
 }
 
+// buildReplyHeaders synthesizes the header map the reply classifier's Layer 1
+// (header) scan reads. EmailMessageStoreData does not carry the full raw header
+// block, but it does carry the structured fields the deterministic markers care
+// about (From, Reply-To) plus any custom headers the worker folded into Flags
+// using the "Header-Name:value" convention (the same encoding extractHeaderValue
+// relies on for the warmup token). That lets RFC 3834 / Precedence / X-Autoreply
+// markers reach the classifier when the worker forwarded them, while the From
+// (mailer-daemon / no-reply) and Subject ("Automatic reply") signals work from
+// the always-present structured fields.
+func buildReplyHeaders(msg *models.EmailMessageStoreData) map[string][]string {
+	if msg == nil {
+		return nil
+	}
+	h := map[string][]string{}
+	if len(msg.FromAddr) > 0 {
+		h["From"] = msg.FromAddr
+	}
+	if len(msg.ReplyTo) > 0 {
+		h["Reply-To"] = msg.ReplyTo
+	}
+	if msg.Subject != "" {
+		h["Subject"] = []string{msg.Subject}
+	}
+	// Custom headers the worker stored as "Header-Name:value" flags (auto-reply
+	// markers, Precedence, etc.). Split on the FIRST colon so header values that
+	// contain ':' survive intact.
+	for _, flag := range msg.Flags {
+		if i := strings.Index(flag, ":"); i > 0 {
+			name := strings.TrimSpace(flag[:i])
+			val := strings.TrimSpace(flag[i+1:])
+			if name != "" && !strings.HasPrefix(name, "\\") {
+				h[name] = append(h[name], val)
+			}
+		}
+	}
+	return h
+}
+
 func containsAnyKeyword(text string, keywords []string) bool {
 	if text == "" {
 		return false
@@ -548,6 +698,11 @@ func (s *service) ProcessIncomingReply(ctx context.Context, emailAccountID uuid.
 	text = strings.TrimSpace(text + "\n" + msg.Subject)
 	intent, confidence := classifyReply(text, settings.ReplyIntent)
 
+	// Layered reply classification (header -> lexicon -> optional model) is run
+	// further down, once the campaign context is known to store it on. Classifying
+	// only inside that block means a reply with no campaign match never spends a
+	// model call.
+
 	var campaignID *uuid.UUID
 	var sequenceID *uuid.UUID
 	var contactID *uuid.UUID
@@ -592,8 +747,56 @@ func (s *service) ProcessIncomingReply(ctx context.Context, emailAccountID uuid.
 	}
 
 	if campaignID != nil && contactID != nil && sequenceID != nil {
-		_ = s.campaignProgressRepo.RecordEmailReplied(ctx, *campaignID, *contactID, *sequenceID)
-		_ = s.repo.MarkVariantEvent(ctx, *campaignID, *contactID, string(models.DeliverabilityEventReply))
+		cID, ctID, sID := *campaignID, *contactID, *sequenceID
+
+		// Cost guard for the optional AI layer (Layer 3). Layers 1-2 (headers +
+		// lexicon) are free and always run; the paid model is only spent on a
+		// genuinely new, non-trivial, human-looking reply from a contact we have
+		// not already classified. So one contact spamming replies costs at most a
+		// single model call, and trivial/boilerplate bodies never reach the model.
+		gate := func() bool {
+			if !replyclassify.WorthModeling(replyclassify.Input{BodyText: msg.Snippet}) {
+				return false
+			}
+			if prior, perr := s.campaignProgressRepo.GetLatestReplyClass(ctx, ctID, cID); perr == nil &&
+				prior != "" && prior != replyclassify.ClassUnknown {
+				return false
+			}
+			return true
+		}
+
+		replyResult := replyclassify.ClassifyGated(ctx, replyclassify.Input{
+			Headers:  buildReplyHeaders(msg),
+			Subject:  msg.Subject,
+			BodyText: msg.Snippet,
+		}, gate)
+
+		// Always persist the classifier verdict so reply_* branches can route on
+		// it (including reply_automated for OOO / autoresponders). Layers 1-2 run
+		// for every reply, so OOO/unsubscribe stay correct even when the gate
+		// skipped the model.
+		_ = s.campaignProgressRepo.RecordReplyClassification(ctx, cID, ctID, sID, replyResult.Class, replyResult.Source, replyResult.Confidence)
+
+		// OOO trap fix: only a HUMAN reply stamps replied_at. An auto_reply /
+		// out_of_office must NOT count as a reply, or it would (a) trip
+		// stop_on_reply and silently halt the sequence, and (b) match the plain
+		// "replied" branch. Both stop_on_reply and the "replied" condition key off
+		// replied_at IS NOT NULL, so gating the stamp here fixes both at once.
+		if !replyclassify.IsAutomated(replyResult.Class) {
+			_ = s.campaignProgressRepo.RecordEmailReplied(ctx, cID, ctID, sID)
+			_ = s.repo.MarkVariantEvent(ctx, cID, ctID, string(models.DeliverabilityEventReply))
+		}
+
+		// INSTANT reply trigger: if the contact's CURRENT step has a reply_* intent
+		// branch matching this just-classified reply, run that branch's
+		// action chain for THIS contact right now (instead of waiting for the next
+		// scheduled step boundary). Best-effort and non-blocking like the rest of
+		// reply handling — a failure must never block inbox ingest. Fires for both
+		// human and automated replies (reply_automated drives the auto-reply case)
+		// and exactly once per reply event via the instant_fired["reply"] gate. The
+		// just-classified reply_class and (human-only) replied_at have already been
+		// persisted above, so the matcher reads them off the loaded progress row.
+		s.fireInstantActions(ctx, cID, ctID, sID, "reply")
 	}
 
 	actionTaken := ""

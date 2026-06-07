@@ -42,6 +42,7 @@ const SECTIONS: SectionDef[] = [
     { path: "notifications", label: "Notifications", icon: BellIcon,         description: "What you get notified about." },
     { path: "security",      label: "Security",      icon: ShieldIcon,       description: "Password, 2FA, active sessions." },
     { path: "members",       label: "Members",       icon: UsersIcon,        description: "Team and invitations." },
+    { path: "teams",         label: "Teams",         icon: UsersIcon,        description: "Group members into teams." },
     { path: "roles",         label: "Roles & access", icon: ShieldCheckIcon,  description: "Who can do what.", ownerOnly: true },
     { path: "workspace",     label: "Workspace",     icon: BriefcaseIcon,    description: "Org-wide settings.", ownerOnly: true },
     { path: "billing",       label: "Billing",       icon: CreditCardIcon,   description: "Plan, payment, invoices.", ownerOnly: true },

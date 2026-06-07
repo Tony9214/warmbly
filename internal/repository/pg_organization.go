@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -103,10 +104,18 @@ func (r *organizationRepository) Create(ctx context.Context, org *models.Organiz
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`
 	now := time.Now()
-	_, err := r.db.Exec(ctx, query,
+	if _, err := r.db.Exec(ctx, query,
 		org.ID, org.Name, org.Slug, org.OwnerUserID, now, now,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+
+	// Seed the org's default CRM task types so the tasks UI is usable from day
+	// one. Best-effort: a failure here shouldn't block org creation.
+	if err := SeedDefaultTaskTypes(ctx, r.db, org.ID); err != nil {
+		return err
+	}
+	return nil
 }
 
 // GetByID retrieves an organization by ID
@@ -245,6 +254,8 @@ func (r *organizationRepository) GetMembers(ctx context.Context, orgID uuid.UUID
 			return nil, err
 		}
 		m.User = &u
+		m.Email = u.Email
+		m.Name = strings.TrimSpace(u.FirstName + " " + u.LastName)
 		members = append(members, m)
 	}
 	return members, nil

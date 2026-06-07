@@ -22,15 +22,18 @@ import {
   MoonIcon,
   SendIcon,
   TrashIcon,
+  UserIcon,
   XIcon,
 } from "lucide-react";
 
 import { MessageBubble } from "./MessageBubble";
 import { ReplyComposer, type ReplyMode } from "./ReplyComposer";
 import { ThreadLabelMenu } from "./ThreadLabelMenu";
+import ContactContextPanel from "./ContactContextPanel";
 import { CategoryChip } from "@/components/app/contacts/CategoryPicker";
 import { SectionBar } from "@/components/layout/Page";
 import useThread from "@/lib/api/hooks/app/unibox/useThread";
+import useMarkSeen from "@/lib/api/hooks/app/unibox/useMarkSeen";
 import useThreadLabels from "@/lib/api/hooks/app/unibox/useThreadLabels";
 import useThreadScheduled from "@/lib/api/hooks/app/unibox/useThreadScheduled";
 import cancelScheduled from "@/lib/api/client/app/unibox/cancelScheduled";
@@ -159,6 +162,10 @@ export function ThreadView({ threadId, emailId }: ThreadViewProps) {
   const threadLabels = useThreadLabels(threadId);
   const [labelMenuOpen, setLabelMenuOpen] = React.useState(false);
 
+  // CRM context rail (right side). Open by default on wide screens; the panel
+  // itself is hidden below `lg`, so the toggle only matters there.
+  const [crmOpen, setCrmOpen] = React.useState(true);
+
   // `c` opens the label menu while a thread is open — ignored while
   // typing into the composer / any input so it never eats keystrokes.
   React.useEffect(() => {
@@ -191,6 +198,20 @@ export function ThreadView({ threadId, emailId }: ThreadViewProps) {
   React.useEffect(() => {
     setReplyState(null);
   }, [threadId]);
+
+  // Opening a thread marks its unseen messages as read. The hook invalidates
+  // ["unibox"], so the unread badge, the collapsed list, and the overview all
+  // refresh. Once everything is seen the id list is empty and this no-ops, so
+  // it self-terminates after the post-mark refetch (no loop).
+  const markSeen = useMarkSeen();
+  const markSeenMutate = markSeen.mutate;
+  React.useEffect(() => {
+    const unseenIds = (q.data?.data ?? [])
+      .filter((m) => !m.seen)
+      .map((m) => m.id);
+    if (unseenIds.length === 0) return;
+    markSeenMutate({ ids: unseenIds });
+  }, [threadId, q.data, markSeenMutate]);
 
   const snooze = useMutation({
     mutationFn: (until: Date) =>
@@ -265,6 +286,20 @@ export function ThreadView({ threadId, emailId }: ThreadViewProps) {
   );
   const mailbox = accounts.find((a) => a.id === messages[0]?.account_id);
 
+  // The external party of the thread = the first message address that isn't
+  // our own mailbox. Addresses arrive as "Name <addr>" or bare "addr"; reduce
+  // to the bare address so the comparison + the CRM panel lookup both work.
+  const mailboxEmail = mailbox?.email?.toLowerCase();
+  const bareAddr = (s: string) => {
+    const m = s.match(/<([^>]+)>/);
+    return (m ? m[1] : s).trim();
+  };
+  const contactEmail =
+    messages
+      .map((m) => bareAddr(m.from))
+      .find((e) => e && e.toLowerCase() !== mailboxEmail) ??
+    bareAddr(messages[0]?.from ?? "");
+
   const submitCustomSnooze = () => {
     if (!customValue) return;
     const d = new Date(customValue);
@@ -284,7 +319,8 @@ export function ThreadView({ threadId, emailId }: ThreadViewProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex h-full min-h-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-white">
       <div className="h-12 px-3 sm:px-5 border-b border-slate-200 flex items-center gap-2 sm:gap-3 shrink-0 bg-white">
         <span className="hidden sm:inline text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
           Thread
@@ -306,6 +342,19 @@ export function ThreadView({ threadId, emailId }: ThreadViewProps) {
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setCrmOpen((o) => !o)}
+            aria-label={crmOpen ? "Hide contact panel" : "Show contact panel"}
+            className={
+              "hidden lg:inline-flex size-7 rounded-md items-center justify-center transition-colors " +
+              (crmOpen
+                ? "text-sky-700 bg-sky-50"
+                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100")
+            }
+          >
+            <UserIcon className="w-3.5 h-3.5" />
+          </button>
           <ThreadLabelMenu
             threadId={threadId}
             open={labelMenuOpen}
@@ -507,6 +556,15 @@ export function ThreadView({ threadId, emailId }: ThreadViewProps) {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
+
+      {crmOpen && (
+        <ContactContextPanel
+          email={contactEmail}
+          mailboxId={mailbox?.id}
+          onClose={() => setCrmOpen(false)}
+        />
+      )}
     </div>
   );
 }

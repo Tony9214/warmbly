@@ -3,6 +3,7 @@ package crm
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
@@ -36,6 +37,8 @@ type CRMService interface {
 	CreateDeal(ctx context.Context, orgID uuid.UUID, data *models.CreateDeal) (*models.Deal, *errx.Error)
 	GetDeal(ctx context.Context, orgID, dealID uuid.UUID) (*models.Deal, *errx.Error)
 	ListDeals(ctx context.Context, orgID uuid.UUID, pipelineID, stageID *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.DealsResult, *errx.Error)
+	SearchDeals(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals, limit, offset int) (*models.DealsSearchResult, *errx.Error)
+	DealsSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals) (*models.DealsSummary, *errx.Error)
 	UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID, userID *uuid.UUID, data *models.UpdateDeal) (*models.Deal, *errx.Error)
 	DeleteDeal(ctx context.Context, orgID, dealID uuid.UUID) *errx.Error
 	GetDealsByContact(ctx context.Context, contactID uuid.UUID) ([]models.Deal, *errx.Error)
@@ -44,8 +47,16 @@ type CRMService interface {
 	CreateCRMTask(ctx context.Context, orgID, userID uuid.UUID, data *models.CreateCRMTask) (*models.CRMTask, *errx.Error)
 	GetCRMTask(ctx context.Context, orgID, taskID uuid.UUID) (*models.CRMTask, *errx.Error)
 	ListCRMTasks(ctx context.Context, orgID uuid.UUID, contactID, dealID, assignedTo *uuid.UUID, status *string, limit int, cursor *uuid.UUID) (*models.CRMTasksResult, *errx.Error)
+	SearchTasks(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks, limit, offset int) (*models.TasksSearchResult, *errx.Error)
+	TasksSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks) (*models.TasksSummary, *errx.Error)
 	UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, userID *uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, *errx.Error)
 	DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) *errx.Error
+
+	// CRM Task Types (user-managed)
+	ListTaskTypes(ctx context.Context, orgID uuid.UUID) ([]models.CRMTaskType, *errx.Error)
+	CreateTaskType(ctx context.Context, orgID uuid.UUID, data *models.CreateCRMTaskType) (*models.CRMTaskType, *errx.Error)
+	UpdateTaskType(ctx context.Context, orgID, typeID uuid.UUID, data *models.UpdateCRMTaskType) (*models.CRMTaskType, *errx.Error)
+	DeleteTaskType(ctx context.Context, orgID, typeID uuid.UUID) *errx.Error
 }
 
 type crmService struct {
@@ -272,6 +283,28 @@ func (s *crmService) ListDeals(ctx context.Context, orgID uuid.UUID, pipelineID,
 	return result, nil
 }
 
+func (s *crmService) SearchDeals(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals, limit, offset int) (*models.DealsSearchResult, *errx.Error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	result, err := s.repo.SearchDeals(ctx, orgID, filters, limit, offset)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return result, nil
+}
+
+func (s *crmService) DealsSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchDeals) (*models.DealsSummary, *errx.Error) {
+	result, err := s.repo.DealsSummary(ctx, orgID, filters)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return result, nil
+}
+
 func (s *crmService) UpdateDeal(ctx context.Context, orgID, dealID uuid.UUID, userID *uuid.UUID, data *models.UpdateDeal) (*models.Deal, *errx.Error) {
 	// Get existing deal for activity recording
 	existingDeal, _ := s.repo.GetDeal(ctx, orgID, dealID)
@@ -371,6 +404,28 @@ func (s *crmService) ListCRMTasks(ctx context.Context, orgID uuid.UUID, contactI
 	return result, nil
 }
 
+func (s *crmService) SearchTasks(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks, limit, offset int) (*models.TasksSearchResult, *errx.Error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	result, err := s.repo.SearchCRMTasks(ctx, orgID, filters, limit, offset)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return result, nil
+}
+
+func (s *crmService) TasksSummary(ctx context.Context, orgID uuid.UUID, filters models.SearchTasks) (*models.TasksSummary, *errx.Error) {
+	result, err := s.repo.TasksSummary(ctx, orgID, filters)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return result, nil
+}
+
 func (s *crmService) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID, userID *uuid.UUID, data *models.UpdateCRMTask) (*models.CRMTask, *errx.Error) {
 	task, err := s.repo.UpdateCRMTask(ctx, orgID, taskID, data)
 	if err != nil {
@@ -386,6 +441,49 @@ func (s *crmService) UpdateCRMTask(ctx context.Context, orgID, taskID uuid.UUID,
 	}
 
 	return task, nil
+}
+
+func (s *crmService) ListTaskTypes(ctx context.Context, orgID uuid.UUID) ([]models.CRMTaskType, *errx.Error) {
+	types, err := s.repo.ListTaskTypes(ctx, orgID)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return types, nil
+}
+
+func (s *crmService) CreateTaskType(ctx context.Context, orgID uuid.UUID, data *models.CreateCRMTaskType) (*models.CRMTaskType, *errx.Error) {
+	name := strings.TrimSpace(data.Name)
+	if name == "" || len(name) > 60 {
+		return nil, errx.New(errx.BadRequest, "task type name must be between 1 and 60 characters")
+	}
+	data.Name = name
+	t, err := s.repo.CreateTaskType(ctx, orgID, data)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return t, nil
+}
+
+func (s *crmService) UpdateTaskType(ctx context.Context, orgID, typeID uuid.UUID, data *models.UpdateCRMTaskType) (*models.CRMTaskType, *errx.Error) {
+	if data.Name != nil {
+		name := strings.TrimSpace(*data.Name)
+		if name == "" || len(name) > 60 {
+			return nil, errx.New(errx.BadRequest, "task type name must be between 1 and 60 characters")
+		}
+		data.Name = &name
+	}
+	t, err := s.repo.UpdateTaskType(ctx, orgID, typeID, data)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	return t, nil
+}
+
+func (s *crmService) DeleteTaskType(ctx context.Context, orgID, typeID uuid.UUID) *errx.Error {
+	if err := s.repo.DeleteTaskType(ctx, orgID, typeID); err != nil {
+		return toErrx(err)
+	}
+	return nil
 }
 
 func (s *crmService) DeleteCRMTask(ctx context.Context, orgID, taskID uuid.UUID) *errx.Error {

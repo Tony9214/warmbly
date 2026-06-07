@@ -15,12 +15,17 @@
 
 import React from "react";
 import {
+    ArrowRightLeftIcon,
     BellOffIcon,
+    AlertTriangleIcon,
+    BracesIcon,
+    CheckSquareIcon,
     ChevronDownIcon,
     ChevronUpIcon,
     ClockIcon,
     FlagIcon,
     GitBranchIcon,
+    HandshakeIcon,
     Loader2Icon,
     MailIcon,
     PlusIcon,
@@ -34,17 +39,21 @@ import {
 import {
     ReactFlow,
     Background,
+    BaseEdge,
     Controls,
+    EdgeLabelRenderer,
     Panel,
     Handle,
     MarkerType,
     Position,
+    getBezierPath,
     useNodesState,
     useEdgesState,
     type Node,
     type Edge,
     type Connection,
     type NodeProps,
+    type EdgeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
@@ -52,7 +61,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import type Sequence from "@/lib/api/models/app/campaigns/sequences/Sequence";
 import type { SequenceBranch, BranchCondition, BranchField } from "@/lib/api/models/app/campaigns/sequences/Branching";
-import { BRANCH_FIELD_LABELS } from "@/lib/api/models/app/campaigns/sequences/Branching";
+import { BRANCH_FIELD_LABELS, isReplyBranchField, isInstantCapableField } from "@/lib/api/models/app/campaigns/sequences/Branching";
 import useSequences from "@/lib/api/hooks/app/campaigns/sequences/useSequences";
 import useCreateSequence from "@/lib/api/hooks/app/campaigns/sequences/useCreateSequence";
 import useDeleteSequence from "@/lib/api/hooks/app/campaigns/sequences/useDeleteSequence";
@@ -62,11 +71,20 @@ import useUpdateCampaign from "@/lib/api/hooks/app/campaigns/useUpdateCampaign";
 import { useConfirm } from "@/hooks/context/confirm";
 import useClickOutside from "@/hooks/useClickOutside";
 import { NumberInput, Label, TextInput } from "@/components/ui/field";
+import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import SequenceView from "./SequenceView";
 import CategoryPicker from "@/components/app/contacts/CategoryPicker";
 import type { SequenceAction, SequenceActionType } from "@/lib/api/models/app/campaigns/sequences/Action";
+import TaskTypePicker from "@/components/app/crm/TaskTypePicker";
+import DealStagePicker from "@/components/app/crm/DealStagePicker";
+import useMembers from "@/lib/api/hooks/app/organizations/useMembers";
+
+// Personalization tokens available in templated copy. Mirrors SequenceView's
+// VARIABLES so a deal name can use the same {{.FirstName}}/{{.Company}} tokens
+// every other campaign copy field does.
+const DEAL_NAME_VARIABLES = ["{{.FirstName}}", "{{.LastName}}", "{{.Company}}", "{{.Email}}"];
 
 const STOP_ID = "__stop__";
 const IF_PREFIX = "if-";
@@ -89,6 +107,28 @@ function newBranchId(): string {
 const isCond = (b: SequenceBranch) => (b.conditions?.length ?? 0) > 0;
 const stepName = (s: Sequence | undefined) => (s?.name?.trim() ? s.name : "Untitled step");
 
+// "Positive" reply fields are the ones that route a contact INTO a reply flow
+// (a human reply, or a classified reply intent). Mirrors the backend's
+// branchHasPositiveReplyCondition. not_replied is excluded — that is the cold
+// sequence's "didn't reply" continuation, not reply handling. Used to decide
+// whether a campaign has any reply handling at all (the stop-on-reply warning).
+const POSITIVE_REPLY_FIELDS: BranchField[] = [
+    "replied",
+    "reply_positive",
+    "reply_negative",
+    "reply_neutral",
+    "reply_automated",
+];
+const isPositiveReplyField = (f: BranchField) => POSITIVE_REPLY_FIELDS.includes(f);
+
+// A branch is "instant" when its condition is an instant-capable signal
+// (reply intent, opened, or clicked) and the per-branch toggle isn't opted out.
+// Such a branch's action chain fires the moment the event lands (reply recorded,
+// or open / click tracked), so the target step's wait_after is irrelevant.
+function isInstantBranch(b: SequenceBranch): boolean {
+    return (b.conditions ?? []).some((c) => isInstantCapableField(c.field)) && b.instant !== false;
+}
+
 // Conditions first-match; unconditional ("just go there") paths are the fallback.
 function ordered(branches: SequenceBranch[]): SequenceBranch[] {
     return [...branches.filter(isCond), ...branches.filter((b) => !isCond(b))];
@@ -99,6 +139,8 @@ function conditionText(b: SequenceBranch): string {
         .map((c) => {
             if (c.field === "random") return `${c.value ?? 50}% random`;
             const f = BRANCH_FIELD_LABELS[c.field] ?? c.field;
+            // Reply-class conditions are "ever" (no day window).
+            if (isReplyBranchField(c.field)) return f;
             return `${f} within ${c.value ?? 3}d`;
         })
         .join(" + ");
@@ -202,6 +244,7 @@ type StepNodeData = {
     endsHere: boolean;
     orphan: boolean;
     onDelete: () => void;
+    onAddReply: () => void;
 };
 
 function StepNode({ data, selected }: NodeProps) {
@@ -252,6 +295,22 @@ function StepNode({ data, selected }: NodeProps) {
                     Ends here
                 </div>
             ) : null}
+            {/* Explicit, discoverable way to build a reply-triggered step (the
+                reply branch is otherwise only reachable via a connection's
+                condition dropdown). Creates an action step that fires instantly
+                on reply. */}
+            <button
+                type="button"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    d.onAddReply();
+                }}
+                title="Create a step that runs the moment the contact replies"
+                className="nodrag flex w-full items-center gap-1.5 border-t border-slate-200/70 px-2.5 py-1.5 text-[10.5px] font-medium text-violet-600 transition-colors hover:bg-violet-50"
+            >
+                <ZapIcon className="w-3 h-3" />
+                On reply
+            </button>
             {/* Right dot = start an "if" branch; bottom dot = plain "go there". */}
             <Handle type="source" id="if" position={Position.Right} className="!h-3 !w-3 !border-2 !border-white !bg-amber-400" />
             <Handle type="source" id="s" position={Position.Bottom} className="!h-3 !w-3 !border-2 !border-white !bg-sky-500" />
@@ -259,14 +318,24 @@ function StepNode({ data, selected }: NodeProps) {
     );
 }
 
-type IfNodeData = { label: string; onDelete: () => void };
+type IfNodeData = { label: string; instant: boolean; onDelete: () => void };
 
 function IfNode({ data, selected }: NodeProps) {
     const d = data as IfNodeData;
+    // Instant-capable branches (reply intent, opened, clicked) fire the moment
+    // the event lands, not at the next scheduled step. A violet "instant" badge
+    // distinguishes them from the branches checked at the next step boundary
+    // (negative "didn't" signals, within-N-days windows, random / always). The
+    // whole node carries a tooltip explaining it.
     return (
         <div
+            title={
+                d.instant
+                    ? "Runs the moment it happens (reply / open / click), not at the next scheduled step."
+                    : undefined
+            }
             className={`rounded-lg border bg-gradient-to-b from-sky-50 to-white px-2 py-1 shadow-sm transition-shadow duration-200 hover:shadow-md ${
-                selected ? "border-sky-400 ring-2 ring-sky-100" : "border-sky-200"
+                selected ? "border-sky-400 ring-2 ring-sky-100" : d.instant ? "border-violet-200" : "border-sky-200"
             }`}
         >
             <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-2 !border-white !bg-slate-300" />
@@ -276,6 +345,12 @@ function IfNode({ data, selected }: NodeProps) {
                 <GitBranchIcon className="w-3 h-3 shrink-0 text-sky-600" />
                 <span className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-sky-500">if</span>
                 <span className="max-w-[150px] truncate text-[11px] font-medium text-sky-800">{d.label}</span>
+                {d.instant && (
+                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-violet-50 px-1 py-px text-[8.5px] font-semibold uppercase tracking-[0.1em] text-violet-600 ring-1 ring-violet-200/70">
+                        <ZapIcon className="w-2.5 h-2.5" />
+                        instant
+                    </span>
+                )}
                 <button
                     type="button"
                     onClick={(e) => {
@@ -308,6 +383,9 @@ function StopNode() {
 const ACTION_META: Record<string, { label: string; Icon: typeof ClockIcon; tint: string }> = {
     add_tag: { label: "Add tag", Icon: TagIcon, tint: "text-emerald-600" },
     remove_tag: { label: "Remove tag", Icon: TagIcon, tint: "text-amber-600" },
+    create_task: { label: "Create task", Icon: CheckSquareIcon, tint: "text-violet-600" },
+    create_deal: { label: "Create deal", Icon: HandshakeIcon, tint: "text-emerald-600" },
+    move_deal_stage: { label: "Move deal stage", Icon: ArrowRightLeftIcon, tint: "text-sky-600" },
     unsubscribe: { label: "Unsubscribe", Icon: BellOffIcon, tint: "text-rose-600" },
     notify: { label: "Notify", Icon: SendIcon, tint: "text-sky-600" },
 };
@@ -320,6 +398,10 @@ function actionSummary(a?: SequenceAction | null): string {
             return a.category_id ? "Add a tag" : "Pick a tag…";
         case "remove_tag":
             return a.category_id ? "Remove a tag" : "Pick a tag…";
+        case "create_deal":
+            return a.deal_pipeline_id && a.deal_stage_id ? "Create a CRM deal" : "Pick a pipeline and stage…";
+        case "move_deal_stage":
+            return a.deal_pipeline_id && a.deal_stage_id ? "Move the deal forward" : "Pick a pipeline and stage…";
         case "unsubscribe":
             return "Unsubscribe the contact";
         case "notify":
@@ -390,6 +472,70 @@ function ActionNode({ data, selected }: NodeProps) {
 
 const nodeTypes = { step: StepNode, ifcond: IfNode, stop: StopNode, action: ActionNode };
 
+// Convergent edge.
+// Several branches can route to the same next step (many in -> one node). They
+// all terminate at the node's single top handle, so by default the curves pile
+// onto one point and the arrowheads stack. This edge fans the incoming lines
+// across the top of the target node by index, so each inbound connection lands
+// at its own point and stays readable. A lone inbound edge renders unchanged.
+//
+// data.conIndex / data.conTotal are filled in by the layout effect once it
+// knows how many edges share a target.
+type ConvergeEdgeData = { conIndex?: number; conTotal?: number };
+
+function ConvergeEdge({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    markerEnd,
+    style,
+    label,
+    labelStyle,
+    labelBgStyle,
+    data,
+}: EdgeProps) {
+    const d = (data ?? {}) as ConvergeEdgeData;
+    const total = d.conTotal ?? 1;
+    const index = d.conIndex ?? 0;
+    // Spread the landing points across ~70% of the node's width, centred on the
+    // handle. One inbound edge keeps dead-centre (offset 0).
+    const span = Math.min(170, NODE_W * 0.7);
+    const offset = total > 1 ? (index - (total - 1) / 2) * (span / Math.max(1, total - 1)) : 0;
+    const [path, labelX, labelY] = getBezierPath({
+        sourceX,
+        sourceY,
+        sourcePosition,
+        targetX: targetX + offset,
+        targetY,
+        targetPosition,
+    });
+    return (
+        <>
+            <BaseEdge path={path} markerEnd={markerEnd} style={style} />
+            {label ? (
+                <EdgeLabelRenderer>
+                    <div
+                        className="nodrag nopan pointer-events-none absolute rounded border px-1 py-px text-[10px]"
+                        style={{
+                            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+                            borderColor: (labelBgStyle as { stroke?: string } | undefined)?.stroke ?? "#e2e8f0",
+                            background: (labelBgStyle as { fill?: string } | undefined)?.fill ?? "#fff",
+                            color: (labelStyle as { fill?: string } | undefined)?.fill ?? "#475569",
+                        }}
+                    >
+                        {label}
+                    </div>
+                </EdgeLabelRenderer>
+            ) : null}
+        </>
+    );
+}
+
+const edgeTypes = { converge: ConvergeEdge };
+
 type IfMeta = { sourceId: string; branchId: string };
 
 export default function CampaignFlow({ campaignId }: { campaignId: string }) {
@@ -418,6 +564,32 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
     }, [sequences]);
 
     const invalidate = React.useCallback(() => qc.invalidateQueries({ queryKey: SEQ_KEY(campaignId) }), [qc, campaignId]);
+
+    // Does the campaign handle replies at all? True when any step has a branch
+    // routing on a positive reply signal. Drives the stop-on-reply warning copy.
+    const hasReplyBranch = React.useMemo(
+        () =>
+            (sequences ?? []).some((s) =>
+                (s.conditions?.branches ?? []).some((b) =>
+                    (b.conditions ?? []).some((c) => isPositiveReplyField(c.field)),
+                ),
+            ),
+        [sequences],
+    );
+
+    // Single place that flips stop_on_reply (optimistic + persisted). Shared by
+    // the toolbar toggle and the warning's "turn it on" shortcut.
+    const setStopOnReply = React.useCallback(
+        (next: boolean) => {
+            qc.setQueryData(["campaigns", campaignId], (old: unknown) =>
+                old ? { ...(old as object), stop_on_reply: next } : old,
+            );
+            updateCampaign
+                .mutateAsync({ stop_on_reply: next })
+                .catch((err) => toast.error(buildError(err as AppError)));
+        },
+        [qc, campaignId, updateCampaign],
+    );
 
     const openCondition = React.useCallback((sourceId: string, branchId: string) => {
         setSelectedEdge({ sourceId, branchId });
@@ -635,6 +807,39 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         },
         [adding, sequences.length, seqById, createSequence, saveBranches, openCondition],
     );
+    // "On reply" on a step: create a new action step + a reply branch that fires
+    // it the moment the contact replies, then open the branch so you can pick the
+    // reply type (positive/negative/automated) and build the action chain. Reuses
+    // the same instant reply-branch mechanism the backend executes on reply.
+    const addReplyStep = React.useCallback(
+        async (sourceId: string) => {
+            if (adding || sequences.length >= MAX_STEPS) return;
+            const src = seqById.get(sourceId);
+            setAdding(true);
+            try {
+                const created = (await createSequence.mutateAsync()) as Sequence;
+                await updateSequence(campaignId, created.id, {
+                    kind: "action",
+                    action: defaultActionFor("create_task"),
+                });
+                const branch: SequenceBranch = {
+                    branch_id: newBranchId(),
+                    target_sequence_id: created.id,
+                    conditions: [{ field: "reply_positive", operator: "ever" }],
+                };
+                await saveBranches(sourceId, [...(src?.conditions?.branches ?? []), branch]);
+                invalidate();
+                openCondition(sourceId, branch.branch_id);
+                toast.success("Reply step added. It runs the moment they reply.");
+            } catch {
+                toast.error("Couldn't add the reply step");
+            } finally {
+                setAdding(false);
+            }
+        },
+        [adding, sequences.length, seqById, createSequence, campaignId, saveBranches, openCondition, invalidate],
+    );
+
     // Drag an IF block's bottom dot to empty -> new step the if leads to.
     const retargetToNew = React.useCallback(
         async (sourceId: string, branchId: string) => {
@@ -689,10 +894,12 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
     // Node-data callbacks via refs so the layout effect deps don't churn.
     const deleteStepRef = React.useRef(deleteStep);
     const deleteBranchRef = React.useRef(deleteBranch);
+    const addReplyStepRef = React.useRef(addReplyStep);
     React.useEffect(() => {
         deleteStepRef.current = deleteStep;
         deleteBranchRef.current = deleteBranch;
-    }, [deleteStep, deleteBranch]);
+        addReplyStepRef.current = addReplyStep;
+    }, [deleteStep, deleteBranch, addReplyStep]);
 
     React.useEffect(() => {
         const waitTag = (targetId: string | null) => {
@@ -753,6 +960,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                     endsHere: branches.length === 0,
                     orphan: !reachable.has(s.id),
                     onDelete: () => deleteStepRef.current(s.id),
+                    onAddReply: () => addReplyStepRef.current(s.id),
                 } satisfies StepNodeData,
             };
         });
@@ -776,6 +984,9 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                     position: { x: 0, y: 0 },
                     data: {
                         label: conditionText(b),
+                        // Instant-capable branches (reply intent / opened / clicked)
+                        // run the moment the event lands; flag the node.
+                        instant: isInstantBranch(b),
                         onDelete: () => deleteBranchRef.current(s.id, b.branch_id),
                     } satisfies IfNodeData,
                 });
@@ -805,8 +1016,20 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         data: { sourceId: s.id, branchId: b.branch_id },
                     });
                 }
-                // THEN path -> the condition's target.
-                const wt = waitTag(b.target_sequence_id);
+                // THEN path -> the condition's target. Engagement branches
+                // (opened/clicked) carry a window the event must land inside; an
+                // instant branch fires the MOMENT it happens BUT only within that
+                // window, so surface it ("instant <=10d") rather than just
+                // "instant" or the target step's (irrelevant) wait_after. Reply
+                // branches have no window.
+                const withinDays = (b.conditions ?? []).find((c) => c.operator === "within_days")?.value;
+                const wt = isInstantBranch(b)
+                    ? withinDays
+                        ? `instant <=${withinDays}d`
+                        : "instant"
+                    : withinDays
+                      ? `within ${withinDays}d`
+                      : waitTag(b.target_sequence_id);
                 flowEdges.push({
                     id: `then-${b.branch_id}`,
                     source: nid,
@@ -866,18 +1089,40 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         const anyStop = sequences.some((s) => (s.conditions?.branches ?? []).some((b) => b.target_sequence_id === null));
         if (anyStop) allNodes.push({ id: STOP_ID, type: "stop", position: { x: 0, y: 0 }, data: {} });
 
+        // Convergence: more than one branch can route to the SAME next step, so
+        // a node can have several inbound edges. Count them per target and number
+        // each one, so the custom "converge" edge can fan the lines across the
+        // target's top instead of piling them all onto its single handle. Targets
+        // with one inbound edge stay on the plain bezier (no fan, no overhead).
+        const inboundCount = new Map<string, number>();
+        for (const e of flowEdges) inboundCount.set(e.target, (inboundCount.get(e.target) ?? 0) + 1);
+        const inboundSeen = new Map<string, number>();
+
         // Flowing curved (bezier) connectors with arrowheads — no boxy right
         // angles. The arrow takes the edge's own stroke colour.
-        const smoothEdges: Edge[] = flowEdges.map((e) => ({
-            ...e,
-            type: "default",
-            markerEnd: {
-                type: MarkerType.ArrowClosed,
-                width: 16,
-                height: 16,
-                color: (e.style as { stroke?: string } | undefined)?.stroke ?? "#94a3b8",
-            },
-        }));
+        const smoothEdges: Edge[] = flowEdges.map((e) => {
+            const total = inboundCount.get(e.target) ?? 1;
+            const index = inboundSeen.get(e.target) ?? 0;
+            inboundSeen.set(e.target, index + 1);
+            // Always use the converge edge type. With a single inbound edge it
+            // renders identically (offset 0); with several it fans them out. The
+            // point is the type NEVER changes in-session: when a second edge is
+            // added to a target, only conTotal updates (1 -> 2). Flipping an
+            // existing edge's `type` live makes React Flow drop the whole edge
+            // layer until reload. The "lines disappeared after I connected two to
+            // the same step" bug.
+            return {
+                ...e,
+                type: "converge",
+                data: { ...e.data, conIndex: index, conTotal: total },
+                markerEnd: {
+                    type: MarkerType.ArrowClosed,
+                    width: 16,
+                    height: 16,
+                    color: (e.style as { stroke?: string } | undefined)?.stroke ?? "#94a3b8",
+                },
+            };
+        });
 
         const laid = stackComponents(layoutGraph(allNodes, smoothEdges), smoothEdges);
         const sig =
@@ -1015,6 +1260,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                     })
                 }
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
                 onEdgeClick={(_, edge) => {
                     const d = edge.data as { sourceId?: string; branchId?: string } | undefined;
                     if (d?.sourceId && d?.branchId) openCondition(d.sourceId, d.branchId);
@@ -1034,31 +1280,29 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                 <Controls showInteractive={false} />
 
                 <Panel position="top-left">
-                    <div className="flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center gap-1.5">
-                        <AddNodeMenu
-                            onAddEmail={addStep}
-                            onAddAction={addAction}
-                            disabled={adding || atMax}
-                            busy={adding}
-                        />
-                        <button
-                            type="button"
-                            onClick={() => setNodes((ns) => stackComponents(layoutGraph(ns, edges), edges))}
-                            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
-                        >
-                            Tidy up
-                        </button>
-                        <StopOnReplyToggle
-                            on={!!campaign?.stop_on_reply}
-                            onToggle={(next) => {
-                                qc.setQueryData(["campaigns", campaignId], (old: unknown) =>
-                                    old ? { ...(old as object), stop_on_reply: next } : old,
-                                );
-                                updateCampaign
-                                    .mutateAsync({ stop_on_reply: next })
-                                    .catch((err) => toast.error(buildError(err as AppError)));
-                            }}
-                        />
+                    <div className="flex max-w-[calc(100vw-1.5rem)] flex-col gap-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            <AddNodeMenu
+                                onAddEmail={addStep}
+                                onAddAction={addAction}
+                                disabled={adding || atMax}
+                                busy={adding}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setNodes((ns) => stackComponents(layoutGraph(ns, edges), edges))}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
+                            >
+                                Tidy up
+                            </button>
+                            <StopOnReplyToggle on={!!campaign?.stop_on_reply} onToggle={setStopOnReply} />
+                        </div>
+                        {campaign && !campaign.stop_on_reply && (sequences?.length ?? 0) > 1 && (
+                            <ReplyStopWarning
+                                hasReplyBranch={hasReplyBranch}
+                                onEnable={() => setStopOnReply(true)}
+                            />
+                        )}
                     </div>
                 </Panel>
 
@@ -1140,7 +1384,16 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
 // ── Stop-on-reply toggle ────────────────────────────────────────────────────
 function StopOnReplyToggle({ on, onToggle }: { on: boolean; onToggle: (next: boolean) => void }) {
     return (
-        <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
+        <div
+            className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm"
+            title={
+                "When a contact replies, the rest of the sequence stops for them, " +
+                "while the reply branch you connected to the email they answered still " +
+                "runs (it fires instantly). So on reply: that reply flow runs, every other " +
+                "remaining step is cancelled. Auto-replies and out-of-office messages don't " +
+                "count as a reply, so the sequence keeps going."
+            }
+        >
             <span className="text-[11.5px] text-slate-600">Stop on reply</span>
             <button
                 type="button"
@@ -1158,6 +1411,33 @@ function StopOnReplyToggle({ on, onToggle }: { on: boolean; onToggle: (next: boo
                     }`}
                 />
             </button>
+        </div>
+    );
+}
+
+// Shown on the canvas when stop-on-reply is OFF and the sequence keeps sending.
+// Continuing to cold-email a contact who replied is the classic deliverability
+// mistake; turning stop-on-reply on still runs the reply branches (routing is
+// reply-flow aware), so it is strictly safer. Copy adapts to whether the
+// campaign has any reply handling at all.
+function ReplyStopWarning({ hasReplyBranch, onEnable }: { hasReplyBranch: boolean; onEnable: () => void }) {
+    return (
+        <div className="flex max-w-[19rem] items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 shadow-sm">
+            <AlertTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+            <div className="space-y-1">
+                <p className="leading-snug">
+                    {hasReplyBranch
+                        ? "Stop on reply is off. Replies that don't match a reply branch (say, a reply to an older email) keep getting cold emails. Turning it on still runs your reply branches."
+                        : "No reply handling. With stop on reply off, contacts who reply keep moving through the cold sequence. Turn it on, or add a reply branch."}
+                </p>
+                <button
+                    type="button"
+                    onClick={onEnable}
+                    className="font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900"
+                >
+                    Turn on stop on reply
+                </button>
+            </div>
         </div>
     );
 }
@@ -1184,6 +1464,21 @@ function WaitRow({ value, onCommit }: { value: number; onCommit: (v: number) => 
 }
 
 // ── Connection editor (optional condition + wait behind a connection) ───────
+const BRANCH_PATH_OPTIONS: SelectOption[] = [
+    { value: "always", label: "always (right after the wait)" },
+    { value: "opened", label: "if opened the email", group: "Engagement" },
+    { value: "clicked", label: "if clicked a link", group: "Engagement" },
+    { value: "replied", label: "if replied", group: "Engagement" },
+    { value: "not_opened", label: "if didn't open", group: "Engagement" },
+    { value: "not_clicked", label: "if didn't click", group: "Engagement" },
+    { value: "not_replied", label: "if didn't reply", group: "Engagement" },
+    { value: "reply_positive", label: "if replied: positive", group: "Reply intent" },
+    { value: "reply_negative", label: "if replied: negative", group: "Reply intent" },
+    { value: "reply_neutral", label: "if replied: neutral", group: "Reply intent" },
+    { value: "reply_automated", label: "if auto-reply / out of office", group: "Reply intent" },
+    { value: "random", label: "random split" },
+];
+
 function ConnectionEditor({
     source,
     branch,
@@ -1212,11 +1507,16 @@ function ConnectionEditor({
     const c0 = branch.conditions?.[0];
     const [field, setField] = React.useState<string>(c0 ? c0.field : "always");
     const [value, setValue] = React.useState<number>(c0?.value ?? (c0?.field === "random" ? 50 : 3));
+    // Instant-capable branches (reply intent, opened, clicked) fire the moment
+    // the event lands by default; this lets the user opt out so the path routes
+    // at the next step boundary instead.
+    const [instant, setInstant] = React.useState<boolean>(branch.instant !== false);
 
-    const sel =
-        "h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-800 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100";
     const isAlways = field === "always";
     const isRandom = field === "random";
+    const isReply = isReplyBranchField(field as BranchField);
+    const isInstantCapable = isInstantCapableField(field as BranchField);
+    const instantVerb = field === "opened" ? "open" : field === "clicked" ? "click" : "reply";
     const isNegative = field === "not_opened" || field === "not_clicked" || field === "not_replied";
     const target = steps.find((s) => s.id === branch.target_sequence_id);
     const targetLabel = branch.target_sequence_id === null ? "Stop the sequence" : target ? `“${stepName(target)}”` : "—";
@@ -1224,10 +1524,19 @@ function ConnectionEditor({
     const buildConditions = (): BranchCondition[] => {
         if (isAlways) return [];
         if (isRandom) return [{ field: "random", operator: "chance", value }];
+        // Reply-class conditions are checked once, ever (no day window / value).
+        if (isReply) return [{ field: field as BranchField, operator: "ever" }];
         return [{ field: field as BranchField, operator: "within_days", value }];
     };
     const save = (target_sequence_id: string | null) =>
-        onSave({ branch_id: branch.branch_id, target_sequence_id, conditions: buildConditions() });
+        onSave({
+            branch_id: branch.branch_id,
+            target_sequence_id,
+            conditions: buildConditions(),
+            // Persist the instant opt-out for any instant-capable signal (reply
+            // intent, opened, clicked). Other fields can't fire instantly.
+            instant: isInstantCapable ? instant : undefined,
+        });
 
     return (
         <div className="absolute right-3 top-3 z-20 w-[300px] max-w-[calc(100vw-1.5rem)] rounded-md border border-slate-200 bg-white p-3 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]">
@@ -1285,25 +1594,17 @@ function ConnectionEditor({
 
                 <div>
                     <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Take this path</p>
-                    <select
-                        className={sel}
+                    <SelectMenu
+                        className="w-full"
                         value={field}
-                        onChange={(e) => {
-                            const f = e.target.value;
+                        options={BRANCH_PATH_OPTIONS}
+                        onChange={(f) => {
                             setField(f);
                             if (f === "random") setValue((v) => (v >= 1 && v <= 99 ? v : 50));
-                            else if (f !== "always") setValue((v) => (v >= 1 && v <= 60 ? v : 3));
+                            else if (f !== "always" && !isReplyBranchField(f as BranchField))
+                                setValue((v) => (v >= 1 && v <= 60 ? v : 3));
                         }}
-                    >
-                        <option value="always">always (right after the wait)</option>
-                        <option value="opened">if opened the email</option>
-                        <option value="clicked">if clicked a link</option>
-                        <option value="replied">if replied</option>
-                        <option value="not_opened">if didn’t open</option>
-                        <option value="not_clicked">if didn’t click</option>
-                        <option value="not_replied">if didn’t reply</option>
-                        <option value="random">random split</option>
-                    </select>
+                    />
                 </div>
 
                 {isRandom && (
@@ -1312,11 +1613,68 @@ function ConnectionEditor({
                         <span>% of contacts (chosen at random)</span>
                     </div>
                 )}
-                {!isAlways && !isRandom && (
+                {!isAlways && !isRandom && !isReply && (
                     <div className="flex flex-wrap items-center gap-1.5">
                         <span>within</span>
                         <NumberInput value={value} onChange={(v) => setValue(Math.max(1, Math.min(60, Math.round(v) || 1)))} min={1} max={60} className="w-16" align="center" />
                         <span>days</span>
+                    </div>
+                )}
+                {isInstantCapable && (
+                    <div className="space-y-1">
+                        <div
+                            className={`flex items-center gap-2 rounded-md px-2 py-1.5 ring-1 transition-colors ${
+                                instant ? "bg-violet-50 ring-violet-200" : "bg-slate-50 ring-slate-200"
+                            }`}
+                        >
+                            <ZapIcon
+                                className={`w-3.5 h-3.5 shrink-0 transition-colors ${
+                                    instant ? "text-violet-600" : "text-slate-400"
+                                }`}
+                            />
+                            <span
+                                className={`min-w-0 flex-1 text-[11px] font-medium leading-tight transition-colors ${
+                                    instant ? "text-violet-700" : "text-slate-500"
+                                }`}
+                            >
+                                {instant ? `Instant: runs the moment they ${instantVerb}` : "Routes at the next step"}
+                            </span>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={instant}
+                                aria-label="Run instantly"
+                                onClick={() => setInstant((v) => !v)}
+                                title="Toggle whether this path fires the moment it happens or waits for the next step"
+                                className={`relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 ${
+                                    instant ? "bg-violet-600" : "bg-slate-300"
+                                }`}
+                            >
+                                <span
+                                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                                        instant ? "translate-x-[15px]" : "translate-x-[2px]"
+                                    }`}
+                                />
+                            </button>
+                        </div>
+                        {isReply ? (
+                            <>
+                                <p className="text-[10.5px] text-slate-400">
+                                    {field === "reply_automated"
+                                        ? "Routes when the contact's reply is an auto-reply or out-of-office bounce, not a real human reply. Pair this with action steps (create deal, move stage, notify) to react."
+                                        : "Routes when the contact's reply is classified this way. Chain action steps after it, for example create deal then move stage then notify."}
+                                </p>
+                                <p className="text-[10.5px] text-amber-600">
+                                    A reply triggers the reply path of the specific email it answers (matched by the reply's threading headers): the earlier email, not the latest step, and never both. It falls back to the latest step only when the reply can't be threaded. With stop-on-reply on, the sequence also pauses.
+                                </p>
+                            </>
+                        ) : (
+                            <p className="text-[10.5px] text-slate-400">
+                                {instant
+                                    ? `Runs the moment they ${instantVerb}, as long as they ${instantVerb} within the ${value}-day window above. If they don't ${instantVerb} in that time, this path never runs. Chain action steps after it (create deal, move stage, notify).`
+                                    : `Waits up to ${value} day${value === 1 ? "" : "s"} for them to ${instantVerb}, then checks at the next step. If they don't ${instantVerb} in that window, this path never runs.`}
+                            </p>
+                        )}
                     </div>
                 )}
                 {isNegative && (
@@ -1325,17 +1683,20 @@ function ConnectionEditor({
                     </p>
                 )}
 
-                {branch.target_sequence_id !== null && <WaitRow value={waitDays} onCommit={onSetWait} />}
+                {branch.target_sequence_id !== null && !(isInstantCapable && instant) && (
+                    <WaitRow value={waitDays} onCommit={onSetWait} />
+                )}
             </div>
 
             <div className="mt-3 flex items-center gap-2">
                 <button
                     type="button"
                     onClick={onDelete}
-                    title="Delete connection"
-                    className="inline-flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    title="Remove this line and the branch it represents"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-rose-500 transition-colors hover:bg-rose-50 hover:text-rose-600"
                 >
                     <Trash2Icon className="w-3.5 h-3.5" />
+                    Disconnect
                 </button>
                 <button
                     type="button"
@@ -1356,6 +1717,9 @@ function ConnectionEditor({
 const ADD_ACTION_OPTIONS: { type: SequenceActionType; label: string }[] = [
     { type: "add_tag", label: "Add tag" },
     { type: "remove_tag", label: "Remove tag" },
+    { type: "create_task", label: "Create task" },
+    { type: "create_deal", label: "Create deal" },
+    { type: "move_deal_stage", label: "Move deal stage" },
     { type: "unsubscribe", label: "Unsubscribe" },
     { type: "notify", label: "Notify (webhook)" },
 ];
@@ -1439,6 +1803,15 @@ function AddNodeMenu({
 
 // defaultActionFor returns a fresh action config for a newly-picked type.
 function defaultActionFor(type: SequenceActionType): SequenceAction {
+    if (type === "create_task") {
+        return { type, task_priority: "medium", task_due_offset_days: 1 };
+    }
+    if (type === "create_deal") {
+        return { type, deal_currency: "USD", deal_name: "{{.Company}} ({{.FirstName}})" };
+    }
+    if (type === "move_deal_stage") {
+        return { type };
+    }
     return { type };
 }
 
@@ -1595,6 +1968,136 @@ function ActionEditor({
                 </p>
             )}
 
+            {action.type === "create_task" && (
+                <div className="space-y-4">
+                    <div>
+                        <Label>Task title</Label>
+                        <TextInput
+                            value={action.task_title ?? ""}
+                            onChange={(v) => setAction((a) => ({ ...a, task_title: v }))}
+                            placeholder="e.g. Call this lead"
+                            className="w-full max-w-[320px]"
+                        />
+                        <p className="mt-1.5 text-[11px] text-slate-400">
+                            Left blank, it defaults to “Follow up: {"{contact}"}”.
+                        </p>
+                    </div>
+                    <div>
+                        <Label>Task type</Label>
+                        <TaskTypePicker
+                            value={action.task_type ?? ""}
+                            onChange={(name) => setAction((a) => ({ ...a, task_type: name }))}
+                            className="max-w-[280px]"
+                        />
+                    </div>
+                    <div className="flex flex-wrap items-end gap-4">
+                        <div>
+                            <Label>Priority</Label>
+                            <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5">
+                                {(["low", "medium", "high", "urgent"] as const).map((p) => (
+                                    <button
+                                        key={p}
+                                        type="button"
+                                        onClick={() => setAction((a) => ({ ...a, task_priority: p }))}
+                                        className={`h-7 px-2 rounded text-[11px] font-medium capitalize transition-colors ${
+                                            (action.task_priority ?? "medium") === p
+                                                ? "bg-slate-900 text-white"
+                                                : "text-slate-500 hover:text-slate-900"
+                                        }`}
+                                    >
+                                        {p}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <Label>Due in (days)</Label>
+                            <NumberInput
+                                value={action.task_due_offset_days ?? 1}
+                                onChange={(n) => setAction((a) => ({ ...a, task_due_offset_days: n }))}
+                                min={0}
+                                max={365}
+                                className="w-28"
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <Label>Assign to</Label>
+                        <AssigneePicker
+                            value={action.task_assigned_to ?? null}
+                            onChange={(id) => setAction((a) => ({ ...a, task_assigned_to: id }))}
+                        />
+                        <p className="mt-1.5 text-[11px] text-slate-400">Unassigned falls back to the campaign owner.</p>
+                    </div>
+                </div>
+            )}
+
+            {(action.type === "create_deal" || action.type === "move_deal_stage") && (
+                <div className="space-y-4">
+                    <div>
+                        <Label>{action.type === "create_deal" ? "Create the deal in" : "Move the deal to"}</Label>
+                        <DealStagePicker
+                            pipelineId={action.deal_pipeline_id}
+                            stageId={action.deal_stage_id}
+                            onChange={({ pipelineId, stageId }) =>
+                                setAction((a) => ({ ...a, deal_pipeline_id: pipelineId, deal_stage_id: stageId }))
+                            }
+                        />
+                        {action.type === "move_deal_stage" && (
+                            <p className="mt-1.5 text-[11px] text-slate-400">
+                                Moves the contact's most recent open deal in this pipeline to this stage. If they have no
+                                open deal here, nothing happens.
+                            </p>
+                        )}
+                    </div>
+
+                    {action.type === "create_deal" && (
+                        <>
+                            <div>
+                                <div className="mb-1.5 flex items-center justify-between gap-2">
+                                    <Label className="mb-0">Deal name</Label>
+                                    <DealNameVariableMenu
+                                        onPick={(token) =>
+                                            setAction((a) => ({ ...a, deal_name: (a.deal_name ?? "") + token }))
+                                        }
+                                    />
+                                </div>
+                                <TextInput
+                                    value={action.deal_name ?? ""}
+                                    onChange={(v) => setAction((a) => ({ ...a, deal_name: v }))}
+                                    placeholder="{{.Company}} ({{.FirstName}})"
+                                    className="w-full max-w-[320px]"
+                                />
+                                <p className="mt-1.5 text-[11px] text-slate-400">
+                                    Supports the same {"{{.FirstName}}"} / {"{{.Company}}"} variables as your email copy.
+                                </p>
+                            </div>
+                            <div className="flex flex-wrap items-end gap-4">
+                                <div>
+                                    <Label>Value (optional)</Label>
+                                    <NumberInput
+                                        value={action.deal_value ?? 0}
+                                        onChange={(n) =>
+                                            setAction((a) => ({ ...a, deal_value: n > 0 ? n : undefined }))
+                                        }
+                                        min={0}
+                                        max={1_000_000_000}
+                                        className="w-36"
+                                    />
+                                </div>
+                                <div>
+                                    <Label>Currency</Label>
+                                    <CurrencyPicker
+                                        value={action.deal_currency ?? "USD"}
+                                        onChange={(c) => setAction((a) => ({ ...a, deal_currency: c }))}
+                                    />
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
+            )}
+
             <div className="flex items-center justify-end pt-1">
                 <button
                     type="button"
@@ -1605,6 +2108,146 @@ function ActionEditor({
                     {saving ? "Saving…" : "Save action"}
                 </button>
             </div>
+        </div>
+    );
+}
+
+// AssigneePicker — choose the teammate a campaign-created task is assigned to.
+// `null` means "campaign owner" (the executor's fallback). Values are user ids.
+function AssigneePicker({
+    value,
+    onChange,
+}: {
+    value: string | null;
+    onChange: (id: string | null) => void;
+}) {
+    const { data: members } = useMembers();
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef<HTMLDivElement>(null);
+    useClickOutside(ref, () => setOpen(false));
+    const list = members ?? [];
+    const selected = list.find((m) => m.user_id === value);
+    const label = value === null ? "Campaign owner" : (selected?.email ?? "Unknown member");
+    return (
+        <div ref={ref} className="relative inline-flex">
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                className="h-7 min-w-[200px] px-2.5 rounded-md border border-slate-200 hover:border-slate-300 bg-white text-[12px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1.5 transition-colors"
+            >
+                <span className="truncate flex-1 text-left">{label}</span>
+                <ChevronDownIcon className="w-3 h-3 text-slate-400" />
+            </button>
+            {open && (
+                <div className="absolute left-0 top-full z-30 mt-1 w-60 max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            onChange(null);
+                            setOpen(false);
+                        }}
+                        className={`flex w-full items-center px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-slate-100 ${
+                            value === null ? "font-medium text-slate-900" : "text-slate-700"
+                        }`}
+                    >
+                        Campaign owner
+                    </button>
+                    {list.map((m) => (
+                        <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                                onChange(m.user_id);
+                                setOpen(false);
+                            }}
+                            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                            <span className="truncate flex-1">{m.email}</span>
+                            <span className="text-[10px] text-slate-400 capitalize">{m.role}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// DealNameVariableMenu — a compact "insert variable" trigger for the deal-name
+// field, mirroring the VariableMenu affordance the email subject/body use.
+// Appends a {{.Token}} into the deal name so it can personalize per contact.
+function DealNameVariableMenu({ onPick }: { onPick: (token: string) => void }) {
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef<HTMLDivElement>(null);
+    useClickOutside(ref, () => setOpen(false));
+    return (
+        <div ref={ref} className="relative">
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                title="Insert a personalization variable"
+                className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            >
+                <BracesIcon className="w-3.5 h-3.5" />
+                <ChevronDownIcon className="w-3 h-3" />
+            </button>
+            {open && (
+                <div className="absolute right-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]">
+                    {DEAL_NAME_VARIABLES.map((v) => (
+                        <button
+                            key={v}
+                            type="button"
+                            onClick={() => {
+                                onPick(v);
+                                setOpen(false);
+                            }}
+                            className="flex w-full items-center px-2.5 py-1.5 text-left font-mono text-[11.5px] text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                            {v}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// CurrencyPicker — a small themed dropdown for the deal currency (ISO code).
+// Defaults to USD; the value persisted is the bare ISO code (e.g. "USD").
+const DEAL_CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "JPY", "CHF", "SEK", "INR", "BRL"];
+
+function CurrencyPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef<HTMLDivElement>(null);
+    useClickOutside(ref, () => setOpen(false));
+    return (
+        <div ref={ref} className="relative inline-flex">
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                className="inline-flex h-7 w-24 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-900"
+            >
+                <span className="flex-1 truncate text-left">{value || "USD"}</span>
+                <ChevronDownIcon className="w-3 h-3 text-slate-400" />
+            </button>
+            {open && (
+                <div className="absolute left-0 top-full z-30 mt-1 max-h-56 w-24 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]">
+                    {DEAL_CURRENCIES.map((c) => (
+                        <button
+                            key={c}
+                            type="button"
+                            onClick={() => {
+                                onChange(c);
+                                setOpen(false);
+                            }}
+                            className={`flex w-full items-center px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-slate-100 ${
+                                c === value ? "font-medium text-slate-900" : "text-slate-700"
+                            }`}
+                        >
+                            {c}
+                        </button>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

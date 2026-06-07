@@ -8,8 +8,10 @@ export default function useCreateContactNote() {
         mutationFn: ({ contactId, data }: { contactId: string; data: { content: string } }) =>
             createContactNote(contactId, data),
         onSuccess: (_data, variables) => {
+            // Contact-scoped prefix so the notes list AND the 360 timeline /
+            // activity feed both reflect the new note.
             queryClient.invalidateQueries({
-                queryKey: ["contacts", variables.contactId, "notes"],
+                queryKey: ["contacts", variables.contactId],
             })
         }
     })

@@ -29,6 +29,11 @@ export default function useDeleteContacts() {
                     queryKey: ["contacts", id]
                 });
             });
+            // The contacts table reads ["contacts","list",...]; refresh it so the
+            // deleted rows disappear without a manual reload.
+            queryClient.invalidateQueries({
+                queryKey: ["contacts", "list"]
+            });
         }
     })
 }

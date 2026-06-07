@@ -39,6 +39,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/pkg/argon2"
 	"github.com/warmbly/warmbly/internal/seed"
 )
@@ -76,6 +77,14 @@ func main() {
 		log.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
+
+	// Apply embedded migrations before seeding. `make seed` is documented to
+	// assume migrations are already applied, but running them here makes it
+	// robust standalone: without it, new tables (e.g. crm_task_types) are
+	// missing and the seed aborts partway, which looks like "nothing seeded".
+	if err := db.RunMigrations(dsn); err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
 
 	if err := seedBaseline(ctx, pool); err != nil {
 		log.Fatalf("baseline: %v", err)
@@ -138,6 +147,24 @@ func seedBaseline(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("dev pool join %s: %w", a.email, err)
 		}
 	}
+	// Dev-org contacts that match the unibox senders below, so opening those
+	// threads resolves to a real contact in the CRM panel instead of
+	// "Not a known contact". The mailer-daemon bounce stays a non-contact.
+	devContacts := []struct {
+		id             uuid.UUID
+		first, last    string
+		email, company string
+	}{
+		{uuid.MustParse("66666666-0000-0000-0000-0000dddc0001"), "Aiden", "Park", "aiden.park@northwind.test", "Northwind"},
+		{uuid.MustParse("66666666-0000-0000-0000-0000dddc0002"), "Beth", "Chen", "beth.chen@initech.test", "Initech"},
+		{uuid.MustParse("66666666-0000-0000-0000-0000dddc0003"), "Carlos", "Diaz", "carlos.diaz@piedpiper.test", "Pied Piper"},
+	}
+	for _, c := range devContacts {
+		if err := upsertContact(ctx, pool, c.id, userDev, orgDev, c.first, c.last, c.email, c.company, true); err != nil {
+			return fmt.Errorf("dev contact %s: %w", c.email, err)
+		}
+	}
+
 	if err := seedLegacyUnibox(ctx, pool, []legacyUniboxEmail{
 		{
 			id: uuid.MustParse("77777777-0000-0000-0000-000000000101"), userID: userDev,

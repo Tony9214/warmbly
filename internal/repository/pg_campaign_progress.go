@@ -22,6 +22,12 @@ type CampaignContactProgress struct {
 	RepliedAt    *time.Time
 	BouncedAt    *time.Time
 	ComplainedAt *time.Time
+	// ReplyClass is the layered classifier verdict for the contact's reply
+	// (positive | negative | neutral | auto_reply | out_of_office | unsubscribe |
+	// unknown; "" when no reply was classified). Read by the reply_* branch
+	// conditions. RepliedAt is set ONLY for human replies, so an automated reply
+	// can carry a ReplyClass here without ever tripping "replied"/stop_on_reply.
+	ReplyClass string
 }
 
 // CampaignProgress represents overall campaign progress
@@ -69,6 +75,33 @@ type CampaignProgressRepository interface {
 	RecordEmailReplied(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) error
 	RecordEmailBounced(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) error
 	RecordEmailComplained(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) error
+
+	// RecordReplyClassification stores the layered classifier verdict
+	// (class/confidence/source) for the contact's reply on the given step. This
+	// is the data the reply_* branch conditions read. It does NOT stamp
+	// replied_at — only a HUMAN reply should set replied_at (so automated replies
+	// never trip stop_on_reply / the "replied" condition). Callers stamp
+	// replied_at separately via RecordEmailReplied for human replies only.
+	RecordReplyClassification(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID, class, source string, confidence float64) error
+	// GetLatestReplyClass returns the most-recent classified reply class for a
+	// contact in a campaign ("" when none). Convenience getter for the branch
+	// evaluator / callers that need only the class.
+	GetLatestReplyClass(ctx context.Context, contactID, campaignID uuid.UUID) (string, error)
+
+	// ClaimInstantFire atomically claims the one-time right to run the instant
+	// action chain for the contact's current step FOR A SINGLE EVENT KIND
+	// ("reply" / "open" / "click"). It appends eventKind to the instant_fired
+	// array only when that kind is not already present and reports whether THIS
+	// call won the claim (true) or that kind had already fired (false). This is
+	// the per-(step, event) exactly-once gate behind instant automations: a
+	// redelivered event of the same kind (or an auto-reply followed by a human
+	// reply on the same step) sees the kind in the array and is a no-op, while a
+	// DIFFERENT kind on the same step (a contact who opens AND clicks AND replies)
+	// is still free to fire its own chain exactly once. The progress row already
+	// exists at call time (RecordReplyClassification / RecordEmailOpened /
+	// RecordEmailClicked upsert/update it just before), so a missing row
+	// (claimed == false) safely means "nothing to fire".
+	ClaimInstantFire(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID, eventKind string) (bool, error)
 
 	// Query methods
 	GetCampaignProgress(ctx context.Context, campaignID uuid.UUID) (*CampaignProgress, error)
@@ -186,6 +219,64 @@ func (r *campaignProgressRepository) RecordEmailComplained(ctx context.Context, 
 	return err
 }
 
+// RecordReplyClassification persists the classifier verdict on the progress row.
+// It upserts so the classification lands even if the reply arrives before the
+// step's progress row is materialized (rare, but threading can race). It never
+// touches replied_at — human-vs-automated gating lives in the caller, which
+// stamps replied_at via RecordEmailReplied only for human replies.
+func (r *campaignProgressRepository) RecordReplyClassification(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID, class, source string, confidence float64) error {
+	query := `
+		INSERT INTO campaign_contact_progress (campaign_id, contact_id, sequence_id, reply_class, reply_confidence, reply_source)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (campaign_id, contact_id, sequence_id)
+		DO UPDATE SET reply_class = EXCLUDED.reply_class,
+		              reply_confidence = EXCLUDED.reply_confidence,
+		              reply_source = EXCLUDED.reply_source
+	`
+	_, err := r.db.Exec(ctx, query, campaignID, contactID, sequenceID, class, confidence, source)
+	return err
+}
+
+// GetLatestReplyClass returns the most-recent non-empty reply_class for a
+// contact in a campaign, or "" when none has been classified.
+func (r *campaignProgressRepository) GetLatestReplyClass(ctx context.Context, contactID, campaignID uuid.UUID) (string, error) {
+	query := `
+		SELECT reply_class
+		FROM campaign_contact_progress
+		WHERE contact_id = $1 AND campaign_id = $2 AND reply_class <> ''
+		ORDER BY COALESCE(sent_at, '-infinity'::timestamptz) DESC
+		LIMIT 1
+	`
+	var class string
+	err := r.db.QueryRow(ctx, query, contactID, campaignID).Scan(&class)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return class, err
+}
+
+// ClaimInstantFire appends eventKind to instant_fired exactly once per (campaign,
+// contact, step, eventKind). The conditional NOT ($4 = ANY(instant_fired)) makes
+// the claim atomic under concurrent events of the same kind: at most one UPDATE
+// affects a row for a given kind, so RowsAffected() == 1 identifies the single
+// caller that may run that kind's chain. Different kinds on the same step append
+// independently, so an open, a click, and a reply on one step each fire once.
+func (r *campaignProgressRepository) ClaimInstantFire(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID, eventKind string) (bool, error) {
+	query := `
+		UPDATE campaign_contact_progress
+		SET instant_fired = array_append(instant_fired, $4)
+		WHERE campaign_id = $1
+		  AND contact_id = $2
+		  AND sequence_id = $3
+		  AND NOT ($4 = ANY(instant_fired))
+	`
+	tag, err := r.db.Exec(ctx, query, campaignID, contactID, sequenceID, eventKind)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // GetCampaignProgress retrieves overall campaign progress statistics
 func (r *campaignProgressRepository) GetCampaignProgress(ctx context.Context, campaignID uuid.UUID) (*CampaignProgress, error) {
 	query := `
@@ -262,7 +353,7 @@ func (r *campaignProgressRepository) GetCampaignRollingRates(ctx context.Context
 // GetContactProgress retrieves progress for a specific contact in a campaign
 func (r *campaignProgressRepository) GetContactProgress(ctx context.Context, campaignID, contactID uuid.UUID) ([]CampaignContactProgress, error) {
 	query := `
-		SELECT campaign_id, contact_id, sequence_id, sent_at, opened_at, clicked_at, replied_at, bounced_at, complained_at
+		SELECT campaign_id, contact_id, sequence_id, sent_at, opened_at, clicked_at, replied_at, bounced_at, complained_at, COALESCE(reply_class, '')
 		FROM campaign_contact_progress
 		WHERE campaign_id = $1 AND contact_id = $2
 		ORDER BY sent_at ASC
@@ -287,6 +378,7 @@ func (r *campaignProgressRepository) GetContactProgress(ctx context.Context, cam
 			&progress.RepliedAt,
 			&progress.BouncedAt,
 			&progress.ComplainedAt,
+			&progress.ReplyClass,
 		)
 		if err != nil {
 			return nil, err
@@ -419,6 +511,70 @@ func (r *campaignProgressRepository) FindNextRoutedPair(ctx context.Context, cam
 	entry := steps[0].id
 	now := time.Now()
 
+	// Route-aware stop_on_reply. Rather than blanket-excluding every contact who
+	// has replied (which also kills the reply branch's OWN follow-up steps), a
+	// replied contact keeps moving ONLY while their next routed step is part of the
+	// REPLY FLOW: the subgraph downstream of a reply branch that is NOT also part
+	// of the cold sequence. The normal / fall-through cold sequence stops; the
+	// reply branch's path (its actions AND any follow-up emails) runs to
+	// completion. Compute the reply-flow step set once and load the flag.
+	var stopOnReply bool
+	if serr := r.db.QueryRow(ctx, `SELECT stop_on_reply FROM campaigns WHERE id = $1`, campaignID).Scan(&stopOnReply); serr != nil {
+		return nil, nil, serr
+	}
+	replyFlowSteps := map[uuid.UUID]bool{}
+	if stopOnReply {
+		// bfs walks a directed reachability closure from `seeds`, following the
+		// targets selected by `follow`, and records every visited step into `into`.
+		bfs := func(seeds []uuid.UUID, into map[uuid.UUID]bool, follow func(b *models.Branch) bool) {
+			queue := append([]uuid.UUID(nil), seeds...)
+			for _, s := range seeds {
+				into[s] = true
+			}
+			for len(queue) > 0 {
+				cur := queue[0]
+				queue = queue[1:]
+				idx, ok := idxByID[cur]
+				if !ok {
+					continue
+				}
+				for j := range steps[idx].bc.Branches {
+					b := &steps[idx].bc.Branches[j]
+					if b.TargetSequenceID == nil || into[*b.TargetSequenceID] || !follow(b) {
+						continue
+					}
+					into[*b.TargetSequenceID] = true
+					queue = append(queue, *b.TargetSequenceID)
+				}
+			}
+		}
+
+		// 1. Cold trunk: every step a NON-replier reaches from the entry, i.e.
+		//    following every branch EXCEPT the ones that route on a positive reply.
+		//    A step that also sits here (a reply branch merged back into the cold
+		//    sequence) is NOT reply flow — a replier must stop when they reach it.
+		coldReachable := map[uuid.UUID]bool{}
+		bfs([]uuid.UUID{entry}, coldReachable, func(b *models.Branch) bool {
+			return !branchHasPositiveReplyCondition(b)
+		})
+
+		// 2. Reply flow: everything reachable from a positive-reply branch target
+		//    (following ALL onward branches, so internal reply-flow branching is
+		//    kept), MINUS the cold trunk.
+		var seeds []uuid.UUID
+		for i := range steps {
+			for j := range steps[i].bc.Branches {
+				b := &steps[i].bc.Branches[j]
+				if b.TargetSequenceID != nil && branchHasPositiveReplyCondition(b) && !coldReachable[*b.TargetSequenceID] {
+					seeds = append(seeds, *b.TargetSequenceID)
+				}
+			}
+		}
+		bfs(seeds, replyFlowSteps, func(b *models.Branch) bool {
+			return b.TargetSequenceID != nil && !coldReachable[*b.TargetSequenceID]
+		})
+	}
+
 	// routeResult is the outcome of routing a contact out of their current step:
 	// send `target`, fully `stop`, or `wait` until a condition window elapses.
 	type routeResult struct {
@@ -468,6 +624,37 @@ func (r *campaignProgressRepository) FindNextRoutedPair(ctx context.Context, cam
 		return routeResult{stop: true}
 	}
 
+	// routeReplyOnly is the routing used for a contact who HAS REPLIED but is still
+	// on the cold trunk (stop_on_reply on). It considers ONLY positive-reply
+	// branches that lead into the reply flow, giving them priority regardless of
+	// declared order, and never waits on a cold window. The first such branch that
+	// matches right now routes the contact into the reply flow; anything else means
+	// "no reply handling here for this reply" -> STOP the cold sequence. This is
+	// what lets a non-instant reply branch fire even when an engagement branch is
+	// declared ahead of it, and stops a replier instead of deferring on a cold
+	// "did not open within N days" window forever.
+	routeReplyOnly := func(fromID uuid.UUID, prog *CampaignContactProgress, sentAt time.Time) routeResult {
+		idx, ok := idxByID[fromID]
+		if !ok {
+			return routeResult{stop: true}
+		}
+		for i := range steps[idx].bc.Branches {
+			b := &steps[idx].bc.Branches[i]
+			if b.TargetSequenceID == nil || !branchHasPositiveReplyCondition(b) || !replyFlowSteps[*b.TargetSequenceID] {
+				continue
+			}
+			if st, _ := evaluateBranchState(b, prog, sentAt, now); st != BranchMatch {
+				continue
+			}
+			if _, live := idxByID[*b.TargetSequenceID]; !live {
+				continue
+			}
+			t := *b.TargetSequenceID
+			return routeResult{target: &t}
+		}
+		return routeResult{stop: true}
+	}
+
 	// 2. Ordered candidate contacts + their last-sent step (with engagement) + sent set.
 	var contactOrder string
 	switch orderBy {
@@ -498,12 +685,16 @@ func (r *campaignProgressRepository) FindNextRoutedPair(ctx context.Context, cam
 
 	query := `
 		SELECT cl.contact_id,
-		       lp.sequence_id, lp.sent_at, lp.opened_at, lp.clicked_at, lp.replied_at,
-		       COALESCE(ss.ids, '{}') AS sent_ids
+		       lp.sequence_id, lp.sent_at, lp.opened_at, lp.clicked_at, lp.replied_at, COALESCE(lp.reply_class, ''),
+		       COALESCE(ss.ids, '{}') AS sent_ids,
+		       EXISTS (
+		         SELECT 1 FROM campaign_contact_progress rp
+		         WHERE rp.campaign_id = $1 AND rp.contact_id = cl.contact_id AND rp.replied_at IS NOT NULL
+		       ) AS has_replied
 		FROM campaign_leads cl
 		JOIN contacts c ON c.id = cl.contact_id
 		LEFT JOIN LATERAL (
-			SELECT sequence_id, sent_at, opened_at, clicked_at, replied_at
+			SELECT sequence_id, sent_at, opened_at, clicked_at, replied_at, reply_class
 			FROM campaign_contact_progress p
 			WHERE p.campaign_id = $1 AND p.contact_id = cl.contact_id AND p.sent_at IS NOT NULL
 			ORDER BY p.sent_at DESC LIMIT 1
@@ -517,14 +708,6 @@ func (r *campaignProgressRepository) FindNextRoutedPair(ctx context.Context, cam
 		  AND NOT EXISTS (
 		    SELECT 1 FROM campaign_contact_progress b
 		    WHERE b.contact_id = cl.contact_id AND b.bounced_at IS NOT NULL
-		  )
-		  AND NOT EXISTS (
-		    -- Global "stop on reply": when the campaign has it on, a contact who
-		    -- has already replied never surfaces as a candidate again.
-		    SELECT 1 FROM campaigns camp_sr
-		    JOIN campaign_contact_progress rp
-		      ON rp.contact_id = cl.contact_id AND rp.campaign_id = $1
-		    WHERE camp_sr.id = $1 AND camp_sr.stop_on_reply = true AND rp.replied_at IS NOT NULL
 		  )
 		  AND NOT EXISTS (
 		    SELECT 1 FROM suppressed_recipients sr
@@ -546,8 +729,10 @@ func (r *campaignProgressRepository) FindNextRoutedPair(ctx context.Context, cam
 		var contactID uuid.UUID
 		var lastSeq *uuid.UUID
 		var sentAt, openedAt, clickedAt, repliedAt *time.Time
+		var replyClass string
 		var sentIDs []uuid.UUID
-		if serr := rows.Scan(&contactID, &lastSeq, &sentAt, &openedAt, &clickedAt, &repliedAt, &sentIDs); serr != nil {
+		var hasReplied bool
+		if serr := rows.Scan(&contactID, &lastSeq, &sentAt, &openedAt, &clickedAt, &repliedAt, &replyClass, &sentIDs, &hasReplied); serr != nil {
 			return nil, nil, serr
 		}
 
@@ -563,12 +748,29 @@ func (r *campaignProgressRepository) FindNextRoutedPair(ctx context.Context, cam
 			prog := &CampaignContactProgress{
 				CampaignID: campaignID, ContactID: contactID, SequenceID: *lastSeq,
 				SentAt: sentAt, OpenedAt: openedAt, ClickedAt: clickedAt, RepliedAt: repliedAt,
+				ReplyClass: replyClass,
 			}
 			sa := time.Time{}
 			if sentAt != nil {
 				sa = *sentAt
 			}
 			res = routeNext(*lastSeq, prog, sa)
+
+			// Route-aware stop_on_reply for a contact who has replied:
+			//   - still on the cold trunk (lastSeq not in the reply flow): they may
+			//     only ENTER the reply flow via a positive-reply branch. Any cold
+			//     route, an undecided cold window, or a stop ends them here — no cold
+			//     sends and no deferring on a cold window.
+			//   - already inside the reply flow: keep the reply flow's own routing
+			//     (its waits are legitimate), but if it would route back out into the
+			//     cold sequence, stop instead.
+			if stopOnReply && hasReplied {
+				if !replyFlowSteps[*lastSeq] {
+					res = routeReplyOnly(*lastSeq, prog, sa)
+				} else if res.target != nil && !replyFlowSteps[*res.target] {
+					res = routeResult{stop: true}
+				}
+			}
 		}
 
 		if res.wait != nil {
@@ -580,7 +782,7 @@ func (r *campaignProgressRepository) FindNextRoutedPair(ctx context.Context, cam
 			continue
 		}
 		if res.stop || res.target == nil {
-			continue // reached the end / a STOP
+			continue // reached the end / a STOP (incl. a replied contact stopped above)
 		}
 		// Loop guard: never re-send a step the contact already received.
 		already := false
@@ -601,4 +803,19 @@ func (r *campaignProgressRepository) FindNextRoutedPair(ctx context.Context, cam
 	// Nobody sendable now. If contacts are waiting on a window, hand back the
 	// soonest re-check time so the scheduler defers rather than completing.
 	return nil, earliestWait, nil
+}
+
+// branchHasPositiveReplyCondition reports whether a branch is a "reply branch":
+// one that routes on a POSITIVE reply signal (a human reply, or a classified
+// reply intent). Its target seeds the reply flow used by route-aware
+// stop_on_reply. not_replied is deliberately excluded — it is the "did NOT
+// reply" continuation of the normal cold sequence, not the reply flow.
+func branchHasPositiveReplyCondition(b *models.Branch) bool {
+	for i := range b.Conditions {
+		switch b.Conditions[i].Field {
+		case "replied", "reply_positive", "reply_negative", "reply_neutral", "reply_automated":
+			return true
+		}
+	}
+	return false
 }

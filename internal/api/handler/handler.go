@@ -30,6 +30,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/socket"
 	"github.com/warmbly/warmbly/internal/app/stripe"
 	"github.com/warmbly/warmbly/internal/app/subscription"
+	"github.com/warmbly/warmbly/internal/app/team"
 	"github.com/warmbly/warmbly/internal/app/template"
 	"github.com/warmbly/warmbly/internal/app/token"
 	"github.com/warmbly/warmbly/internal/app/trial"
@@ -90,6 +91,9 @@ type Handler struct {
 
 	// CRM
 	CRMService crm.CRMService
+
+	// Teams
+	TeamService team.TeamService
 
 	// Email send & templates
 	TemplateService  template.TemplateService

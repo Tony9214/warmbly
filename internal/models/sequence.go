@@ -42,7 +42,7 @@ type Sequence struct {
 // ActionConfig is the persisted config for a non-email (action/wait) node. Type
 // is the switch the task executes on; the remaining fields are type-scoped.
 type ActionConfig struct {
-	Type string `json:"type"` // wait | add_tag | remove_tag | unsubscribe | notify | end
+	Type string `json:"type"` // wait | add_tag | remove_tag | unsubscribe | notify | create_task | create_deal | move_deal_stage | end
 
 	// wait
 	WaitMinutes *int `json:"wait_minutes,omitempty"`
@@ -53,6 +53,28 @@ type ActionConfig struct {
 	// notify — webhook / integration fan-out
 	NotifyEvent string         `json:"notify_event,omitempty"`
 	NotifyData  map[string]any `json:"notify_data,omitempty"`
+
+	// create_task — open a CRM task for the lead when they reach this step
+	// (e.g. a Call task). TaskAssignedTo is the teammate chosen on the step;
+	// when nil the task falls back to the campaign owner.
+	TaskTitle         string     `json:"task_title,omitempty"`
+	TaskType          string     `json:"task_type,omitempty"`     // general | call | email | meeting
+	TaskPriority      string     `json:"task_priority,omitempty"` // low | medium | high | urgent
+	TaskAssignedTo    *uuid.UUID `json:"task_assigned_to,omitempty"`
+	TaskDueOffsetDays *int       `json:"task_due_offset_days,omitempty"` // due N days after the step fires
+
+	// create_deal / move_deal_stage — CRM deal automation off a reply branch.
+	//   create_deal: open a new deal for the contact in DealPipelineID/DealStageID.
+	//   move_deal_stage: move the contact's most-recent OPEN deal in
+	//     DealPipelineID to DealStageID; a contact with no open deal in that
+	//     pipeline is a logged no-op (not an error).
+	// DealName supports the same {{first_name}}/{{company}} templating other
+	// campaign copy uses. DealValue is optional; DealCurrency defaults to "USD".
+	DealPipelineID *uuid.UUID `json:"deal_pipeline_id,omitempty"`
+	DealStageID    *uuid.UUID `json:"deal_stage_id,omitempty"`
+	DealName       string     `json:"deal_name,omitempty"`
+	DealValue      *float64   `json:"deal_value,omitempty"`
+	DealCurrency   string     `json:"deal_currency,omitempty"`
 }
 
 type UpdateSequence struct {
@@ -102,17 +124,35 @@ type Branch struct {
 	// Conditions are ANDed together — every condition must hold for the branch
 	// to match. An empty list is an unconditional/catch-all branch ("otherwise").
 	Conditions []BranchCondition `json:"conditions,omitempty"`
+	// Instant, for a reply_* branch, controls whether its action chain fires the
+	// MOMENT the contact replies. nil or true = instant (the default); false =
+	// opt out, leaving the branch to route at the normal step boundary like an
+	// engagement branch. Ignored for non-reply branches. Stored in the
+	// sequences.conditions jsonb, so no migration is needed.
+	Instant *bool `json:"instant,omitempty"`
 }
 
 // BranchCondition is a single engagement predicate evaluated against the
 // contact's campaign_contact_progress row for the current step.
 type BranchCondition struct {
-	// Field is the engagement signal: "opened" | "clicked" | "replied" and
-	// their negations "not_opened" | "not_clicked" | "not_replied".
+	// Field is the engagement signal:
+	//   "opened" | "clicked" | "replied" and their negations
+	//   "not_opened" | "not_clicked" | "not_replied",
+	// plus the reply-classification fields (operator "ever", no Value), read
+	// from campaign_contact_progress.reply_class:
+	//   "reply_positive"  — reply_class is positive
+	//   "reply_negative"  — reply_class is negative
+	//   "reply_neutral"   — reply_class is neutral
+	//   "reply_automated" — reply_class is auto_reply OR out_of_office
+	// IMPORTANT: the plain "replied"/"not_replied" fields IGNORE automated
+	// replies (auto_reply / out_of_office) — only a human reply sets replied_at,
+	// so a vacation autoresponder never trips "replied" or stop_on_reply. Use the
+	// reply_automated field to branch specifically on an automated reply.
 	Field string `json:"field"`
-	// Operator is the comparison. Currently "within_days" (the signal occurred
-	// in the last Value days) and "ever" (the signal occurred at all). For the
-	// not_* fields the meaning inverts (did NOT happen within / ever).
+	// Operator is the comparison. "within_days" (the signal occurred in the last
+	// Value days) and "ever" (the signal occurred at all). For the not_* fields
+	// the meaning inverts (did NOT happen within / ever). The reply_* fields take
+	// operator "ever" (no Value).
 	Operator string `json:"operator"`
 	// Value is the day window for "within_days". nil for operators that take no
 	// argument (e.g. "ever").

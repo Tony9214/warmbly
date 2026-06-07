@@ -15,6 +15,10 @@ export default interface Deal {
     lost_at?: string;
     lost_reason?: string;
     assigned_to?: string;
+    // Attribution: the campaign + sender mailbox that produced the originating
+    // reply. Nullable; editable. Lets won revenue trace back to outreach.
+    campaign_id?: string;
+    source_mailbox_id?: string;
     created_at: string;
     updated_at: string;
 
@@ -32,6 +36,7 @@ export default interface Deal {
         color: string;
         position: number;
     };
+    campaign_name?: string;
 }
 
 export interface DealsResult {
