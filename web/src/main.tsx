@@ -32,6 +32,7 @@ import ProfileSettingsPage from './app/app/settings/profile/page';
 import NotificationsSettingsPage from './app/app/settings/notifications/page';
 import SecuritySettingsPage from './app/app/settings/security/page';
 import MembersSettingsPage from './app/app/settings/members/page';
+import TeamsSettingsPage from './app/app/settings/teams/page';
 import WorkspaceSettingsPage from './app/app/settings/workspace/page';
 import DangerSettingsPage from './app/app/settings/danger/page';
 import BillingSettingsPage from './app/app/settings/billing/page';
@@ -276,6 +277,7 @@ const router = createBrowserRouter([
               { path: "notifications", element: <NotificationsSettingsPage /> },
               { path: "security", element: <SecuritySettingsPage /> },
               { path: "members", element: <MembersSettingsPage /> },
+              { path: "teams", element: <TeamsSettingsPage /> },
               { path: "workspace", element: <WorkspaceSettingsPage /> },
               { path: "billing", element: <BillingSettingsPage /> },
               { path: "limits", element: <LimitsSettingsPage /> },
