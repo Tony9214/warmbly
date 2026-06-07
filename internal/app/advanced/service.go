@@ -60,6 +60,19 @@ type Service interface {
 	// task_created activity on the contact.
 	CreateContactTask(ctx context.Context, orgID, createdBy uuid.UUID, data *models.CreateCRMTask) (*models.CRMTask, *errx.Error)
 
+	// CreateContactDeal opens a CRM deal for a contact, used by the campaign
+	// "create_deal" action node (typically off a positive reply branch). data
+	// carries pipeline/stage/name/value/currency; CampaignID is stamped for deal
+	// attribution. Records a deal-created activity on the contact.
+	CreateContactDeal(ctx context.Context, orgID uuid.UUID, createdBy uuid.UUID, data *models.CreateDeal) (*models.Deal, *errx.Error)
+
+	// MoveContactDealStage moves the contact's most-recent OPEN deal in
+	// pipelineID to stageID, used by the campaign "move_deal_stage" action node.
+	// When the contact has no open deal in that pipeline it is a no-op (returns
+	// nil, nil) rather than an error, so a chained reply automation doesn't fail
+	// just because a deal hasn't been created yet.
+	MoveContactDealStage(ctx context.Context, orgID, contactID, pipelineID, stageID uuid.UUID) (*models.Deal, *errx.Error)
+
 	// WireDispatcher attaches the event dispatcher that fans classified
 	// replies + deliverability events out to customer webhooks and third-party
 	// integration actions (Slack ping, CRM upsert).
@@ -304,6 +317,68 @@ func (s *service) CreateContactTask(ctx context.Context, orgID, createdBy uuid.U
 		})
 	}
 	return task, nil
+}
+
+// CreateContactDeal opens a deal for the contact (campaign "create_deal" node)
+// and records a deal_created activity. Mirrors CreateContactTask.
+func (s *service) CreateContactDeal(ctx context.Context, orgID uuid.UUID, createdBy uuid.UUID, data *models.CreateDeal) (*models.Deal, *errx.Error) {
+	if s.crmRepo == nil {
+		return nil, errx.InternalError()
+	}
+	deal, err := s.crmRepo.CreateDeal(ctx, orgID, data)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	if deal.ContactID != nil {
+		_ = s.crmRepo.RecordActivity(ctx, orgID, *deal.ContactID, &createdBy, models.ActivityDealCreated, map[string]interface{}{
+			"deal_id":   deal.ID.String(),
+			"deal_name": deal.Name,
+			"source":    "campaign",
+		})
+	}
+	return deal, nil
+}
+
+// MoveContactDealStage moves the contact's most-recent OPEN deal in pipelineID
+// to stageID. "Most-recent open deal" is resolved by scanning the contact's
+// deals (GetDealsByContact returns them created_at DESC) and taking the first
+// one whose pipeline matches and whose status is still "open". No open deal in
+// that pipeline is a deliberate no-op (returns nil, nil) so a chained reply
+// automation doesn't error just because nothing has been created yet.
+func (s *service) MoveContactDealStage(ctx context.Context, orgID, contactID, pipelineID, stageID uuid.UUID) (*models.Deal, *errx.Error) {
+	if s.crmRepo == nil {
+		return nil, errx.InternalError()
+	}
+	deals, err := s.crmRepo.GetDealsByContact(ctx, contactID)
+	if err != nil {
+		return nil, toErrx(err)
+	}
+	var target *models.Deal
+	for i := range deals {
+		d := deals[i]
+		if d.PipelineID == pipelineID && d.Status == models.DealStatusOpen {
+			target = &d
+			break // GetDealsByContact is created_at DESC => first match is newest
+		}
+	}
+	if target == nil {
+		// No open deal in this pipeline: documented no-op (not an error).
+		return nil, nil
+	}
+	if target.StageID == stageID {
+		return target, nil // already there
+	}
+	updated, uerr := s.crmRepo.UpdateDeal(ctx, orgID, target.ID, &models.UpdateDeal{StageID: &stageID})
+	if uerr != nil {
+		return nil, toErrx(uerr)
+	}
+	_ = s.crmRepo.RecordActivity(ctx, orgID, contactID, nil, models.ActivityDealStageChange, map[string]interface{}{
+		"deal_id": updated.ID.String(),
+		"from":    target.StageID.String(),
+		"to":      stageID.String(),
+		"source":  "campaign",
+	})
+	return updated, nil
 }
 
 func (s *service) Unsubscribe(ctx context.Context, campaignID, contactID uuid.UUID) *errx.Error {

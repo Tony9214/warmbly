@@ -42,7 +42,7 @@ type Sequence struct {
 // ActionConfig is the persisted config for a non-email (action/wait) node. Type
 // is the switch the task executes on; the remaining fields are type-scoped.
 type ActionConfig struct {
-	Type string `json:"type"` // wait | add_tag | remove_tag | unsubscribe | notify | create_task | end
+	Type string `json:"type"` // wait | add_tag | remove_tag | unsubscribe | notify | create_task | create_deal | move_deal_stage | end
 
 	// wait
 	WaitMinutes *int `json:"wait_minutes,omitempty"`
@@ -62,6 +62,19 @@ type ActionConfig struct {
 	TaskPriority      string     `json:"task_priority,omitempty"` // low | medium | high | urgent
 	TaskAssignedTo    *uuid.UUID `json:"task_assigned_to,omitempty"`
 	TaskDueOffsetDays *int       `json:"task_due_offset_days,omitempty"` // due N days after the step fires
+
+	// create_deal / move_deal_stage — CRM deal automation off a reply branch.
+	//   create_deal: open a new deal for the contact in DealPipelineID/DealStageID.
+	//   move_deal_stage: move the contact's most-recent OPEN deal in
+	//     DealPipelineID to DealStageID; a contact with no open deal in that
+	//     pipeline is a logged no-op (not an error).
+	// DealName supports the same {{first_name}}/{{company}} templating other
+	// campaign copy uses. DealValue is optional; DealCurrency defaults to "USD".
+	DealPipelineID *uuid.UUID `json:"deal_pipeline_id,omitempty"`
+	DealStageID    *uuid.UUID `json:"deal_stage_id,omitempty"`
+	DealName       string     `json:"deal_name,omitempty"`
+	DealValue      *float64   `json:"deal_value,omitempty"`
+	DealCurrency   string     `json:"deal_currency,omitempty"`
 }
 
 type UpdateSequence struct {
