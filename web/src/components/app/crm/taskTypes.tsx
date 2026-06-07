@@ -18,5 +18,13 @@ export function taskTypeColor(
     types: { name: string; color: string }[],
 ): string {
     if (!name) return "#94a3b8";
-    return types.find((t) => t.name === name)?.color ?? "#94a3b8";
+    const key = name.trim().toLowerCase();
+    const found = types.find((t) => t.name.trim().toLowerCase() === key)?.color;
+    if (found) return found;
+    // No matching type (renamed/removed, or a case/whitespace mismatch between the
+    // task's stored type string and the type list): hash the name into the palette
+    // so it still gets a stable, DISTINCT colour instead of one grey for everything.
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+    return TASK_TYPE_COLORS[h % TASK_TYPE_COLORS.length];
 }

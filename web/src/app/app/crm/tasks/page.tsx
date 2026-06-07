@@ -799,15 +799,22 @@ function TaskTypeTag({
     if (!type) {
         return compact ? null : <span className="text-slate-300 text-[11.5px]">—</span>;
     }
-    const color = taskTypeColor(type, types);
+    // Render the type as a colour-tinted chip (faint background in the type's
+    // colour + a solid dot + text in the colour) so the colour is unmistakable,
+    // not a single 8px dot. Done tasks fade to grey. Colours are DB-enforced hex.
+    const color = done ? "#94a3b8" : taskTypeColor(type, types);
     return (
         <span
             title={type}
-            className={`shrink-0 inline-flex items-center gap-1 text-[10.5px] text-slate-500 ${
-                compact ? "max-w-[90px]" : ""
+            className={`shrink-0 inline-flex items-center gap-1 rounded h-[18px] px-1.5 text-[10.5px] font-medium ${
+                compact ? "max-w-[110px]" : ""
             }`}
+            style={{ backgroundColor: `${color}1f`, color }}
         >
-            <span className="size-2 rounded-full" style={{ backgroundColor: done ? "#cbd5e1" : color }} />
+            <span
+                className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: color }}
+            />
             <span className="truncate">{type}</span>
         </span>
     );
@@ -1044,12 +1051,14 @@ function TypeFacet({
                             closeOnSelect={false}
                             icon={
                                 <span
-                                    className="size-2 rounded-full"
-                                    style={{ backgroundColor: t.color }}
+                                    className="w-2.5 h-2.5 rounded-full ring-1 ring-black/5 shrink-0"
+                                    style={{ backgroundColor: t.color || "#94a3b8" }}
                                 />
                             }
                         >
-                            {t.name}
+                            <span style={{ color: t.color || "#94a3b8" }}>
+                                {t.name}
+                            </span>
                         </PopoverMenuItem>
                     ))
                 )}
