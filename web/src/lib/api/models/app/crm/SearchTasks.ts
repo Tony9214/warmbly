@@ -20,6 +20,10 @@ export default interface SearchTasks {
     types: string[];
     // User UUIDs (assigned_to). String-matched on the server.
     assigned_to: string[];
+    // Team UUIDs. Matches a task whose assigned_team_id is one of these, OR
+    // whose assigned_to is a member of one of these teams. The same predicate
+    // drives both the rows query and the summary aggregate.
+    team_ids: string[];
     contact_id?: string;
     deal_id?: string;
     due_after?: string;
@@ -37,6 +41,7 @@ export const EMPTY_TASK_SEARCH: SearchTasks = {
     priorities: [],
     types: [],
     assigned_to: [],
+    team_ids: [],
     sort_by: "created_at",
     reverse: false,
 };

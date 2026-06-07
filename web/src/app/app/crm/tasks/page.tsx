@@ -74,6 +74,7 @@ import type SearchTasks from "@/lib/api/models/app/crm/SearchTasks";
 import type { TaskSortBy } from "@/lib/api/models/app/crm/SearchTasks";
 import { EMPTY_TASK_SEARCH } from "@/lib/api/models/app/crm/SearchTasks";
 import type OrganizationMember from "@/lib/api/models/app/organizations/OrganizationMember";
+import type Team from "@/lib/api/models/app/teams/Team";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import TaskTypePicker from "@/components/app/crm/TaskTypePicker";
@@ -169,6 +170,13 @@ export default function TasksPage() {
         return m;
     }, [members]);
 
+    const { data: teams = [] } = useTeams();
+    const teamById = React.useMemo(() => {
+        const m = new Map<string, Team>();
+        for (const t of teams) m.set(t.id, t);
+        return m;
+    }, [teams]);
+
     const { data: types = [] } = useTaskTypes();
 
     const statusTab: "all" | CRMTaskStatus =
@@ -185,6 +193,7 @@ export default function TasksPage() {
         filters.priorities.length +
         filters.types.length +
         filters.assigned_to.length +
+        filters.team_ids.length +
         (filters.overdue ? 1 : 0);
 
     return (
@@ -241,6 +250,11 @@ export default function TasksPage() {
                     selected={filters.assigned_to}
                     onChange={(ids) => setFilters((f) => ({ ...f, assigned_to: ids }))}
                 />
+                <TeamFacet
+                    teams={teams}
+                    selected={filters.team_ids}
+                    onChange={(ids) => setFilters((f) => ({ ...f, team_ids: ids }))}
+                />
                 <TypeFacet
                     types={types}
                     selected={filters.types}
@@ -274,6 +288,7 @@ export default function TasksPage() {
                     <GroupedView
                         tasks={tasks}
                         memberByUser={memberByUser}
+                        teamById={teamById}
                         types={types}
                         onOpen={setEditing}
                     />
@@ -281,6 +296,7 @@ export default function TasksPage() {
                     <FlatView
                         tasks={tasks}
                         memberByUser={memberByUser}
+                        teamById={teamById}
                         types={types}
                         onOpen={setEditing}
                     />
@@ -297,12 +313,18 @@ export default function TasksPage() {
                 )}
             </PageBody>
 
-            <TaskDialog open={newOpen} onClose={() => setNewOpen(false)} members={members} />
+            <TaskDialog
+                open={newOpen}
+                onClose={() => setNewOpen(false)}
+                members={members}
+                teams={teams}
+            />
             <TaskDialog
                 open={!!editing}
                 onClose={() => setEditing(null)}
                 editing={editing ?? undefined}
                 members={members}
+                teams={teams}
             />
         </Page>
     );
@@ -313,11 +335,13 @@ export default function TasksPage() {
 function FlatView({
     tasks,
     memberByUser,
+    teamById,
     types,
     onOpen,
 }: {
     tasks: CRMTask[];
     memberByUser: Map<string, OrganizationMember>;
+    teamById: Map<string, Team>;
     types: { name: string; color: string }[];
     onOpen: (t: CRMTask) => void;
 }) {
@@ -340,6 +364,7 @@ function FlatView({
                         key={t.id}
                         task={t}
                         member={t.assigned_to ? memberByUser.get(t.assigned_to) : undefined}
+                        team={t.assigned_team_id ? teamById.get(t.assigned_team_id) : undefined}
                         types={types}
                         onOpen={() => onOpen(t)}
                     />
@@ -352,11 +377,13 @@ function FlatView({
 function FlatRow({
     task,
     member,
+    team,
     types,
     onOpen,
 }: {
     task: CRMTask;
     member?: OrganizationMember;
+    team?: Team;
     types: { name: string; color: string }[];
     onOpen: () => void;
 }) {
@@ -424,7 +451,12 @@ function FlatRow({
                 <TaskTypeTag type={task.type} types={types} done={isDone} />
             </td>
             <td className="px-3 whitespace-nowrap">
-                <AssigneeCell member={member} assignedTo={task.assigned_to} />
+                <AssigneeCell
+                    member={member}
+                    assignedTo={task.assigned_to}
+                    team={team}
+                    assignedTeamId={task.assigned_team_id}
+                />
             </td>
             <td className="px-3 whitespace-nowrap">
                 <span
@@ -474,11 +506,13 @@ function FlatRow({
 function GroupedView({
     tasks,
     memberByUser,
+    teamById,
     types,
     onOpen,
 }: {
     tasks: CRMTask[];
     memberByUser: Map<string, OrganizationMember>;
+    teamById: Map<string, Team>;
     types: { name: string; color: string }[];
     onOpen: (t: CRMTask) => void;
 }) {
@@ -521,6 +555,7 @@ function GroupedView({
                         bucket={b}
                         tasks={items}
                         memberByUser={memberByUser}
+                        teamById={teamById}
                         types={types}
                         onOpen={onOpen}
                     />
@@ -534,12 +569,14 @@ function BucketGroup({
     bucket,
     tasks,
     memberByUser,
+    teamById,
     types,
     onOpen,
 }: {
     bucket: { id: Bucket; label: string; tone: keyof typeof TONE };
     tasks: CRMTask[];
     memberByUser: Map<string, OrganizationMember>;
+    teamById: Map<string, Team>;
     types: { name: string; color: string }[];
     onOpen: (t: CRMTask) => void;
 }) {
@@ -562,6 +599,7 @@ function BucketGroup({
                         key={t.id}
                         task={t}
                         member={t.assigned_to ? memberByUser.get(t.assigned_to) : undefined}
+                        team={t.assigned_team_id ? teamById.get(t.assigned_team_id) : undefined}
                         types={types}
                         onOpen={onOpen}
                     />
@@ -574,11 +612,13 @@ function BucketGroup({
 function GroupedRow({
     task,
     member,
+    team,
     types,
     onOpen,
 }: {
     task: CRMTask;
     member?: OrganizationMember;
+    team?: Team;
     types: { name: string; color: string }[];
     onOpen: (t: CRMTask) => void;
 }) {
@@ -622,7 +662,13 @@ function GroupedRow({
             >
                 {task.title}
             </span>
-            <AssigneeCell member={member} assignedTo={task.assigned_to} compact />
+            <AssigneeCell
+                member={member}
+                assignedTo={task.assigned_to}
+                team={team}
+                assignedTeamId={task.assigned_team_id}
+                compact
+            />
             <span
                 className={`inline-flex items-center gap-1 text-[10.5px] uppercase tracking-[0.08em] font-semibold ${priority.text}`}
             >
@@ -666,26 +712,59 @@ function memberInitials(member?: OrganizationMember, assignedTo?: string): strin
 function AssigneeCell({
     member,
     assignedTo,
+    team,
+    assignedTeamId,
     compact = false,
 }: {
     member?: OrganizationMember;
     assignedTo?: string;
+    team?: Team;
+    assignedTeamId?: string;
     compact?: boolean;
 }) {
-    if (!assignedTo) {
+    // A task may carry a person, a team, both, or neither. Render whichever are
+    // present; only fall back to "Unassigned" when nothing is set.
+    if (!assignedTo && !assignedTeamId) {
         return <span className="text-slate-300 text-[11.5px]">{compact ? "" : "Unassigned"}</span>;
     }
     const label = memberLabel(member, assignedTo);
     const initials = memberInitials(member, assignedTo);
     return (
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+            {assignedTo && (
+                <span
+                    className="inline-flex items-center gap-1.5 min-w-0"
+                    title={member?.name || member?.email || assignedTo}
+                >
+                    <span className="size-5 shrink-0 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-[9px] font-semibold inline-flex items-center justify-center uppercase tracking-tight">
+                        {initials}
+                    </span>
+                    {!compact && <span className="text-[11.5px] text-slate-600 truncate">{label}</span>}
+                </span>
+            )}
+            {assignedTeamId && <TeamChip team={team} teamId={assignedTeamId} compact={compact} />}
+        </span>
+    );
+}
+
+function teamLabel(team?: Team, teamId?: string): string {
+    const name = team?.name?.trim();
+    if (name) return name;
+    return teamId ? `Team ${teamId.slice(0, 6)}` : "";
+}
+
+function TeamChip({ team, teamId, compact = false }: { team?: Team; teamId?: string; compact?: boolean }) {
+    const label = teamLabel(team, teamId);
+    return (
         <span
-            className="inline-flex items-center gap-1.5 min-w-0"
-            title={member?.name || member?.email || assignedTo}
+            className="inline-flex items-center gap-1.5 min-w-0 h-5 px-1.5 rounded-full border border-slate-200 bg-slate-50"
+            title={label}
         >
-            <span className="size-5 shrink-0 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-[9px] font-semibold inline-flex items-center justify-center uppercase tracking-tight">
-                {initials}
-            </span>
-            {!compact && <span className="text-[11.5px] text-slate-600 truncate">{label}</span>}
+            <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: team?.color || "#94a3b8" }}
+            />
+            {!compact && <span className="text-[11px] text-slate-600 truncate max-w-[90px]">{label}</span>}
         </span>
     );
 }
@@ -843,6 +922,76 @@ function AssigneeFacet({
                             }
                         >
                             <span className="truncate">{memberLabel(m)}</span>
+                        </PopoverMenuItem>
+                    ))
+                )}
+            </PopoverMenuContent>
+        </PopoverMenu>
+    );
+}
+
+function TeamFacet({
+    teams,
+    selected,
+    onChange,
+}: {
+    teams: Team[];
+    selected: string[];
+    onChange: (ids: string[]) => void;
+}) {
+    const [open, setOpen] = React.useState(false);
+    const label =
+        selected.length === 0
+            ? "Any team"
+            : selected.length === 1
+              ? teamLabel(teams.find((t) => t.id === selected[0]), selected[0])
+              : `${selected.length} teams`;
+
+    function toggle(id: string) {
+        onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+    }
+
+    return (
+        <PopoverMenu open={open} onOpenChange={setOpen} align="end">
+            <PopoverMenuTrigger asChild>
+                <button
+                    type="button"
+                    className={`h-7 px-2.5 rounded-md border text-[12px] inline-flex items-center gap-1.5 transition-colors ${
+                        selected.length
+                            ? "border-sky-300 bg-sky-50 text-sky-700"
+                            : "border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300"
+                    }`}
+                >
+                    <UsersRoundIcon className="w-3 h-3" />
+                    <span className="truncate max-w-[100px]">{label}</span>
+                    <span className="text-slate-400">▾</span>
+                </button>
+            </PopoverMenuTrigger>
+            <PopoverMenuContent minWidth={220} className="max-h-64 overflow-y-auto">
+                {teams.length === 0 ? (
+                    <Link
+                        to="/app/settings/teams"
+                        onClick={() => setOpen(false)}
+                        className="flex items-center gap-2 px-3 h-8 text-[11.5px] text-slate-500 hover:text-sky-700 hover:bg-slate-50 transition-colors"
+                    >
+                        <UsersRoundIcon className="w-3.5 h-3.5 shrink-0" />
+                        No teams yet, create one in Settings
+                    </Link>
+                ) : (
+                    teams.map((t) => (
+                        <PopoverMenuItem
+                            key={t.id}
+                            onSelect={() => toggle(t.id)}
+                            selected={selected.includes(t.id)}
+                            closeOnSelect={false}
+                            icon={
+                                <span
+                                    className="size-2.5 rounded-full"
+                                    style={{ backgroundColor: t.color || "#94a3b8" }}
+                                />
+                            }
+                        >
+                            <span className="truncate">{t.name}</span>
                         </PopoverMenuItem>
                     ))
                 )}
@@ -1221,11 +1370,13 @@ function TaskDialog({
     onClose,
     editing,
     members,
+    teams,
 }: {
     open: boolean;
     onClose: () => void;
     editing?: CRMTask;
     members: OrganizationMember[];
+    teams: Team[];
 }) {
     const create = useCreateCRMTask();
     const update = useUpdateCRMTask();
@@ -1239,6 +1390,7 @@ function TaskDialog({
     const [type, setType] = React.useState<string>("");
     const [status, setStatus] = React.useState<CRMTaskStatus>("pending");
     const [assignedTo, setAssignedTo] = React.useState<string>("");
+    const [assignedTeamId, setAssignedTeamId] = React.useState<string>("");
 
     React.useEffect(() => {
         if (!open) return;
@@ -1250,6 +1402,7 @@ function TaskDialog({
             setType(editing.type ?? "");
             setStatus(editing.status);
             setAssignedTo(editing.assigned_to ?? "");
+            setAssignedTeamId(editing.assigned_team_id ?? "");
         } else {
             setTitle("");
             setDescription("");
@@ -1258,6 +1411,7 @@ function TaskDialog({
             setType("");
             setStatus("pending");
             setAssignedTo("");
+            setAssignedTeamId("");
         }
     }, [open, editing]);
 
@@ -1274,6 +1428,7 @@ function TaskDialog({
         if (description.trim()) data.description = description.trim();
         if (dueDays !== null) data.due_date = dueInDaysToISO(dueDays);
         if (assignedTo) data.assigned_to = assignedTo;
+        if (assignedTeamId) data.assigned_team_id = assignedTeamId;
         if (editing) data.status = status;
 
         try {
@@ -1394,6 +1549,9 @@ function TaskDialog({
                                         value={assignedTo}
                                         members={members}
                                         onChange={setAssignedTo}
+                                        teams={teams}
+                                        teamValue={assignedTeamId}
+                                        onTeamChange={setAssignedTeamId}
                                     />
                                 </div>
                             </div>
@@ -1468,14 +1626,30 @@ function AssigneePicker({
     value,
     members,
     onChange,
+    teams,
+    teamValue,
+    onTeamChange,
 }: {
     value: string;
     members: OrganizationMember[];
     onChange: (id: string) => void;
+    teams: Team[];
+    teamValue: string;
+    onTeamChange: (id: string) => void;
 }) {
     const [open, setOpen] = React.useState(false);
     const cur = members.find((m) => m.user_id === value);
-    const { data: teams = [] } = useTeams();
+    const curTeam = teams.find((t) => t.id === teamValue);
+
+    // Person and team are independent: a task can set one, both, or neither.
+    // The trigger summarizes whichever are selected.
+    const triggerLabel = cur
+        ? curTeam
+            ? `${memberLabel(cur)} + ${curTeam.name}`
+            : memberLabel(cur)
+        : curTeam
+          ? curTeam.name
+          : "Unassigned";
 
     return (
         <PopoverMenu open={open} onOpenChange={setOpen} align="start">
@@ -1488,28 +1662,36 @@ function AssigneePicker({
                         <span className="size-4 shrink-0 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-[8px] font-semibold inline-flex items-center justify-center uppercase">
                             {memberInitials(cur)}
                         </span>
+                    ) : curTeam ? (
+                        <span
+                            className="size-2 rounded-full shrink-0"
+                            style={{ backgroundColor: curTeam.color || "#94a3b8" }}
+                        />
                     ) : (
                         <span className="size-2 rounded-full bg-slate-300 shrink-0" />
                     )}
-                    <span className="truncate flex-1 text-left">
-                        {cur ? memberLabel(cur) : "Unassigned"}
-                    </span>
+                    <span className="truncate flex-1 text-left">{triggerLabel}</span>
                     <span className="ml-auto text-slate-400">▾</span>
                 </button>
             </PopoverMenuTrigger>
-            <PopoverMenuContent minWidth={220} className="max-h-56 overflow-y-auto">
+            <PopoverMenuContent minWidth={240} className="max-h-72 overflow-y-auto">
+                <div className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
+                    Person
+                </div>
                 <PopoverMenuItem
                     onSelect={() => onChange("")}
                     selected={value === ""}
+                    closeOnSelect={false}
                     icon={<span className="size-2 rounded-full bg-slate-300 block" />}
                 >
-                    Unassigned
+                    No person
                 </PopoverMenuItem>
                 {members.map((m) => (
                     <PopoverMenuItem
                         key={m.user_id}
                         onSelect={() => onChange(m.user_id)}
                         selected={m.user_id === value}
+                        closeOnSelect={false}
                         icon={
                             <span className="size-5 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-[9px] font-semibold inline-flex items-center justify-center uppercase">
                                 {memberInitials(m)}
@@ -1520,14 +1702,46 @@ function AssigneePicker({
                     </PopoverMenuItem>
                 ))}
                 <div className="my-1 h-px bg-slate-200" />
-                <Link
-                    to="/app/settings/teams"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-2 px-3 h-8 text-[12px] text-slate-500 hover:text-sky-700 hover:bg-slate-50 transition-colors"
-                >
-                    <UsersRoundIcon className="w-3.5 h-3.5 shrink-0" />
-                    {teams.length === 0 ? "No teams yet — create one in Settings" : "Manage teams"}
-                </Link>
+                <div className="px-3 pt-0.5 pb-1 text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
+                    Team
+                </div>
+                {teams.length === 0 ? (
+                    <Link
+                        to="/app/settings/teams"
+                        onClick={() => setOpen(false)}
+                        className="flex items-center gap-2 px-3 h-8 text-[12px] text-slate-500 hover:text-sky-700 hover:bg-slate-50 transition-colors"
+                    >
+                        <UsersRoundIcon className="w-3.5 h-3.5 shrink-0" />
+                        No teams yet, create one in Settings
+                    </Link>
+                ) : (
+                    <>
+                        <PopoverMenuItem
+                            onSelect={() => onTeamChange("")}
+                            selected={teamValue === ""}
+                            closeOnSelect={false}
+                            icon={<span className="size-2 rounded-full bg-slate-300 block" />}
+                        >
+                            No team
+                        </PopoverMenuItem>
+                        {teams.map((t) => (
+                            <PopoverMenuItem
+                                key={t.id}
+                                onSelect={() => onTeamChange(t.id)}
+                                selected={t.id === teamValue}
+                                closeOnSelect={false}
+                                icon={
+                                    <span
+                                        className="size-2.5 rounded-full"
+                                        style={{ backgroundColor: t.color || "#94a3b8" }}
+                                    />
+                                }
+                            >
+                                <span className="truncate">{t.name}</span>
+                            </PopoverMenuItem>
+                        ))}
+                    </>
+                )}
             </PopoverMenuContent>
         </PopoverMenu>
     );
@@ -1580,6 +1794,7 @@ function hasAnyFilter(f: SearchTasks): boolean {
         f.priorities.length > 0 ||
         f.types.length > 0 ||
         f.assigned_to.length > 0 ||
+        f.team_ids.length > 0 ||
         !!f.contact_id ||
         !!f.deal_id ||
         !!f.due_after ||

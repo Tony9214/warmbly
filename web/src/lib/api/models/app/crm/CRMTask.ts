@@ -7,6 +7,7 @@ export default interface CRMTask {
     contact_id?: string;
     deal_id?: string;
     assigned_to?: string;
+    assigned_team_id?: string;
     created_by: string;
     title: string;
     description?: string;
