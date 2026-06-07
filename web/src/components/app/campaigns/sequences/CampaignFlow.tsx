@@ -896,8 +896,12 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         data: { sourceId: s.id, branchId: b.branch_id },
                     });
                 }
-                // THEN path -> the condition's target.
-                const wt = waitTag(b.target_sequence_id);
+                // THEN path -> the condition's target. A reply branch fires the
+                // moment the contact replies, so the target step's wait_after is
+                // irrelevant. Showing "wait 10d" there is misleading. Label it
+                // "instant" instead.
+                const isReplyBr = (b.conditions ?? []).some((c) => isReplyBranchField(c.field));
+                const wt = isReplyBr ? "instant" : waitTag(b.target_sequence_id);
                 flowEdges.push({
                     id: `then-${b.branch_id}`,
                     source: nid,
