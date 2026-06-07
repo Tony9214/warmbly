@@ -88,6 +88,17 @@ type CampaignProgressRepository interface {
 	// evaluator / callers that need only the class.
 	GetLatestReplyClass(ctx context.Context, contactID, campaignID uuid.UUID) (string, error)
 
+	// ClaimReplyActionFire atomically claims the one-time right to run the instant
+	// reply-triggered action chain for the contact's current step. It stamps
+	// reply_actions_fired_at = NOW() only when it is still NULL and reports whether
+	// THIS call won the claim (true) or it was already fired (false). This is the
+	// exactly-once gate behind instant reply automations: a redelivered reply event
+	// (or an auto-reply followed by a human reply on the same step) sees the stamp
+	// and is a no-op. The progress row already exists at call time because
+	// RecordReplyClassification upserts it just before, so a missing row (claimed ==
+	// false) safely means "nothing to fire".
+	ClaimReplyActionFire(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) (bool, error)
+
 	// Query methods
 	GetCampaignProgress(ctx context.Context, campaignID uuid.UUID) (*CampaignProgress, error)
 	GetCampaignRollingRates(ctx context.Context, campaignID uuid.UUID, since time.Time) (*CampaignRollingRates, error)
@@ -238,6 +249,26 @@ func (r *campaignProgressRepository) GetLatestReplyClass(ctx context.Context, co
 		return "", nil
 	}
 	return class, err
+}
+
+// ClaimReplyActionFire stamps reply_actions_fired_at exactly once per (campaign,
+// contact, step) progress row. The conditional WHERE ... IS NULL makes the claim
+// atomic under concurrent reply events: at most one UPDATE affects a row, so
+// RowsAffected() == 1 identifies the single caller that may run the chain.
+func (r *campaignProgressRepository) ClaimReplyActionFire(ctx context.Context, campaignID, contactID, sequenceID uuid.UUID) (bool, error) {
+	query := `
+		UPDATE campaign_contact_progress
+		SET reply_actions_fired_at = NOW()
+		WHERE campaign_id = $1
+		  AND contact_id = $2
+		  AND sequence_id = $3
+		  AND reply_actions_fired_at IS NULL
+	`
+	tag, err := r.db.Exec(ctx, query, campaignID, contactID, sequenceID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // GetCampaignProgress retrieves overall campaign progress statistics

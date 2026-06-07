@@ -25,6 +25,13 @@ type CampaignRepository interface {
 	GetByID(ctx context.Context, campaignID uuid.UUID) (*models.Campaign, error)
 	GetSequenceByID(ctx context.Context, sequenceID uuid.UUID) (*models.Sequence, error)
 	GetSequencesByCampaignID(ctx context.Context, campaignID uuid.UUID) ([]models.Sequence, error)
+	// GetSequencesRoutingByCampaignID returns every step of a campaign with the
+	// fields needed to walk the flow graph at reply time: id, position, kind,
+	// action config, and the branching tree (conditions). GetSequencesByCampaignID
+	// deliberately omits conditions/kind/action, so this is the routing-aware
+	// variant used by the instant reply-trigger executor to find the matched
+	// branch and follow its action chain.
+	GetSequencesRoutingByCampaignID(ctx context.Context, campaignID uuid.UUID) ([]models.Sequence, error)
 	Search(ctx context.Context, userID, query string, cursor, folder *string, limit int32) (*models.CampaignsResult, error)
 	Update(ctx context.Context, userID, query string, data *models.UpdateCampaign) (*models.Campaign, *errx.Error)
 	UpdateStatus(ctx context.Context, campaignID uuid.UUID, status string) error
@@ -1143,6 +1150,39 @@ func (r *campaignRepository) GetSequencesByCampaignID(ctx context.Context, campa
 			&seq.BodySync, &seq.BodyCode, &seq.WaitAfter, &seq.Position, &seq.UpdatedAt, &seq.CreatedAt,
 		)
 		if err != nil {
+			db.CaptureError(err, "", nil, "scan")
+			return nil, err
+		}
+		sequences = append(sequences, seq)
+	}
+
+	return sequences, rows.Err()
+}
+
+// GetSequencesRoutingByCampaignID loads every step with its routing fields
+// (kind, action, conditions) so the instant reply-trigger executor can locate
+// the matched reply branch and walk the linear action chain it targets. Ordered
+// by position so the caller can resolve "next step by position" if it ever needs
+// to (the chain here only follows explicit branch targets).
+func (r *campaignRepository) GetSequencesRoutingByCampaignID(ctx context.Context, campaignID uuid.UUID) ([]models.Sequence, error) {
+	query := `
+		SELECT id, position, kind, action, conditions
+		FROM sequences
+		WHERE campaign_id = $1
+		ORDER BY position ASC, created_at ASC
+	`
+
+	rows, err := r.DB.Query(ctx, query, campaignID)
+	if err != nil {
+		db.CaptureError(err, query, []any{campaignID}, "query")
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sequences []models.Sequence
+	for rows.Next() {
+		var seq models.Sequence
+		if err := rows.Scan(&seq.ID, &seq.Position, &seq.Kind, &seq.Action, &seq.Conditions); err != nil {
 			db.CaptureError(err, "", nil, "scan")
 			return nil, err
 		}

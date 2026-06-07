@@ -212,6 +212,10 @@ func conditionState(cond models.BranchCondition, prog *CampaignContactProgress, 
 // string. reply_automated is the union of the two automated classes. Mirrors
 // replyclassify's class constants (kept as literals here so this package stays
 // free of an app-layer import).
+//
+// Note: there is intentionally no reply_unsubscribe branch field. An
+// unsubscribe-classified reply is handled by suppression (advanced.Unsubscribe),
+// not routed through the canvas, so it matches no instant branch here.
 func replyClassMatches(field, class string) bool {
 	switch field {
 	case "reply_positive":
@@ -225,6 +229,68 @@ func replyClassMatches(field, class string) bool {
 	default:
 		return false
 	}
+}
+
+// isReplyField reports whether a branch condition field is one of the
+// reply-classification predicates that fire instantly when a reply is classified
+// (as opposed to engagement predicates, which stay step-boundary).
+func isReplyField(field string) bool {
+	switch field {
+	case "reply_positive", "reply_negative", "reply_neutral", "reply_automated":
+		return true
+	default:
+		return false
+	}
+}
+
+// MatchReplyBranchTarget evaluates a step's branches at reply time and returns
+// the route out of the step for an INSTANT reply trigger. It walks branches in
+// declared order (first match wins, identical to the scheduler) and returns the
+// first branch that (a) carries at least one reply_* condition and (b) has ALL
+// of its conditions decidably matching right now against prog (which must carry
+// the just-classified ReplyClass).
+//
+// Returns:
+//   - matched=false when no reply branch applies (caller does nothing instant);
+//   - matched=true, target=nil for a STOP / deleted-target branch;
+//   - matched=true, target=<step id> for a branch that routes onward.
+//
+// It reuses conditionState (the same predicate evaluator the scheduler uses), so
+// matching lives in exactly one place. Engagement-only branches are skipped here
+// because they are not reply-driven; they keep firing at the step boundary. The
+// caller resolves whether target is a live step.
+func MatchReplyBranchTarget(bc *models.BranchConditions, prog *CampaignContactProgress) (matched bool, target *uuid.UUID) {
+	if bc == nil || prog == nil {
+		return false, nil
+	}
+	// reply_* conditions decide off the stored class with no time window, so
+	// sentAt/now are immaterial for them. A fixed reference time keeps any
+	// engagement conditions ANDed alongside a reply_* condition decidable
+	// (Match/NoMatch) rather than Undecided at evaluation time.
+	now := time.Now()
+	sentAt := now
+	if prog.SentAt != nil {
+		sentAt = *prog.SentAt
+	}
+	for i := range bc.Branches {
+		b := &bc.Branches[i]
+		hasReply := false
+		allMatch := true
+		for j := range b.Conditions {
+			if isReplyField(b.Conditions[j].Field) {
+				hasReply = true
+			}
+			cs, _ := conditionState(b.Conditions[j], prog, b.BranchID, sentAt, now)
+			if cs != BranchMatch {
+				allMatch = false
+				break
+			}
+		}
+		if hasReply && allMatch {
+			return true, b.TargetSequenceID
+		}
+	}
+	return false, nil
 }
 
 // randomHolds deterministically routes Value% of contacts down a random-split

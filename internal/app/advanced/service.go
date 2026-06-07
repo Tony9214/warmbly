@@ -774,6 +774,15 @@ func (s *service) ProcessIncomingReply(ctx context.Context, emailAccountID uuid.
 			_ = s.campaignProgressRepo.RecordEmailReplied(ctx, cID, ctID, sID)
 			_ = s.repo.MarkVariantEvent(ctx, cID, ctID, string(models.DeliverabilityEventReply))
 		}
+
+		// INSTANT reply trigger: if the contact's CURRENT step has a reply_* branch
+		// matching this just-classified reply, run that branch's action chain for
+		// THIS contact right now (instead of waiting for the next scheduled step
+		// boundary). Best-effort and non-blocking like the rest of reply handling —
+		// a failure must never block inbox ingest. Fires for both human and
+		// automated replies (reply_automated drives the auto-reply case) and exactly
+		// once per reply event via the reply_actions_fired_at gate.
+		s.fireInstantReplyActions(ctx, cID, ctID, sID, replyResult.Class)
 	}
 
 	actionTaken := ""
