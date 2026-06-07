@@ -271,10 +271,19 @@ export function ThreadView({ threadId, emailId }: ThreadViewProps) {
   );
   const mailbox = accounts.find((a) => a.id === messages[0]?.account_id);
 
-  // The external party of the thread = the first participant address that
-  // isn't our own mailbox. Feeds the CRM panel's contact lookup.
+  // The external party of the thread = the first message address that isn't
+  // our own mailbox. Addresses arrive as "Name <addr>" or bare "addr"; reduce
+  // to the bare address so the comparison + the CRM panel lookup both work.
+  const mailboxEmail = mailbox?.email?.toLowerCase();
+  const bareAddr = (s: string) => {
+    const m = s.match(/<([^>]+)>/);
+    return (m ? m[1] : s).trim();
+  };
   const contactEmail =
-    [...participants].find((p) => p && p !== mailbox?.email) ?? messages[0]?.from;
+    messages
+      .map((m) => bareAddr(m.from))
+      .find((e) => e && e.toLowerCase() !== mailboxEmail) ??
+    bareAddr(messages[0]?.from ?? "");
 
   const submitCustomSnooze = () => {
     if (!customValue) return;

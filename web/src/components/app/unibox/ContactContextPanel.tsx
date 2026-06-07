@@ -206,7 +206,7 @@ export default function ContactContextPanel({
                         />
 
                         {/* Notes */}
-                        <NotesSection contactId={contact.id} notes={notesQ.data ?? []} loading={notesQ.isPending} />
+                        <NotesSection contactId={contact.id} notes={asNoteList(notesQ.data)} loading={notesQ.isPending} />
                     </div>
                 )}
             </div>
@@ -597,6 +597,14 @@ function NotAContact({ email }: { email?: string }) {
             </Link>
         </div>
     );
+}
+
+// The notes endpoint returns either a bare array or a { data, pagination }
+// envelope depending on the path; normalise to a plain list (mirrors the
+// contacts NotesTab helper) so .slice/.map never blow up.
+function asNoteList(raw: unknown): { id: string; content: string; created_at: Date | string }[] {
+    const arr = Array.isArray(raw) ? raw : ((raw as { data?: unknown } | null | undefined)?.data ?? []);
+    return Array.isArray(arr) ? (arr as { id: string; content: string; created_at: Date | string }[]) : [];
 }
 
 function initials(name: string): string {
