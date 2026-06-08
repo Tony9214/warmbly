@@ -370,10 +370,12 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		return xerr
 	}
 
-	// STEP 10: Render email template with contact variables
-	subject := RenderTemplate(sequence.Subject, *contact)
-	bodyHTML := RenderTemplate(sequence.BodyHTML, *contact)
-	bodyPlain := RenderTemplate(sequence.BodyPlain, *contact)
+	// STEP 10: Render email template with contact variables, then expand any
+	// {a|b|c} spintax per-recipient (only real |-groups; literal braces/CSS are
+	// left intact) so each send varies for deliverability.
+	subject := expandSpintax(RenderTemplate(sequence.Subject, *contact))
+	bodyHTML := expandSpintax(RenderTemplate(sequence.BodyHTML, *contact))
+	bodyPlain := expandSpintax(RenderTemplate(sequence.BodyPlain, *contact))
 
 	// If no plain text provided, extract from HTML
 	if bodyPlain == "" && bodyHTML != "" {

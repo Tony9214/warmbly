@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/pkg/tmplfuncs"
 	"github.com/warmbly/warmbly/internal/pkg/warmpersona"
 )
 
@@ -97,7 +98,7 @@ func compiledTemplate(tmpl string) *template.Template {
 		t, _ := v.(*template.Template)
 		return t // may be nil (known-bad)
 	}
-	t, err := template.New("body").Option("missingkey=zero").Parse(tmpl)
+	t, err := template.New("body").Funcs(tmplfuncs.FuncMap()).Option("missingkey=zero").Parse(tmpl)
 	if err != nil {
 		tmplCache.Store(tmpl, (*template.Template)(nil))
 		return nil
@@ -123,7 +124,7 @@ func TemplateError(tmpl string) error {
 		}
 		return "" // non-identifier custom key: substituted per contact at render
 	})
-	_, err := template.New("validate").Option("missingkey=zero").Parse(prepared)
+	_, err := template.New("validate").Funcs(tmplfuncs.FuncMap()).Option("missingkey=zero").Parse(prepared)
 	return err
 }
 
@@ -168,6 +169,48 @@ func naiveRenderTemplate(tmpl string, contact models.Contact) string {
 		result = strings.ReplaceAll(result, fmt.Sprintf("{{.%s}}", k), v)
 	}
 	return result
+}
+
+// TemplatePreview is the result of rendering a campaign template against one
+// contact, plus any problems found — used by the composer's live preview and
+// inline validation so a broken {{if}} or a token that won't resolve is caught
+// before launch instead of shipping literally.
+type TemplatePreview struct {
+	Subject    string   `json:"subject"`
+	BodyHTML   string   `json:"body_html"`
+	BodyPlain  string   `json:"body_plain"`
+	Errors     []string `json:"errors,omitempty"`     // template parse errors (these block sending)
+	Unresolved []string `json:"unresolved,omitempty"` // literal {{…}} tokens left after render
+}
+
+// unresolvedToken matches a {{…}} token still present after rendering (i.e. one
+// that failed to parse and fell through to literal substitution).
+var unresolvedToken = regexp.MustCompile(`\{\{[^{}]*\}\}`)
+
+// PreviewTemplates renders subject/html/plain against contact EXACTLY as the
+// send path does (template render + spintax), and reports parse errors plus any
+// tokens that did not resolve.
+func PreviewTemplates(subject, bodyHTML, bodyPlain string, contact models.Contact) TemplatePreview {
+	p := TemplatePreview{
+		Subject:   expandSpintax(RenderTemplate(subject, contact)),
+		BodyHTML:  expandSpintax(RenderTemplate(bodyHTML, contact)),
+		BodyPlain: expandSpintax(RenderTemplate(bodyPlain, contact)),
+	}
+	for _, f := range []struct{ name, raw string }{{"subject", subject}, {"body", bodyHTML}, {"plain text", bodyPlain}} {
+		if err := TemplateError(f.raw); err != nil {
+			p.Errors = append(p.Errors, f.name+": "+err.Error())
+		}
+	}
+	seen := map[string]bool{}
+	for _, out := range []string{p.Subject, p.BodyHTML, p.BodyPlain} {
+		for _, tok := range unresolvedToken.FindAllString(out, -1) {
+			if !seen[tok] {
+				seen[tok] = true
+				p.Unresolved = append(p.Unresolved, tok)
+			}
+		}
+	}
+	return p
 }
 
 // AddSignature adds signature to email body

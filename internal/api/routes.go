@@ -259,6 +259,11 @@ func Run(
 			integrationsOAuth.POST("/reauth/:id", h.ReauthIntegration)
 		}
 
+		// Template preview/validation (no campaign id; can't be a static sibling
+		// of /campaigns/:id, so it lives one level up). Renders against a sample
+		// contact — read-level access, no side effects.
+		protected.POST("/campaign-template-preview", m.RequireOrganization(), m.RequireAccess(models.PermViewCampaigns, models.APIPermReadCampaigns), h.PreviewCampaignTemplate)
+
 		campaigns := protected.Group("/campaigns")
 		campaigns.Use(m.RateLimitMiddleware(models.RateLimitWrite))
 		{
