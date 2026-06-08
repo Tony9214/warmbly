@@ -175,6 +175,13 @@ export function useRealtimeEvents() {
         return
       }
 
+      // A new in-app notification for this user: refresh the bell feed live
+      // (invalidate-only — the badge updates without a toast, to avoid burst spam).
+      if (includes('NOTIFICATION')) {
+        invalidate([['notifications', 'feed']])
+        return
+      }
+
       // An automation was created/updated/deleted or fired: refresh the list and,
       // for a specific automation, its detail + run history (live in the builder).
       if (includes('AUTOMATION')) {
