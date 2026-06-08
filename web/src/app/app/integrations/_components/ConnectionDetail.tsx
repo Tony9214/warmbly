@@ -20,16 +20,13 @@ import {
     CopyIcon,
     EyeIcon,
     Loader2Icon,
-    PlusIcon,
     RefreshCwIcon,
     SendIcon,
-    Trash2Icon,
     UnplugIcon,
-    ZapIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
-import { Label, TextInput } from "@/components/ui/field";
+import { TextInput } from "@/components/ui/field";
 import { useConfirm } from "@/hooks/context/confirm";
 import useConnectionDetail from "@/lib/api/hooks/app/integrations/useConnectionDetail";
 import useDisconnectIntegration from "@/lib/api/hooks/app/integrations/useDisconnectIntegration";
