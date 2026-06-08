@@ -51,8 +51,11 @@ export default function IntegrationsPage() {
     const [inboundUrl, setInboundUrl] = React.useState<{ provider: IntegrationProvider; url: string } | null>(null);
     const [query, setQuery] = React.useState("");
 
-    const catalog = catalogQuery.data?.catalog ?? [];
-    const connections = connectionsQuery.data?.connections ?? [];
+    const catalog = React.useMemo(() => catalogQuery.data?.catalog ?? [], [catalogQuery.data?.catalog]);
+    const connections = React.useMemo(
+        () => connectionsQuery.data?.connections ?? [],
+        [connectionsQuery.data?.connections],
+    );
     const bookings = bookingsQuery.data?.bookings ?? [];
 
     const entryByProvider = React.useMemo(() => {
