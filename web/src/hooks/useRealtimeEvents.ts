@@ -162,7 +162,20 @@ export function useRealtimeEvents() {
         return
       }
 
-      if (includes('INTEGRATION', 'CONNECTION', 'BOOKING', 'MEETING')) {
+      // A meeting was booked / rescheduled / canceled (Calendly / Cal.com):
+      // refresh the Meetings page list + summary, the integrations bookings
+      // list, and the originating contact's timeline so the call appears live.
+      if (includes('MEETING', 'BOOKING')) {
+        invalidate([
+          ['meetings'],
+          ['meetings', 'summary'],
+          ['integrations', 'bookings'],
+        ])
+        if (contactId) invalidate([['contacts', contactId, 'timeline']])
+        return
+      }
+
+      if (includes('INTEGRATION', 'CONNECTION')) {
         invalidate([
           ['integrations', 'connections'],
           ['integrations', 'catalog'],

@@ -23,6 +23,7 @@ import AnalyticsPage from './app/app/analytics/page';
 import PipelinesPage from './app/app/crm/pipelines/page';
 import DealsPage from './app/app/crm/deals/page';
 import TasksPage from './app/app/crm/tasks/page';
+import MeetingsPage from './app/app/crm/meetings/page';
 import TemplatesPage from './app/app/templates/page';
 import APIKeysPage from './app/app/api-keys/page';
 import IntegrationsPage from './app/app/integrations/page';
@@ -249,6 +250,10 @@ const router = createBrowserRouter([
               {
                 path: "tasks",
                 element: <TasksPage />,
+              },
+              {
+                path: "meetings",
+                element: <MeetingsPage />,
               }
             ]
           },

@@ -10,6 +10,7 @@ import { Link, useLocation } from "react-router-dom";
 import {
     BarChart3Icon,
     CableIcon,
+    CalendarClockIcon,
     CheckSquareIcon,
     CircleDollarSignIcon,
     FileTextIcon,
@@ -31,6 +32,7 @@ import useFeatureAccess from "@/hooks/useFeatureAccess";
 import useCampaigns from "@/lib/api/hooks/app/campaigns/useCampaigns";
 import useEmails from "@/lib/api/hooks/app/emails/useEmails";
 import useTasksSummary from "@/lib/api/hooks/app/crm/tasks/useTasksSummary";
+import useMeetingsSummary from "@/lib/api/hooks/app/meetings/useMeetingsSummary";
 import useDealsSummary from "@/lib/api/hooks/app/crm/deals/useDealsSummary";
 import { EMPTY_TASK_SEARCH } from "@/lib/api/models/app/crm/SearchTasks";
 import { EMPTY_DEAL_SEARCH } from "@/lib/api/models/app/crm/SearchDeals";
@@ -40,6 +42,7 @@ import usePipelines from "@/lib/api/hooks/app/crm/pipelines/usePipelines";
 import useTemplates from "@/lib/api/hooks/app/templates/useTemplates";
 import useUsageOverview from "@/lib/api/hooks/app/analytics/useUsageOverview";
 import useAPIKeys from "@/lib/api/hooks/app/api-keys/useAPIKeys";
+import useIntegrationConnections from "@/lib/api/hooks/app/integrations/useIntegrationConnections";
 import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import { UserNav } from "./UserNav";
 import { Logo } from "@/components/svg";
@@ -76,9 +79,11 @@ interface NavItem {
         | "contacts"
         | "deals"
         | "pipelines"
+        | "meetings"
         | "templates"
         | "analytics"
-        | "apikeys";
+        | "apikeys"
+        | "integrations";
 }
 
 // Plan badge shown on locked sidebar rows. Plan names + colors come
@@ -123,13 +128,14 @@ const sections: NavSection[] = [
             { title: "Pipelines", url: "/app/crm/pipelines", icon: GitBranchIcon, indicator: "pipelines" },
             { title: "Deals", url: "/app/crm/deals", icon: CircleDollarSignIcon, indicator: "deals" },
             { title: "Tasks", url: "/app/crm/tasks", icon: CheckSquareIcon, indicator: "tasks" },
+            { title: "Meetings", url: "/app/crm/meetings", icon: CalendarClockIcon, indicator: "meetings" },
         ],
     },
     {
         label: "Resources",
         items: [
             { title: "Templates", url: "/app/templates", icon: FileTextIcon, indicator: "templates" },
-            { title: "Integrations", url: "/app/integrations", icon: CableIcon },
+            { title: "Integrations", url: "/app/integrations", icon: CableIcon, indicator: "integrations" },
             { title: "API Keys", url: "/app/api-keys", icon: KeyIcon, indicator: "apikeys" },
             { title: "Audit log", url: "/app/audit", icon: ListChecksIcon, rolesAllowed: "manage" },
         ],
@@ -188,12 +194,14 @@ function NavRow({ item }: { item: NavItem }) {
             {item.indicator === "campaigns" && !locked && <CampaignActivity />}
             {item.indicator === "accounts" && !locked && <MailboxActivity />}
             {item.indicator === "tasks" && !locked && <TasksActivity />}
+            {item.indicator === "meetings" && !locked && <MeetingsActivity />}
             {item.indicator === "contacts" && !locked && <ContactsActivity />}
             {item.indicator === "deals" && !locked && <DealsActivity />}
             {item.indicator === "pipelines" && !locked && <PipelinesActivity />}
             {item.indicator === "templates" && !locked && <TemplatesActivity />}
             {item.indicator === "analytics" && !locked && <AnalyticsActivity />}
             {item.indicator === "apikeys" && !locked && <ApiKeysActivity />}
+            {item.indicator === "integrations" && !locked && <IntegrationsActivity />}
             {planBadge ? (
                 <span
                     className={cn(
@@ -375,6 +383,28 @@ function TasksActivity() {
     );
 }
 
+// MeetingsActivity — upcoming booked calls, with a live sky pulse on the ones
+// happening today (a meeting today is the "act now" subset, like overdue tasks).
+function MeetingsActivity() {
+    const { data } = useMeetingsSummary();
+    const upcoming = data?.upcoming ?? 0;
+    const today = data?.today ?? 0;
+    return (
+        <TabDualStat
+            total={upcoming}
+            active={today}
+            activeClass="text-sky-600"
+            activeGlyph={
+                <span className="relative inline-flex shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                    <span className="absolute inset-0 rounded-full bg-sky-500/40 animate-ping" />
+                </span>
+            }
+            title={`${upcoming} upcoming meeting${upcoming === 1 ? "" : "s"}${today > 0 ? `, ${today} today` : ""}`}
+        />
+    );
+}
+
 // Contacts row: total contacts. Reads pagination.total from a small search — the
 // limit MUST be >= the backend LimitMin (10) or validate.Limit rejects it (400)
 // and the whole count comes back as 0.
@@ -434,6 +464,31 @@ function ApiKeysActivity() {
             total={active}
             format={(v) => String(Math.round(v))}
             title={`${active} active API key${active === 1 ? "" : "s"}`}
+        />
+    );
+}
+
+// Integrations row: total connected integrations + a coloured "needs attention"
+// sub-count (degraded / reauth-required) so a broken connection is visible from
+// the sidebar. Reads the shared connections cache the realtime layer invalidates.
+function IntegrationsActivity() {
+    const { data } = useIntegrationConnections();
+    const conns = data?.connections ?? [];
+    const attention = conns.filter(
+        (c) => c.status === "degraded" || c.status === "reauth_required" || c.health === "down",
+    ).length;
+    return (
+        <TabDualStat
+            total={conns.length}
+            active={attention}
+            activeClass="text-amber-600"
+            activeGlyph={
+                <span className="relative inline-flex shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <span className="absolute inset-0 rounded-full bg-amber-500/40 animate-ping" />
+                </span>
+            }
+            title={`${conns.length} connected${attention > 0 ? `, ${attention} need attention` : ""}`}
         />
     );
 }

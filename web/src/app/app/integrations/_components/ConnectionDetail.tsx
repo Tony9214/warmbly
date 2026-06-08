@@ -17,9 +17,12 @@ import React from "react";
 import {
     AlertTriangleIcon,
     CheckCircle2Icon,
+    CopyIcon,
+    EyeIcon,
     Loader2Icon,
     PlusIcon,
     RefreshCwIcon,
+    SendIcon,
     Trash2Icon,
     UnplugIcon,
     ZapIcon,
@@ -41,18 +44,28 @@ import {
 } from "@/lib/api/hooks/app/integrations/useConnectionEvents";
 import { openOAuthPopup } from "@/lib/integrations/oauthPopup";
 import {
+    defaultActionForProvider,
     EVENT_LABELS,
     REPLY_INTENT_OPTIONS,
+    type CapabilityObject,
     type IntegrationCatalogEntry,
     type IntegrationConnection,
     type IntegrationEventSubscription,
 } from "@/lib/api/models/app/integrations/Integration";
+import { useFieldMappings, useUpdateConnectionConfig } from "@/lib/api/hooks/app/integrations/useFieldMappings";
+import { useRevealWebhookSecret, useTestConnection } from "@/lib/api/hooks/app/integrations/useConnectionWebhookTools";
 import { cn } from "@/lib/utils";
 
 import { Drawer, SectionLabel } from "./ConnectDrawer";
+import FieldMapEditor from "./FieldMapEditor";
 import StatusPill, { HealthDot } from "./StatusPill";
 
 const REPLY_EVENT = "campaign.reply_received";
+
+// Providers whose deliveries we can test (notify + generic webhook). Automation
+// tools additionally expose an HMAC signing secret for verification.
+const WEBHOOK_TOOL_PROVIDERS = ["slack", "discord", "zapier", "make", "n8n"];
+const SIGNING_PROVIDERS = ["zapier", "make", "n8n"];
 
 export default function ConnectionDetail({
     connection,
@@ -78,7 +91,11 @@ export default function ConnectionDetail({
     const events = detail.data?.events ?? [];
     const runs = detail.data?.runs ?? [];
 
-    const availableEvents = entry?.events ?? Object.keys(EVENT_LABELS);
+    // Only offer events the provider actually has a handler for; an empty list
+    // means this connection has no automations (e.g. a meeting provider).
+    const availableEvents = entry?.events ?? [];
+    const capability = entry?.capability;
+    const crmObject = capability?.objects?.[0];
     const isOAuth = conn.auth_method === "oauth";
     const needsReauth = conn.status === "reauth_required";
 
@@ -114,7 +131,7 @@ export default function ConnectionDetail({
             await createEvent.mutateAsync({
                 connectionId: conn.id,
                 event_type: eventType,
-                action: actionForProvider(conn.provider),
+                action: defaultActionForProvider(conn.provider),
                 config,
                 enabled: true,
             });
@@ -181,50 +198,80 @@ export default function ConnectionDetail({
                 )}
 
                 {/* Automations — the core "how you use it" surface */}
-                <div className="px-5 py-4 border-b border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between">
-                        <SectionLabel>Automations</SectionLabel>
-                        {!adding && (
-                            <button
-                                type="button"
-                                onClick={() => setAdding(true)}
-                                className="h-6 px-2 rounded text-[11px] text-sky-700 hover:bg-sky-50 inline-flex items-center gap-1 transition-colors"
-                            >
-                                <PlusIcon className="w-3 h-3" />
-                                New rule
-                            </button>
+                {(availableEvents.length > 0 || events.length > 0) && (
+                    <div className="px-5 py-4 border-b border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <SectionLabel>Automations</SectionLabel>
+                            {!adding && availableEvents.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setAdding(true)}
+                                    className="h-6 px-2 rounded text-[11px] text-sky-700 hover:bg-sky-50 inline-flex items-center gap-1 transition-colors"
+                                >
+                                    <PlusIcon className="w-3 h-3" />
+                                    New rule
+                                </button>
+                            )}
+                        </div>
+
+                        {events.length === 0 && !adding && (
+                            <p className="text-[11.5px] text-slate-400 leading-relaxed">
+                                No automations yet. Add a rule to push Warmbly events into {entry?.name ?? conn.label} —
+                                e.g. ping a channel when a prospect replies, or upsert a contact in your CRM.
+                            </p>
+                        )}
+
+                        {events.map((ev) => (
+                            <AutomationRow
+                                key={ev.id}
+                                sub={ev}
+                                onDelete={() =>
+                                    deleteEvent
+                                        .mutateAsync({ connectionId: conn.id, eventId: ev.id })
+                                        .then(() => detail.refetch())
+                                }
+                            />
+                        ))}
+
+                        {adding && (
+                            <AddAutomation
+                                provider={conn.provider}
+                                availableEvents={availableEvents}
+                                onCancel={() => setAdding(false)}
+                                onAdd={addAutomation}
+                                busy={createEvent.isPending}
+                            />
                         )}
                     </div>
+                )}
 
-                    {events.length === 0 && !adding && (
-                        <p className="text-[11.5px] text-slate-400 leading-relaxed">
-                            No automations yet. Add a rule to push Warmbly events into {entry?.name ?? conn.label} —
-                            e.g. ping a channel when a prospect replies.
-                        </p>
-                    )}
+                {/* Field mapping — control exactly what each CRM record gets */}
+                {crmObject && (
+                    <div className="px-5 py-4 border-b border-slate-200 space-y-2.5">
+                        <SectionLabel>Field mapping</SectionLabel>
+                        <FieldMappingsBlock connectionId={conn.id} object={crmObject} />
+                    </div>
+                )}
 
-                    {events.map((ev) => (
-                        <AutomationRow
-                            key={ev.id}
-                            sub={ev}
-                            onDelete={() =>
-                                deleteEvent
-                                    .mutateAsync({ connectionId: conn.id, eventId: ev.id })
-                                    .then(() => detail.refetch())
-                            }
-                        />
-                    ))}
+                {/* Booking link — for scheduling providers (Calendly / Cal.com) */}
+                {capability?.supports_booking_link && (
+                    <div className="px-5 py-4 border-b border-slate-200 space-y-2">
+                        <SectionLabel>Booking link</SectionLabel>
+                        <BookingLinkBlock connection={conn} onSaved={() => detail.refetch()} />
+                    </div>
+                )}
 
-                    {adding && (
-                        <AddAutomation
+                {/* Webhook delivery — test wiring + (automation tools) signature */}
+                {WEBHOOK_TOOL_PROVIDERS.includes(conn.provider) && (
+                    <div className="px-5 py-4 border-b border-slate-200 space-y-3">
+                        <SectionLabel>Webhook delivery</SectionLabel>
+                        <WebhookToolsBlock
+                            connectionId={conn.id}
                             provider={conn.provider}
-                            availableEvents={availableEvents}
-                            onCancel={() => setAdding(false)}
-                            onAdd={addAutomation}
-                            busy={createEvent.isPending}
+                            hasAutomations={events.length > 0}
                         />
-                    )}
-                </div>
+                    </div>
+                )}
 
                 {/* Activity */}
                 <div className="px-5 py-4 space-y-2">
@@ -353,8 +400,8 @@ function AddAutomation({
     const [template, setTemplate] = React.useState("");
 
     const needsChannel = provider === "slack";
-    const needsURL = provider !== "slack" && provider !== "discord" &&
-        provider !== "hubspot" && provider !== "pipedrive";
+    const needsURL =
+        provider === "discord" || provider === "zapier" || provider === "make" || provider === "n8n";
     const isReplyTrigger = eventType === REPLY_EVENT;
     const destRequired = needsChannel || needsURL;
 
@@ -481,6 +528,75 @@ function AddAutomation({
     );
 }
 
+// FieldMappingsBlock loads the connection's field maps and renders the editor.
+function FieldMappingsBlock({ connectionId, object }: { connectionId: string; object: CapabilityObject }) {
+    const mappings = useFieldMappings(connectionId);
+    if (mappings.isPending) {
+        return <p className="text-[11.5px] text-slate-400 inline-flex items-center gap-1.5"><Loader2Icon className="w-3 h-3 animate-spin" /> Loading…</p>;
+    }
+    return (
+        <FieldMapEditor
+            connectionId={connectionId}
+            object={object}
+            mappings={mappings.data?.mappings ?? []}
+        />
+    );
+}
+
+// BookingLinkBlock lets the user set the public scheduling URL surfaced by the
+// contextual "Book a call" buttons across the dashboard.
+function BookingLinkBlock({ connection, onSaved }: { connection: IntegrationConnection; onSaved: () => void }) {
+    const update = useUpdateConnectionConfig();
+    const stored =
+        (connection.config_capabilities?.scheduling_url as string) ||
+        ((connection.display_fields?.scheduling_url as string) ?? "");
+    const [url, setUrl] = React.useState(stored);
+    React.useEffect(() => setUrl(stored), [stored]);
+    const dirty = url.trim() !== stored.trim();
+
+    async function save() {
+        const v = url.trim();
+        if (v && !/^https?:\/\//i.test(v)) {
+            toast.error("Enter a full https:// booking link");
+            return;
+        }
+        await toast.promise(
+            update.mutateAsync({
+                connectionId: connection.id,
+                config_capabilities: { ...(connection.config_capabilities ?? {}), scheduling_url: v },
+            }),
+            { loading: "Saving…", success: "Booking link saved", error: "Could not save" },
+        );
+        onSaved();
+    }
+
+    return (
+        <div className="space-y-1.5">
+            <p className="text-[11.5px] text-slate-500 leading-relaxed">
+                Paste your public scheduling link. A “Book a call” button appears on contacts and inbox
+                threads, prefilled with the contact’s email.
+            </p>
+            <TextInput value={url} onChange={setUrl} placeholder="https://calendly.com/you/intro" className="font-mono" />
+            {dirty && (
+                <div className="flex justify-end">
+                    <button
+                        type="button"
+                        onClick={save}
+                        disabled={update.isPending}
+                        className={cn(
+                            "h-6 px-2.5 rounded text-[11.5px] font-medium text-white bg-sky-600 hover:bg-sky-700 inline-flex items-center gap-1.5 transition-colors",
+                            update.isPending && "opacity-60",
+                        )}
+                    >
+                        {update.isPending && <Loader2Icon className="w-3 h-3 animate-spin" />}
+                        Save link
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
     return (
         <div className="flex items-center justify-between gap-3">
@@ -490,24 +606,104 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
     );
 }
 
-// actionForProvider maps a connection's provider to the action its automations
-// perform. Mirrors defaultActionForProvider in the model module.
-function actionForProvider(provider: string): string {
-    switch (provider) {
-        case "slack":
-            return "slack.notify";
-        case "discord":
-            return "discord.notify";
-        case "hubspot":
-            return "hubspot.upsert_contact";
-        case "pipedrive":
-            return "pipedrive.upsert_person";
-        default:
-            return "webhook.ping";
-    }
-}
-
 function msg(err: unknown): string | undefined {
     const e = err as { response?: { data?: { message?: string; error?: string } }; message?: string };
     return e.response?.data?.message ?? e.response?.data?.error ?? e.message;
+}
+
+// WebhookToolsBlock — "send a test event" for any notify/webhook provider, plus
+// (for Zapier/Make/n8n) the HMAC signing secret used to verify our deliveries.
+function WebhookToolsBlock({
+    connectionId,
+    provider,
+    hasAutomations,
+}: {
+    connectionId: string;
+    provider: string;
+    hasAutomations: boolean;
+}) {
+    const test = useTestConnection();
+    const reveal = useRevealWebhookSecret();
+    const [secret, setSecret] = React.useState<string | null>(null);
+
+    const runTest = () =>
+        test.mutate(connectionId, {
+            onSuccess: (r) => toast.success(`Sent ${r.sent} test event${r.sent === 1 ? "" : "s"}`),
+            onError: (e) => toast.error(msg(e) ?? "Test failed"),
+        });
+
+    const showSecret = () =>
+        reveal.mutate(connectionId, {
+            onSuccess: (r) => setSecret(r.signing_secret),
+            onError: (e) => toast.error(msg(e) ?? "Could not load secret"),
+        });
+
+    const copy = () => {
+        if (secret) void navigator.clipboard.writeText(secret).then(() => toast.success("Copied"));
+    };
+
+    return (
+        <div className="space-y-2.5">
+            <p className="text-[11.5px] text-slate-400 leading-relaxed">
+                {hasAutomations
+                    ? "Send a sample event to confirm your automation is wired correctly."
+                    : "Add an automation above first, then send a test event to confirm it's wired."}
+            </p>
+            <button
+                type="button"
+                onClick={runTest}
+                disabled={!hasAutomations || test.isPending}
+                className="h-7 px-2.5 rounded-md border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 text-[12px] inline-flex items-center gap-1.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+                {test.isPending ? (
+                    <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                    <SendIcon className="w-3.5 h-3.5" />
+                )}
+                Send test event
+            </button>
+
+            {SIGNING_PROVIDERS.includes(provider) && (
+                <div className="pt-1.5 space-y-1.5">
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
+                        Signing secret
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Every delivery is signed with{" "}
+                        <span className="font-mono">X-Warmbly-Signature: t=&lt;unix&gt;,v1=&lt;hmac&gt;</span> (HMAC-SHA256
+                        of <span className="font-mono">{"{t}.{body}"}</span>). Use this secret to verify it.
+                    </p>
+                    {secret ? (
+                        <div className="flex items-center gap-1.5">
+                            <code className="flex-1 min-w-0 truncate rounded-md border border-slate-200 bg-slate-50 px-2 h-7 inline-flex items-center text-[11px] font-mono text-slate-700">
+                                {secret}
+                            </code>
+                            <button
+                                type="button"
+                                onClick={copy}
+                                title="Copy"
+                                className="h-7 w-7 rounded-md border border-slate-200 hover:border-slate-300 text-slate-500 hover:text-slate-900 inline-flex items-center justify-center"
+                            >
+                                <CopyIcon className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={showSecret}
+                            disabled={reveal.isPending}
+                            className="h-7 px-2.5 rounded-md border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 text-[12px] inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                        >
+                            {reveal.isPending ? (
+                                <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                                <EyeIcon className="w-3.5 h-3.5" />
+                            )}
+                            Reveal signing secret
+                        </button>
+                    )}
+                </div>
+            )}
+        </div>
+    );
 }
