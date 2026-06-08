@@ -345,12 +345,16 @@ type AutomationEdge struct {
 }
 
 // AutomationCondition is an IF test evaluated against the trigger event's data.
-// For the generic "field" type, Key names the event-data key to test.
+// For the generic "field" type, Key names the event-data key to test. For the
+// "expression" type, Expression is a Go-template predicate (truthy when it
+// renders a non-empty, non-false value) evaluated against the native event data,
+// giving full string/number/boolean logic.
 type AutomationCondition struct {
-	Field    string `json:"field"`
-	Key      string `json:"key,omitempty"`
-	Operator string `json:"operator"`
-	Value    any    `json:"value,omitempty"`
+	Field      string `json:"field"`
+	Key        string `json:"key,omitempty"`
+	Operator   string `json:"operator"`
+	Value      any    `json:"value,omitempty"`
+	Expression string `json:"expression,omitempty"`
 }
 
 // AutomationWrite is the create/update payload from the flow builder.

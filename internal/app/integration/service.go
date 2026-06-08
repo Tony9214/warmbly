@@ -604,11 +604,18 @@ func (s *service) validateAutomationGraph(ctx context.Context, orgID uuid.UUID, 
 			if !models.ValidAutomationConditionField(n.Condition.Field) {
 				return fmt.Errorf("unknown condition field: %s", n.Condition.Field)
 			}
-			if !models.ValidAutomationConditionOperator(n.Condition.Operator) {
-				return fmt.Errorf("unknown condition operator: %s", n.Condition.Operator)
-			}
-			if n.Condition.Field == models.AutoCondField && strings.TrimSpace(n.Condition.Key) == "" {
-				return errors.New("a condition is missing the field to test")
+			if n.Condition.Field == models.AutoCondExpression {
+				// Free-form predicate: no operator; just validate it compiles.
+				if err := ValidExpression(n.Condition.Expression); err != nil {
+					return fmt.Errorf("invalid condition expression: %w", err)
+				}
+			} else {
+				if !models.ValidAutomationConditionOperator(n.Condition.Operator) {
+					return fmt.Errorf("unknown condition operator: %s", n.Condition.Operator)
+				}
+				if n.Condition.Field == models.AutoCondField && strings.TrimSpace(n.Condition.Key) == "" {
+					return errors.New("a condition is missing the field to test")
+				}
 			}
 		default:
 			return fmt.Errorf("unknown node type: %s", n.Type)

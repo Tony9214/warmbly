@@ -20,6 +20,7 @@ const (
 // for back-compat (older saved automations) and for the special random split.
 const (
 	AutoCondField      = "field"       // generic: test data[Key] with Operator
+	AutoCondExpression = "expression"  // free-form Go-template predicate
 	AutoCondIntent     = "intent"      // legacy: data["intent"]
 	AutoCondConfidence = "confidence"  // legacy: classifier confidence float
 	AutoCondSource     = "source"      // legacy: campaign / provider source
@@ -41,6 +42,7 @@ const (
 
 var automationConditionFields = map[string]bool{
 	AutoCondField:      true,
+	AutoCondExpression: true,
 	AutoCondIntent:     true,
 	AutoCondConfidence: true,
 	AutoCondSource:     true,

@@ -120,6 +120,9 @@ func conditionSummary(c *models.AutomationCondition) string {
 	if c == nil {
 		return "condition"
 	}
+	if c.Field == models.AutoCondExpression {
+		return "expression"
+	}
 	field := c.Field
 	if c.Field == models.AutoCondField && c.Key != "" {
 		field = c.Key
@@ -362,6 +365,8 @@ func (s *service) runGraphAction(ctx context.Context, a models.Automation, n mod
 // semantic shortcuts (kept working for older saved automations).
 func evaluateAutomationCondition(c models.AutomationCondition, data map[string]any, seed string) bool {
 	switch c.Field {
+	case models.AutoCondExpression:
+		return EvalExpression(c.Expression, data)
 	case models.AutoCondField:
 		raw, present := data[c.Key]
 		switch c.Operator {
