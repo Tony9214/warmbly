@@ -75,8 +75,10 @@ import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import SequenceView from "./SequenceView";
+import StepVariants from "./StepVariants";
 import CategoryPicker from "@/components/app/contacts/CategoryPicker";
-import type { SequenceAction, SequenceActionType } from "@/lib/api/models/app/campaigns/sequences/Action";
+import type { ActionKV, SequenceAction, SequenceActionType } from "@/lib/api/models/app/campaigns/sequences/Action";
+import { useAutomations } from "@/lib/api/hooks/app/automations/useAutomations";
 import TaskTypePicker from "@/components/app/crm/TaskTypePicker";
 import DealStagePicker from "@/components/app/crm/DealStagePicker";
 import useMembers from "@/lib/api/hooks/app/organizations/useMembers";
@@ -388,6 +390,7 @@ const ACTION_META: Record<string, { label: string; Icon: typeof ClockIcon; tint:
     move_deal_stage: { label: "Move deal stage", Icon: ArrowRightLeftIcon, tint: "text-sky-600" },
     unsubscribe: { label: "Unsubscribe", Icon: BellOffIcon, tint: "text-rose-600" },
     notify: { label: "Notify", Icon: SendIcon, tint: "text-sky-600" },
+    run_automation: { label: "Run automation", Icon: ZapIcon, tint: "text-indigo-600" },
 };
 
 // actionSummary is the one-line subtitle shown on an action node.
@@ -406,6 +409,8 @@ function actionSummary(a?: SequenceAction | null): string {
             return "Unsubscribe the contact";
         case "notify":
             return "Send a notification";
+        case "run_automation":
+            return a.automation_id ? "Launch an automation" : "Pick an automation…";
         default:
             return "Action";
     }
@@ -1372,7 +1377,15 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         {editStep.kind !== "email" ? (
                             <ActionEditor campaignId={campaignId} sequence={editStep} onSaved={invalidate} />
                         ) : (
-                            <SequenceView campaignId={campaignId} sequence={editStep} index={editIndex} />
+                            <div className="space-y-4">
+                                <SequenceView campaignId={campaignId} sequence={editStep} index={editIndex} />
+                                <StepVariants
+                                    campaignId={campaignId}
+                                    sequenceId={editStep.id}
+                                    baseSubject={editStep.subject ?? ""}
+                                    baseBodyHtml={editStep.body_html ?? ""}
+                                />
+                            </div>
                         )}
                     </div>
                 </div>
@@ -1722,6 +1735,7 @@ const ADD_ACTION_OPTIONS: { type: SequenceActionType; label: string }[] = [
     { type: "move_deal_stage", label: "Move deal stage" },
     { type: "unsubscribe", label: "Unsubscribe" },
     { type: "notify", label: "Notify (webhook)" },
+    { type: "run_automation", label: "Run automation" },
 ];
 
 function AddNodeMenu({
@@ -1811,6 +1825,9 @@ function defaultActionFor(type: SequenceActionType): SequenceAction {
     }
     if (type === "move_deal_stage") {
         return { type };
+    }
+    if (type === "run_automation") {
+        return { type, automation_values: [] };
     }
     return { type };
 }
@@ -2098,6 +2115,8 @@ function ActionEditor({
                 </div>
             )}
 
+            {action.type === "run_automation" && <RunAutomationFields action={action} setAction={setAction} />}
+
             <div className="flex items-center justify-end pt-1">
                 <button
                     type="button"
@@ -2107,6 +2126,98 @@ function ActionEditor({
                 >
                     {saving ? "Saving…" : "Save action"}
                 </button>
+            </div>
+        </div>
+    );
+}
+
+// RunAutomationFields — pick an automation to launch + the templated key/value
+// inputs passed to it as event data (values render against the contact).
+function RunAutomationFields({
+    action,
+    setAction,
+}: {
+    action: SequenceAction;
+    setAction: React.Dispatch<React.SetStateAction<SequenceAction>>;
+}) {
+    const { data } = useAutomations();
+    const automations = data?.automations ?? [];
+    const options: SelectOption[] = automations.map((a) => ({ value: a.id, label: a.name || "Untitled automation" }));
+    const values = action.automation_values ?? [];
+    const setValues = (next: ActionKV[]) => setAction((a) => ({ ...a, automation_values: next }));
+    const updateRow = (i: number, patch: Partial<ActionKV>) =>
+        setValues(values.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    const addRow = () => setValues([...values, { key: "", value: "" }]);
+    const removeRow = (i: number) => setValues(values.filter((_, idx) => idx !== i));
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <Label>Automation to run</Label>
+                <SelectMenu
+                    value={action.automation_id ?? ""}
+                    onChange={(id) => setAction((a) => ({ ...a, automation_id: id }))}
+                    options={options}
+                    placeholder={options.length ? "Choose an automation…" : "No automations yet"}
+                    className="w-full max-w-[320px]"
+                    fullWidth
+                />
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                    Launches the automation's flow for this contact when they reach this step. The automation receives{" "}
+                    <span className="font-mono text-slate-500">contact_email</span>,{" "}
+                    <span className="font-mono text-slate-500">first_name</span>,{" "}
+                    <span className="font-mono text-slate-500">last_name</span>,{" "}
+                    <span className="font-mono text-slate-500">company</span>,{" "}
+                    <span className="font-mono text-slate-500">campaign_name</span> plus your values below — reference them as{" "}
+                    <span className="font-mono text-slate-500">{"{{key}}"}</span> in the automation's actions.
+                </p>
+            </div>
+
+            <div>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <Label className="mb-0">Pass values (optional)</Label>
+                    <button
+                        type="button"
+                        onClick={addRow}
+                        className="inline-flex h-6 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11.5px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900"
+                    >
+                        <PlusIcon className="w-3 h-3" /> Add value
+                    </button>
+                </div>
+                {values.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">
+                        Add key/value pairs to pass into the automation. Values support {"{{.FirstName}}"} / {"{{.Company}}"}.
+                    </p>
+                ) : (
+                    <div className="space-y-1.5">
+                        {values.map((row, i) => (
+                            <div key={i} className="flex items-center gap-1.5">
+                                <TextInput
+                                    value={row.key}
+                                    onChange={(v) => updateRow(i, { key: v })}
+                                    placeholder="key"
+                                    className="w-28 shrink-0"
+                                />
+                                <span className="text-slate-300">=</span>
+                                <TextInput
+                                    value={row.value}
+                                    onChange={(v) => updateRow(i, { value: v })}
+                                    placeholder="{{.FirstName}}"
+                                    className="flex-1 min-w-0"
+                                />
+                                <DealNameVariableMenu onPick={(token) => updateRow(i, { value: (row.value ?? "") + token })} />
+                                <button
+                                    type="button"
+                                    onClick={() => removeRow(i)}
+                                    title="Remove"
+                                    className="inline-flex size-6 shrink-0 items-center justify-center rounded text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                                >
+                                    <Trash2Icon className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );
