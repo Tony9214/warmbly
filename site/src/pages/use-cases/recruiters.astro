@@ -270,32 +270,36 @@ const faq: [string, string][] = [
   </section>
 
   <!-- ============================================================
-       WHY RECRUITER OUTREACH IS DIFFERENT · 3-card row
+       SECTION 2 · how the two setups compare
   ============================================================ -->
-  <section class="border-b border-[color:var(--border)] py-20 md:py-24">
+  <section class="bg-[color:var(--surface-1)]/40 border-y border-[color:var(--border)] py-20 md:py-28">
     <div class="container-page">
-      <div class="max-w-2xl mb-12">
-        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Why recruiter outreach is different</div>
+      <div class="max-w-2xl mx-auto text-center mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 2 · Who owns the reputation</div>
         <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
-          The mailbox patterns that ruin candidate outreach.
+          Comparing the two setups.
         </h2>
         <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
-          Sales and recruiting share the cold-email surface area, but recruiter mail fails for its own reasons. Each of these is a default in most ATS and CRM tooling.
+          With a shared address, one complaint or spam report touches everyone who sends from it. With a mailbox per recruiter, a problem stays with the person it belongs to. It changes how warmup, complaints, and replies are tracked, not only how the email reads.
         </p>
       </div>
 
-      <div class="grid md:grid-cols-3 gap-px bg-[color:var(--border)] rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
-        {pains.map((p, i) => (
-          <div class="bg-white p-7">
-            <div class="flex items-baseline justify-between mb-4">
-              <span class="text-[10.5px] font-mono uppercase tracking-[0.18em] text-rose-600 font-semibold">Anti-pattern {String(i + 1).padStart(2, '0')}</span>
-              <span class="inline-flex items-center gap-1 text-[10.5px] font-mono text-rose-700">
-                <span class="w-1 h-1 rounded-full bg-rose-500"></span>
-                avoid
-              </span>
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+        <!-- Header -->
+        <div class="grid grid-cols-[1fr_104px_1fr] md:grid-cols-[1fr_180px_1fr] border-b border-[color:var(--border)]">
+          <div class="px-5 py-3 bg-rose-50/40 text-[11px] font-mono uppercase tracking-[0.16em] text-rose-700/80">Shared careers@</div>
+          <div class="px-2 py-3 text-center text-[10px] font-mono uppercase tracking-[0.16em] text-muted-foreground bg-[color:var(--surface-1)]/60"></div>
+          <div class="px-5 py-3 bg-[color:var(--sky-1)]/25 text-[11px] font-mono uppercase tracking-[0.16em] text-[#0369a1] text-right">Per-recruiter mailboxes</div>
+        </div>
+
+        <!-- Rows -->
+        {ownershipLedger.map((r) => (
+          <div class="grid grid-cols-[1fr_104px_1fr] md:grid-cols-[1fr_180px_1fr] border-b border-[color:var(--border)] last:border-b-0 items-stretch">
+            <div class="px-5 py-4 bg-rose-50/20 text-[12.5px] md:text-[13px] text-foreground/60 leading-snug flex items-center">{r.shared}</div>
+            <div class="px-1 py-4 flex items-center justify-center">
+              <span class="text-center text-[9.5px] md:text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground leading-tight">{r.label}</span>
             </div>
-            <div class="text-[16px] font-semibold text-heading">{p.title}</div>
-            <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed">{p.body}</p>
+            <div class="px-5 py-4 bg-[color:var(--sky-1)]/15 text-[12.5px] md:text-[13px] font-medium text-heading leading-snug flex items-center justify-end text-right">{r.mine}</div>
           </div>
         ))}
       </div>
