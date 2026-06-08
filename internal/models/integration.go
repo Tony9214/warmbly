@@ -267,9 +267,48 @@ type IntegrationEventSubscription struct {
 	Enabled        bool              `json:"enabled"`
 	// UseCase is a discriminator describing what this automation is for (e.g.
 	// "crm_sync", "notify", "custom"). Drives projection + which handler runs.
-	UseCase   string    `json:"use_case"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UseCase string `json:"use_case"`
+	// AutomationID groups this subscription as one step of an Automation (the
+	// visual flow builder). Nil = a legacy/standalone subscription.
+	AutomationID *uuid.UUID `json:"automation_id,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// Automation is a named grouping of event-subscriptions that share one trigger
+// event: "when <trigger_event> fires, run these action steps". It's the data
+// behind the visual flow builder. Execution reuses the event-subscription
+// dispatcher — each step is an ordinary subscription tagged with this id.
+type Automation struct {
+	ID             uuid.UUID       `json:"id"`
+	OrganizationID uuid.UUID       `json:"organization_id"`
+	Name           string          `json:"name"`
+	Enabled        bool            `json:"enabled"`
+	TriggerEvent   string          `json:"trigger_event"`
+	Filter         json.RawMessage `json:"filter,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+
+	// Steps is hydrated on read (the automation's action subscriptions).
+	Steps []AutomationStep `json:"steps"`
+}
+
+// AutomationStep is one action node of an automation: run Action on Connection
+// with Config (channel / message template / CRM object, etc.).
+type AutomationStep struct {
+	ID           uuid.UUID         `json:"id,omitempty"`
+	ConnectionID uuid.UUID         `json:"connection_id"`
+	Action       IntegrationAction `json:"action"`
+	Config       json.RawMessage   `json:"config,omitempty"`
+}
+
+// AutomationWrite is the create/update payload from the flow builder.
+type AutomationWrite struct {
+	Name         string           `json:"name"`
+	Enabled      bool             `json:"enabled"`
+	TriggerEvent string           `json:"trigger_event"`
+	Filter       json.RawMessage  `json:"filter,omitempty"`
+	Steps        []AutomationStep `json:"steps"`
 }
 
 // IntegrationFieldMapping is one Warmbly-field -> provider-field mapping row.

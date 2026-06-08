@@ -71,6 +71,15 @@ type IntegrationRepository interface {
 	DeleteEventSubscription(ctx context.Context, orgID, id uuid.UUID) error
 	MatchingDispatchTargets(ctx context.Context, orgID uuid.UUID, eventType string) ([]DispatchTarget, error)
 
+	// Automations (named groups of subscriptions sharing a trigger). Steps are
+	// persisted as automation-tagged event-subscription rows, so the dispatcher
+	// runs them unchanged.
+	CreateAutomation(ctx context.Context, a *models.Automation) error
+	ListAutomations(ctx context.Context, orgID uuid.UUID) ([]models.Automation, error)
+	GetAutomation(ctx context.Context, orgID, id uuid.UUID) (*models.Automation, error)
+	UpdateAutomation(ctx context.Context, a *models.Automation) error
+	DeleteAutomation(ctx context.Context, orgID, id uuid.UUID) error
+
 	// Field mappings (Warmbly field -> provider field). ListFieldMappings returns
 	// every mapping for a connection; ReplaceConnectionFieldMappings swaps the
 	// connection-default (unscoped) push map for one object atomically.
@@ -386,9 +395,9 @@ func (r *integrationRepository) CreateEventSubscription(ctx context.Context, sub
 	// filtered automations per (connection, event, action), so each is a row.
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO integration_event_subscriptions (
-			id, connection_id, organization_id, event_type, action, config, enabled, use_case, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
-		sub.ID, sub.ConnectionID, sub.OrganizationID, sub.EventType, string(sub.Action), cfg, sub.Enabled, useCase, now)
+			id, connection_id, organization_id, event_type, action, config, enabled, use_case, automation_id, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
+		sub.ID, sub.ConnectionID, sub.OrganizationID, sub.EventType, string(sub.Action), cfg, sub.Enabled, useCase, sub.AutomationID, now)
 	sub.UseCase = useCase
 	return err
 }
@@ -417,6 +426,192 @@ func (r *integrationRepository) DeleteEventSubscription(ctx context.Context, org
 	_, err := r.db.Exec(ctx,
 		`DELETE FROM integration_event_subscriptions WHERE organization_id = $1 AND id = $2`, orgID, id)
 	return err
+}
+
+// --- Automations ------------------------------------------------------------
+
+// insertAutomationSteps writes one event-subscription row per step, tagged with
+// the automation id + its trigger event + enabled flag (so the dispatcher runs
+// them). Caller has already merged the automation filter into each step Config.
+func insertAutomationSteps(ctx context.Context, tx pgx.Tx, a *models.Automation, now time.Time) error {
+	for _, step := range a.Steps {
+		cfg := step.Config
+		if len(cfg) == 0 {
+			cfg = json.RawMessage("{}")
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO integration_event_subscriptions (
+				id, connection_id, organization_id, event_type, action, config, enabled, use_case, automation_id, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'automation', $8, $9, $9)`,
+			uuid.New(), step.ConnectionID, a.OrganizationID, a.TriggerEvent, string(step.Action), cfg, a.Enabled, a.ID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *integrationRepository) CreateAutomation(ctx context.Context, a *models.Automation) error {
+	if a.ID == uuid.Nil {
+		a.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	a.CreatedAt = now
+	a.UpdatedAt = now
+	filter := a.Filter
+	if len(filter) == 0 {
+		filter = json.RawMessage("{}")
+	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO automations (id, organization_id, name, enabled, trigger_event, filter, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+		a.ID, a.OrganizationID, a.Name, a.Enabled, a.TriggerEvent, filter, now); err != nil {
+		return err
+	}
+	if err := insertAutomationSteps(ctx, tx, a, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *integrationRepository) UpdateAutomation(ctx context.Context, a *models.Automation) error {
+	now := time.Now().UTC()
+	a.UpdatedAt = now
+	filter := a.Filter
+	if len(filter) == 0 {
+		filter = json.RawMessage("{}")
+	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE automations SET name = $3, enabled = $4, trigger_event = $5, filter = $6, updated_at = $7
+		WHERE id = $1 AND organization_id = $2`,
+		a.ID, a.OrganizationID, a.Name, a.Enabled, a.TriggerEvent, filter, now)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("automation not found")
+	}
+	// Replace steps: drop the old step subscriptions, re-insert from the payload.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM integration_event_subscriptions WHERE automation_id = $1 AND organization_id = $2`,
+		a.ID, a.OrganizationID); err != nil {
+		return err
+	}
+	if err := insertAutomationSteps(ctx, tx, a, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *integrationRepository) DeleteAutomation(ctx context.Context, orgID, id uuid.UUID) error {
+	// Steps cascade via the automation_id FK.
+	_, err := r.db.Exec(ctx, `DELETE FROM automations WHERE id = $1 AND organization_id = $2`, id, orgID)
+	return err
+}
+
+func (r *integrationRepository) GetAutomation(ctx context.Context, orgID, id uuid.UUID) (*models.Automation, error) {
+	var a models.Automation
+	err := r.db.QueryRow(ctx, `
+		SELECT id, organization_id, name, enabled, trigger_event, filter, created_at, updated_at
+		FROM automations WHERE id = $1 AND organization_id = $2`, id, orgID).
+		Scan(&a.ID, &a.OrganizationID, &a.Name, &a.Enabled, &a.TriggerEvent, &a.Filter, &a.CreatedAt, &a.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	steps, err := r.automationSteps(ctx, []uuid.UUID{a.ID})
+	if err != nil {
+		return nil, err
+	}
+	a.Steps = steps[a.ID]
+	if a.Steps == nil {
+		a.Steps = []models.AutomationStep{}
+	}
+	return &a, nil
+}
+
+func (r *integrationRepository) ListAutomations(ctx context.Context, orgID uuid.UUID) ([]models.Automation, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, organization_id, name, enabled, trigger_event, filter, created_at, updated_at
+		FROM automations WHERE organization_id = $1 ORDER BY created_at DESC`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []models.Automation{}
+	ids := []uuid.UUID{}
+	for rows.Next() {
+		var a models.Automation
+		if err := rows.Scan(&a.ID, &a.OrganizationID, &a.Name, &a.Enabled, &a.TriggerEvent, &a.Filter, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			return nil, err
+		}
+		a.Steps = []models.AutomationStep{}
+		out = append(out, a)
+		ids = append(ids, a.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	steps, err := r.automationSteps(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if s := steps[out[i].ID]; s != nil {
+			out[i].Steps = s
+		}
+	}
+	return out, nil
+}
+
+// automationSteps loads the step subscriptions for a set of automation ids,
+// grouped by automation id.
+func (r *integrationRepository) automationSteps(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]models.AutomationStep, error) {
+	out := map[uuid.UUID][]models.AutomationStep{}
+	rows, err := r.db.Query(ctx, `
+		SELECT automation_id, id, connection_id, action, config
+		FROM integration_event_subscriptions
+		WHERE automation_id = ANY($1)
+		ORDER BY created_at`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var autoID, stepID, connID uuid.UUID
+		var action string
+		var cfg []byte
+		if err := rows.Scan(&autoID, &stepID, &connID, &action, &cfg); err != nil {
+			return nil, err
+		}
+		if len(cfg) == 0 {
+			cfg = []byte("{}")
+		}
+		out[autoID] = append(out[autoID], models.AutomationStep{
+			ID:           stepID,
+			ConnectionID: connID,
+			Action:       models.IntegrationAction(action),
+			Config:       cfg,
+		})
+	}
+	return out, rows.Err()
 }
 
 // --- Field mappings ---------------------------------------------------------
