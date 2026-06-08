@@ -1,15 +1,42 @@
 import type { IntegrationAction } from "@/lib/api/models/app/integrations/Integration";
 
-// One action node of an automation: run `action` on `connection_id` with config.
-export interface AutomationStep {
-    id?: string;
-    connection_id: string;
-    action: IntegrationAction;
-    config?: Record<string, unknown>;
+// A condition (IF) tested against the trigger event's data. For the generic
+// "field" type, `key` names the event-data key to test.
+export interface AutomationCondition {
+    field: string;
+    key?: string;
+    operator: string;
+    value?: unknown;
 }
 
-// An automation = one trigger event -> a set of action steps. Execution reuses
-// the integration event-subscription dispatcher (each step is a subscription).
+// One node on the flow canvas. "trigger" is the single entry (id "trigger");
+// "condition" is an IF with true/false outgoing edges; "action" runs a provider
+// action on a connection.
+export interface AutomationNode {
+    id: string;
+    type: "trigger" | "condition" | "action";
+    action?: IntegrationAction;
+    connection_id?: string;
+    config?: Record<string, unknown>;
+    condition?: AutomationCondition;
+    x: number;
+    y: number;
+}
+
+// An edge. `when` is "" for plain edges and "true"/"false" for the two outgoing
+// edges of a condition node.
+export interface AutomationEdge {
+    id: string;
+    source: string;
+    target: string;
+    when?: "" | "true" | "false";
+}
+
+export interface AutomationGraph {
+    nodes: AutomationNode[];
+    edges: AutomationEdge[];
+}
+
 export interface Automation {
     id: string;
     organization_id: string;
@@ -17,16 +44,45 @@ export interface Automation {
     enabled: boolean;
     trigger_event: string;
     filter?: Record<string, unknown>;
+    graph: AutomationGraph;
     created_at: string;
     updated_at: string;
-    steps: AutomationStep[];
 }
 
-// Create/update payload from the flow builder.
 export interface AutomationWrite {
     name: string;
     enabled: boolean;
     trigger_event: string;
     filter?: Record<string, unknown>;
-    steps: AutomationStep[];
+    graph: AutomationGraph;
+}
+
+// One node's outcome in a run (or a dry-run trace).
+export interface AutomationNodeResult {
+    node_id: string;
+    type: string; // trigger | condition | action
+    action?: string;
+    label?: string;
+    status: string; // success | error | skipped | branch_true | branch_false
+    error?: string;
+    preview?: Record<string, unknown>; // dry-run only
+}
+
+// A persisted execution of an automation graph.
+export interface AutomationRun {
+    id: string;
+    automation_id: string;
+    organization_id: string;
+    trigger_event: string;
+    status: string; // running | success | error
+    node_results: AutomationNodeResult[];
+    error_detail?: string;
+    started_at: string;
+    finished_at?: string | null;
+}
+
+// Dry-run (test) response: the trace of the walk + the sample data used.
+export interface DryRunResponse {
+    trace: AutomationNodeResult[];
+    data: Record<string, unknown>;
 }

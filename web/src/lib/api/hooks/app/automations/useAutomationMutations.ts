@@ -2,7 +2,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import createAutomation from "@/lib/api/client/app/automations/createAutomation";
 import updateAutomation from "@/lib/api/client/app/automations/updateAutomation";
 import deleteAutomation from "@/lib/api/client/app/automations/deleteAutomation";
+import testAutomation from "@/lib/api/client/app/automations/testAutomation";
 import type { AutomationWrite } from "@/lib/api/models/app/automations/Automation";
+
+export function useTestAutomation() {
+    return useMutation({
+        mutationFn: ({ id, data }: { id: string; data?: Record<string, unknown> }) => testAutomation(id, data),
+    });
+}
 
 export function useCreateAutomation() {
     const qc = useQueryClient();

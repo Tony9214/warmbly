@@ -159,7 +159,14 @@ export type IntegrationAction =
     | "pipedrive.upsert_person"
     | "salesforce.upsert_contact"
     | "close.upsert_lead"
-    | "webhook.ping";
+    | "webhook.ping"
+    // Native (Warmbly built-in) automation actions — no external connection.
+    | "warmbly.add_tag"
+    | "warmbly.remove_tag"
+    | "warmbly.create_task"
+    | "warmbly.create_deal"
+    | "warmbly.move_deal_stage"
+    | "warmbly.unsubscribe";
 
 export interface IntegrationEventSubscription {
     id: string;
@@ -297,6 +304,7 @@ export const EVENT_LABELS: Record<string, string> = {
     "meeting.booked": "Meeting booked",
     "meeting.rescheduled": "Meeting rescheduled",
     "meeting.canceled": "Meeting canceled",
+    "campaign.action": "Launched by a campaign step",
 };
 
 // Which action a provider performs for an event subscription.
