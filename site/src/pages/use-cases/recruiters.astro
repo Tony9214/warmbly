@@ -307,52 +307,108 @@ const faq: [string, string][] = [
   </section>
 
   <!-- ============================================================
-       PERSONAL MAILBOX PER RECRUITER · sticky split with policy table
+       SECTION 3 · sending limits
   ============================================================ -->
-  <section class="bg-[color:var(--surface-1)]/40 border-b border-[color:var(--border)] py-20 md:py-28">
-    <div class="container-page grid lg:grid-cols-[1fr_1.4fr] gap-12 lg:gap-20 items-start">
+  <section class="bg-white border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page grid lg:grid-cols-[1fr_1.5fr] gap-12 lg:gap-20 items-start">
       <div class="lg:sticky lg:top-24" style="align-self: start;">
-        <div class="text-[11px] uppercase tracking-[0.18em] font-mono text-muted-foreground mb-3">Per-recruiter mailbox</div>
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 3 · Daily volume</div>
         <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
-          One recruiter.<br/>One mailbox.<br/>One reputation.
+          Recommended sending limits.
         </h2>
         <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
-          Each recruiter sends from their own warmed mailbox. The agency does not share a single careers@ or talent@ inbox. Reputation travels with the recruiter, not with the team.
+          A sales rep working a known list of business domains can usually absorb the odd complaint. Recruiter outreach goes to a scattered mix of personal and work inboxes, where a single complaint counts for more. That is why we suggest keeping the daily cap well under the 100 the platform allows.
         </p>
         <ul class="mt-6 space-y-2.5 text-[14px] text-foreground/85">
-          {tipsForRecruiters.map((t) => (
-            <li class="flex items-start gap-2">
-              <Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0"/>
-              <span>{t}</span>
-            </li>
-          ))}
+          <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0" /><span>Candidates use personal Gmail and iCloud as well as work Outlook, so there is no single domain reputation to lean on.</span></li>
+          <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0" /><span>A complaint tied to a named recruiter is harder to recover from than one against an anonymous list.</span></li>
         </ul>
       </div>
 
-      <div class="space-y-px">
-        {mailboxPolicy.map((d, i) => (
-          <div class="grid grid-cols-[1fr_auto] gap-6 py-5 border-b border-[color:var(--border)] items-baseline">
-            <div>
-              <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">
-                {String(i + 1).padStart(2, '0')} · {d.k}
+      <div>
+        <div class="divide-y divide-[color:var(--border)] border-y border-[color:var(--border)]">
+          {parameters.map((p) => (
+            <div class="py-5">
+              <div class="flex items-baseline justify-between gap-4">
+                <div class="flex items-baseline gap-2.5">
+                  <span class="font-mono text-[11px] text-[#0284c7] font-semibold">PARAM {p.id}</span>
+                  <span class="text-[14.5px] font-semibold text-heading">{p.label}</span>
+                </div>
+                <span class="font-mono tabular-nums text-[22px] md:text-[28px] font-semibold tracking-[-0.02em] text-heading whitespace-nowrap">{p.value}</span>
               </div>
-              <p class="mt-2 text-[13.5px] text-foreground/70 leading-relaxed max-w-lg">{d.why}</p>
+              <!-- Inline allowance meter -->
+              <div class="mt-3 relative h-1.5 rounded-full bg-[color:var(--sky-1)]/40">
+                <div class="absolute inset-y-0 left-0 rounded-full bg-[#0284c7]" style={`width:${p.fillPct}%`}></div>
+                <div class="absolute inset-y-[-3px] w-px bg-[color:var(--border-strong)]" style={`left:${p.ceilingPct}%`}></div>
+              </div>
+              <div class="mt-2 flex items-baseline justify-between gap-4">
+                <p class="text-[12.5px] text-foreground/65 leading-relaxed max-w-md">{p.why}</p>
+                <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground whitespace-nowrap shrink-0">{p.ceiling}</span>
+              </div>
             </div>
-            <div class="text-right">
-              <div class="text-[24px] md:text-[30px] font-semibold tracking-[-0.02em] text-heading font-mono whitespace-nowrap">{d.v}</div>
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
+        <p class="mt-5 text-[11.5px] font-mono italic text-muted-foreground leading-relaxed">{paramFootnote}</p>
+      </div>
+    </div>
+  </section>
 
-        <div class="pt-5 text-[11.5px] font-mono text-muted-foreground italic max-w-lg">
-          The 30/day figure is a recommendation, not a measured outcome. The platform enforces 100/day per mailbox by default. Recruiters can raise toward that ceiling once a mailbox has a clean complaint and bounce history.
+  <!-- ============================================================
+       SECTION 4 · how many follow-ups
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-1)]/40 border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 4 · Sequence length</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          How many follow-ups to send.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
+          Most candidates who are going to reply do so on the first or second message. A longer sequence rarely adds replies. It keeps a low-interest email in front of someone who has already passed, and an uninterested recipient is the one most likely to mark it as spam. The third message gives the candidate an easy way to opt out, and the sequence ends there.
+        </p>
+      </div>
+
+      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] p-6 md:p-10">
+        <!-- Reply wedge above the spine -->
+        <div class="relative h-12 mb-1">
+          <div class="absolute left-0 bottom-0 h-full w-[62%]" style="clip-path: polygon(0 0, 0 100%, 100% 100%); background: linear-gradient(180deg, rgba(2,132,199,0.20), rgba(2,132,199,0.03));"></div>
+          <span class="absolute bottom-1 left-3 text-[10.5px] font-mono uppercase tracking-[0.12em] text-[#0369a1]">most replies come in here</span>
+        </div>
+
+        <!-- Spine + nodes -->
+        <div class="relative">
+          <div class="absolute left-0 right-0 top-[18px] h-px bg-[color:var(--border)]"></div>
+          <div class="relative grid grid-cols-[1fr_1fr_1fr_0.6fr_0.6fr_0.6fr_0.6fr] gap-1">
+            {cadence.map((c) => (
+              <div class="flex flex-col items-center text-center px-1">
+                <span class="relative z-10 inline-grid place-items-center w-9 h-9 rounded-full bg-white ring-1 ring-[color:var(--sky-2)] font-mono text-[9px] font-semibold text-[#0369a1] leading-none">
+                  {c.day.replace('Day ', 'D')}
+                </span>
+                <div class="mt-3 text-[12.5px] font-semibold text-heading">{c.label}</div>
+                <div class="text-[11.5px] text-foreground/60 leading-snug mt-0.5">{c.intent}</div>
+              </div>
+            ))}
+            {phantomTouches.map((p) => (
+              <div class="flex flex-col items-center text-center px-1" style={`opacity:${p.op};margin-top:4px`}>
+                <span class="relative z-10 inline-grid place-items-center w-7 h-7 rounded-full bg-[color:var(--surface-1)] border border-dashed border-[color:var(--border-strong)]">
+                  <Icon name="warning" size={11} class="text-rose-400" />
+                </span>
+                <div class="mt-3 font-mono text-[10px] text-muted-foreground">{p.n}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div class="mt-6 pt-4 border-t border-[color:var(--border)] flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+          <span class="inline-flex items-center gap-2 text-[#0369a1]"><span class="w-1.5 h-1.5 rounded-full bg-[#0284c7]"></span>3 messages</span>
+          <span class="inline-flex items-center gap-2 text-rose-600"><span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>messages 4 to 7 rarely add replies</span>
         </div>
       </div>
     </div>
   </section>
 
   <!-- ============================================================
-       VARIABLE-RICH PERSONALISATION · dark code block with fallbacks
+       SECTION 5 · plain text
   ============================================================ -->
   <section class="border-b border-[color:var(--border)] py-20 md:py-28">
     <div class="container-page grid lg:grid-cols-[1fr_1.3fr] gap-12 lg:gap-16 items-start">
