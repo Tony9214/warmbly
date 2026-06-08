@@ -9,27 +9,27 @@ const traps = [
   {
     n: '01',
     trap: 'Mailbox set up the same week as the raise',
-    detail: 'A fresh mailbox sending cold to a partner list looks like the worst-case sender. Providers default to suspicion. First catastrophic event can hit within days.',
+    detail: 'A mailbox you connected this week has no history, so the first thing it ever does is cold-email strangers. That is the textbook spammer pattern, and you can taint the domain for the whole raise in a couple of days.',
     defence: 'Warmup',
-    fix: 'Connect and start warmup 4 to 6 weeks before the raise. Ramp from 10 to 40 per day so the mailbox has behaviour history before the first cold send.',
+    fix: 'Connect the mailbox four to six weeks out and let warmup run. It climbs from 10 to 40 sends a day, so by the time you write the first partner the mailbox already looks lived-in.',
     link: '/warmup/',
     linkLabel: 'See warmup ramp',
   },
   {
     n: '02',
     trap: 'CC the co-founders on every send',
-    detail: 'CC chains on cold sends normalise a behaviour Gmail treats as bulk. The partner sees an internal cast list before they see your one-line ask.',
+    detail: 'CC-ing your co-founders does two bad things at once: Gmail reads the chain as bulk mail, and the partner opens to a wall of names instead of a two-line ask from one person.',
     defence: 'Sender pool',
-    fix: 'Each cold message goes from one sender to one recipient. If a co-founder needs to be in the loop, route through the inbox once a reply lands. Keep the cold surface clean.',
+    fix: 'Send one to one, one founder to one partner. If someone on your side needs to be in the loop, bring them in from the shared inbox once the partner replies, not on the cold send.',
     link: '/inbox/',
     linkLabel: 'How inbox routing works',
   },
   {
     n: '03',
     trap: 'Blast 80 partners at 9am Tuesday',
-    detail: 'Sending to a partner list in the same minute is the loudest possible spam signal. It bursts the same mailbox past safe spacing and trips volume anomaly heuristics.',
+    detail: 'Firing the whole list at 9am Tuesday is the loudest spam tell there is. One mailbox sends dozens of near-identical emails in the same minute, which is not something a person ever does.',
     defence: 'Business-hour scheduling · 600s gap',
-    fix: 'Distribute sends across each recipient business window in their own time zone. Default 600 second gap keeps the send pattern natural and within the per-mailbox cap.',
+    fix: 'Spread the sends across each partner’s own working hours, with a gap between them (600 seconds by default). It paces out like someone working through a list, and stays under the mailbox’s daily cap.',
     link: '/campaigns/',
     linkLabel: 'Scheduling rules',
   },
@@ -123,7 +123,7 @@ const faq = [
           The three patterns that kill an investor sequence.
         </h2>
         <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
-          The mistakes are not creative. They are the same three founders make every raise. Each has a specific platform defence so the mailbox stays out of promotions and the sequence keeps moving.
+          None of these are exotic. They are the same three mistakes founders make on almost every raise, and each one has a setting in Warmbly that quietly keeps it from happening.
         </p>
       </div>
 
