@@ -319,12 +319,38 @@ func buildAutomationPayload(sub models.IntegrationEventSubscription, data map[st
 		Event:     sub.EventType,
 		Version:   "1",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		Data:      data,
+		Data:      publicEventData(data),
 		Content:   msg.plainText(),
 		Email:     msg.Email,
 		Subject:   msg.Subject,
 		Title:     msg.Title,
 	}
+}
+
+// publicEventData strips internal, underscore-prefixed keys (e.g. the
+// _automation_depth re-entrancy counter) from the outbound webhook body so
+// engine bookkeeping never leaks to a customer's receiver. Intentionally
+// forwarded keys like idempotency_key (no underscore) are kept. Returns the input
+// unchanged when there is nothing internal to strip (the common case).
+func publicEventData(data map[string]any) map[string]any {
+	hasInternal := false
+	for k := range data {
+		if strings.HasPrefix(k, "_") {
+			hasInternal = true
+			break
+		}
+	}
+	if !hasInternal {
+		return data
+	}
+	out := make(map[string]any, len(data))
+	for k, v := range data {
+		if strings.HasPrefix(k, "_") {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // renderTemplate substitutes {{key}} placeholders with values from the event

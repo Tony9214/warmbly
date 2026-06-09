@@ -80,6 +80,10 @@ type IntegrationRepository interface {
 	GetAutomation(ctx context.Context, orgID, id uuid.UUID) (*models.Automation, error)
 	UpdateAutomation(ctx context.Context, a *models.Automation) error
 	DeleteAutomation(ctx context.Context, orgID, id uuid.UUID) error
+	// CampaignsUsingAutomation returns the names of campaigns whose sequence has a
+	// "run_automation" step pointing at this automation (so deletion can refuse to
+	// orphan those steps). Capped; order is stable for a readable message.
+	CampaignsUsingAutomation(ctx context.Context, orgID, automationID uuid.UUID) ([]string, error)
 
 	// Field mappings (Warmbly field -> provider field). ListFieldMappings returns
 	// every mapping for a connection; ReplaceConnectionFieldMappings swaps the
@@ -502,6 +506,31 @@ func (r *integrationRepository) UpdateAutomation(ctx context.Context, a *models.
 func (r *integrationRepository) DeleteAutomation(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := r.db.Exec(ctx, `DELETE FROM automations WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err
+}
+
+func (r *integrationRepository) CampaignsUsingAutomation(ctx context.Context, orgID, automationID uuid.UUID) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT DISTINCT c.name
+		FROM sequences s
+		JOIN campaigns c ON c.id = s.campaign_id
+		WHERE c.organization_id = $1
+		  AND s.action->>'type' = 'run_automation'
+		  AND s.action->>'automation_id' = $2::text
+		ORDER BY c.name
+		LIMIT 20`, orgID, automationID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
 }
 
 func (r *integrationRepository) GetAutomation(ctx context.Context, orgID, id uuid.UUID) (*models.Automation, error) {

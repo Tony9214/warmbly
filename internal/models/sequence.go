@@ -57,11 +57,12 @@ type ActionConfig struct {
 	// create_task — open a CRM task for the lead when they reach this step
 	// (e.g. a Call task). TaskAssignedTo is the teammate chosen on the step;
 	// when nil the task falls back to the campaign owner.
-	TaskTitle         string     `json:"task_title,omitempty"`
-	TaskType          string     `json:"task_type,omitempty"`     // general | call | email | meeting
-	TaskPriority      string     `json:"task_priority,omitempty"` // low | medium | high | urgent
-	TaskAssignedTo    *uuid.UUID `json:"task_assigned_to,omitempty"`
-	TaskDueOffsetDays *int       `json:"task_due_offset_days,omitempty"` // due N days after the step fires
+	TaskTitle          string     `json:"task_title,omitempty"`
+	TaskType           string     `json:"task_type,omitempty"`     // general | call | email | meeting
+	TaskPriority       string     `json:"task_priority,omitempty"` // low | medium | high | urgent
+	TaskAssignedTo     *uuid.UUID `json:"task_assigned_to,omitempty"`
+	TaskAssignedTeamID *uuid.UUID `json:"task_assigned_team_id,omitempty"` // assign to a whole team instead of one user
+	TaskDueOffsetDays  *int       `json:"task_due_offset_days,omitempty"`  // due N days after the step fires
 
 	// create_deal / move_deal_stage — CRM deal automation off a reply branch.
 	//   create_deal: open a new deal for the contact in DealPipelineID/DealStageID.

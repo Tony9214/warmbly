@@ -133,10 +133,28 @@ func conditionSummary(c *models.AutomationCondition) string {
 	return field
 }
 
+// automationDepthKey carries the re-entrancy depth through an automation's event
+// data; maxAutomationChainDepth bounds it. Today the only launcher is a campaign
+// "Run automation" step (depth 0 -> 1), so the guard never trips in practice. It
+// is pre-emptive: if a future action ever launches a campaign or another
+// automation, that launcher MUST forward this key so a misconfigured loop
+// (campaign -> automation -> campaign -> ...) is bounded instead of infinite.
+const (
+	automationDepthKey      = "_automation_depth"
+	maxAutomationChainDepth = 5
+)
+
 // RunAutomationByID runs one automation's graph on demand (launched from a
 // campaign step), ignoring the trigger-matching gate. Condition nodes still
-// evaluate against `data`; a disabled automation is a documented no-op.
+// evaluate against `data`. Returns a descriptive error when the automation is
+// missing or disabled so the caller can record it — a disabled automation is a
+// logged skip, never a silent no-op (a toggled-off automation must not make
+// campaign steps quietly stop doing anything).
 func (s *service) RunAutomationByID(ctx context.Context, orgID, automationID uuid.UUID, data map[string]any) error {
+	depth := int(toFloat(data[automationDepthKey]))
+	if depth >= maxAutomationChainDepth {
+		return fmt.Errorf("automation chain depth limit (%d) reached; refusing to launch %s", maxAutomationChainDepth, automationID)
+	}
 	a, err := s.repo.GetAutomation(ctx, orgID, automationID)
 	if err != nil {
 		return err
@@ -145,17 +163,23 @@ func (s *service) RunAutomationByID(ctx context.Context, orgID, automationID uui
 		return fmt.Errorf("automation not found")
 	}
 	if !a.Enabled {
-		return nil
+		return fmt.Errorf("automation %q is disabled", a.Name)
 	}
 	eventType := a.TriggerEvent
 	if eventType == "" {
 		eventType = string(models.WebhookEventCampaignAction)
 	}
-	if data == nil {
-		data = map[string]any{}
+	// Run on a COPY of the caller's data: a graph with several "run automation"
+	// actions shares one data map, so bumping depth in place would let sibling #2
+	// inherit the depth that sibling #1's nested chain reached and false-trip the
+	// cap. The copy gives each launch the same starting depth, +1.
+	d := make(map[string]any, len(data)+2)
+	for k, v := range data {
+		d[k] = v
 	}
-	data["trigger"] = "campaign" // provenance: launched by a campaign step
-	s.executeAutomationGraph(ctx, *a, eventType, data)
+	d[automationDepthKey] = float64(depth + 1)
+	d["trigger"] = "campaign" // provenance: launched on demand, not event-matched
+	s.executeAutomationGraph(ctx, *a, eventType, d)
 	return nil
 }
 

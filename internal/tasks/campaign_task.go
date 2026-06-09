@@ -307,7 +307,8 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		if len(sequence.Action) > 0 {
 			_ = json.Unmarshal(sequence.Action, &cfg)
 		}
-		if aerr := s.executeActionNode(ctx, campaign, contact, &cfg); aerr != nil {
+		aerr := s.executeActionNode(ctx, campaign, contact, sequence.ID, &cfg)
+		if aerr != nil {
 			log.Warn().Err(aerr).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Str("action", cfg.Type).Msg("Action node execution failed")
 		}
 		resumeAt := nextTime
@@ -321,10 +322,16 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 			log.Warn().Err(cerr).Str("campaign_id", campaign.ID.String()).Msg("Failed to schedule next task after action node")
 		}
 		if s.campaignLogRepo != nil {
+			// Record the real outcome: a failed or skipped action (e.g. the linked
+			// automation is disabled) must be visible, not logged as if it ran.
+			evt, msg := "action", fmt.Sprintf("Ran '%s' action for %s", cfg.Type, contact.Email)
+			if aerr != nil {
+				evt, msg = "action_skipped", fmt.Sprintf("Action '%s' for %s did not run: %v", cfg.Type, contact.Email, aerr)
+			}
 			_ = s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
 				CampaignID: campaign.ID,
-				EventType:  "action",
-				Message:    fmt.Sprintf("Ran '%s' action for %s", cfg.Type, contact.Email),
+				EventType:  evt,
+				Message:    msg,
 			})
 		}
 		s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
@@ -685,7 +692,7 @@ func (s *tasksService) autoPauseCampaign(ctx context.Context, campaignID, taskID
 // "wait" and "end" have no side effect (their behaviour is timing / routing
 // only); the others reuse existing repos/services. Everything here is
 // control-plane — the worker is never involved for an action node.
-func (s *tasksService) executeActionNode(ctx context.Context, campaign *models.Campaign, contact *models.Contact, cfg *models.ActionConfig) error {
+func (s *tasksService) executeActionNode(ctx context.Context, campaign *models.Campaign, contact *models.Contact, sequenceID uuid.UUID, cfg *models.ActionConfig) error {
 	switch cfg.Type {
 	case "wait", "end", "":
 		return nil
@@ -748,20 +755,22 @@ func (s *tasksService) executeActionNode(ctx context.Context, campaign *models.C
 			}
 			title = "Follow up: " + name
 		}
-		// Per-step assignee; fall back to the campaign owner when unset.
+		// Per-step assignee; fall back to the campaign owner only when neither a
+		// user nor a team is chosen (a team-assigned task has no single owner).
 		assignee := cfg.TaskAssignedTo
-		if assignee == nil {
+		if assignee == nil && cfg.TaskAssignedTeamID == nil {
 			assignee = &owner
 		}
 		// Task types are user-managed free text; pass the configured name
 		// through (empty = untyped).
 		cid := contact.ID
 		data := &models.CreateCRMTask{
-			ContactID:  &cid,
-			Title:      title,
-			Type:       cfg.TaskType,
-			Priority:   cfg.TaskPriority,
-			AssignedTo: assignee,
+			ContactID:      &cid,
+			Title:          title,
+			Type:           cfg.TaskType,
+			Priority:       cfg.TaskPriority,
+			AssignedTo:     assignee,
+			AssignedTeamID: cfg.TaskAssignedTeamID,
 		}
 		if cfg.TaskDueOffsetDays != nil {
 			due := time.Now().UTC().AddDate(0, 0, *cfg.TaskDueOffsetDays)
@@ -851,6 +860,12 @@ func (s *tasksService) executeActionNode(ctx context.Context, campaign *models.C
 			"last_name":     contact.LastName,
 			"company":       contact.Company,
 			"phone":         contact.Phone,
+			// Stable per-(campaign,contact,step) key. Campaign tasks are
+			// at-least-once, so a duplicate delivery would re-launch this step;
+			// downstream actions (notably a webhook.ping to Zapier/Make) can dedupe
+			// on this. The scheduler already routes each step once per lead, so a
+			// real double-run is only a narrow retry window, shared by every action.
+			"idempotency_key": fmt.Sprintf("campaign:%s:%s:%s", campaign.ID, contact.ID, sequenceID),
 		}
 		for _, kv := range cfg.AutomationValues {
 			key := strings.TrimSpace(kv.Key)

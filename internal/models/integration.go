@@ -263,6 +263,10 @@ const (
 	IntegrationActionCreateDeal    IntegrationAction = "warmbly.create_deal"
 	IntegrationActionMoveDealStage IntegrationAction = "warmbly.move_deal_stage"
 	IntegrationActionUnsubscribe   IntegrationAction = "warmbly.unsubscribe"
+	// IntegrationActionRunAutomation launches another automation's flow, passing
+	// the current event data through. Bounded by the chain-depth guard so it
+	// cannot loop forever or fan out unbounded compute.
+	IntegrationActionRunAutomation IntegrationAction = "warmbly.run_automation"
 )
 
 // IsNativeAction reports whether an action is a Warmbly-internal CRM/contact
@@ -270,7 +274,8 @@ const (
 func IsNativeAction(a IntegrationAction) bool {
 	switch a {
 	case IntegrationActionAddTag, IntegrationActionRemoveTag, IntegrationActionCreateTask,
-		IntegrationActionCreateDeal, IntegrationActionMoveDealStage, IntegrationActionUnsubscribe:
+		IntegrationActionCreateDeal, IntegrationActionMoveDealStage, IntegrationActionUnsubscribe,
+		IntegrationActionRunAutomation:
 		return true
 	default:
 		return false

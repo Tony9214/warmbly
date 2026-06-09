@@ -14,6 +14,7 @@ import (
 
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/webhook"
+	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -516,7 +517,35 @@ func (s *service) UpdateAutomation(ctx context.Context, orgID, id uuid.UUID, w m
 }
 
 func (s *service) DeleteAutomation(ctx context.Context, orgID, id uuid.UUID) error {
+	// Referential integrity: refuse to orphan campaign "Run automation" steps that
+	// point at this automation. A blocked delete names the campaigns so the user
+	// knows where to remove the step first (a typed Conflict the handler maps to 409).
+	used, err := s.repo.CampaignsUsingAutomation(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if len(used) > 0 {
+		return errx.New(errx.Conflict, automationInUseMessage(used))
+	}
 	return s.repo.DeleteAutomation(ctx, orgID, id)
+}
+
+// automationInUseMessage builds a human, actionable conflict message naming up to
+// three referencing campaigns.
+func automationInUseMessage(names []string) string {
+	shown, more := names, 0
+	if len(shown) > 3 {
+		shown, more = shown[:3], len(shown)-3
+	}
+	list := strings.Join(shown, ", ")
+	if more > 0 {
+		list = fmt.Sprintf("%s and %d more", list, more)
+	}
+	noun := "campaign"
+	if len(names) != 1 {
+		noun = "campaigns"
+	}
+	return fmt.Sprintf("This automation is still used by %d %s (%s). Remove the 'Run automation' step from those campaigns before deleting it.", len(names), noun, list)
 }
 
 // buildAutomation validates a write payload (trigger event, step connections,

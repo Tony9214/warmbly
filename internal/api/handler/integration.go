@@ -728,7 +728,9 @@ func (h *Handler) DeleteAutomation(c *gin.Context) {
 		return
 	}
 	if err := h.IntegrationService.DeleteAutomation(c.Request.Context(), orgID, id); err != nil {
-		errx.JSON(c, errx.New(errx.Internal, "delete failed"))
+		// Propagate a typed error (e.g. Conflict when the automation is still used
+		// by campaign steps) with its message; anything else becomes a 500.
+		errx.Handle(c, err)
 		return
 	}
 	h.auditIntegration(c, userID, models.AuditActionDelete, id, "automation")
