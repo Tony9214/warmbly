@@ -5,7 +5,7 @@ import Icon from './Icon.astro';
  * ChangelogShowcase - a landing-page CHANGELOG section.
  *
  * A clean vertical timeline of the latest releases. Content is grounded in the
- * real entries on /changelog/ (versions, dates, change bullets) so the section
+ * real entries on /changelog/ (dates, change bullets) so the section
  * never drifts from the actual product history. Self-contained, no props, no
  * client JS, no app-window frame - this is a content section, not a mock.
  *
@@ -16,56 +16,52 @@ import Icon from './Icon.astro';
  */
 
 interface Release {
-  version: string;
   date: string;
   category: 'New' | 'Improved' | 'Fixed';
   title: string;
   bullets: string[];
 }
 
-// Latest four releases, taken from /changelog/ and split into 2-3 bullet lines.
+// Latest releases, taken from /changelog/ (which is derived from the real
+// git history) and split into 2-3 bullet lines.
 const releases: Release[] = [
   {
-    version: 'v1.9',
-    date: '2026-05-26',
+    date: '2026-06-09',
     category: 'New',
-    title: 'BYOK envelope encryption for self-host',
+    title: 'Automation builder',
     bullets: [
-      'Register your own AWS KMS key as the root of trust for the per-user DEK envelope.',
-      'Existing encrypted material is re-wrapped on first key activation.',
-      'Plaintext DEKs stay only in the Redis cache with a bounded TTL.',
+      'Build branching flows in a visual graph builder.',
+      'Launch automations straight from a campaign.',
+      'Execution safeguards protect every live flow.',
     ],
   },
   {
-    version: 'v1.8',
-    date: '2026-05-22',
+    date: '2026-06-08',
     category: 'New',
-    title: 'SAML SSO for Business plans',
+    title: 'Reply classification and campaign branching',
     bullets: [
-      'Connect Okta, Azure AD, or any SAML 2.0 identity provider.',
-      'Just-in-time provisioning is on by default.',
-      'Admins can pin a default role for new sign-ins.',
+      'Inbound replies are classified by intent.',
+      'Sequences branch on what a reply actually says.',
+      'New campaigns stop on reply by default.',
     ],
   },
   {
-    version: 'v1.7',
-    date: '2026-05-20',
+    date: '2026-06-08',
     category: 'New',
-    title: 'API keys dashboard',
+    title: 'Two-factor auth and notifications',
     bullets: [
-      'Per-key scopes, last-used timestamps, and one-click rotation.',
-      'Existing keys auto-migrated to full-access scope.',
+      'Two-factor authentication, required at login once on.',
+      'A realtime notification center with per-member preferences.',
     ],
   },
   {
-    version: 'v1.6',
-    date: '2026-05-15',
-    category: 'Improved',
-    title: 'Per-mailbox health bands',
+    date: '2026-06-07',
+    category: 'New',
+    title: 'CRM, unified inbox, and integrations',
     bullets: [
-      'Mailboxes surface a health band: healthy, watch, quarantined, or blocked.',
-      'Bands are driven by rolling placement, complaint, and bounce signals.',
-      'Pool selection now skips anything not healthy.',
+      'Server-driven CRM with a deals board and team tasks.',
+      'Reworked unified inbox routing and seen-state.',
+      'Integrations and meetings dashboard.',
     ],
   },
 ];
@@ -136,9 +132,6 @@ const categoryStyle = (c: Release['category']) => {
               <span aria-hidden="true" class={`absolute left-0 top-0 bottom-0 w-[3px] ${s.rail}`}></span>
 
               <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span class="text-[12.5px] font-mono font-semibold text-heading tabular-nums">
-                  {r.version}
-                </span>
                 <span class="text-[11.5px] font-mono uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
                   {r.date}
                 </span>
