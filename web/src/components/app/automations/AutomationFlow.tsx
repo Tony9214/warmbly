@@ -31,14 +31,22 @@ import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
 import {
     ArrowLeftIcon,
+    BriefcaseIcon,
     CheckCircle2Icon,
     CheckIcon,
+    CheckSquareIcon,
     GitBranchIcon,
     HistoryIcon,
+    Link2Icon,
     Loader2Icon,
+    MessageSquareIcon,
     PlayIcon,
     PlusIcon,
+    SendIcon,
+    TagIcon,
+    TriangleAlertIcon,
     Trash2Icon,
+    UserMinusIcon,
     XCircleIcon,
     XIcon,
     ZapIcon,
@@ -46,6 +54,7 @@ import {
 import toast from "react-hot-toast";
 import { Label, NumberInput, TextInput } from "@/components/ui/field";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
+import { useConfirm } from "@/hooks/context/confirm";
 import { useUpdateAutomation, useTestAutomation } from "@/lib/api/hooks/app/automations/useAutomationMutations";
 import { useAutomationRuns } from "@/lib/api/hooks/app/automations/useAutomationRuns";
 import type {
@@ -87,6 +96,9 @@ import {
 import CategoryPicker from "@/components/app/contacts/CategoryPicker";
 import { ExpressionReference } from "@/components/app/automations/ExpressionReference";
 import DealStagePicker from "@/components/app/crm/DealStagePicker";
+import TaskTypePicker from "@/components/app/crm/TaskTypePicker";
+import AssigneeTeamPicker, { type AssigneeValue } from "@/components/app/crm/AssigneeTeamPicker";
+import { useAutomations } from "@/lib/api/hooks/app/automations/useAutomations";
 import ProviderGlyph from "@/app/app/integrations/_components/ProviderGlyph";
 import { cn } from "@/lib/utils";
 
@@ -384,6 +396,40 @@ export default function AutomationFlow({
     const [testResult, setTestResult] = React.useState<DryRunResponse | null>(null);
     const seeded = React.useRef(false);
 
+    const confirm = useConfirm();
+
+    // Dirty tracking: a stable signature of everything we persist (name, enabled,
+    // trigger, and the graph). The baseline is captured from the seeded canvas and
+    // reset on every successful save, so the Save button only lights up — and the
+    // leave guard only fires — when there are real unsaved changes. Positions are
+    // rounded so sub-pixel drift never reads as a change.
+    const baselineRef = React.useRef<string>("");
+    const flowSig = React.useCallback(
+        (nm: string, en: boolean, tr: string, ns: Node[], es: Edge[]) =>
+            JSON.stringify({
+                name: nm.trim(),
+                enabled: en,
+                trigger: tr,
+                nodes: ns.map((n) => {
+                    const d = n.data as { action?: string; connection_id?: string; config?: unknown; condition?: unknown };
+                    return {
+                        id: n.id,
+                        type: n.type,
+                        x: Math.round(n.position.x),
+                        y: Math.round(n.position.y),
+                        action: d?.action ?? null,
+                        connection_id: d?.connection_id ?? null,
+                        config: d?.config ?? null,
+                        condition: d?.condition ?? null,
+                    };
+                }),
+                edges: es.map((e) => ({ id: e.id, source: e.source, target: e.target, when: (e.data as { when?: string })?.when ?? "" })),
+            }),
+        [],
+    );
+    const signature = React.useMemo(() => flowSig(name, enabled, trigger, nodes, edges), [flowSig, name, enabled, trigger, nodes, edges]);
+    const dirty = baselineRef.current !== "" && signature !== baselineRef.current;
+
     // Connection helpers ------------------------------------------------------
     const targets = React.useMemo(
         () =>
@@ -478,7 +524,9 @@ export default function AutomationFlow({
         if (noPositions) rfNodes = stackComponents(layoutGraph(rfNodes, rfEdges), rfEdges);
         setNodes(rfNodes);
         setEdges(rfEdges);
-    }, [automation.graph, toRFNode, setNodes, setEdges]);
+        // Baseline for dirty detection, captured from the exact seeded canvas.
+        baselineRef.current = flowSig(automation.name, automation.enabled, automation.trigger_event, rfNodes, rfEdges);
+    }, [automation.graph, automation.name, automation.enabled, automation.trigger_event, toRFNode, setNodes, setEdges, flowSig]);
 
     const updateNodeData = React.useCallback(
         (id: string, patch: Record<string, unknown>) =>
@@ -559,6 +607,11 @@ export default function AutomationFlow({
                     setSelectedId(n.id);
                     return false;
                 }
+                if (need === "automation" && !String(d.config?.automation_id ?? "").trim()) {
+                    toast.error("A run-automation action needs a target automation");
+                    setSelectedId(n.id);
+                    return false;
+                }
                 continue; // native actions need no connection
             }
             if (!d.connection_id) {
@@ -601,6 +654,8 @@ export default function AutomationFlow({
         };
         try {
             await update.mutateAsync({ id: automation.id, w: { name: name.trim() || "Automation", enabled, trigger_event: trigger, filter, graph } });
+            // Re-baseline so the canvas is no longer "dirty" after a successful save.
+            baselineRef.current = flowSig(name, enabled, trigger, nodes, edges);
             toast.success("Automation saved");
             return true;
         } catch {
@@ -624,12 +679,22 @@ export default function AutomationFlow({
 
     const selectedNode = nodes.find((n) => n.id === selectedId) ?? null;
 
+    // Leaving the builder with unsaved changes asks first; a clean canvas leaves
+    // immediately.
+    const guardedBack = () => {
+        if (dirty) {
+            confirm.show("You have unsaved changes. Leave without saving?", () => onBack());
+            return;
+        }
+        onBack();
+    };
+
     return (
         <div className="h-full flex flex-col">
             <header className="h-12 px-3 border-b border-slate-200 flex items-center gap-2 shrink-0 bg-white">
                 <button
                     type="button"
-                    onClick={onBack}
+                    onClick={guardedBack}
                     className="h-7 w-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center"
                     aria-label="Back"
                 >
@@ -643,14 +708,29 @@ export default function AutomationFlow({
                 />
                 <button
                     type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label="Enable automation"
                     onClick={() => setEnabled((v) => !v)}
-                    className={cn(
-                        "h-7 px-2.5 rounded-md text-[12px] font-medium border inline-flex items-center gap-1.5 transition-colors",
-                        enabled ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-500 border-slate-200",
-                    )}
+                    title={enabled ? "Automation is live" : "Automation is paused"}
+                    className="inline-flex h-7 cursor-pointer select-none items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                 >
-                    <span className={cn("size-1.5 rounded-full", enabled ? "bg-emerald-500" : "bg-slate-400")} />
-                    {enabled ? "Active" : "Off"}
+                    <span
+                        className={cn(
+                            "relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full transition-colors",
+                            enabled ? "bg-sky-600" : "bg-slate-300",
+                        )}
+                    >
+                        <span
+                            className={cn(
+                                "inline-block size-3.5 rounded-full bg-white shadow-sm transition-transform duration-150",
+                                enabled ? "translate-x-[16px]" : "translate-x-[2px]",
+                            )}
+                        />
+                    </span>
+                    <span className={cn("text-[12px] font-medium transition-colors", enabled ? "text-slate-700" : "text-slate-400")}>
+                        {enabled ? "Active" : "Off"}
+                    </span>
                 </button>
                 <div className="ml-auto flex items-center gap-1.5">
                     <button
@@ -686,11 +766,23 @@ export default function AutomationFlow({
                     <button
                         type="button"
                         onClick={save}
-                        disabled={update.isPending}
-                        className="h-7 px-3 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 disabled:opacity-60"
+                        disabled={!dirty || update.isPending}
+                        title={dirty ? "Save changes" : "No unsaved changes"}
+                        className={cn(
+                            "h-7 px-3 rounded-md text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors",
+                            dirty
+                                ? "bg-sky-600 hover:bg-sky-700 text-white shadow-sm"
+                                : "bg-slate-100 text-slate-400 cursor-default",
+                        )}
                     >
-                        {update.isPending ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <CheckIcon className="w-3.5 h-3.5" />}
-                        Save
+                        {update.isPending ? (
+                            <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
+                        ) : dirty ? (
+                            <CheckIcon className="w-3.5 h-3.5" />
+                        ) : (
+                            <CheckIcon className="w-3.5 h-3.5 text-slate-300" />
+                        )}
+                        {dirty ? "Save" : "Saved"}
                     </button>
                 </div>
             </header>
@@ -761,6 +853,7 @@ export default function AutomationFlow({
                         key={selectedNode.id}
                         node={selectedNode}
                         onClose={() => setSelectedId(null)}
+                        selfId={automation.id}
                         // trigger
                         trigger={trigger}
                         onTrigger={(ev) => {
@@ -918,6 +1011,7 @@ function InsightsPanel({
 function NodeEditor({
     node,
     onClose,
+    selfId,
     trigger,
     onTrigger,
     onCondition,
@@ -929,6 +1023,7 @@ function NodeEditor({
 }: {
     node: Node;
     onClose: () => void;
+    selfId: string;
     trigger: string;
     onTrigger: (ev: string) => void;
     onCondition: (c: AutomationCondition) => void;
@@ -979,6 +1074,7 @@ function NodeEditor({
                 ) : (
                     <ActionEditor
                         trigger={trigger}
+                        selfId={selfId}
                         data={node.data as { action?: string; connection_id?: string; config?: Record<string, unknown> }}
                         targets={targets}
                         connLabel={connLabel}
@@ -1127,8 +1223,36 @@ function ConditionEditor({
     );
 }
 
+// One visual per action (native + provider): icon, text tint, and a soft bg for
+// the editor header. Drives both the action dropdown glyphs and the editor
+// header, so the picker reads like the campaign step picker.
+const ACTION_VISUAL: Record<string, { Icon: typeof TagIcon; tint: string; bg: string; desc?: string }> = {
+    "warmbly.add_tag": { Icon: TagIcon, tint: "text-emerald-600", bg: "bg-emerald-50", desc: "Add a tag to the contact." },
+    "warmbly.remove_tag": { Icon: TagIcon, tint: "text-amber-600", bg: "bg-amber-50", desc: "Remove a tag from the contact." },
+    "warmbly.create_task": { Icon: CheckSquareIcon, tint: "text-violet-600", bg: "bg-violet-50", desc: "Open a CRM task for the contact." },
+    "warmbly.create_deal": { Icon: BriefcaseIcon, tint: "text-sky-600", bg: "bg-sky-50", desc: "Create a CRM deal for the contact." },
+    "warmbly.move_deal_stage": { Icon: BriefcaseIcon, tint: "text-sky-600", bg: "bg-sky-50", desc: "Move the contact's open deal to another stage." },
+    "warmbly.unsubscribe": { Icon: UserMinusIcon, tint: "text-rose-600", bg: "bg-rose-50", desc: "Unsubscribe the contact from the campaign." },
+    "warmbly.run_automation": { Icon: ZapIcon, tint: "text-indigo-600", bg: "bg-indigo-50", desc: "Launch another automation with this event's data." },
+    "slack.notify": { Icon: MessageSquareIcon, tint: "text-violet-600", bg: "bg-violet-50" },
+    "discord.notify": { Icon: MessageSquareIcon, tint: "text-indigo-600", bg: "bg-indigo-50" },
+    "webhook.ping": { Icon: SendIcon, tint: "text-sky-600", bg: "bg-sky-50" },
+    "hubspot.upsert_contact": { Icon: BriefcaseIcon, tint: "text-orange-600", bg: "bg-orange-50" },
+    "pipedrive.upsert_person": { Icon: BriefcaseIcon, tint: "text-slate-700", bg: "bg-slate-100" },
+    "salesforce.upsert_contact": { Icon: BriefcaseIcon, tint: "text-sky-600", bg: "bg-sky-50" },
+    "close.upsert_lead": { Icon: BriefcaseIcon, tint: "text-emerald-600", bg: "bg-emerald-50" },
+};
+
+// actionGlyph returns the tinted leading icon for an action's dropdown option.
+function actionGlyph(action: string): React.ReactNode {
+    const v = ACTION_VISUAL[action];
+    const Icon = v?.Icon ?? ZapIcon;
+    return <Icon className={cn("w-3.5 h-3.5", v?.tint ?? "text-slate-400")} />;
+}
+
 function ActionEditor({
     trigger,
+    selfId,
     data,
     targets,
     connLabel,
@@ -1137,6 +1261,7 @@ function ActionEditor({
     onAction,
 }: {
     trigger: string;
+    selfId: string;
     data: { action?: string; connection_id?: string; config?: Record<string, unknown> };
     targets: IntegrationConnection[];
     connLabel: (id?: string) => string;
@@ -1153,12 +1278,16 @@ function ActionEditor({
     const isNative = isNativeAction(data.action ?? "");
     const selectedConn = isNative ? NATIVE_CONNECTION : (data.connection_id ?? "");
     const connOptions: SelectOption[] = [
-        { value: NATIVE_CONNECTION, label: "Warmbly (built-in)" },
-        ...targets.map((c) => ({ value: c.id, label: connLabel(c.id) })),
+        { value: NATIVE_CONNECTION, label: "Warmbly (built-in)", icon: <ZapIcon className="size-3.5 shrink-0 text-indigo-600" /> },
+        ...targets.map((c) => ({
+            value: c.id,
+            label: connLabel(c.id),
+            icon: <Link2Icon className="size-3.5 shrink-0 text-slate-400" />,
+        })),
     ];
-    const actionOptions: SelectOption[] = isNative
-        ? NATIVE_ACTIONS.map((a) => ({ value: a, label: actionLabel(a) }))
-        : actionsForProvider(providerOf(data.connection_id)).map((a) => ({ value: a, label: actionLabel(a) }));
+    const actionOptions: SelectOption[] = (isNative ? NATIVE_ACTIONS : actionsForProvider(providerOf(data.connection_id))).map(
+        (a) => ({ value: a, label: actionLabel(a), icon: actionGlyph(a) }),
+    );
 
     const pickConnection = (connId: string) => {
         if (connId === NATIVE_CONNECTION) {
@@ -1198,7 +1327,7 @@ function ActionEditor({
             </div>
 
             {isNative ? (
-                <NativeActionConfig action={data.action ?? ""} config={config} patchConfig={patchConfig} />
+                <NativeActionConfig action={data.action ?? ""} config={config} patchConfig={patchConfig} selfId={selfId} />
             ) : (
                 <>
                     {actionNeedsChannel(data.action ?? "") && (
@@ -1236,83 +1365,224 @@ function ActionEditor({
     );
 }
 
-// NativeActionConfig renders the right picker for a built-in (Warmbly) action.
+const NATIVE_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+function PrioritySegment({ value, onChange }: { value: string; onChange: (p: string) => void }) {
+    const current = value || "medium";
+    return (
+        <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5">
+            {NATIVE_PRIORITIES.map((p) => (
+                <button
+                    key={p}
+                    type="button"
+                    onClick={() => onChange(p)}
+                    className={cn(
+                        "h-7 px-2.5 rounded text-[11px] font-medium capitalize transition-colors",
+                        current === p ? "bg-sky-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700",
+                    )}
+                >
+                    {p}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+const NATIVE_CURRENCIES: SelectOption[] = ["USD", "EUR", "GBP", "CAD", "AUD"].map((c) => ({ value: c, label: c }));
+
+// NativeActionConfig renders the right editor for a built-in (Warmbly) action.
 function NativeActionConfig({
     action,
     config,
     patchConfig,
+    selfId,
 }: {
     action: string;
     config: Record<string, unknown>;
     patchConfig: (p: Record<string, unknown>) => void;
+    selfId: string;
 }) {
     const need = nativeActionNeeds(action);
-    if (need === "tag") {
-        return (
-            <div>
-                <Label>{action === "warmbly.add_tag" ? "Tag to add" : "Tag to remove"}</Label>
-                <CategoryPicker
-                    value={config.category_id ? [String(config.category_id)] : []}
-                    onChange={(ids) => patchConfig({ category_id: ids.length ? ids[ids.length - 1] : "" })}
-                    placeholder="Pick a tag…"
-                />
-                <p className="mt-1.5 text-[11px] text-slate-400">Tags are your contact categories.</p>
-            </div>
-        );
-    }
-    if (need === "deal") {
-        return (
-            <div className="space-y-3">
+    return (
+        <div className="space-y-3">
+            {need === "tag" && (
                 <div>
-                    <Label>{action === "warmbly.create_deal" ? "Create the deal in" : "Move the deal to"}</Label>
-                    <DealStagePicker
-                        pipelineId={config.deal_pipeline_id ? String(config.deal_pipeline_id) : undefined}
-                        stageId={config.deal_stage_id ? String(config.deal_stage_id) : undefined}
-                        onChange={({ pipelineId, stageId }) => patchConfig({ deal_pipeline_id: pipelineId, deal_stage_id: stageId })}
+                    <Label>{action === "warmbly.add_tag" ? "Tag to add" : "Tag to remove"}</Label>
+                    <CategoryPicker
+                        value={config.category_id ? [String(config.category_id)] : []}
+                        onChange={(ids) => patchConfig({ category_id: ids.length ? ids[ids.length - 1] : "" })}
+                        placeholder="Pick a tag…"
                     />
                 </div>
-                {action === "warmbly.create_deal" && (
+            )}
+
+            {need === "deal" && (
+                <>
                     <div>
-                        <Label>Deal name</Label>
+                        <Label>{action === "warmbly.create_deal" ? "Create the deal in" : "Move the deal to"}</Label>
+                        <DealStagePicker
+                            pipelineId={config.deal_pipeline_id ? String(config.deal_pipeline_id) : undefined}
+                            stageId={config.deal_stage_id ? String(config.deal_stage_id) : undefined}
+                            onChange={({ pipelineId, stageId }) => patchConfig({ deal_pipeline_id: pipelineId, deal_stage_id: stageId })}
+                        />
+                    </div>
+                    {action === "warmbly.create_deal" && (
+                        <>
+                            <div>
+                                <Label>Deal name</Label>
+                                <TextInput
+                                    value={String(config.deal_name ?? "")}
+                                    onChange={(v) => patchConfig({ deal_name: v })}
+                                    placeholder="{{.company}} ({{.contact_email}})"
+                                    className="w-full"
+                                />
+                                <p className="mt-1.5 text-[11px] text-slate-400">
+                                    Full Go template: {"{{.variable}}"} fields plus {"{{if}}"}, helpers, and pipelines.
+                                </p>
+                            </div>
+                            <div className="flex items-end gap-3">
+                                <div className="flex-1">
+                                    <Label>Value (optional)</Label>
+                                    <NumberInput
+                                        value={Number(config.deal_value ?? 0)}
+                                        onChange={(n) => patchConfig({ deal_value: n > 0 ? n : undefined })}
+                                        min={0}
+                                        max={1_000_000_000}
+                                        className="w-full"
+                                    />
+                                </div>
+                                <div className="w-32">
+                                    <Label>Currency</Label>
+                                    <SelectMenu
+                                        value={String(config.deal_currency ?? "USD")}
+                                        onChange={(c) => patchConfig({ deal_currency: c })}
+                                        options={NATIVE_CURRENCIES}
+                                        className="w-full"
+                                        fullWidth
+                                    />
+                                </div>
+                            </div>
+                        </>
+                    )}
+                    {action === "warmbly.move_deal_stage" && (
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                            Moves the contact's most recent open deal in this pipeline. If they have no open deal here, nothing happens.
+                        </p>
+                    )}
+                </>
+            )}
+
+            {need === "task" && (
+                <>
+                    <div>
+                        <Label>Task title</Label>
                         <TextInput
-                            value={String(config.deal_name ?? "")}
-                            onChange={(v) => patchConfig({ deal_name: v })}
-                            placeholder="{{.company}} ({{.contact_email}})"
+                            value={String(config.task_title ?? "")}
+                            onChange={(v) => patchConfig({ task_title: v })}
+                            placeholder="Follow up with {{.contact_email}}"
                             className="w-full"
                         />
                         <p className="mt-1.5 text-[11px] text-slate-400">
-                            Full Go template: {"{{.variable}}"} fields plus {"{{if}}"}, helpers, and pipelines from the trigger data.
+                            Full Go template: {"{{.variable}}"} fields plus {"{{if}}"}, helpers, and pipelines.
                         </p>
                     </div>
-                )}
-                {action === "warmbly.move_deal_stage" && (
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Moves the contact's most recent open deal in this pipeline. If they have no open deal here, nothing happens.
-                    </p>
-                )}
-            </div>
-        );
-    }
-    if (need === "task") {
-        return (
-            <div>
-                <Label>Task title</Label>
-                <TextInput
-                    value={String(config.task_title ?? "")}
-                    onChange={(v) => patchConfig({ task_title: v })}
-                    placeholder="Follow up with {{.contact_email}}"
-                    className="w-full"
-                />
-                <p className="mt-1.5 text-[11px] text-slate-400">
-                    Full Go template: {"{{.variable}}"} fields plus {"{{if}}"}, helpers, and pipelines. The task is assigned to the workspace owner.
+                    <div>
+                        <Label>Task type</Label>
+                        <TaskTypePicker
+                            value={String(config.task_type ?? "")}
+                            onChange={(name) => patchConfig({ task_type: name })}
+                            className="w-full"
+                        />
+                    </div>
+                    <div className="flex flex-wrap items-end gap-4">
+                        <div>
+                            <Label>Priority</Label>
+                            <PrioritySegment value={String(config.task_priority ?? "")} onChange={(p) => patchConfig({ task_priority: p })} />
+                        </div>
+                        <div>
+                            <Label>Due in (days)</Label>
+                            <NumberInput
+                                value={Number(config.task_due_offset_days ?? 1)}
+                                onChange={(n) => patchConfig({ task_due_offset_days: n })}
+                                min={0}
+                                max={365}
+                                className="w-28"
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <Label>Assign to</Label>
+                        <AssigneeTeamPicker
+                            className="w-full"
+                            value={{
+                                userId: config.task_assigned_to ? String(config.task_assigned_to) : null,
+                                teamId: config.task_assigned_team_id ? String(config.task_assigned_team_id) : null,
+                            }}
+                            onChange={(v: AssigneeValue) => patchConfig({ task_assigned_to: v.userId ?? null, task_assigned_team_id: v.teamId ?? null })}
+                        />
+                        <p className="mt-1.5 text-[11px] text-slate-400">
+                            Assign to a teammate or a whole team. Unassigned falls back to the workspace owner.
+                        </p>
+                    </div>
+                </>
+            )}
+
+            {need === "automation" && <RunAnotherAutomationFields config={config} patchConfig={patchConfig} selfId={selfId} />}
+
+            {need === "none" && (
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Works when the event carries a campaign (reply / bounce / unsubscribe triggers).
                 </p>
-            </div>
-        );
-    }
+            )}
+        </div>
+    );
+}
+
+// RunAnotherAutomationFields picks the automation to launch. It excludes self and
+// flags a disabled / non-campaign-trigger target. Recursion + compute are bounded
+// server-side by the chain-depth guard, so this stays safe even if chains nest.
+function RunAnotherAutomationFields({
+    config,
+    patchConfig,
+    selfId,
+}: {
+    config: Record<string, unknown>;
+    patchConfig: (p: Record<string, unknown>) => void;
+    selfId: string;
+}) {
+    const { data } = useAutomations();
+    const all = (data?.automations ?? []).filter((a) => a.id !== selfId);
+    const options: SelectOption[] = all.map((a) => ({
+        value: a.id,
+        label: (a.name || "Untitled automation") + (a.enabled ? "" : " · disabled"),
+    }));
+    const selected = all.find((a) => a.id === String(config.automation_id ?? ""));
     return (
-        <p className="text-[11px] text-slate-400 leading-relaxed">
-            Unsubscribes the contact. Works when the event carries a campaign (reply / bounce / unsubscribe triggers).
-        </p>
+        <div className="space-y-2">
+            <div>
+                <Label>Automation to run</Label>
+                <SelectMenu
+                    value={String(config.automation_id ?? "")}
+                    onChange={(id) => patchConfig({ automation_id: id })}
+                    options={options}
+                    placeholder={options.length ? "Choose an automation…" : "No other automations yet"}
+                    className="w-full"
+                    fullWidth
+                />
+            </div>
+            {selected && !selected.enabled && (
+                <p className="inline-flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-700">
+                    <TriangleAlertIcon className="mt-px w-3.5 h-3.5 shrink-0" /> This automation is disabled, so nothing runs until you enable it.
+                </p>
+            )}
+            {selected && selected.enabled && selected.trigger_event !== "campaign.action" && (
+                <p className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5 text-[11px] leading-relaxed text-sky-700">
+                    Built for the &quot;{triggerLabel(selected.trigger_event)}&quot; trigger. It still runs here, but only the variables present in this event are passed through.
+                </p>
+            )}
+            <p className="text-[11px] leading-relaxed text-slate-400">
+                The launched automation receives this event&apos;s data. Chains are depth-limited, so automations can&apos;t loop forever.
+            </p>
+        </div>
     );
 }
 
