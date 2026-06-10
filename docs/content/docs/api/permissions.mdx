@@ -1,13 +1,12 @@
 ---
-title: Permissions Reference
+title: Permissions reference
 description: Complete reference for the 22 API permissions available in Warmbly.
+icon: ShieldCheck
 ---
-
-# Permissions Reference
 
 Warmbly uses a bitmask system for API permissions. Each permission is one bit in a `uint64`, so a single integer can express any combination of the permissions below.
 
-## Permission Values
+## Permission values
 
 | Permission | Bit | Value | Category | Description |
 |------------|-----|-------|----------|-------------|
@@ -54,11 +53,11 @@ High-volume operations. These can touch large numbers of rows in a single reques
 
 Realtime subscriptions, webhooks, integrations, warmup routing, and self-service key management. Grant individually.
 
-## Preset Combinations
+## Preset combinations
 
 Both presets are returned by `GET /api-keys/permissions` for convenience.
 
-### Read Only — 688159
+### Read only (688159)
 
 All read permissions combined:
 
@@ -69,7 +68,7 @@ READ_EMAILS | READ_CAMPAIGNS | READ_CONTACTS | READ_UNIBOX | READ_ANALYTICS
 = 688159
 ```
 
-### Full Access — 4194303
+### Full access (4194303)
 
 All 22 permissions:
 
@@ -77,7 +76,7 @@ All 22 permissions:
 (1 << 22) - 1 = 4194303
 ```
 
-## Working with Bitmasks
+## Working with bitmasks
 
 ### Combining
 
@@ -97,17 +96,17 @@ function hasPermission(permissions, required) {
   return (permissions & required) === required;
 }
 
-hasPermission(16387, 16384); // true — SEND_CAMPAIGNS granted
-hasPermission(16387, 64);    // false — WRITE_CAMPAIGNS missing
+hasPermission(16387, 16384); // true: SEND_CAMPAIGNS granted
+hasPermission(16387, 64);    // false: WRITE_CAMPAIGNS missing
 ```
 
 ### Rejecting unknown bits
 
 `POST /api-keys` rejects any request whose `permissions` field has bits outside the known set, so a stale client can't accidentally request a future permission. The current mask of valid bits is `4194303`.
 
-## Common Permission Sets
+## Common permission sets
 
-### Monitoring Integration
+### Monitoring integration
 
 For dashboards and reporting:
 
@@ -119,7 +118,7 @@ const MONITORING =
 // 19
 ```
 
-### CRM Sync
+### CRM sync
 
 ```javascript
 const CRM_SYNC =
@@ -131,7 +130,7 @@ const CRM_SYNC =
 // 393860
 ```
 
-### Campaign Automation (drafts only, no send)
+### Campaign automation (drafts only, no send)
 
 ```javascript
 const CAMPAIGN_DRAFTS =
@@ -143,13 +142,15 @@ const CAMPAIGN_DRAFTS =
 // 98374
 ```
 
-### Campaign Automation (with send)
+### Campaign automation (with send)
 
 Same as above, plus `SEND_CAMPAIGNS` (16384). Grant only when the integration genuinely needs to start campaigns.
 
-## Permission Constants
+## Permission constants
 
-### JavaScript/TypeScript
+<Tabs items={['JavaScript', 'Python', 'Go']}>
+
+<Tab value="JavaScript">
 
 ```typescript
 export const Permissions = {
@@ -173,10 +174,14 @@ export const Permissions = {
   READ_CRM: 131072,
   WRITE_CRM: 262144,
   READ_AUDIT_LOGS: 524288,
+  INTEGRATIONS: 1048576,
+  WARMUP_ROUTING: 2097152,
 } as const;
 ```
 
-### Python
+</Tab>
+
+<Tab value="Python">
 
 ```python
 class Permissions:
@@ -200,9 +205,13 @@ class Permissions:
     READ_CRM = 131072
     WRITE_CRM = 262144
     READ_AUDIT_LOGS = 524288
+    INTEGRATIONS = 1048576
+    WARMUP_ROUTING = 2097152
 ```
 
-### Go
+</Tab>
+
+<Tab value="Go">
 
 ```go
 const (
@@ -226,11 +235,17 @@ const (
     APIPermReadCRM                              // 131072
     APIPermWriteCRM                             // 262144
     APIPermReadAuditLogs                        // 524288
+    APIPermIntegrations                         // 1048576
+    APIPermWarmupRouting                        // 2097152
 )
 ```
 
-## See Also
+</Tab>
 
-- [Authentication](/authentication)
-- [Endpoints](/endpoints)
-- [Team & roles](/team-roles)
+</Tabs>
+
+## See also
+
+- [Authentication](/api/authentication)
+- [Endpoints](/api/endpoints)
+- [Team & roles](/guides/team-roles)

@@ -1,13 +1,12 @@
 ---
-title: Error Codes
+title: Error codes
 description: Reference for all API error codes and their meanings.
+icon: TriangleAlert
 ---
-
-# Error Codes
 
 The Warmbly API uses standard HTTP status codes and returns structured error responses in JSON format.
 
-## Error Response Format
+## Error response format
 
 All errors follow this structure:
 
@@ -22,9 +21,9 @@ All errors follow this structure:
 
 `error` and `message` are for people. Client logic should use `code`, HTTP status, and endpoint-specific fields such as `retry_after`. Include `request_id` when contacting support.
 
-## HTTP Status Codes
+## HTTP status codes
 
-### Client Errors (4xx)
+### Client errors (4xx)
 
 | Code | Error | Description |
 |------|-------|-------------|
@@ -34,8 +33,9 @@ All errors follow this structure:
 | 404 | Not Found | Resource doesn't exist |
 | 409 | Conflict | Resource already exists |
 | 422 | Unprocessable | Validation failed |
+| 429 | Too Many Requests | Rate limit exceeded |
 
-### Server Errors (5xx)
+### Server errors (5xx)
 
 | Code | Error | Description |
 |------|-------|-------------|
@@ -43,7 +43,7 @@ All errors follow this structure:
 | 501 | Not Implemented | Feature not available |
 | 503 | Service Unavailable | Service temporarily down |
 
-## Error Details
+## Error details
 
 ### 400 Bad Request
 
@@ -86,7 +86,9 @@ Returned when authentication fails.
 ```json
 {
   "error": "Unauthorized",
-  "message": "Token not found."
+  "message": "Token not found.",
+  "code": "unauthorized",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 
@@ -111,7 +113,9 @@ Returned when authenticated but lacking necessary permissions.
 ```json
 {
   "error": "Forbidden",
-  "message": "You doesn't have access to this feature."
+  "message": "You don't have access to this feature.",
+  "code": "forbidden",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 
@@ -135,7 +139,9 @@ Returned when the requested resource doesn't exist.
 ```json
 {
   "error": "Not Found",
-  "message": "Resource not found."
+  "message": "Resource not found.",
+  "code": "not_found",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 
@@ -157,7 +163,9 @@ Returned when the request conflicts with existing data.
 ```json
 {
   "error": "Conflict",
-  "message": "resource already exists"
+  "message": "resource already exists",
+  "code": "conflict",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 
@@ -176,7 +184,9 @@ Returned when validation fails on the request data.
 ```json
 {
   "error": "Unprocessable",
-  "message": "validation failed"
+  "message": "validation failed",
+  "code": "unprocessable",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 
@@ -189,7 +199,9 @@ Returned when an unexpected error occurs on the server.
 ```json
 {
   "error": "Internal Server Error",
-  "message": "Something went wrong."
+  "message": "Something went wrong.",
+  "code": "internal_error",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 
@@ -206,7 +218,9 @@ Returned when the service is temporarily unavailable.
 ```json
 {
   "error": "Service Unavailable",
-  "message": "service unavailable"
+  "message": "service unavailable",
+  "code": "service_unavailable",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 
@@ -214,9 +228,9 @@ Returned when the service is temporarily unavailable.
 - Wait and retry with exponential backoff
 - Check status page for incidents
 
-## Error Handling Best Practices
+## Error handling best practices
 
-### Implement Retry Logic
+### Implement retry logic
 
 For transient errors (5xx, 429), implement exponential backoff:
 
@@ -248,7 +262,7 @@ async function requestWithRetry(url, options, maxRetries = 3) {
 }
 ```
 
-### Parse Error Responses
+### Parse error responses
 
 Always parse and handle error responses:
 
@@ -273,7 +287,7 @@ class ApiError extends Error {
 }
 ```
 
-## Rate Limiting
+## Rate limiting
 
 When you exceed rate limits, you'll receive:
 
@@ -285,13 +299,15 @@ Retry-After: 60
 ```json
 {
   "error": "Too Many Requests",
-  "message": "Rate limit exceeded. Please retry after 60 seconds."
+  "message": "Rate limit exceeded. Please retry after 60 seconds.",
+  "code": "rate_limit_exceeded",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
 }
 ```
 
 Use the `Retry-After` header to determine when to retry.
 
-## See Also
+## See also
 
-- [Authentication](/authentication)
-- [Endpoints](/endpoints)
+- [Authentication](/api/authentication)
+- [Endpoints](/api/endpoints)

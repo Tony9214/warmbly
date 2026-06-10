@@ -1,9 +1,8 @@
 ---
 title: "Deliverability"
 description: "Bounce, complaint, and spam-placement health, with the thresholds Warmbly acts on."
+icon: HeartPulse
 ---
-
-# Deliverability
 
 Deliverability is whether your email actually reaches the inbox, instead of bouncing, getting marked as spam, or being filtered into the junk folder. Warmbly tracks this for every mailbox and every campaign you run, surfaces it on a single dashboard, and acts automatically when a mailbox starts to look risky.
 
@@ -21,10 +20,10 @@ You can scope the whole dashboard to a time window with the range tabs: `7d`, `3
 
 At the top of the page are four headline numbers for the selected window:
 
-- **Bounce rate** the share of sent emails that bounced, shown as a percentage along with the raw counts (for example, bounces out of total sent). This number is highlighted when it reaches `5%` or higher.
-- **Complaint rate** the share of recipients who marked your mail as spam. This number is highlighted when it reaches `0.1%` or higher.
-- **Spam placement** the share of monitored test deliveries that landed in spam or junk, based on seed inbox samples. If there is no seed data yet, this shows a dash.
-- **Suppressed** the number of recipients currently on your active suppression list (see [Suppression](#suppression-stopping-traffic-early) below).
+- **Bounce rate**: the share of sent emails that bounced, shown as a percentage along with the raw counts (for example, bounces out of total sent). This number is highlighted when it reaches `5%` or higher.
+- **Complaint rate**: the share of recipients who marked your mail as spam. This number is highlighted when it reaches `0.1%` or higher.
+- **Spam placement**: the share of monitored test deliveries that landed in spam or junk, based on seed inbox samples. If there is no seed data yet, this shows a dash.
+- **Suppressed**: the number of recipients currently on your active suppression list (see [Suppression](#suppression-stopping-traffic-early) below).
 
 ### Trend over time
 
@@ -63,7 +62,7 @@ The four bands you see on the dashboard are:
 | Quarantine | Orange | Removed from the shared warmup pool. Cold sending throttled or paused. |
 | Blocked | Red | Blocked from the shared warmup pool. Requires review before re-entry. |
 
-Warmup is a paid feature, and these pool actions apply to the shared paid warmup pool that healthy paying customers depend on. Protecting that shared reputation is the reason the bands exist. For how warmup itself works, see the [Warmup](/warmup) guide.
+Warmup is a paid feature, and these pool actions apply to the shared paid warmup pool that healthy paying customers depend on. Protecting that shared reputation is the reason the bands exist. For how warmup itself works, see the [Warmup](/guides/warmup) guide.
 
 <Callout type="info" title="Different metrics, different failure modes">
 Warmbly does not roll everything into one score. It tracks complaint rate, spam-folder placement, and bounce rate as separate signals, because they fail for different reasons. Any one of them crossing a threshold can move a mailbox into a worse band.
@@ -89,10 +88,10 @@ These are the default bands and the metrics that move a mailbox into each one. A
 
 What each band does:
 
-- **Watch** lower the mailbox's warmup volume, increase spacing between sends, and watch it more closely.
-- **Quarantine** immediately remove the mailbox from the shared paid warmup pool for `7 days`. If the same mailbox is also sending cold campaigns, that sending is throttled or paused. A quarantined mailbox is not selected as a warmup sender or as a warmup recipient.
-- **Blocked** block the mailbox from the shared paid pool for `30 days` and require review before it can re-enter.
-- **Catastrophic** a spam placement of `80%` or higher triggers an immediate long-duration block and a full reputation reset. The mailbox does not return to the shared paid pool automatically.
+- **Watch**: lower the mailbox's warmup volume, increase spacing between sends, and watch it more closely.
+- **Quarantine**: immediately remove the mailbox from the shared paid warmup pool for `7 days`. If the same mailbox is also sending cold campaigns, that sending is throttled or paused. A quarantined mailbox is not selected as a warmup sender or as a warmup recipient.
+- **Blocked**: block the mailbox from the shared paid pool for `30 days` and require review before it can re-enter.
+- **Catastrophic**: a spam placement of `80%` or higher triggers an immediate long-duration block and a full reputation reset. The mailbox does not return to the shared paid pool automatically.
 
 <Callout type="warn" title="80% spam is not a warning, it is a failure">
 If a mailbox is landing in spam most of the time, it is already damaging the shared pool. The bands above are designed to act long before that point. By the time a mailbox would hit a "most mail in spam" level, Warmbly has usually already quarantined or blocked it.
@@ -155,7 +154,7 @@ The single most important habit: keep complaint rate and spam placement low. A c
 ## Related guides
 
 <Cards>
-  <Card title="Warmup" href="/warmup" />
-  <Card title="Personalization & expressions" href="/expressions" />
-  <Card title="Error codes" href="/error-codes" />
+  <Card title="Warmup" href="/guides/warmup" />
+  <Card title="Personalization & expressions" href="/guides/expressions" />
+  <Card title="Error codes" href="/api/error-codes" />
 </Cards>

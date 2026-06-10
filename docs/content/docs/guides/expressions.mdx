@@ -1,9 +1,8 @@
 ---
 title: "Personalization & Expressions"
 description: "Merge fields, conditionals, fallbacks, functions, spintax, and automation expressions: the templating language shared by campaign emails and automations."
+icon: Variable
 ---
-
-# Personalization & expressions
 
 Warmbly lets you write one email (or one automation message) and have it come out personalized for every contact. You do this with merge fields like `{{.FirstName}}`, plus a small set of helpers for fallbacks, conditions, and simple math. This guide covers everything you can use, with copy-paste examples.
 
@@ -65,19 +64,19 @@ Any custom field you imported on a contact is also available. How you reference 
 
   These can also be used inside conditions and helpers (see below).
 
-- **Names with spaces or dashes** (for example `job title`, `first-name`) work too — write them with the dot, exactly as the field is named:
+- **Names with spaces or dashes** (for example `job title`, `first-name`) work too. Write them with the dot, exactly as the field is named:
 
   ```
   {{if .job title}}Your role as {{.job title}} at {{.Company}} caught my eye.{{end}}
   ```
 
-  These resolve **everywhere** — standalone, inside `{{if}}`, and inside helpers like `{{eq}}` — so any custom field can be used in a condition regardless of its name. (Internally Warmbly rewrites `.job title` to the equivalent `index` lookup, so you do not have to.)
+  These resolve **everywhere** (standalone, inside `{{if}}`, and inside helpers like `{{eq}}`), so any custom field can be used in a condition regardless of its name. (Internally Warmbly rewrites `.job title` to the equivalent `index` lookup, so you do not have to.)
 
 ### Automation variables (per trigger)
 
 Automations are not about a contact's saved fields. Each automation **trigger** carries its own data, and you reference those by the field's key (already lowercase, no capitalization rules).
 
-In automation **action** text (a Slack message, a webhook body, a CRM field value), reference each variable with standard dotted field access, `{{.key}}` (the leading dot is required — it's plain Go `text/template`):
+In automation **action** text (a Slack message, a webhook body, a CRM field value), reference each variable with standard dotted field access, `{{.key}}` (the leading dot is required; it's plain Go `text/template`):
 
 ```
 New reply from {{.contact_email}} on campaign {{.campaign_id}} ({{.intent}})
@@ -153,7 +152,7 @@ Companion to `eq`: `ne` means "not equals".
 
 ## Functions
 
-The same helper set is available in campaign emails, automation conditions, and automation action text. You can work with numbers and text without worrying about exact data types — the helpers coerce strings to numbers where needed.
+The same helper set is available in campaign emails, automation conditions, and automation action text. You can work with numbers and text without worrying about exact data types: the helpers coerce strings to numbers where needed.
 
 ### Math
 
@@ -213,7 +212,7 @@ Spintax lets one email come out worded slightly differently for each recipient, 
 Each send randomly picks one option from each group, for example "Hey Dana, hope things are good."
 
 <Callout type="warn" title="Spintax rules">
-Spintax is **campaign-only** (subject + body); it does not run in automation conditions or action text. Use a **single** pair of braces, not the double braces of merge fields. Only groups that actually contain a pipe are treated as spintax — a brace run with no pipe (CSS, JSON in an HTML email) is left exactly as written, so it's safe in HTML bodies.
+Spintax is **campaign-only** (subject + body); it does not run in automation conditions or action text. Use a **single** pair of braces, not the double braces of merge fields. Only groups that actually contain a pipe are treated as spintax; a brace run with no pipe (CSS, JSON in an HTML email) is left exactly as written, so it's safe in HTML bodies.
 </Callout>
 
 ## Automation advanced expressions
@@ -222,7 +221,7 @@ Most automation conditions are built with the visual picker (field, operator, va
 
 ### The truthy rule
 
-An advanced expression passes when it renders to something "truthy". It is treated as **false** when the result is empty, `false`, `0`, `no`, `off`, or `<no value>`. Anything else counts as **true**. If an expression is broken or fails to evaluate, it is treated as false — a broken condition never silently passes.
+An advanced expression passes when it renders to something "truthy". It is treated as **false** when the result is empty, `false`, `0`, `no`, `off`, or `<no value>`. Anything else counts as **true**. If an expression is broken or fails to evaluate, it is treated as false, so a broken condition never silently passes.
 
 ### Two ways to write it
 
@@ -267,16 +266,16 @@ When you mix multiple groups, wrap each test in parentheses (as in the `and` exa
 ## Gotchas
 
 - **Capitalization of standard fields**: `{{.FirstName}}` works, `{{.firstname}}` does not.
-- **Custom fields with spaces** (`{{.job title}}`) work everywhere, including inside `{{if}}` and helpers — Warmbly resolves the dotted form for you.
+- **Custom fields with spaces** (`{{.job title}}`) work everywhere, including inside `{{if}}` and helpers; Warmbly resolves the dotted form for you.
 - **Single vs double braces**: `{a|b}` is spintax (campaigns only); `{{...}}` is a variable, condition, or function.
 - **Always close `{{if}}` with `{{end}}`.**
 - **Quote your text values**: `eq .intent "positive"`, not `eq .intent positive`.
 - **Numbers from text**: if a comparison on a custom field behaves oddly, switch from `gt`/`lt` to `gtf`/`ltf` (or wrap the value in `num`).
-- **Unknown variables render empty** — they don't error. A leftover `{{...}}` in your output usually means a typo or wrong capitalization.
+- **Unknown variables render empty**; they don't error. A leftover `{{...}}` in your output usually means a typo or wrong capitalization.
 
 ## Preview and validation
 
 Warmbly checks your templates before they go out.
 
-- **Campaigns**: the composer's live **Preview** renders your subject and body against a sample contact exactly the way the real send does (variables, conditionals, functions, then spintax). It flags **errors** (a broken `{{if}}` — these block launching) and **unresolved tokens** (any `{{...}}` left after rendering, usually a misspelled or wrongly capitalized field).
+- **Campaigns**: the composer's live **Preview** renders your subject and body against a sample contact exactly the way the real send does (variables, conditionals, functions, then spintax). It flags **errors** (a broken `{{if}}`; these block launching) and **unresolved tokens** (any `{{...}}` left after rendering, usually a misspelled or wrongly capitalized field).
 - **Automations**: an advanced expression is **validated when you save**, so an automation can't be saved with a condition that doesn't parse. The "Reference" button next to the expression box lists every variable and function inline.

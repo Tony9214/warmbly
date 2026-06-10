@@ -1,16 +1,15 @@
 ---
 title: "Meetings"
 description: "Calendly / Cal.com scheduling, booking links, and the meetings timeline."
+icon: Calendar
 ---
-
-# Meetings
 
 Meetings are booked calls treated as a first-class part of your pipeline. When a prospect books a call with you, that call shows up in Warmbly automatically, lands on the contact's timeline, and can trigger automations like a Slack ping or a CRM update. You can also log calls yourself, without any external scheduler.
 
 There are two ways a meeting gets into Warmbly:
 
-- **Auto** a prospect self-books a time through a Calendly or Cal.com link you connected. The booking, and any later reschedule or cancellation, is captured over that provider's webhook.
-- **Manual** you schedule or log a call yourself with the "New meeting" button. It is created instantly inside Warmbly with no redirect to an external site.
+- **Auto**: a prospect self-books a time through a Calendly or Cal.com link you connected. The booking, and any later reschedule or cancellation, is captured over that provider's webhook.
+- **Manual**: you schedule or log a call yourself with the "New meeting" button. It is created instantly inside Warmbly with no redirect to an external site.
 
 Either way, the meeting appears on the **Meetings** page and on the contact's timeline, live, without a refresh.
 
@@ -22,18 +21,18 @@ The Meetings page lists every booked or logged call. Open it from the CRM sectio
 
 Four counts sit at the top of the page, computed across your whole set of meetings (not just the rows currently loaded):
 
-- **Upcoming** calls scheduled for a future time.
-- **Today** calls scheduled for today.
-- **Total booked** every meeting on record.
-- **Canceled** meetings that have been canceled.
+- **Upcoming**: calls scheduled for a future time.
+- **Today**: calls scheduled for today.
+- **Total booked**: every meeting on record.
+- **Canceled**: meetings that have been canceled.
 
 ### Filtering and search
 
 Use the timeframe tabs to narrow the list:
 
-- **Upcoming** future calls only.
-- **Past** calls that have already happened.
-- **All** everything.
+- **Upcoming**: future calls only.
+- **Past**: calls that have already happened.
+- **All**: everything.
 
 The search box matches a contact's name, email, or the event name. The list loads more rows as you scroll, so large pipelines stay fast.
 
@@ -66,9 +65,9 @@ For auto-booked calls, the Reschedule and Cancel buttons hand off to Calendly or
 
 Click **New meeting** to log a call without an external scheduler. The dialog asks for:
 
-- **Title** for example "Discovery call". Defaults to "Call" if left blank.
+- **Title**: for example "Discovery call". Defaults to "Call" if left blank.
 - **Contact name** and **Contact email**. You need at least one of the two.
-- **When** date and time. Defaults to the next hour.
+- **When**: date and time. Defaults to the next hour.
 - **Duration** in minutes (`5` to `480`, default `30`).
 - **Location** (optional) for example an office or phone.
 - **Meeting link** (optional) for example a Google Meet URL.
@@ -83,8 +82,8 @@ Connecting is webhook-based, not OAuth:
 
 1. Add the **Calendly** or **Cal.com** integration. Warmbly mints an inbound webhook URL for you.
 2. Copy that URL into the provider's webhook settings:
-   - **Calendly** subscribe to `invitee.created` and `invitee.canceled`.
-   - **Cal.com** subscribe to `BOOKING_CREATED`, `BOOKING_RESCHEDULED`, and `BOOKING_CANCELLED`.
+   - **Calendly**: subscribe to `invitee.created` and `invitee.canceled`.
+   - **Cal.com**: subscribe to `BOOKING_CREATED`, `BOOKING_RESCHEDULED`, and `BOOKING_CANCELLED`.
 3. That is it. The connection shows as connected as soon as the inbound URL exists.
 
 <Callout type="info" title="The inbound URL is a shared secret">
@@ -109,8 +108,8 @@ Inbound bookings are idempotent: if a provider re-delivers the same event, Warmb
 
 When a booking arrives, Warmbly attributes it to the right contact in this order:
 
-1. **By contact hint** if the booking link carried a contact id (see [booking links](#booking-links-and-book-a-call) below), Warmbly uses it, after confirming that contact belongs to your workspace. This survives the prospect booking with a different email.
-2. **By email** otherwise it matches the invitee's email against your contacts.
+1. **By contact hint**: if the booking link carried a contact id (see [booking links](#booking-links-and-book-a-call) below), Warmbly uses it, after confirming that contact belongs to your workspace. This survives the prospect booking with a different email.
+2. **By email**: otherwise it matches the invitee's email against your contacts.
 
 If neither resolves, the meeting still appears on the Meetings page; it just is not tied to a contact yet.
 
@@ -120,7 +119,7 @@ Every meeting also appears on the contact's activity timeline, alongside emails,
 
 Each meeting entry shows what happened (booked, rescheduled, or canceled), when the call is set for, which calendar it came from, and a one-click **Join** link when a meeting URL is available and the call is not canceled. Canceled meetings show the cancellation reason when the provider includes one.
 
-This pairs well with the [Unibox](/unibox) and [Contacts and CRM](/contacts-crm) views: a reply and the call it produced sit on the same record.
+This pairs well with the [Unibox](/guides/unibox) and [Contacts and CRM](/guides/contacts-crm) views: a reply and the call it produced sit on the same record.
 
 ## Booking links and "Book a call"
 
@@ -129,7 +128,7 @@ A booking link is your public scheduling page (your Calendly or Cal.com URL). On
 Set it under the connection's **Booking link** settings: paste your full `https://` scheduling URL, for example `https://calendly.com/you/intro`. After that:
 
 - A **Book a call** / **Booking link** button appears on contact detail and Unibox threads. It opens your scheduling page in a new tab, prefilled with the contact's email and name. If you have several scheduling links connected, it offers a picker.
-- A **Booking link** button in the [Unibox](/unibox) reply composer drops the link, prefilled for the recipient, straight into your reply text.
+- A **Booking link** button in the [Unibox](/guides/unibox) reply composer drops the link, prefilled for the recipient, straight into your reply text.
 
 When you book from a place tied to a specific contact, Warmbly embeds that contact's id in the link (as the `utm_content` parameter). Both providers echo it back in the booking webhook, which is what lets a self-booked call attribute to the exact contact even if they book under a different email address.
 
@@ -139,18 +138,18 @@ The Book a call and Booking link buttons only render when you have a connected s
 
 ## Automations when a meeting is booked
 
-Meeting events can drive [Automations](/automations). Calendly and Cal.com both emit meeting events you can wire to actions, and other connected tools can react to them too:
+Meeting events can drive [Automations](/guides/automations). Calendly and Cal.com both emit meeting events you can wire to actions, and other connected tools can react to them too:
 
 - **Meeting booked**, **rescheduled**, and **canceled** are available as notification triggers, so Slack, Discord, Zapier, Make, and n8n can ping your team the moment a call is set, moved, or dropped.
 - **Meeting booked** and **canceled** are available as CRM triggers, so HubSpot, Salesforce, Pipedrive, and Close can create or update a record when a call is booked.
 
-For example, you can have Warmbly post "Meeting booked" to a Slack channel and upsert the contact into your CRM, automatically, every time a prospect books a call. See [Notifications](/notifications) for routing alerts to people, and [Automations](/automations) for building the flows.
+For example, you can have Warmbly post "Meeting booked" to a Slack channel and upsert the contact into your CRM, automatically, every time a prospect books a call. See [Notifications](/guides/notifications) for routing alerts to people, and [Automations](/guides/automations) for building the flows.
 
 ## Related
 
 <Cards>
-  <Card title="Automations" href="/automations" />
-  <Card title="Contacts and CRM" href="/contacts-crm" />
-  <Card title="Unibox" href="/unibox" />
-  <Card title="Notifications" href="/notifications" />
+  <Card title="Automations" href="/guides/automations" />
+  <Card title="Contacts and CRM" href="/guides/contacts-crm" />
+  <Card title="Unibox" href="/guides/unibox" />
+  <Card title="Notifications" href="/guides/notifications" />
 </Cards>

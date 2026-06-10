@@ -1,16 +1,15 @@
 ---
 title: Campaigns
 description: "Create and send cold outreach campaigns safely."
+icon: Send
 ---
-
-# Campaigns
 
 A campaign is a sequence of emails that Warmbly sends to a list of contacts on your behalf, spread across your connected mailboxes. Warmbly handles the timing, the volume limits, and the rotation between mailboxes so your sending looks natural and stays safe.
 
 This guide walks through creating a campaign, choosing which mailboxes send it, setting limits and a schedule, and starting or pausing it. It also explains the safety posture Warmbly applies by default so your sender reputation stays healthy.
 
 <Callout type="info" title="Before you start">
-You need at least one connected, active mailbox and a list of contacts. We also recommend warming up new mailboxes before you run cold campaigns from them. See the [Deliverability](/deliverability) guide.
+You need at least one connected, active mailbox and a list of contacts. We also recommend warming up new mailboxes before you run cold campaigns from them. See the [Deliverability](/guides/deliverability) guide.
 </Callout>
 
 ## Create a campaign
@@ -19,10 +18,10 @@ From the **Campaigns** page, click **New campaign**. A short wizard walks you th
 
 The wizard has four steps:
 
-1. **Basics** — the campaign name and an optional description.
-2. **Schedule** — the timezone, which days of the week may send, and the start and end time of day.
-3. **Sender pool** — which mailboxes send this campaign.
-4. **First email** — the subject and body of your first step.
+1. **Basics**: the campaign name and an optional description.
+2. **Schedule**: the timezone, which days of the week may send, and the start and end time of day.
+3. **Sender pool**: which mailboxes send this campaign.
+4. **First email**: the subject and body of your first step.
 
 After it is created, the campaign opens to its detail view, where you can edit settings, add more steps, review schedule windows, and watch live performance.
 
@@ -32,9 +31,9 @@ A campaign starts in the **draft** state. Nothing sends until you start it.
 
 A campaign sends from one or more of your connected mailboxes. You choose which mailboxes from the **Sending accounts** section of the campaign's settings. There are three ways to select them, and you can combine the first two:
 
-- **By tag** — every active mailbox carrying a tag you pick is included. New mailboxes you tag later are added automatically.
-- **Individually** — pick specific mailboxes by hand.
-- **All active mailboxes** — if you select neither a tag nor any specific mailbox, the campaign sends from every active mailbox you own.
+- **By tag**: every active mailbox carrying a tag you pick is included. New mailboxes you tag later are added automatically.
+- **Individually**: pick specific mailboxes by hand.
+- **All active mailboxes**: if you select neither a tag nor any specific mailbox, the campaign sends from every active mailbox you own.
 
 <Callout type="info" title="Follow-ups stay on the same mailbox">
 Each mailbox stays within its own daily limit, and follow-up steps always send from the same mailbox that sent the first email to that contact, so every thread stays consistent.
@@ -44,16 +43,16 @@ Each mailbox stays within its own daily limit, and follow-up steps always send f
 
 When a campaign has several mailboxes, Warmbly decides which one sends each email. You control this with the **Rotation** setting:
 
-- **Even spacing** (recommended) — always picks the mailbox that has been idle longest, for the most natural pattern.
-- **Round-robin** — cycles through your mailboxes in order: `A`, then `B`, then `C`, then back to `A`.
-- **Weighted** — sends more from your healthiest, higher-limit mailboxes.
+- **Even spacing** (recommended): always picks the mailbox that has been idle longest, for the most natural pattern.
+- **Round-robin**: cycles through your mailboxes in order: `A`, then `B`, then `C`, then back to `A`.
+- **Weighted**: sends more from your healthiest, higher-limit mailboxes.
 
 ### ESP matching
 
 You can optionally align the sending mailbox's provider with each recipient's provider (for example, sending Gmail-to-Gmail). This is the **ESP matching** setting:
 
-- **Prefer same** — use a same-provider mailbox when one is free, otherwise fall back to any mailbox.
-- **Strict same** — only ever send from a same-provider mailbox. If none is available, the contact waits rather than sending cross-provider.
+- **Prefer same**: use a same-provider mailbox when one is free, otherwise fall back to any mailbox.
+- **Strict same**: only ever send from a same-provider mailbox. If none is available, the contact waits rather than sending cross-provider.
 
 If a recipient's provider is unknown (a custom domain), matching never blocks the send.
 
@@ -77,9 +76,9 @@ Anything above `50`/day per cold mailbox should be backed by positive reputation
 
 Instead of starting a mailbox at its full limit on day one, you can turn on **Daily ramp-up** to grow volume gradually. You set three values:
 
-- **Ramp start** — how many emails per mailbox on the first day (default `10`).
-- **Ramp increment** — how much to add each day (default `5`).
-- **Ramp ceiling** — the highest the ramp will climb to (default `50`).
+- **Ramp start**: how many emails per mailbox on the first day (default `10`).
+- **Ramp increment**: how much to add each day (default `5`).
+- **Ramp ceiling**: the highest the ramp will climb to (default `50`).
 
 The ramp is applied as another minimum on top of the per-mailbox cap, so it only ever lowers today's volume while the campaign is still ramping. Ramp-up is separate from mailbox warmup; the two work together.
 
@@ -128,13 +127,13 @@ Keep mailbox warmup active even after campaigns begin. A mailbox that stops warm
 ## Related guides
 
 <Cards>
-  <Card title="Personalization & expressions" href="/expressions">
+  <Card title="Personalization & expressions" href="/guides/expressions">
     Merge fields, fallbacks, conditionals, and spintax for your campaign emails.
   </Card>
-  <Card title="Deliverability" href="/deliverability">
+  <Card title="Deliverability" href="/guides/deliverability">
     Warmup, authentication, tracking, and keeping your sender reputation healthy.
   </Card>
-  <Card title="Sequences" href="/sequences">
+  <Card title="Sequences" href="/guides/sequences">
     Build multi-step follow-ups with delays and branching conditions.
   </Card>
 </Cards>

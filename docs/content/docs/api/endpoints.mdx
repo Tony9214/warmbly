@@ -1,19 +1,18 @@
 ---
-title: Endpoint Scope Map
+title: Endpoint scope map
 description: Every endpoint, which auth types it accepts, and which permission it requires.
+icon: Route
 ---
-
-# Endpoint Scope Map
 
 This page is the source of truth for what an API key can and cannot reach. Every route in the backend falls into one of three buckets:
 
-- **API key accepted** — works with both a JWT (dashboard user) and an API key with the listed permission.
-- **JWT only** — never reachable via an API key. Used for billing, governance, websocket bootstrap, danger-zone destruction, the OAuth onboarding flow, and admin tools.
-- **Public** — no auth required (webhooks with signature verification, health check, OAuth bouncer pages).
+- **API key accepted**: works with both a JWT (dashboard user) and an API key with the listed permission.
+- **JWT only**: never reachable via an API key. Used for billing, governance, websocket bootstrap, danger-zone destruction, the OAuth onboarding flow, and admin tools.
+- **Public**: no auth required (webhooks with signature verification, health check, OAuth bouncer pages).
 
 When an endpoint says "JWT permission: X / API permission: Y", the dual-auth middleware checks the relevant one based on which credential the caller used.
 
-## API Key Accepted
+## API key accepted
 
 ### Emails
 
@@ -133,9 +132,9 @@ Mutating API requests may include an `Idempotency-Key` header. Warmbly stores th
 | GET | `/plans` | (any authenticated key) |
 | GET | `/timezones` | (any authenticated key) |
 
-## JWT Only
+## JWT only
 
-These never accept an API key. They depend on a human-bound session — billing flows, governance, OAuth onboarding, websocket bootstrap, and operational destruction.
+These never accept an API key. They depend on a human-bound session: billing flows, governance, OAuth onboarding, websocket bootstrap, and operational destruction.
 
 - `POST /auth/login`, `/auth/login/confirm`, `/auth/register`, `/auth/register/confirm`, `/auth/refresh`, `/auth/reset-password`, `/auth/reset-password/confirm`
 - `POST /auth/logout`, `POST /auth/logout-all`, `GET /auth/me`, `PATCH /auth/me/onboarding`
@@ -159,12 +158,12 @@ These never accept an API key. They depend on a human-bound session — billing 
 
 ## Notes
 
-- When a route has both a JWT permission and an API permission listed, the dual-auth middleware checks the JWT user's organization role for browser callers and the key's permission bitmask for API key callers. They're independent gates — a user's role doesn't constrain what an API key can do beyond what was granted at creation.
+- When a route has both a JWT permission and an API permission listed, the dual-auth middleware checks the JWT user's organization role for browser callers and the key's permission bitmask for API key callers. They're independent gates: a user's role doesn't constrain what an API key can do beyond what was granted at creation.
 - Every API key request is logged to `api_key_usage_logs` with the endpoint pattern (e.g. `/campaigns/:id`), method, IP, user-agent, response status, and elapsed milliseconds. JWT requests are not logged here.
-- Rate limit categories (`X-RateLimit-*` headers) are scoped to the underlying user, not the key — every key issued by a user shares the user's quota.
+- Rate limit categories (`X-RateLimit-*` headers) are scoped to the underlying user, not the key; every key issued by a user shares the user's quota.
 
-## See Also
+## See also
 
-- [Authentication](/authentication)
-- [Permissions Reference](/permissions)
-- [Error Codes](/error-codes)
+- [Authentication](/api/authentication)
+- [Permissions Reference](/api/permissions)
+- [Error Codes](/api/error-codes)

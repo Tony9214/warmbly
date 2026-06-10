@@ -1,9 +1,8 @@
 ---
 title: Automations
 description: "A visual flow builder: a trigger event connected to action steps across your integrations."
+icon: Workflow
 ---
-
-# Automations
 
 An automation is a small flow you build on a canvas. It starts with one **trigger** (something that happens in Warmbly, like a reply coming in or a meeting being booked) and runs one or more **action steps** in response (post to Slack, push to your CRM, tag a contact, and more). Between the trigger and the actions you can add **IF conditions** to branch the flow, so different events take different paths.
 
@@ -46,7 +45,7 @@ A trigger is the event that starts the flow. Pick one in the trigger node's edit
 
 The **Campaign action** trigger is special: it never fires by itself. It only runs when a campaign sequence reaches a "Run automation" step, which lets you trigger an automation as part of a campaign flow. (A campaign-launched run still evaluates your conditions, and an automation that is **Off** is a no-op.)
 
-Each trigger carries its own event data (for example, a reply carries the contact email, the reply intent, and a classifier confidence). Those values are what your conditions test and what your action text can insert. See [Personalization & expressions](/expressions) for the full list of variables per trigger.
+Each trigger carries its own event data (for example, a reply carries the contact email, the reply intent, and a classifier confidence). Those values are what your conditions test and what your action text can insert. See [Personalization & expressions](/guides/expressions) for the full list of variables per trigger.
 
 ## IF conditions (branching)
 
@@ -86,7 +85,7 @@ and (gtf .confidence 0.8) (eq .intent "positive")
 
 This passes only when the classifier confidence is at least `0.8` and the reply intent is `positive`. You can use comparisons (`eq`, `gt`, `lt`), numeric-coercing comparisons (`gtf`, `ltf`, `add`, `sub`, `mul`, `div`), boolean logic (`and`, `or`, `not`), and text helpers (`contains`, `lower`). A broken or empty expression is treated as **false**, so a malformed condition never silently passes. The expression is validated when you save.
 
-The full language, every variable, and more examples are in [Personalization & expressions](/expressions).
+The full language, every variable, and more examples are in [Personalization & expressions](/guides/expressions).
 
 ## Action steps
 
@@ -131,7 +130,7 @@ Text fields in an action (a Slack or Discord message, a webhook URL, a deal name
 New reply from {{.contact_email}} on {{.campaign_name}}
 ```
 
-Tokens are filled in when the automation runs. An unknown token renders empty rather than failing. See [Personalization & expressions](/expressions) for the rules and the per-trigger variable list.
+Tokens are filled in when the automation runs. An unknown token renders empty rather than failing. See [Personalization & expressions](/guides/expressions) for the rules and the per-trigger variable list.
 
 ## Templates
 
@@ -156,10 +155,10 @@ Automation runs are best-effort and bounded against loops, so one failing step w
 ## Related guides
 
 <Cards>
-  <Card title="Personalization & expressions" href="/expressions">
+  <Card title="Personalization & expressions" href="/guides/expressions">
     The condition and templating language shared by automations and campaigns.
   </Card>
-  <Card title="Deliverability" href="/deliverability">
+  <Card title="Deliverability" href="/guides/deliverability">
     Warmup health and complaint signals that several automation triggers fire on.
   </Card>
 </Cards>

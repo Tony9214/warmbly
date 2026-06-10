@@ -1,13 +1,12 @@
 ---
 title: "Analytics"
 description: "Campaign and account performance metrics."
+icon: ChartLine
 ---
-
-# Analytics
 
 Analytics is how Warmbly tells you whether your sending is working. It rolls up every send, open, click, reply, bounce, and complaint into rates you can act on, broken down by workspace, by campaign, and by individual mailbox.
 
-This guide covers the metrics Warmbly tracks, where each breakdown lives, and how A/B analysis picks a winner. For the bounce, complaint, and spam-placement side of reporting (health bands and the thresholds Warmbly acts on), see the [Deliverability](/deliverability) guide.
+This guide covers the metrics Warmbly tracks, where each breakdown lives, and how A/B analysis picks a winner. For the bounce, complaint, and spam-placement side of reporting (health bands and the thresholds Warmbly acts on), see the [Deliverability](/guides/deliverability) guide.
 
 ## The metrics Warmbly tracks
 
@@ -24,7 +23,7 @@ Every campaign send produces a set of events. Warmbly counts them and turns the 
 
 A few things worth knowing about how the counts behave:
 
-- **Open and click tracking** only work when the campaign has open tracking or link tracking turned on, and when the sender mailboxes have a tracking domain configured. With tracking off, opens and clicks stay at zero even though sends and replies are still counted. See [Deliverability](/deliverability) for the pre-send checks that flag missing tracking domains.
+- **Open and click tracking** only work when the campaign has open tracking or link tracking turned on, and when the sender mailboxes have a tracking domain configured. With tracking off, opens and clicks stay at zero even though sends and replies are still counted. See [Deliverability](/guides/deliverability) for the pre-send checks that flag missing tracking domains.
 - **Replies are human replies.** An out-of-office auto-reply or an autoresponder does not count as a reply and does not stamp the contact as having replied. This keeps reply rate honest and stops an auto-reply from silently tripping a sequence's stop-on-reply rule.
 - **Rates are percentages of sent.** Open rate, click rate, reply rate, and bounce rate are all computed against the number of emails sent in the selected window.
 
@@ -36,10 +35,10 @@ The Analytics page (`Analytics` in the dashboard) is your workspace-wide overvie
 
 Four headline numbers sit at the top, all scoped to the selected window:
 
-- **Total sent** the raw number of emails sent.
-- **Open rate** opens as a percentage of sent.
-- **Reply rate** replies as a percentage, including positive replies.
-- **Bounce rate** bounces (hard and soft) as a percentage.
+- **Total sent**: the raw number of emails sent.
+- **Open rate**: opens as a percentage of sent.
+- **Reply rate**: replies as a percentage, including positive replies.
+- **Bounce rate**: bounces (hard and soft) as a percentage.
 
 ### Performance chart
 
@@ -49,7 +48,7 @@ The "Email performance" chart plots one metric per day across the window. Switch
 
 A side panel lists the raw window totals behind the rates: Sent, Opens, Clicks, Replies, and Bounces.
 
-Below that, **Account health** summarizes your mailboxes into three counts: Healthy, At risk, and Issues. This is a quick read on whether any senders need attention before you push more volume. The full per-mailbox detail lives on the [Deliverability](/deliverability) dashboard.
+Below that, **Account health** summarizes your mailboxes into three counts: Healthy, At risk, and Issues. This is a quick read on whether any senders need attention before you push more volume. The full per-mailbox detail lives on the [Deliverability](/guides/deliverability) dashboard.
 
 ### Top campaigns
 
@@ -69,7 +68,7 @@ Open any campaign to see its own analytics, scoped to that campaign alone. The c
 
 ### Per-sequence step stats
 
-A campaign's analytics also break performance down by sequence step. For each step you see emails sent, opens, clicks, replies, and bounces. This tells you which step in a multi-touch sequence is actually pulling the replies, and which follow-ups are dead weight. For how sequence steps are built, see the [Sequences](/sequences) guide.
+A campaign's analytics also break performance down by sequence step. For each step you see emails sent, opens, clicks, replies, and bounces. This tells you which step in a multi-touch sequence is actually pulling the replies, and which follow-ups are dead weight. For how sequence steps are built, see the [Sequences](/guides/sequences) guide.
 
 ### Daily and hourly trends
 
@@ -83,12 +82,12 @@ Warmbly can compare campaigns side by side so you can see which one is performin
 
 Every mailbox reports its own status and usage so you can tell a healthy sender from a struggling one:
 
-- **Health** a status of healthy, warning, or error, plus a score and any specific issues.
-- **Daily usage** how many campaign emails the mailbox has sent today against its `campaign_limit`, and its warmup sent and warmup limit. The default cold campaign cap is `50` emails per mailbox per day.
-- **Warmup status** whether warmup is on, its current volume, and its target and max volume.
-- **Warmup health** the mailbox's warmup-pool reputation: its state (healthy, watch, throttled, quarantined, or blocked), spam score, and any block expiry.
+- **Health**: a status of healthy, warning, or error, plus a score and any specific issues.
+- **Daily usage**: how many campaign emails the mailbox has sent today against its `campaign_limit`, and its warmup sent and warmup limit. The default cold campaign cap is `50` emails per mailbox per day.
+- **Warmup status**: whether warmup is on, its current volume, and its target and max volume.
+- **Warmup health**: the mailbox's warmup-pool reputation: its state (healthy, watch, throttled, quarantined, or blocked), spam score, and any block expiry.
 
-Use this to find the one mailbox dragging down a campaign's bounce rate, rather than blaming the whole campaign. The thresholds that move a mailbox between health states are documented in [Deliverability](/deliverability).
+Use this to find the one mailbox dragging down a campaign's bounce rate, rather than blaming the whole campaign. The thresholds that move a mailbox between health states are documented in [Deliverability](/guides/deliverability).
 
 ## A/B analysis
 
@@ -131,7 +130,7 @@ A practical loop for using analytics:
 1. Start on the workspace dashboard. Check the four headline rates for the window you care about.
 2. If a rate looks off, switch the performance chart to that metric and find the day it moved. That usually points at one campaign or one list.
 3. Open the campaign behind it and read the per-step stats to see which touch is responsible.
-4. If the problem is bounces or complaints, drop into the per-mailbox breakdown and the [Deliverability](/deliverability) dashboard to find the specific sender at fault.
+4. If the problem is bounces or complaints, drop into the per-mailbox breakdown and the [Deliverability](/guides/deliverability) dashboard to find the specific sender at fault.
 5. For subject and copy decisions, lean on A/B analysis rather than guessing, and wait for real confidence before locking in a winner.
 
 The habit that matters most: a clean reply rate with a low bounce and complaint rate beats a big open-rate screenshot every time.
@@ -139,7 +138,7 @@ The habit that matters most: a clean reply rate with a low bounce and complaint 
 ## Related guides
 
 <Cards>
-  <Card title="Deliverability" href="/deliverability" />
-  <Card title="Sequences" href="/sequences" />
-  <Card title="Personalization & expressions" href="/expressions" />
+  <Card title="Deliverability" href="/guides/deliverability" />
+  <Card title="Sequences" href="/guides/sequences" />
+  <Card title="Personalization & expressions" href="/guides/expressions" />
 </Cards>

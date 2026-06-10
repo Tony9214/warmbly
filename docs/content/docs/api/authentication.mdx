@@ -1,13 +1,12 @@
 ---
 title: Authentication
 description: Learn how to authenticate with the Warmbly API using API keys.
+icon: KeyRound
 ---
-
-# Authentication
 
 The Warmbly API uses API keys for authentication. Each API key has specific permissions that control what operations it can perform.
 
-## API Key Format
+## API key format
 
 API keys follow this format:
 
@@ -15,11 +14,11 @@ API keys follow this format:
 wmbly_<43-character-random-string>
 ```
 
-The `wmbly_` prefix identifies the key as a Warmbly key. The remaining 43 characters are 32 random bytes encoded as base64url (no padding) — 256 bits of entropy, so brute-forcing a valid key is computationally infeasible.
+The `wmbly_` prefix identifies the key as a Warmbly key. The remaining 43 characters are 32 random bytes encoded as base64url (no padding): 256 bits of entropy, so brute-forcing a valid key is computationally infeasible.
 
 Keys are stored as a SHA-256 hash; the plaintext is shown exactly once on creation. To help you spot a key in the dashboard without exposing the secret, we store the first 8 characters (`key_prefix`, e.g. `wmbly_ab`) and the last 4 characters (`key_suffix`, e.g. `wxyz`). Render them as `wmbly_ab…wxyz`.
 
-## Using Your API Key
+## Using your API key
 
 Include your API key in the `Authorization` header of every request:
 
@@ -31,13 +30,13 @@ curl -X GET "https://api.warmbly.com/api-keys" \
 
 For mutation retries, include an `Idempotency-Key` header with a unique value per logical operation. Warmbly stores completed mutation responses for 24 hours per organization and key, then replays matching retries instead of performing the operation again.
 
-## Key Security Best Practices
+## Key security best practices
 
 <Callout type="warn" title="Keep Your Keys Secret">
   Never expose API keys in client-side code, public repositories, or logs. Treat them like passwords.
 </Callout>
 
-### Do's
+### Do
 
 - Store API keys in environment variables or secure secret managers
 - Use different keys for development and production
@@ -45,7 +44,7 @@ For mutation retries, include an `Idempotency-Key` header with a unique value pe
 - Set expiration dates for keys when possible
 - Use IP allowlists to restrict key usage
 
-### Don'ts
+### Don't
 
 - Commit API keys to version control
 - Share API keys via email or chat
@@ -54,9 +53,9 @@ For mutation retries, include an `Idempotency-Key` header with a unique value pe
 
 ## Permissions
 
-Each API key has a permissions bitmask that controls its capabilities. See the [Permissions Reference](/permissions) for a complete list.
+Each API key has a permissions bitmask that controls its capabilities. See the [Permissions Reference](/api/permissions) for a complete list.
 
-### Permission Categories
+### Permission categories
 
 | Category | Description |
 |----------|-------------|
@@ -65,7 +64,7 @@ Each API key has a permissions bitmask that controls its capabilities. See the [
 | **Bulk** | Perform bulk operations |
 | **Special** | Advanced features (realtime, webhooks, API key management) |
 
-### Example: Read-Only Key
+### Example: read-only key
 
 A read-only API key might have these permissions:
 
@@ -84,7 +83,7 @@ This combines:
 
 Total: 1 + 2 + 4 + 8 + 16 = 31
 
-## IP Restrictions
+## IP restrictions
 
 You can restrict API keys to specific IPs or CIDR ranges. Entries can be bare IPs (v4 or v6) or CIDR blocks; an empty list means "any IP".
 
@@ -103,7 +102,7 @@ You can restrict API keys to specific IPs or CIDR ranges. Entries can be bare IP
 
 Requests from outside every listed range are rejected with `403 Forbidden`. There's a soft cap of 64 entries per key.
 
-## Email Account Restrictions
+## Email account restrictions
 
 Limit API keys to specific email accounts:
 
@@ -118,7 +117,7 @@ Limit API keys to specific email accounts:
 }
 ```
 
-## Key Expiration
+## Key expiration
 
 Set an expiration date for temporary access:
 
@@ -126,13 +125,13 @@ Set an expiration date for temporary access:
 {
   "name": "Contractor Access",
   "permissions": 31,
-  "expires_at": "2024-12-31T23:59:59Z"
+  "expires_at": "2027-12-31T23:59:59Z"
 }
 ```
 
 After expiration, the key returns `401 Unauthorized`.
 
-## Error Responses
+## Error responses
 
 ### 401 Unauthorized
 
@@ -159,12 +158,12 @@ Returned when:
 ```json
 {
   "error": "Forbidden",
-  "message": "You doesn't have access to this feature."
+  "message": "You don't have access to this feature."
 }
 ```
 
-## Next Steps
+## Next steps
 
-- [Endpoints](/endpoints)
-- [View all permissions](/permissions)
-- [Handle errors](/error-codes)
+- [Endpoints](/api/endpoints)
+- [View all permissions](/api/permissions)
+- [Handle errors](/api/error-codes)
