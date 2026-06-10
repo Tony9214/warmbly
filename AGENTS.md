@@ -45,6 +45,10 @@ Copy / writing style:
 
 - do not lean on em dashes (`—`). Use them sparingly, only when one is genuinely the clearest option; prefer a period, comma, colon, or parentheses instead. This applies to user-facing copy and microcopy in `site/` and `web/`, and to docs. Overusing em dashes reads as machine-written.
 
+Code comments:
+
+- keep them short: one line stating the non-obvious constraint or intent. No multi-line essays; if a comment needs a paragraph, the explanation belongs in docs or the PR description
+
 Data modeling / representation:
 
 - we are happiest with the most **type-safe** option, but the rule is: pick the **most effective option for the actual use case**, not type-safety for its own sake.

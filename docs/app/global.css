@@ -2,11 +2,7 @@
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
 
-/*
- * Warmbly brand theme, mirroring site/src/styles/global.css: white surfaces,
- * slate text and borders, sky as the single accent. Fumadocs reads the
- * --color-fd-* variables (the legacy shadcn-style names do nothing here).
- */
+/* Warmbly brand theme mirroring site/: slate text and borders, sky accent. */
 :root {
   --color-fd-background: #ffffff;
   --color-fd-foreground: #0f172a;
@@ -45,8 +41,7 @@
   --color-fd-ring: oklch(0.62 0.02 252);
 }
 
-/* The neutral preset re-tints the dark sidebar in pure gray; keep it on our
-   slate-blue dark palette instead. */
+/* Keep the dark sidebar on the slate-blue palette, not the preset's gray. */
 .dark #nd-sidebar {
   --color-fd-muted: oklch(0.2 0.01 260);
   --color-fd-secondary: oklch(0.22 0.01 260);

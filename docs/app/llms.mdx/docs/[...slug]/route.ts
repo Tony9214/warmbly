@@ -3,10 +3,8 @@ import { notFound } from 'next/navigation';
 
 export const revalidate = false;
 
-// Every path ends in a real `<name>.mdx` file segment (the index page becomes
-// `index.mdx`), so the static export writes plain files and a folder's own
-// markdown (`/llms.mdx/docs/api.mdx`) never collides with the directory that
-// holds its children (`/llms.mdx/docs/api/...`).
+// Paths end in a real `.mdx` filename so the export writes plain files with no
+// file/directory collisions.
 export async function GET(_req: Request, { params }: RouteContext<'/llms.mdx/docs/[...slug]'>) {
   const { slug } = await params;
   const last = slug.at(-1);

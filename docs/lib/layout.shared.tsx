@@ -1,8 +1,6 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 
-// The Warmbly mark, same single path as site/src/components/Logo.astro, rendered
-// monochrome via currentColor so it is black in light mode and white in dark
-// mode automatically (no color version, no invert filter).
+// The Warmbly mark (same path as site/'s Logo.astro), monochrome via currentColor.
 function Mark() {
   return (
     <svg width="20" height="20" viewBox="0 0 746 764" fill="none" aria-hidden="true">

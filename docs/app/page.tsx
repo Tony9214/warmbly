@@ -6,9 +6,7 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-// The docs root has no landing page of its own: it sends readers straight to
-// the Guides section. A meta refresh keeps this working on a fully static
-// host, where server-side redirects are not available.
+// No docs landing page: a meta refresh (works on static hosts) sends readers to the guides.
 export default function Home() {
   return (
     <>
