@@ -10,9 +10,9 @@ connection of their own.
 
 | Method  | Path                              | Caller            | Purpose                              |
 |---------|-----------------------------------|-------------------|--------------------------------------|
-| GET     | `/api/v1/internal/dek/:userID`    | worker            | Fetch a user's encrypted DEK         |
-| PUT     | `/api/v1/internal/dek/:userID`    | worker (rarely)   | Store a new encrypted DEK            |
-| DELETE  | `/api/v1/internal/dek/:userID`    | admin / cleanup   | Delete an encrypted DEK              |
+| GET     | `/api/v1/internal/dek/:orgID`    | worker            | Fetch an organization encrypted DEK         |
+| PUT     | `/api/v1/internal/dek/:orgID`    | worker (rarely)   | Store a new encrypted DEK            |
+| DELETE  | `/api/v1/internal/dek/:orgID`    | admin / cleanup   | Delete an encrypted DEK              |
 | GET     | `/api/v1/internal/worker/config`  | worker            | Fetch runtime config for the worker  |
 | POST    | `/api/v1/internal/worker/heartbeat` | worker          | Liveness report                      |
 
@@ -94,7 +94,7 @@ alongside the worker config endpoint:
 
 Benefits: ability to revoke a single worker without rotating the whole fleet,
 audit-log a specific worker's actions, and tier-gate DEK access (e.g., a
-free-tier worker can only request DEKs for free-tier users).
+free-tier worker can only request DEKs for free-tier organizations).
 
 Implementation lives behind Task #9 in the project tracker.
 

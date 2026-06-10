@@ -23,7 +23,7 @@ to light it up; just add the env vars and restart the backend.
 5. SPA calls `POST /integrations/oauth/finish` → backend validates+consumes the
    `state`, exchanges the code for tokens, resolves the connected account, and
    stores the access/refresh tokens **sealed with the connecting user's
-   envelope-encryption DEK** (KMS → per-user DEK → AES-GCM, the same path used
+   envelope-encryption DEK** (KMS → per-organization DEK → AES-GCM, the same path used
    for mailbox OAuth tokens). Plaintext tokens never touch a database column.
 
 Access tokens are refreshed automatically (60s before expiry) using the stored
