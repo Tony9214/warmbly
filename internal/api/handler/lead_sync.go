@@ -175,6 +175,7 @@ func (h *Handler) CreateLeadSyncSource(c *gin.Context) {
 		errx.JSON(c, xerr)
 		return
 	}
+	h.auditOrg(c, models.AuditActionCreate, models.AuditEntityLeadSyncSource, &src.ID, nil, map[string]string{"sheet": src.SheetTitle})
 	c.JSON(http.StatusCreated, src)
 }
 
@@ -218,6 +219,7 @@ func (h *Handler) UpdateLeadSyncSource(c *gin.Context) {
 		errx.JSON(c, xerr)
 		return
 	}
+	h.auditOrg(c, models.AuditActionUpdate, models.AuditEntityLeadSyncSource, &id, nil, nil)
 	c.JSON(http.StatusOK, src)
 }
 
@@ -236,6 +238,7 @@ func (h *Handler) DeleteLeadSyncSource(c *gin.Context) {
 		errx.JSON(c, xerr)
 		return
 	}
+	h.auditOrg(c, models.AuditActionDelete, models.AuditEntityLeadSyncSource, &id, nil, nil)
 	c.Status(http.StatusNoContent)
 }
 
@@ -257,5 +260,6 @@ func (h *Handler) SyncLeadSyncSourceNow(c *gin.Context) {
 		errx.JSON(c, xerr)
 		return
 	}
+	h.auditOrg(c, models.AuditActionImport, models.AuditEntityLeadSyncSource, &id, nil, map[string]string{"trigger": "manual_sync"})
 	c.JSON(http.StatusOK, result)
 }

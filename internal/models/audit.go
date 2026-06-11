@@ -84,6 +84,12 @@ const (
 
 	// Inbox
 	AuditEntityUnibox AuditEntityType = "unibox"
+
+	// Collaboration / automation surfaces
+	AuditEntityTeam           AuditEntityType = "team"
+	AuditEntityAutomation     AuditEntityType = "automation"
+	AuditEntityLeadSyncSource AuditEntityType = "lead_sync_source"
+	AuditEntityMeeting        AuditEntityType = "meeting"
 )
 
 // AuditActor is the minimal identity of the member who performed an action,

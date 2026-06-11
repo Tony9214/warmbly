@@ -687,7 +687,7 @@ func (h *Handler) CreateAutomation(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.BadRequest, err.Error()))
 		return
 	}
-	h.auditIntegration(c, userID, models.AuditActionCreate, a.ID, "automation")
+	h.auditIntegrationEntity(c, userID, models.AuditActionCreate, models.AuditEntityAutomation, a.ID, a.Name)
 	h.StreamingPublisher.PublishAutomationEvent(c.Request.Context(), orgID, userID, pubsub.EventAutomationCreated, a.ID.String(), a.Name)
 	c.JSON(http.StatusCreated, gin.H{"automation": a})
 }
@@ -712,7 +712,7 @@ func (h *Handler) UpdateAutomation(c *gin.Context) {
 		errx.JSON(c, errx.New(errx.BadRequest, err.Error()))
 		return
 	}
-	h.auditIntegration(c, userID, models.AuditActionUpdate, id, "automation")
+	h.auditIntegrationEntity(c, userID, models.AuditActionUpdate, models.AuditEntityAutomation, id, a.Name)
 	h.StreamingPublisher.PublishAutomationEvent(c.Request.Context(), orgID, userID, pubsub.EventAutomationUpdated, id.String(), a.Name)
 	c.JSON(http.StatusOK, gin.H{"automation": a})
 }
@@ -733,7 +733,7 @@ func (h *Handler) DeleteAutomation(c *gin.Context) {
 		errx.Handle(c, err)
 		return
 	}
-	h.auditIntegration(c, userID, models.AuditActionDelete, id, "automation")
+	h.auditIntegrationEntity(c, userID, models.AuditActionDelete, models.AuditEntityAutomation, id, "")
 	h.StreamingPublisher.PublishAutomationEvent(c.Request.Context(), orgID, userID, pubsub.EventAutomationDeleted, id.String(), "")
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
@@ -1053,6 +1053,8 @@ func (h *Handler) CreateMeeting(c *gin.Context) {
 	// by hand shouldn't fire "a prospect booked a call" alerts back at them).
 	h.emitMeetingRealtime(c.Request.Context(), orgID, booking, pubsub.EventMeetingBooked)
 
+	h.auditOrg(c, models.AuditActionCreate, models.AuditEntityMeeting, &booking.ID, nil, map[string]string{"title": booking.EventName})
+
 	c.JSON(http.StatusCreated, gin.H{"meeting": booking})
 }
 
@@ -1081,11 +1083,19 @@ func (h *Handler) DeleteMeeting(c *gin.Context) {
 		return
 	}
 	h.emitMeetingRealtime(c.Request.Context(), orgID, existing, pubsub.EventMeetingCanceled)
+	h.auditOrg(c, models.AuditActionDelete, models.AuditEntityMeeting, &id, nil, nil)
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 // auditIntegration is a thin best-effort audit-log wrapper.
 func (h *Handler) auditIntegration(c *gin.Context, userID uuid.UUID, action models.AuditAction, entityID uuid.UUID, detail string) {
+	h.auditIntegrationEntity(c, userID, action, models.AuditEntityIntegration, entityID, detail)
+}
+
+// auditIntegrationEntity is auditIntegration with an explicit entity type, so
+// automations (and other integration-adjacent surfaces) land in the audit log
+// under their own filterable entity instead of a generic "integration" row.
+func (h *Handler) auditIntegrationEntity(c *gin.Context, userID uuid.UUID, action models.AuditAction, entityType models.AuditEntityType, entityID uuid.UUID, detail string) {
 	if h.AuditService == nil {
 		return
 	}
@@ -1098,5 +1108,5 @@ func (h *Handler) auditIntegration(c *gin.Context, userID uuid.UUID, action mode
 	if orgID == nil {
 		return
 	}
-	h.AuditService.LogAction(c.Request.Context(), *orgID, userID, action, models.AuditEntityIntegration, &id, c.ClientIP(), c.Request.UserAgent(), nil, meta)
+	h.AuditService.LogAction(c.Request.Context(), *orgID, userID, action, entityType, &id, c.ClientIP(), c.Request.UserAgent(), nil, meta)
 }
