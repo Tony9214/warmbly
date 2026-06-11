@@ -536,7 +536,10 @@ func Run(
 		automations.Use(m.RequireOrganization(), m.RateLimitMiddleware(models.RateLimitWrite))
 		{
 			aread := m.RequireAnyAccess(models.APIPermIntegrations, models.PermManageSettings, models.PermUseIntegrations)
-			awrite := m.RequireAccess(models.PermManageSettings, models.APIPermIntegrations)
+			// Writing automations needs the integration permission (same family as
+			// reads) OR settings-manager; previously it required manage-settings only,
+			// which let integration-permitted members open the builder but 403 on save.
+			awrite := m.RequireAnyAccess(models.APIPermIntegrations, models.PermManageSettings, models.PermUseIntegrations)
 			automations.GET("", aread, h.ListAutomations)
 			automations.POST("", awrite, h.CreateAutomation)
 			automations.GET("/:id", aread, h.GetAutomation)

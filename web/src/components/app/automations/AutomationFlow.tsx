@@ -55,6 +55,7 @@ import {
     ZapIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import type { AppError } from "@/lib/api/client/normalizeError";
 import { Label, NumberInput, TextInput } from "@/components/ui/field";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
 import { useConfirm } from "@/hooks/context/confirm";
@@ -693,8 +694,12 @@ export default function AutomationFlow({
             baselineRef.current = flowSig(name, enabled, trigger, nodes, edges);
             toast.success("Automation saved");
             return true;
-        } catch {
-            toast.error("Could not save automation");
+        } catch (e) {
+            // Show the backend's reason (e.g. "an action node has no integration
+            // selected", a permission denial, or the paid-plan gate) instead of a
+            // generic message, so a failed save is actually actionable.
+            const msg = (e as AppError)?.message;
+            toast.error(msg ? `Could not save automation: ${msg}` : "Could not save automation");
             return false;
         }
     };
