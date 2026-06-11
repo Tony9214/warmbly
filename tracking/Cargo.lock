@@ -2924,8 +2924,6 @@ dependencies = [
  "axum",
  "base64 0.21.7",
  "chrono",
- "hex",
- "hmac",
  "moka",
  "rdkafka",
  "reqwest 0.11.27",
@@ -2937,7 +2935,6 @@ dependencies = [
  "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
- "urlencoding",
  "uuid",
 ]
 

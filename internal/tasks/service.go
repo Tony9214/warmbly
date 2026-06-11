@@ -86,6 +86,7 @@ type tasksService struct {
 	contactRepo          repository.ContactRepository
 	campaignLogRepo      repository.CampaignLogRepository
 	attachmentRepo       repository.AttachmentRepository
+	trackedLinkRepo      repository.TrackedLinkRepository
 
 	// automationRunner launches automations from a campaign "run_automation" step.
 	automationRunner AutomationRunner
@@ -124,6 +125,7 @@ func NewService(
 	campaignLogRepo repository.CampaignLogRepository,
 	advanced advanced.Service,
 	attachmentRepo repository.AttachmentRepository,
+	trackedLinkRepo repository.TrackedLinkRepository,
 	automationRunner AutomationRunner,
 ) TasksService {
 	return &tasksService{
@@ -148,6 +150,7 @@ func NewService(
 		contactRepo:          contactRepo,
 		campaignLogRepo:      campaignLogRepo,
 		attachmentRepo:       attachmentRepo,
+		trackedLinkRepo:      trackedLinkRepo,
 		automationRunner:     automationRunner,
 		warmupSettings:       &warmupSettingsCache{},
 	}

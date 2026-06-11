@@ -71,6 +71,10 @@ func Run(
 		internal.PUT("/dek/:orgID", h.InternalPutDEK)
 		internal.DELETE("/dek/:orgID", h.InternalDeleteDEK)
 
+		// Click-link tickets: the tracking service resolves /c/<id> redirects
+		// here instead of touching Postgres (read-only, heavily cached there).
+		internal.GET("/tracked-links/:id", h.InternalGetTrackedLink)
+
 		// Worker mailbox-sync messageId -> internal email map (replaces the
 		// former DynamoDB EmailMessageData table). Workers read/write it here.
 		internal.GET("/email-message-map", h.InternalGetEmailMessageMap)

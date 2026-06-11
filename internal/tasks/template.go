@@ -1,12 +1,8 @@
 package tasks
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"math/rand"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -16,30 +12,8 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/pkg/tmplfuncs"
 	"github.com/warmbly/warmbly/internal/pkg/warmpersona"
+	"github.com/warmbly/warmbly/internal/repository"
 )
-
-// trackingLinkSecret signs click-tracking redirects so the tracking service
-// can refuse forged ?url= values (open-redirect abuse). Injected from the
-// required EmailConfig.TrackingLinkSecret at boot (SetTrackingLinkSecret);
-// the Rust service verifies with the same value and has no unsigned mode.
-var trackingLinkSecret string
-
-// SetTrackingLinkSecret wires the click-link signing secret after config
-// load. Must be called before any campaign send builds tracked links —
-// unsigned links are refused by the tracking service.
-func SetTrackingLinkSecret(secret string) {
-	trackingLinkSecret = secret
-}
-
-// signTrackingURL returns the hex HMAC-SHA256 tag binding a click redirect to
-// (taskID, originalURL).
-func signTrackingURL(taskID uuid.UUID, originalURL string) string {
-	mac := hmac.New(sha256.New, []byte(trackingLinkSecret))
-	mac.Write([]byte(taskID.String()))
-	mac.Write([]byte("|"))
-	mac.Write([]byte(originalURL))
-	return hex.EncodeToString(mac.Sum(nil))
-}
 
 // Conversation represents a warmup conversation for AI generation
 type Conversation struct {
@@ -298,15 +272,21 @@ func AddOpenTrackingPixel(htmlBody string, taskID uuid.UUID, trackingDomain stri
 	return htmlBody + pixel
 }
 
-// WrapLinksForTracking wraps all links in HTML for click tracking
-// The tracking URL points to the Rust tracking service endpoint: /t/c/{taskID}?url={original_url}
-func WrapLinksForTracking(htmlBody string, taskID uuid.UUID, trackingDomain string) string {
+// WrapLinksForTracking rewrites every external link to an opaque
+// click-tracking ticket (https://<domain>/c/<id>) and returns the minted
+// rows. The destination never travels inside the link, so there is nothing
+// to forge: the tracking service resolves tickets via the backend internal
+// API and 404s anything it does not know. The caller MUST persist the
+// returned rows before using the rewritten body (and fall back to the
+// original body on failure) so an email can never ship dead tickets.
+func WrapLinksForTracking(htmlBody string, taskID, campaignID uuid.UUID, trackingDomain string) (string, []repository.TrackedLink) {
 	if trackingDomain == "" {
 		trackingDomain = "track.warmbly.com"
 	}
 
 	// Regex to find href attributes
 	linkRegex := regexp.MustCompile(`href="([^"]+)"`)
+	var links []repository.TrackedLink
 
 	result := linkRegex.ReplaceAllStringFunc(htmlBody, func(match string) string {
 		// Extract the original URL
@@ -326,18 +306,23 @@ func WrapLinksForTracking(htmlBody string, taskID uuid.UUID, trackingDomain stri
 			return match
 		}
 
-		// Use /t/c/ path to match Rust tracking service
-		// URL encode the original URL properly
-		trackingURL := fmt.Sprintf("https://%s/t/c/%s?url=%s&s=%s",
-			trackingDomain,
-			taskID.String(),
-			url.QueryEscape(originalURL),
-			signTrackingURL(taskID, originalURL))
+		// Only http(s) destinations are storable redirect targets
+		if !strings.HasPrefix(originalURL, "http://") && !strings.HasPrefix(originalURL, "https://") {
+			return match
+		}
 
-		return fmt.Sprintf(`href="%s"`, trackingURL)
+		id := uuid.New()
+		links = append(links, repository.TrackedLink{
+			ID:          id,
+			TaskID:      taskID,
+			CampaignID:  campaignID,
+			Destination: originalURL,
+		})
+
+		return fmt.Sprintf(`href="https://%s/c/%s"`, trackingDomain, id.String())
 	})
 
-	return result
+	return result, links
 }
 
 // personaPick chooses from a mailbox's preferred subset of phrasing options so

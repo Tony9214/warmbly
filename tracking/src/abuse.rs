@@ -1,16 +1,15 @@
 //! Anti-abuse layer for the tracking endpoints.
 //!
-//! Three independent controls, all applied before an event reaches Kafka:
+//! Two independent controls, applied before an event reaches Kafka:
 //! - per-source rate limiting (fixed 60s window, bounded cache)
 //! - prefetch / scanner filtering (the response is still served so real
 //!   clients never break; only the analytics event is suppressed)
-//! - HMAC verification of click redirects, so the tracking domain cannot be
-//!   used as an open redirector with forged `?url=` values.
+//!
+//! Open-redirect protection lives in the ticket design itself (`links.rs`):
+//! destinations never travel inside the URL, so there is nothing to forge.
 
 use axum::http::HeaderMap;
-use hmac::{Hmac, Mac};
 use moka::future::Cache;
-use sha2::Sha256;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -103,23 +102,4 @@ pub fn is_scanner(user_agent: Option<&str>) -> bool {
     };
     let ua = ua.to_ascii_lowercase();
     SCANNER_UA_MARKERS.iter().any(|marker| ua.contains(marker))
-}
-
-type HmacSha256 = Hmac<Sha256>;
-
-/// Verify the `s` query parameter of a click redirect: hex HMAC-SHA256 over
-/// `"{task_id}|{original_url}"` with the shared TRACKING_LINK_SECRET. The Go
-/// sender signs at link-rewrite time; anything unsigned or mis-signed is a
-/// forged redirect.
-pub fn verify_signature(secret: &str, task_id: &str, original_url: &str, sig: Option<&str>) -> bool {
-    let Some(sig) = sig else { return false };
-    let Ok(sig_bytes) = hex::decode(sig) else {
-        return false;
-    };
-
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("hmac accepts any key size");
-    mac.update(task_id.as_bytes());
-    mac.update(b"|");
-    mac.update(original_url.as_bytes());
-    mac.verify_slice(&sig_bytes).is_ok()
 }

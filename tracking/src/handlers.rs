@@ -1,23 +1,18 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
 };
 use chrono::Utc;
 use moka::future::Cache;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::abuse::{is_prefetch, is_scanner, verify_signature, RateLimiter};
+use crate::abuse::{is_prefetch, is_scanner, RateLimiter};
 use crate::config::Config;
 use crate::kafka::{KafkaProducer, TrackingEvent};
-
-/// Raw (still-encoded) `?url=` values longer than this are rejected before
-/// decoding; decoded URLs are capped at the practical browser URL limit.
-const MAX_RAW_URL_LEN: usize = 4096;
-const MAX_URL_LEN: usize = 2048;
+use crate::links::{LinkResolver, Resolution};
 
 // 1x1 transparent GIF (43 bytes)
 const TRANSPARENT_GIF: &[u8] = &[
@@ -38,9 +33,8 @@ pub struct AppState {
     pub dedupe_cache: Arc<DedupeCache>,
     /// Per-source request budget (anti-flood)
     pub rate_limiter: Arc<RateLimiter>,
-    /// Signing secret for click redirects. Always enforced; rotating it
-    /// immediately invalidates links signed with the old secret.
-    pub link_secret: Arc<String>,
+    /// Click-ticket resolver (backend internal API + layered caches)
+    pub links: Arc<LinkResolver>,
 }
 
 impl AppState {
@@ -59,7 +53,10 @@ impl AppState {
             kafka,
             dedupe_cache: Arc::new(dedupe_cache),
             rate_limiter: Arc::new(RateLimiter::new(config.rate_limit_per_min)),
-            link_secret: Arc::new(config.link_secret.clone()),
+            links: Arc::new(LinkResolver::new(
+                config.backend_internal_url.clone(),
+                config.internal_api_token.clone(),
+            )),
         }
     }
 
@@ -154,74 +151,38 @@ pub async fn track_open(
 }
 
 /// Click tracking redirect handler
-/// GET /t/c/{task_id}?url={original_url}
+/// GET /c/{link_id}
+///
+/// The email carries only this opaque ticket; the destination lives
+/// server-side, so there is nothing to forge and no open-redirect surface.
+/// Unknown tickets 404.
 pub async fn track_click(
     State(state): State<AppState>,
-    Path(task_id): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
+    Path(link_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    // Get original URL from query params first (we need to redirect regardless)
-    let original_url = match params.get("url") {
-        Some(url) => {
-            if url.len() > MAX_RAW_URL_LEN {
-                return (StatusCode::BAD_REQUEST, "URL too long").into_response();
-            }
-            // Decode URL
-            urlencoding::decode(url)
-                .map(|s| s.into_owned())
-                .unwrap_or_else(|_| url.clone())
-        }
-        None => {
-            return (StatusCode::BAD_REQUEST, "Missing url parameter").into_response();
-        }
-    };
-
-    // Basic URL validation
-    if original_url.len() > MAX_URL_LEN {
-        return (StatusCode::BAD_REQUEST, "URL too long").into_response();
-    }
-    if !original_url.starts_with("http://") && !original_url.starts_with("https://") {
-        return (StatusCode::BAD_REQUEST, "Invalid URL").into_response();
-    }
-
-    // Signed-link enforcement: only redirects minted by our own send
-    // pipeline are honored. This is what stops the tracking domain from
-    // being abused as an open redirector. There is exactly one valid key;
-    // a rotated-away key is dead, so its links 404 by design.
-    if !verify_signature(
-        &state.link_secret,
-        &task_id,
-        &original_url,
-        params.get("s").map(String::as_str),
-    ) {
+    // Garbage dies before any lookup or counter work
+    if uuid::Uuid::parse_str(&link_id).is_err() {
         return (StatusCode::NOT_FOUND, "Unknown link").into_response();
     }
 
-    // Anti-flood: refuse the redirect outright over budget. Unlike the pixel
-    // there is no rendering concern, and serving unlimited redirects would
-    // keep the redirector attractive to abusers even with events suppressed.
+    // Anti-flood: cap total request rate per source
     let ip_hash = extract_ip_hash(&headers);
     let source = ip_hash.clone().unwrap_or_else(|| "unknown".to_string());
     if !state.rate_limiter.allow(&source).await {
         return (StatusCode::TOO_MANY_REQUESTS, "Slow down").into_response();
     }
 
-    // Validate task_id is a valid UUID format
-    if uuid::Uuid::parse_str(&task_id).is_err() {
-        // Still redirect but don't track
-        return Redirect::temporary(&original_url).into_response();
-    }
-
-    // Create a unique key for this specific link click (task + URL + IP)
-    let url_hash = {
-        let mut hasher = Sha256::new();
-        hasher.update(original_url.as_bytes());
-        let result = hasher.finalize();
-        format!("{:x}", result)[..8].to_string()
+    let link = match state.links.resolve(&link_id, &source).await {
+        Resolution::Found(link) => link,
+        Resolution::NotFound => {
+            return (StatusCode::NOT_FOUND, "Unknown link").into_response();
+        }
+        Resolution::Unavailable => {
+            // Fail closed: never redirect a ticket we could not verify.
+            return (StatusCode::SERVICE_UNAVAILABLE, "Try again shortly").into_response();
+        }
     };
-
-    let dedupe_key = format!("{}:{}", task_id, url_hash);
 
     // Extract metadata from request
     let user_agent = headers
@@ -232,24 +193,23 @@ pub async fn track_click(
     // Security gateways and link previewers follow every URL in a message;
     // serve them the destination but never count a click.
     if is_prefetch(&headers) || is_scanner(user_agent.as_deref()) {
-        return Redirect::temporary(&original_url).into_response();
+        return Redirect::temporary(&link.destination).into_response();
     }
 
-    // Check for duplicate (same task + URL + IP within 1 hour)
-    if state.is_duplicate("CLICK", &dedupe_key, &ip_hash).await {
-        // Still redirect but don't publish event
-        return Redirect::temporary(&original_url).into_response();
+    // Dedupe repeat clicks of the same ticket from the same source
+    if state.is_duplicate("CLICK", &link_id, &ip_hash).await {
+        return Redirect::temporary(&link.destination).into_response();
     }
 
     // Publish event asynchronously (fire and forget)
     let kafka = state.kafka.clone();
-    let original_url_clone = original_url.clone();
+    let destination = link.destination.clone();
     tokio::spawn(async move {
         kafka
             .publish(TrackingEvent {
                 event_type: "EMAIL_CLICKED".to_string(),
-                task_id,
-                original_url: Some(original_url_clone),
+                task_id: link.task_id,
+                original_url: Some(destination),
                 timestamp: Utc::now().to_rfc3339(),
                 user_agent,
                 ip_hash,
@@ -257,8 +217,7 @@ pub async fn track_click(
             .await;
     });
 
-    // Redirect to original URL
-    Redirect::temporary(&original_url).into_response()
+    Redirect::temporary(&link.destination).into_response()
 }
 
 /// Return the transparent pixel response

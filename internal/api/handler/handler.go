@@ -177,6 +177,10 @@ type Handler struct {
 	// as EncryptedKeys. Backed by Postgres in the backend.
 	EmailMessageMap repository.EmailMessageMapRepository
 
+	// Click-link store, served to the tracking service over HTTPS at
+	// /api/v1/internal/tracked-links/:id (same no-direct-Postgres rule).
+	TrackedLinks repository.TrackedLinkRepository
+
 	// Direct repositories used by handlers that don't yet have a
 	// service layer (avatars, etc.). Keep narrow and add a service
 	// only when business logic accumulates.

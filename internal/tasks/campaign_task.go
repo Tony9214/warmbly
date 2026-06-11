@@ -427,7 +427,16 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	}
 
 	if campaign.LinkTracking && bodyHTML != "" {
-		bodyHTML = WrapLinksForTracking(bodyHTML, taskID, trackingDomain)
+		wrapped, links := WrapLinksForTracking(bodyHTML, taskID, campaign.ID, trackingDomain)
+		if len(links) == 0 {
+			bodyHTML = wrapped
+		} else if err := s.trackedLinkRepo.CreateBatch(ctx, links); err != nil {
+			// Tracking is a nicety: ship the original working links rather
+			// than tickets that would 404 at the tracking service.
+			log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to store tracked links; sending untracked")
+		} else {
+			bodyHTML = wrapped
+		}
 	}
 
 	// STEP 12: Add signature

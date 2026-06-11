@@ -383,7 +383,6 @@ backend:
 	EMAIL_NAME='Warmbly Dev' \
 	EMAIL_ADDRESS=dev@warmbly.local \
 	TRACKING_DOMAIN=t.warmbly.com \
-	TRACKING_LINK_SECRET=local-dev-tracking-link-secret \
 	SMTP_HOST=$(INFRA_HOST) \
 	SMTP_PORT=11025 \
 	GEODB_PATH=data/GeoLite2-City.mmdb \
@@ -441,7 +440,8 @@ tracking:
 	KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
 	KAFKA_TRACKING_TOPIC=tracking-events \
 	SCHEMA_REGISTRY_URL=http://localhost:8081 \
-	TRACKING_LINK_SECRET=local-dev-tracking-link-secret \
+	BACKEND_INTERNAL_URL=http://localhost:8080 \
+	INTERNAL_API_TOKEN=local-dev-internal-token \
 	cargo run
 
 # Websocket fanout service (Elixir/Phoenix) on :4000. MIX_ENV=dev skips

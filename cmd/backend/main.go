@@ -187,6 +187,7 @@ func main() {
 	// survive the config block where they're initialized.
 	var s3ForHandler *storage.Client
 	var emailMessageMapForHandler repository.EmailMessageMapRepository
+	var trackedLinkRepository repository.TrackedLinkRepository
 	var userRepoForHandler repository.UserRepository
 	var organizationRepoForHandler repository.OrganizationRepository
 	var warmupRoutingRepoForHandler repository.WarmupRoutingRepository
@@ -329,9 +330,6 @@ func main() {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
-		// Click-link signing: the tracking service refuses unsigned redirects,
-		// so the signer must be wired before any campaign send builds links.
-		tasks.SetTrackingLinkSecret(emailCfg.TrackingLinkSecret)
 
 		smtpCfg := cfg.LoadSMTPConfig(ctx)
 		if smtpCfg != nil {
@@ -468,6 +466,7 @@ func main() {
 			"postgres",
 		)
 		emailMessageMapForHandler = repository.NewEmailMessageMapRepository(primaryDB)
+		trackedLinkRepository = repository.NewTrackedLinkRepository(primaryDB.Pool)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -896,6 +895,7 @@ func main() {
 			campaignLogRepository,
 			advancedService,
 			attachmentRepoForHandler,
+			trackedLinkRepository,
 			integrationServiceForHandler, // AutomationRunner for campaign run_automation steps
 		)
 
@@ -1086,6 +1086,7 @@ func main() {
 		Storage:                  s3ForHandler,
 		EncryptedKeys:            encryptedKeys,
 		EmailMessageMap:          emailMessageMapForHandler,
+		TrackedLinks:             trackedLinkRepository,
 		UserRepo:                 userRepoForHandler,
 		OrgRepo:                  organizationRepoForHandler,
 		AttachmentRepo:           attachmentRepoForHandler,
