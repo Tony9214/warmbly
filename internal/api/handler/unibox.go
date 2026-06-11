@@ -40,6 +40,12 @@ func (h *Handler) GetUniboxIncoming(c *gin.Context) {
 		return
 	}
 
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
 	// Check if organization can use unibox (active free trial or paid subscription)
 	if h.FeatureGateService != nil {
 		orgID := middleware.GetOrganizationID(c)
@@ -148,7 +154,7 @@ func (h *Handler) GetUniboxIncoming(c *gin.Context) {
 		}
 	}
 
-	resp, xerr := h.UniboxService.Search(c.Request.Context(), uid, params)
+	resp, xerr := h.UniboxService.Search(c.Request.Context(), *orgID, uid, params)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return
@@ -459,8 +465,13 @@ func (h *Handler) GetUniboxOverview(c *gin.Context) {
 		errx.Handle(c, errx.ErrUser)
 		return
 	}
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
 
-	resp, xerr := h.UniboxService.Overview(c.Request.Context(), uid)
+	resp, xerr := h.UniboxService.Overview(c.Request.Context(), *orgID, uid)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return

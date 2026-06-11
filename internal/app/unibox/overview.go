@@ -13,8 +13,8 @@ import (
 // Overview rolls up the counts the dashboard's scope rail and top
 // metric strip need into one request, so the dashboard never has to
 // fan out N+M follow-up queries to render those panels.
-func (s *uniboxService) Overview(ctx context.Context, userID uuid.UUID) (*models.UniboxOverview, *errx.Error) {
-	o, err := s.uniboxRepository.Overview(ctx, userID)
+func (s *uniboxService) Overview(ctx context.Context, orgID, userID uuid.UUID) (*models.UniboxOverview, *errx.Error) {
+	o, err := s.uniboxRepository.Overview(ctx, orgID)
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.InternalError()

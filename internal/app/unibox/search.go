@@ -12,6 +12,7 @@ import (
 // Search searches emails with filters
 func (s *uniboxService) Search(
 	ctx context.Context,
+	orgID uuid.UUID,
 	userID uuid.UUID,
 	params *models.MailSearchParams,
 ) (*models.MailSearchResult, *errx.Error) {
@@ -28,7 +29,7 @@ func (s *uniboxService) Search(
 	// sender-only fast path (GetBySender) returned un-collapsed,
 	// label-less rows, so it can't serve the stacked list anymore — the
 	// sender filter is handled inside Search via params.Sender.
-	resp, err := s.uniboxRepository.Search(ctx, userID, params)
+	resp, err := s.uniboxRepository.Search(ctx, orgID, userID, params)
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.InternalError()
