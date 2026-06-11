@@ -122,7 +122,7 @@ func (s *authService) ResetPasswordConfirm(ctx context.Context, data *ResetPassw
 // ChangePassword updates a logged-in user's password. It verifies the current
 // password first (so a hijacked but unattended session can't silently change
 // it), rejects OAuth-only accounts, and enforces the password policy.
-func (s *authService) ChangePassword(ctx context.Context, userID uuid.UUID, data *ChangePassword) *errx.Error {
+func (s *authService) ChangePassword(ctx context.Context, userID, currentSessionID uuid.UUID, data *ChangePassword) *errx.Error {
 	hash, xerr := s.authRepository.GetPasswordHash(ctx, userID)
 	if xerr != nil {
 		return xerr
@@ -152,5 +152,19 @@ func (s *authService) ChangePassword(ctx context.Context, userID uuid.UUID, data
 		sentry.CaptureException(hashErr)
 		return errx.InternalError()
 	}
-	return s.authRepository.ResetPassword(ctx, userID, newHash)
+	if err := s.authRepository.ResetPassword(ctx, userID, newHash); err != nil {
+		return err
+	}
+
+	// Changing the password evicts every OTHER signed-in device (the whole
+	// point of changing it when a session may be compromised). The current
+	// device keeps its session so the user isn't logged out of the action
+	// they just performed.
+	if s.tokenService != nil && currentSessionID != uuid.Nil {
+		if err := s.tokenService.RevokeOtherSessions(ctx, userID, currentSessionID); err != nil {
+			sentry.CaptureException(err)
+			// Non-fatal: the password is already changed.
+		}
+	}
+	return nil
 }

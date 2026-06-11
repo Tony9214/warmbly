@@ -94,6 +94,9 @@ export default function ChangePasswordDialog({ open, onClose }: { open: boolean;
                                     <p className="text-[11px] text-rose-500 mt-1">Passwords do not match.</p>
                                 )}
                             </div>
+                            <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                                Changing your password signs out every other device. This one stays signed in.
+                            </p>
                         </div>
 
                         <footer className="px-4 h-12 flex items-center justify-end gap-2 border-t border-slate-200">

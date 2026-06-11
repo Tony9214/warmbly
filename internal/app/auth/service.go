@@ -39,7 +39,7 @@ type AuthService interface {
 
 	// ChangePassword updates a logged-in user's password after verifying the
 	// current one.
-	ChangePassword(ctx context.Context, userID uuid.UUID, data *ChangePassword) *errx.Error
+	ChangePassword(ctx context.Context, userID, currentSessionID uuid.UUID, data *ChangePassword) *errx.Error
 }
 
 type authService struct {

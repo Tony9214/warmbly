@@ -224,7 +224,7 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), authRequestTimeout)
 	defer cancel()
 
-	if xerr := h.AuthService.ChangePassword(ctx, uid, &data); xerr != nil {
+	if xerr := h.AuthService.ChangePassword(ctx, uid, currentSessionID(c), &data); xerr != nil {
 		errx.Handle(c, xerr)
 		return
 	}
