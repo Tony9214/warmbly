@@ -97,6 +97,21 @@ export default async function Request<T>(config: AuthRequestConfig): Promise<T> 
             clearTokens();
             throw SessionExpired;
         }
+
+        // A denied WRITE action (edit/save/delete) gets one clear, app-wide
+        // popup explaining the missing permission (or plan). Reads that 403 are
+        // intentionally left to page-level gating (locked surfaces / NoAccess),
+        // so we only surface this for mutating methods.
+        if (appErr?.status === 403 && typeof window !== "undefined") {
+            const method = String(config.method ?? "get").toUpperCase();
+            if (method !== "GET" && method !== "HEAD") {
+                window.dispatchEvent(
+                    new CustomEvent("permission-denied", {
+                        detail: { message: appErr.message },
+                    }),
+                );
+            }
+        }
         throw error;
     }
 }
