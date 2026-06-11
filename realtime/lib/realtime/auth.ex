@@ -154,6 +154,22 @@ defmodule Realtime.Auth do
   end
 
   @doc """
+  Fetch a user's display profile (name + avatar) for presence metadata.
+  Best-effort: returns nil fields when the user can't be loaded, so a
+  DB hiccup degrades presence labels rather than blocking the join.
+  """
+  def get_user_profile(user_id) do
+    query = "SELECT first_name, last_name, avatar_url FROM users WHERE id = $1"
+
+    with {:ok, uuid} <- Ecto.UUID.dump(user_id),
+         {:ok, %{rows: [[first, last, avatar] | _]}} <- Realtime.Repo.query(query, [uuid]) do
+      %{name: String.trim("#{first} #{last}"), avatar: avatar}
+    else
+      _ -> %{name: nil, avatar: nil}
+    end
+  end
+
+  @doc """
   Check if a user has access to a campaign via organization membership.
 
   Returns:

@@ -1,15 +1,20 @@
 defmodule RealtimeWeb.OrgChannel do
   @moduledoc """
-  Channel for organization-specific events.
+  Channel for organization-specific events and team presence.
 
-  Users can join their organization's channel to receive events like:
-  - member_joined: New member joined the organization
-  - member_left: Member left or was removed
-  - member_role_changed: Member's role/permissions changed
-  - settings_changed: Organization settings updated
-  - subscription_changed: Subscription status changed
+  Users join their organization's channel to receive org-scoped dashboard
+  events (campaign sends, inbox arrivals, audit entries, member changes, ...)
+  filtered by their member permissions.
 
-  Authorization is handled by checking organization membership.
+  Presence: every JWT member is tracked in `RealtimeWeb.Presence` with
+  display metadata and a live activity descriptor. Clients push
+  `presence:update` (rate-limited like any client event) with:
+
+      %{"page" => "/app/unibox", "resource" => "thread:<id>", "action" => "replying"}
+
+  so teammates see who is online, who is viewing the same record, and who is
+  already replying to an email. API-key (developer) sockets receive events but
+  are never tracked as presences.
   """
 
   use Phoenix.Channel
@@ -19,6 +24,9 @@ defmodule RealtimeWeb.OrgChannel do
   alias Realtime.Auth
   alias Realtime.Connections
   alias Realtime.RateLimiter
+  alias RealtimeWeb.Presence
+
+  @presence_actions ~w(viewing editing replying idle)
 
   @impl true
   def join("org:" <> org_id, _params, socket) do
@@ -51,6 +59,25 @@ defmodule RealtimeWeb.OrgChannel do
     # Subscribe to the organization's Pub/Sub topic
     org_id = socket.assigns.org_id
     Phoenix.PubSub.subscribe(Realtime.PubSub, "org:#{org_id}")
+
+    # Track presence for human members only; developer API-key sockets are
+    # event consumers, not teammates.
+    if Map.get(socket.assigns, :auth_type) == :jwt do
+      profile = Auth.get_user_profile(socket.assigns.user_id)
+
+      {:ok, _} =
+        Presence.track(socket, socket.assigns.user_id, %{
+          online_at: System.system_time(:second),
+          name: profile.name,
+          avatar: profile.avatar,
+          page: nil,
+          resource: nil,
+          action: nil
+        })
+
+      push(socket, "presence_state", Presence.list(socket))
+    end
+
     {:noreply, socket}
   end
 
@@ -79,6 +106,12 @@ defmodule RealtimeWeb.OrgChannel do
 
     {:noreply, socket}
   end
+
+  # Presence diffs (and any other channel broadcasts) reach the client through
+  # the transport fastlane; this clause only swallows the duplicate delivered
+  # to the channel process by our manual PubSub subscription above.
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{}, socket), do: {:noreply, socket}
 
   @impl true
   def handle_in("ping", _payload, socket) do
@@ -116,38 +149,98 @@ defmodule RealtimeWeb.OrgChannel do
 
   # Private functions
 
-  # Check if user has permission to see a specific event type
+  # Gate org-broadcast events on member permissions. Event types are
+  # normalized (upcased, separators collapsed to "_") so both the legacy
+  # lowercase names and the Go publisher's UPPER_SNAKE names match.
   defp can_see_event?(socket, event) do
-    event_type = Map.get(event, "event_type", "")
+    event_type =
+      event
+      |> Map.get("event_type", "")
+      |> to_string()
+      |> String.upcase()
+      |> String.replace(~r/[.:\s-]+/, "_")
+
     permissions = socket.assigns.permissions
+    has = fn perm -> Auth.has_permission?(%{permissions: permissions}, Auth.permission(perm)) end
 
-    case event_type do
-      # Billing events require billing permission
-      "subscription_changed" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_billing))
+    cond do
+      # Billing
+      String.contains?(event_type, "SUBSCRIPTION") or String.contains?(event_type, "BILLING") ->
+        has.(:manage_billing)
 
-      # Member events require team management permission
-      "member_joined" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_team))
+      # Team / member events
+      String.contains?(event_type, "MEMBER") or String.contains?(event_type, "INVITATION") ->
+        has.(:manage_team)
 
-      "member_left" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_team))
+      # Org settings changes
+      String.contains?(event_type, "SETTINGS") ->
+        has.(:manage_settings)
 
-      "member_role_changed" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_team))
+      # Unibox rows carry subject + preview snippets
+      String.contains?(event_type, "INBOX") or
+          event_type in ["EMAIL_RECEIVED", "EMAIL_UPDATED", "EMAIL_DELETED"] ->
+        has.(:access_unibox)
 
-      # Settings changes require settings permission
-      "settings_changed" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_settings))
+      # Campaign activity: lifecycle, task progress, send/open/click/reply pulses
+      String.contains?(event_type, "CAMPAIGN") or String.contains?(event_type, "TASK_PROGRESS") or
+          event_type in ["EMAIL_SENT", "EMAIL_OPENED", "EMAIL_CLICKED", "EMAIL_REPLIED", "EMAIL_BOUNCED"] ->
+        has.(:view_campaigns)
 
-      # Default: allow all other events
-      _ ->
+      # Contact changes
+      String.contains?(event_type, "CONTACT") ->
+        has.(:view_contacts)
+
+      # Mailbox account + warmup health transitions
+      String.contains?(event_type, "ACCOUNT") or String.contains?(event_type, "WARMUP") ->
+        has.(:manage_emails)
+
+      # Default: allow (audit refresh signals, meetings, automations, ...).
+      # The corresponding list endpoints enforce their own permissions; these
+      # events only tell the dashboard to refetch.
+      true ->
         true
     end
+  end
+
+  # presence:update — merge the client's sanitized activity descriptor into
+  # its presence meta. Only tracked (JWT) members can update presence.
+  defp handle_client_event("presence:update", payload, socket) do
+    if Map.get(socket.assigns, :auth_type) == :jwt do
+      patch = sanitize_presence(payload)
+      Presence.update(socket, socket.assigns.user_id, fn meta -> Map.merge(meta, patch) end)
+    end
+
+    {:noreply, socket}
   end
 
   defp handle_client_event(_event, _payload, socket) do
     # Default handler for unknown events
     {:noreply, socket}
   end
+
+  defp sanitize_presence(payload) when is_map(payload) do
+    action =
+      case payload["action"] do
+        a when a in @presence_actions -> a
+        _ -> nil
+      end
+
+    %{
+      page: presence_string(payload["page"]),
+      resource: presence_string(payload["resource"]),
+      action: action,
+      updated_at: System.system_time(:second)
+    }
+  end
+
+  defp sanitize_presence(_), do: %{page: nil, resource: nil, action: nil}
+
+  defp presence_string(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> String.slice(trimmed, 0, 160)
+    end
+  end
+
+  defp presence_string(_), do: nil
 end

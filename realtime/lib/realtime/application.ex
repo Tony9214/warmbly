@@ -22,6 +22,9 @@ defmodule Realtime.Application do
       # Phoenix PubSub for internal message broadcasting
       {Phoenix.PubSub, name: Realtime.PubSub},
 
+      # Presence tracker for org-level collaboration (who's online / viewing what)
+      RealtimeWeb.Presence,
+
       # Phoenix Endpoint (WebSocket server)
       RealtimeWeb.Endpoint,
 
