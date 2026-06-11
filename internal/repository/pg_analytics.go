@@ -338,7 +338,7 @@ func (r *analyticsRepository) GetContactCounts(ctx context.Context, userID uuid.
 
 // Dashboard Analytics Methods
 
-func (r *analyticsRepository) GetDashboardOverallStats(ctx context.Context, userID uuid.UUID, from, to time.Time) (*models.DashboardOverallStats, *errx.Error) {
+func (r *analyticsRepository) GetDashboardOverallStats(ctx context.Context, orgID uuid.UUID, from, to time.Time) (*models.DashboardOverallStats, *errx.Error) {
 	query := `
 		SELECT
 			COUNT(CASE WHEN ccp.sent_at IS NOT NULL AND ccp.sent_at >= $2 AND ccp.sent_at <= $3 THEN 1 END) as total_sent,
@@ -347,14 +347,14 @@ func (r *analyticsRepository) GetDashboardOverallStats(ctx context.Context, user
 			COUNT(CASE WHEN ccp.clicked_at IS NOT NULL AND ccp.sent_at >= $2 AND ccp.sent_at <= $3 THEN 1 END) as total_clicks,
 			COUNT(CASE WHEN ccp.replied_at IS NOT NULL AND ccp.sent_at >= $2 AND ccp.sent_at <= $3 THEN 1 END) as total_replies,
 			COUNT(CASE WHEN ccp.bounced_at IS NOT NULL AND ccp.sent_at >= $2 AND ccp.sent_at <= $3 THEN 1 END) as total_bounces,
-			(SELECT COUNT(*) FROM campaigns WHERE user_id = $1 AND status = 'active') as active_campaigns,
-			(SELECT COUNT(*) FROM email_accounts WHERE user_id = $1 AND status = 'active') as active_accounts
+			(SELECT COUNT(*) FROM campaigns WHERE organization_id = $1 AND status = 'active') as active_campaigns,
+			(SELECT COUNT(*) FROM email_accounts WHERE organization_id = $1 AND status = 'active') as active_accounts
 		FROM campaign_contact_progress ccp
 		JOIN campaigns c ON c.id = ccp.campaign_id
-		WHERE c.user_id = $1
+		WHERE c.organization_id = $1
 	`
 
-	params := []any{userID, from, to}
+	params := []any{orgID, from, to}
 
 	var stats models.DashboardOverallStats
 	err := r.DB.QueryRow(ctx, query, params...).Scan(
@@ -383,7 +383,7 @@ func (r *analyticsRepository) GetDashboardOverallStats(ctx context.Context, user
 	return &stats, nil
 }
 
-func (r *analyticsRepository) GetRecentActivity(ctx context.Context, userID uuid.UUID, limit int) ([]models.RecentActivityItem, *errx.Error) {
+func (r *analyticsRepository) GetRecentActivity(ctx context.Context, orgID uuid.UUID, limit int) ([]models.RecentActivityItem, *errx.Error) {
 	// Union query to get recent opens, clicks, replies, and bounces
 	query := `
 		WITH recent_events AS (
@@ -393,7 +393,7 @@ func (r *analyticsRepository) GetRecentActivity(ctx context.Context, userID uuid
 			FROM campaign_contact_progress ccp
 			JOIN campaigns c ON c.id = ccp.campaign_id
 			JOIN contacts co ON co.id = ccp.contact_id
-			WHERE c.user_id = $1 AND ccp.opened_at IS NOT NULL
+			WHERE c.organization_id = $1 AND ccp.opened_at IS NOT NULL
 
 			UNION ALL
 
@@ -403,7 +403,7 @@ func (r *analyticsRepository) GetRecentActivity(ctx context.Context, userID uuid
 			FROM campaign_contact_progress ccp
 			JOIN campaigns c ON c.id = ccp.campaign_id
 			JOIN contacts co ON co.id = ccp.contact_id
-			WHERE c.user_id = $1 AND ccp.clicked_at IS NOT NULL
+			WHERE c.organization_id = $1 AND ccp.clicked_at IS NOT NULL
 
 			UNION ALL
 
@@ -413,7 +413,7 @@ func (r *analyticsRepository) GetRecentActivity(ctx context.Context, userID uuid
 			FROM campaign_contact_progress ccp
 			JOIN campaigns c ON c.id = ccp.campaign_id
 			JOIN contacts co ON co.id = ccp.contact_id
-			WHERE c.user_id = $1 AND ccp.replied_at IS NOT NULL
+			WHERE c.organization_id = $1 AND ccp.replied_at IS NOT NULL
 
 			UNION ALL
 
@@ -423,7 +423,7 @@ func (r *analyticsRepository) GetRecentActivity(ctx context.Context, userID uuid
 			FROM campaign_contact_progress ccp
 			JOIN campaigns c ON c.id = ccp.campaign_id
 			JOIN contacts co ON co.id = ccp.contact_id
-			WHERE c.user_id = $1 AND ccp.bounced_at IS NOT NULL
+			WHERE c.organization_id = $1 AND ccp.bounced_at IS NOT NULL
 		)
 		SELECT type, campaign_id, campaign_name, contact_email, contact_id, timestamp, COALESCE(link, '') as link
 		FROM recent_events
@@ -431,7 +431,7 @@ func (r *analyticsRepository) GetRecentActivity(ctx context.Context, userID uuid
 		LIMIT $2
 	`
 
-	params := []any{userID, limit}
+	params := []any{orgID, limit}
 
 	rows, err := r.DB.Query(ctx, query, params...)
 	if err != nil {
@@ -453,7 +453,7 @@ func (r *analyticsRepository) GetRecentActivity(ctx context.Context, userID uuid
 	return activities, nil
 }
 
-func (r *analyticsRepository) GetTopCampaigns(ctx context.Context, userID uuid.UUID, from, to time.Time, limit int, sortBy string) ([]models.TopCampaignStats, *errx.Error) {
+func (r *analyticsRepository) GetTopCampaigns(ctx context.Context, orgID uuid.UUID, from, to time.Time, limit int, sortBy string) ([]models.TopCampaignStats, *errx.Error) {
 	// Default sort by emails_sent
 	orderClause := "emails_sent DESC"
 	switch sortBy {
@@ -483,14 +483,14 @@ func (r *analyticsRepository) GetTopCampaigns(ctx context.Context, userID uuid.U
 		FROM campaigns c
 		LEFT JOIN campaign_contact_progress ccp ON ccp.campaign_id = c.id
 			AND ccp.sent_at >= $2 AND ccp.sent_at <= $3
-		WHERE c.user_id = $1
+		WHERE c.organization_id = $1
 		GROUP BY c.id, c.name, c.status
 		HAVING COUNT(CASE WHEN ccp.sent_at IS NOT NULL THEN 1 END) > 0
 		ORDER BY ` + orderClause + `
 		LIMIT $4
 	`
 
-	params := []any{userID, from, to, limit}
+	params := []any{orgID, from, to, limit}
 
 	rows, err := r.DB.Query(ctx, query, params...)
 	if err != nil {
@@ -512,7 +512,7 @@ func (r *analyticsRepository) GetTopCampaigns(ctx context.Context, userID uuid.U
 	return campaigns, nil
 }
 
-func (r *analyticsRepository) GetDashboardDailyTrend(ctx context.Context, userID uuid.UUID, from, to time.Time) ([]models.DashboardDailyStats, *errx.Error) {
+func (r *analyticsRepository) GetDashboardDailyTrend(ctx context.Context, orgID uuid.UUID, from, to time.Time) ([]models.DashboardDailyStats, *errx.Error) {
 	query := `
 		SELECT
 			sent_at::date::text as date,
@@ -522,7 +522,7 @@ func (r *analyticsRepository) GetDashboardDailyTrend(ctx context.Context, userID
 			COUNT(CASE WHEN replied_at IS NOT NULL THEN 1 END) as replies
 		FROM campaign_contact_progress ccp
 		JOIN campaigns c ON c.id = ccp.campaign_id
-		WHERE c.user_id = $1
+		WHERE c.organization_id = $1
 		  AND ccp.sent_at IS NOT NULL
 		  AND ccp.sent_at::date >= $2
 		  AND ccp.sent_at::date <= $3
@@ -530,7 +530,7 @@ func (r *analyticsRepository) GetDashboardDailyTrend(ctx context.Context, userID
 		ORDER BY sent_at::date ASC
 	`
 
-	params := []any{userID, from, to}
+	params := []any{orgID, from, to}
 
 	rows, err := r.DB.Query(ctx, query, params...)
 	if err != nil {
@@ -552,7 +552,7 @@ func (r *analyticsRepository) GetDashboardDailyTrend(ctx context.Context, userID
 	return stats, nil
 }
 
-func (r *analyticsRepository) GetAccountHealthSummary(ctx context.Context, userID uuid.UUID) (*models.AccountHealthSummary, *errx.Error) {
+func (r *analyticsRepository) GetAccountHealthSummary(ctx context.Context, orgID uuid.UUID) (*models.AccountHealthSummary, *errx.Error) {
 	query := `
 		SELECT
 			COUNT(*) as total,
@@ -569,13 +569,13 @@ func (r *analyticsRepository) GetAccountHealthSummary(ctx context.Context, userI
 				WHERE eae.email_account_id = ea.id AND eae.resolved_at IS NULL AND eae.severity = 'CRITICAL'
 			) THEN 1 END) as error
 		FROM email_accounts ea
-		WHERE ea.user_id = $1
+		WHERE ea.organization_id = $1
 	`
 
 	var summary models.AccountHealthSummary
-	err := r.DB.QueryRow(ctx, query, userID).Scan(&summary.TotalAccounts, &summary.HealthyAccounts, &summary.WarningAccounts, &summary.ErrorAccounts)
+	err := r.DB.QueryRow(ctx, query, orgID).Scan(&summary.TotalAccounts, &summary.HealthyAccounts, &summary.WarningAccounts, &summary.ErrorAccounts)
 	if err != nil {
-		db.CaptureError(err, query, []any{userID}, "queryrow")
+		db.CaptureError(err, query, []any{orgID}, "queryrow")
 		return nil, errx.InternalError()
 	}
 

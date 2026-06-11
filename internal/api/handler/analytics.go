@@ -230,10 +230,9 @@ func (h *Handler) GetRealtimeInfo(c *gin.Context) {
 // GetDashboardAnalytics returns main dashboard analytics overview
 // GET /analytics/dashboard?period=7d
 func (h *Handler) GetDashboardAnalytics(c *gin.Context) {
-	userIDStr := middleware.GetUserID(c)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		errx.Handle(c, errx.ErrAuth)
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -243,7 +242,7 @@ func (h *Handler) GetDashboardAnalytics(c *gin.Context) {
 		period = "7d"
 	}
 
-	analytics, xerr := h.AnalyticsService.GetDashboardAnalytics(c.Request.Context(), userID, period)
+	analytics, xerr := h.AnalyticsService.GetDashboardAnalytics(c.Request.Context(), *orgID, period)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return
