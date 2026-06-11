@@ -450,6 +450,7 @@ tracking:
 realtime:
 	cd realtime && \
 	export MIX_ENV=dev \
+	       JWT_SECRET=local-dev-auth-secret-minimum-32-characters-long \
 	       PORT=4000 \
 	       PHX_HOST=$(WEB_HOST) \
 	       DATABASE_HOST=localhost \

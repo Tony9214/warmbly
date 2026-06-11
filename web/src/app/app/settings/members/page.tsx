@@ -117,7 +117,7 @@ export default function MembersSettingsPage() {
             title="Members"
             description={`Everyone with access to ${currentOrg?.name ?? "this workspace"}.`}
         >
-            {access.isOwner && (
+            {access.canManage && (
                 <Section
                     eyebrow="Invite teammates"
                     description="Paste any number of emails — we'll separate them automatically. Pick a role; you can change it later."
@@ -197,7 +197,7 @@ export default function MembersSettingsPage() {
                                                 </div>
                                             </td>
                                             <td className="px-3">
-                                                {access.isOwner && !isOwner ? (
+                                                {access.canManage && !isOwner ? (
                                                     <RoleSelect
                                                         roles={customRoles.data ?? []}
                                                         value={m.role_id}
@@ -211,7 +211,7 @@ export default function MembersSettingsPage() {
                                                         Owner
                                                     </span>
                                                 ) : (
-                                                    <RolePill role={m.role} />
+                                                    <RolePill role={m.role} color={(customRoles.data ?? []).find((r) => r.id === m.role_id)?.color} />
                                                 )}
                                             </td>
                                             <td className="px-3 font-mono text-[11px] text-slate-500 tabular-nums hidden md:table-cell">
@@ -220,7 +220,7 @@ export default function MembersSettingsPage() {
                                                     : "—"}
                                             </td>
                                             <td className="px-3">
-                                                {access.isOwner && !isOwner && !isSelf && (
+                                                {access.canManage && !isOwner && !isSelf && (
                                                     <button
                                                         type="button"
                                                         onClick={() => doRemove(m.user_id, email)}
@@ -276,13 +276,13 @@ export default function MembersSettingsPage() {
                                             </div>
                                         </td>
                                         <td className="px-3">
-                                            <RolePill role={inv.role} />
+                                            <RolePill role={inv.role} color={(customRoles.data ?? []).find((r) => r.id === inv.role_id)?.color} />
                                         </td>
                                         <td className="px-3 font-mono text-[11px] text-slate-500 tabular-nums hidden md:table-cell">
                                             {new Date(inv.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                                         </td>
                                         <td className="px-3">
-                                            {access.isOwner && (
+                                            {access.canManage && (
                                                 <div className="flex items-center gap-0.5 justify-end opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                                     <button
                                                         type="button"

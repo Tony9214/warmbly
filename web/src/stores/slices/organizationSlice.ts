@@ -38,12 +38,14 @@ export const createOrganizationSlice: StateCreator<OrganizationSlice, [], [], Or
   // tab) so the gate can redirect cleanly.
   setOrganizations: (organizations) => {
     const current = get().currentOrganization
-    const stillMember = current
-      ? organizations.some((o) => o.id === current.id)
-      : false
+    // Adopt the FRESH row for the current org (role/permissions may have
+    // changed since the last fetch — e.g. a role edit propagated live).
+    const fresh = current
+      ? (organizations.find((o) => o.id === current.id) ?? null)
+      : null
     set({
       organizations,
-      currentOrganization: stillMember ? current : null,
+      currentOrganization: fresh,
     })
   },
 

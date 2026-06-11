@@ -6,6 +6,7 @@ defmodule Realtime.MixProject do
       app: :realtime,
       version: "0.1.0",
       elixir: "~> 1.18",
+      listeners: [Phoenix.CodeReloader],
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]

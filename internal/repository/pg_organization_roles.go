@@ -103,8 +103,20 @@ func (r *organizationRepository) UpdateRole(ctx context.Context, role *models.Or
 		return err
 	}
 
+	// role <> 'owner' is belt-and-suspenders: owner rows must never carry a
+	// role_id, but a stray one must still not let an edit demote the owner.
 	if _, err := tx.Exec(ctx, `
 		UPDATE organization_members
+		SET role = $2, permissions = $3
+		WHERE role_id = $1 AND role <> 'owner'
+	`, role.ID, role.Name, role.Permissions); err != nil {
+		return err
+	}
+
+	// Pending invitations snapshot the role too; keep them in sync so an
+	// invite accepted after an edit lands with the role's CURRENT shape.
+	if _, err := tx.Exec(ctx, `
+		UPDATE organization_invitations
 		SET role = $2, permissions = $3
 		WHERE role_id = $1
 	`, role.ID, role.Name, role.Permissions); err != nil {
@@ -115,19 +127,30 @@ func (r *organizationRepository) UpdateRole(ctx context.Context, role *models.Or
 }
 
 // DeleteRole removes a custom role. Returns inUse=true (and deletes nothing)
-// while members are still assigned, so an assignment is always deliberate.
+// while members or pending invitations still reference it. The guard lives
+// inside the DELETE itself, so a concurrent assignment can never race past
+// the check and strand a member on a phantom permission snapshot.
 func (r *organizationRepository) DeleteRole(ctx context.Context, orgID, roleID uuid.UUID) (bool, error) {
-	var inUse bool
-	if err := r.db.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM organization_members WHERE role_id = $1)`, roleID,
-	).Scan(&inUse); err != nil {
+	tag, err := r.db.Exec(ctx, `
+		DELETE FROM organization_roles rl
+		WHERE rl.organization_id = $1 AND rl.id = $2
+		  AND NOT EXISTS (SELECT 1 FROM organization_members om WHERE om.role_id = rl.id)
+		  AND NOT EXISTS (SELECT 1 FROM organization_invitations i WHERE i.role_id = rl.id)
+	`, orgID, roleID)
+	if err != nil {
 		return false, err
 	}
-	if inUse {
-		return true, nil
+	if tag.RowsAffected() > 0 {
+		return false, nil
 	}
 
-	_, err := r.db.Exec(ctx,
-		`DELETE FROM organization_roles WHERE organization_id = $1 AND id = $2`, orgID, roleID)
-	return false, err
+	// Nothing deleted: in use, or already gone (idempotent success).
+	var exists bool
+	if err := r.db.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM organization_roles WHERE organization_id = $1 AND id = $2)`,
+		orgID, roleID,
+	).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }

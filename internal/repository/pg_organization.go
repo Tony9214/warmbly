@@ -235,7 +235,7 @@ func (r *organizationRepository) GetUserDefaultOrganization(ctx context.Context,
 func (r *organizationRepository) GetMembers(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationMember, error) {
 	query := `
 		SELECT
-			om.id, om.organization_id, om.user_id, om.role, om.permissions,
+			om.id, om.organization_id, om.user_id, om.role, om.role_id, om.permissions,
 			om.invited_by, om.invited_at, om.accepted_at,
 			u.id, u.first_name, u.last_name, u.email, u.created_at, u.updated_at
 		FROM organization_members om
@@ -414,7 +414,7 @@ func (r *organizationRepository) GetInvitationByEmail(ctx context.Context, orgID
 // GetPendingInvitations retrieves all pending invitations for an organization
 func (r *organizationRepository) GetPendingInvitations(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationInvitation, error) {
 	query := `
-		SELECT id, organization_id, email, role, permissions, invited_by, token, expires_at, created_at
+		SELECT id, organization_id, email, role, role_id, permissions, invited_by, token, expires_at, created_at
 		FROM organization_invitations
 		WHERE organization_id = $1 AND expires_at > NOW()
 		ORDER BY created_at DESC
@@ -428,7 +428,7 @@ func (r *organizationRepository) GetPendingInvitations(ctx context.Context, orgI
 	var invitations []models.OrganizationInvitation
 	for rows.Next() {
 		var inv models.OrganizationInvitation
-		err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.Permissions, &inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt)
+		err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.RoleID, &inv.Permissions, &inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -507,15 +507,24 @@ func (r *organizationRepository) TransferOwnership(ctx context.Context, orgID, n
 		return err
 	}
 
-	// Update old owner to admin
-	_, err = tx.Exec(ctx, `UPDATE organization_members SET role = 'admin', permissions = $3 WHERE organization_id = $1 AND user_id = $2`,
+	// Re-home the old owner onto the org's Admin role row when one exists
+	// (roles are data); otherwise fall back to a detached Admin-mask member.
+	_, err = tx.Exec(ctx, `
+		UPDATE organization_members om SET
+			role = COALESCE(r.name, 'Admin'),
+			role_id = r.id,
+			permissions = COALESCE(r.permissions, $3)
+		FROM (SELECT 1) one
+		LEFT JOIN organization_roles r ON r.organization_id = $1 AND r.name = 'Admin'
+		WHERE om.organization_id = $1 AND om.user_id = $2`,
 		orgID, currentOwnerID, models.RolePermissions[models.RoleAdmin])
 	if err != nil {
 		return err
 	}
 
-	// Update new owner to owner
-	_, err = tx.Exec(ctx, `UPDATE organization_members SET role = 'owner', permissions = $3 WHERE organization_id = $1 AND user_id = $2`,
+	// Owner is a membership status, not a role: role_id must be NULL so role
+	// edits can never write through onto the owner row.
+	_, err = tx.Exec(ctx, `UPDATE organization_members SET role = 'owner', role_id = NULL, permissions = $3 WHERE organization_id = $1 AND user_id = $2`,
 		orgID, newOwnerUserID, models.RolePermissions[models.RoleOwner])
 	if err != nil {
 		return err

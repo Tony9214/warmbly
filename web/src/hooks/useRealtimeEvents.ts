@@ -231,7 +231,7 @@ export function useRealtimeEvents() {
           organization_member: [['organizations'], ['organizations', 'members']],
           invitation: [['organizations', 'invitations']],
           team: [['teams']],
-          role: [['organizations', 'roles'], ['organizations', 'members']],
+          role: [['organizations']],
           automation: [['automations']],
           integration: [['integrations', 'connections']],
           lead_sync_source: [['lead-sync', 'sources']],

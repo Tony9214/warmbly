@@ -8,8 +8,8 @@ A Warmbly workspace can be shared with your whole team. You invite people by ema
 
 Everything here lives under **Settings**: the roster and invitations are on the **Members** page, and the roles and permission matrix are on the **Roles & access** page.
 
-<Callout type="info" title="Owner-only controls">
-Inviting members, changing someone's role, and removing members are reserved for the workspace **owner**. If you are not the owner, you can still see the Members page, but the invite box, the role pickers, and the remove buttons will not appear. The Roles & access page is owner-only and shows a "permission denied" notice to everyone else.
+<Callout type="info" title="Who can manage the team">
+Inviting members, changing roles, removing members, and managing roles all require the **Manage team** permission (the owner and the seeded Admin role have it; any custom role can carry it). Members without it see the roster read-only, and the Roles & access page shows a permission notice instead.
 </Callout>
 
 ## Inviting members
@@ -150,7 +150,7 @@ A few rules keep custom roles safe:
 - **You can only grant permissions you hold yourself.** A manager with team access cannot mint a role stronger than their own and assign it to someone.
 - **Ownership transfer can never be part of a custom role.** It stays exclusive to the owner.
 - **A role in use cannot be deleted.** Reassign its members first, so nobody silently loses access.
-- Each workspace can have up to 25 custom roles.
+- Each workspace can have up to 25 roles in total (including the seeded ones).
 
 Custom roles apply everywhere permissions do: API access checks, dashboard visibility, and which realtime events a member's live dashboard receives.
 

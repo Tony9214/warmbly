@@ -49,7 +49,7 @@ type OrganizationService interface {
 	CreateRole(ctx context.Context, orgID, actorID uuid.UUID, req *models.CreateOrganizationRoleRequest) (*models.OrganizationRole, *errx.Error)
 	UpdateRole(ctx context.Context, orgID, actorID, roleID uuid.UUID, req *models.UpdateOrganizationRoleRequest) (*models.OrganizationRole, *errx.Error)
 	DeleteRole(ctx context.Context, orgID, roleID uuid.UUID) *errx.Error
-	UpdateMemberRole(ctx context.Context, orgID, memberUserID uuid.UUID, req *models.UpdateMemberRequest) (*models.OrganizationMember, *errx.Error)
+	UpdateMemberRole(ctx context.Context, orgID, actorID, memberUserID uuid.UUID, req *models.UpdateMemberRequest) (*models.OrganizationMember, *errx.Error)
 	RemoveMember(ctx context.Context, orgID, memberUserID uuid.UUID) *errx.Error
 
 	// Invitations
@@ -367,6 +367,12 @@ func (s *organizationService) InviteMember(ctx context.Context, orgID uuid.UUID,
 	if workspaceRole == nil {
 		return nil, errx.New(errx.BadRequest, "role not found")
 	}
+	// Assignment is also an escalation surface: the inviter must hold every
+	// permission the role grants (the owner's 0xFFFF passes trivially).
+	if xerr := s.validateActorHoldsPermissions(ctx, orgID, inviterID, workspaceRole.Permissions); xerr != nil {
+		return nil, xerr
+	}
+
 	role := workspaceRole.Name
 	roleID := &workspaceRole.ID
 	permissions := workspaceRole.Permissions
@@ -429,15 +435,31 @@ func (s *organizationService) AcceptInvitation(ctx context.Context, token string
 		return existing, nil
 	}
 
+	// Re-resolve the role at accept time: the invitation's snapshot may be
+	// stale (role edited) or dangling (role deleted) since it was sent.
+	role := (*models.OrganizationRole)(nil)
+	if inv.RoleID != nil {
+		var rerr error
+		role, rerr = s.orgRepo.GetRoleByID(ctx, inv.OrganizationID, *inv.RoleID)
+		if rerr != nil {
+			sentry.CaptureException(rerr)
+			return nil, errx.New(errx.Internal, "failed to load role")
+		}
+	}
+	if role == nil {
+		_ = s.orgRepo.DeleteInvitation(ctx, inv.ID)
+		return nil, errx.New(errx.BadRequest, "the role for this invitation no longer exists — ask for a new invite")
+	}
+
 	// Add member
 	now := time.Now()
 	member := &models.OrganizationMember{
 		ID:             uuid.New(),
 		OrganizationID: inv.OrganizationID,
 		UserID:         userID,
-		Role:           inv.Role,
-		RoleID:         inv.RoleID,
-		Permissions:    inv.Permissions,
+		Role:           role.Name,
+		RoleID:         &role.ID,
+		Permissions:    role.Permissions,
 		InvitedBy:      &inv.InvitedBy,
 		InvitedAt:      inv.CreatedAt,
 		AcceptedAt:     &now,
@@ -455,7 +477,7 @@ func (s *organizationService) AcceptInvitation(ctx context.Context, token string
 }
 
 // UpdateMemberRole updates a member's role and permissions
-func (s *organizationService) UpdateMemberRole(ctx context.Context, orgID, memberUserID uuid.UUID, req *models.UpdateMemberRequest) (*models.OrganizationMember, *errx.Error) {
+func (s *organizationService) UpdateMemberRole(ctx context.Context, orgID, actorID, memberUserID uuid.UUID, req *models.UpdateMemberRequest) (*models.OrganizationMember, *errx.Error) {
 	member, err := s.orgRepo.GetMember(ctx, orgID, memberUserID)
 	if err != nil {
 		sentry.CaptureException(err)
@@ -483,6 +505,15 @@ func (s *organizationService) UpdateMemberRole(ctx context.Context, orgID, membe
 	if workspaceRole == nil {
 		return nil, errx.New(errx.BadRequest, "role not found")
 	}
+	// Assignment is an escalation surface: the actor must hold every
+	// permission the role grants, and may not re-role themselves.
+	if actorID == memberUserID {
+		return nil, errx.New(errx.Forbidden, "you cannot change your own role")
+	}
+	if xerr := s.validateActorHoldsPermissions(ctx, orgID, actorID, workspaceRole.Permissions); xerr != nil {
+		return nil, xerr
+	}
+
 	member.Role = workspaceRole.Name
 	member.RoleID = &workspaceRole.ID
 	member.Permissions = workspaceRole.Permissions
@@ -1158,6 +1189,12 @@ func (s *organizationService) validateRolePermissions(ctx context.Context, orgID
 	if perms&models.PermTransferOwnership != 0 {
 		return errx.New(errx.BadRequest, "custom roles cannot include ownership transfer")
 	}
+	return s.validateActorHoldsPermissions(ctx, orgID, actorID, perms)
+}
+
+// validateActorHoldsPermissions rejects granting (via role create/edit OR
+// assignment) any permission the actor does not hold themselves.
+func (s *organizationService) validateActorHoldsPermissions(ctx context.Context, orgID, actorID uuid.UUID, perms models.OrganizationPermission) *errx.Error {
 	actor, err := s.orgRepo.GetMember(ctx, orgID, actorID)
 	if err != nil {
 		sentry.CaptureException(err)
@@ -1167,7 +1204,7 @@ func (s *organizationService) validateRolePermissions(ctx context.Context, orgID
 		return errx.New(errx.Forbidden, "not a member")
 	}
 	if perms&^actor.Permissions != 0 {
-		return errx.New(errx.Forbidden, "a role cannot grant permissions you do not hold")
+		return errx.New(errx.Forbidden, "you cannot grant permissions you do not hold")
 	}
 	return nil
 }

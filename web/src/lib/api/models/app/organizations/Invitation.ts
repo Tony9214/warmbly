@@ -3,7 +3,9 @@ export default interface Invitation {
     organization_id: string
     organization_name: string
     email: string
-    role: 'admin' | 'member'
+    role: string;
+    // Workspace role row this invitation lands in.
+    role_id?: string
     invited_by: string
     created_at: Date
     expires_at: Date

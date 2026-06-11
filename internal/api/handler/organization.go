@@ -254,7 +254,13 @@ func (h *Handler) UpdateMemberRole(c *gin.Context) {
 		return
 	}
 
-	member, xerr := h.OrganizationService.UpdateMemberRole(c.Request.Context(), *orgID, memberUserID, &req)
+	actorID, uerr := middleware.GetUserUUID(c)
+	if uerr != nil {
+		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+		return
+	}
+
+	member, xerr := h.OrganizationService.UpdateMemberRole(c.Request.Context(), *orgID, actorID, memberUserID, &req)
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return

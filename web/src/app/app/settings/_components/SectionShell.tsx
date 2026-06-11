@@ -298,19 +298,22 @@ export function Card({
     );
 }
 
-export function RolePill({ role }: { role: string }) {
+export function RolePill({ role, color }: { role: string; color?: string }) {
+    // Roles are data: tint from the role's stored color when known;
+    // owner keeps its fixed sky accent, anything else falls back to slate.
     const cls =
         role === "owner"
             ? "bg-sky-50 text-sky-700 border-sky-100"
-            : role === "admin"
-                ? "bg-violet-50 text-violet-700 border-violet-100"
-                : role === "manager"
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                    : role === "viewer"
-                        ? "bg-amber-50 text-amber-700 border-amber-100"
-                        : "bg-slate-50 text-slate-600 border-slate-200";
+            : color
+                ? ""
+                : "bg-slate-50 text-slate-600 border-slate-200";
+    const style =
+        role !== "owner" && color
+            ? { backgroundColor: `${color}14`, borderColor: `${color}55`, color }
+            : undefined;
     return (
         <span
+            style={style}
             className={`inline-flex items-center text-[10px] uppercase tracking-[0.08em] font-semibold rounded-sm px-1.5 py-0.5 border ${cls}`}
         >
             {role}
