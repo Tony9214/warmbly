@@ -29,6 +29,7 @@ import (
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
+	"github.com/warmbly/warmbly/internal/notify"
 	"github.com/warmbly/warmbly/internal/observability"
 	"github.com/warmbly/warmbly/internal/repository"
 )
@@ -228,6 +229,19 @@ func main() {
 	// notifier must be wired here. Missing this = notifications silently never
 	// created.
 	notificationService := notification.NewService(repository.NewNotificationRepository(primaryDB.Pool), streamingPublisher)
+	// Email + Slack delivery for notifications. Email is best-effort: the
+	// SES/SMTP service only constructs when email config is present (prod, or
+	// a dev env that sets it), so a bare dev consumer simply skips the email
+	// channel. Slack reuses the integration service (token decryption).
+	var notifEmail notification.EmailSender
+	if emailCfg, ecErr := cfg.LoadEmailConfig(ctx); ecErr == nil {
+		if smtpCfg := cfg.LoadSMTPConfig(ctx); smtpCfg != nil {
+			notifEmail = notify.NewSMTPEmailNotificationService(emailCfg.EmailName, emailCfg.EmailAddress, smtpCfg.Host, smtpCfg.Port)
+		} else if ses, sErr := notify.NewEmailNotficiationService(ctx, emailCfg.EmailName, emailCfg.EmailAddress); sErr == nil {
+			notifEmail = ses
+		}
+	}
+	notificationService.WireDelivery(notifEmail, integrationServiceC, repository.NewUserRepostory(primaryDB, kmsClient))
 	advancedService.WireNotifier(notificationService)
 	// Reply pulses fire in THIS process too (inbox ingest classifies replies).
 	advancedService.WireRealtime(streamingPublisher)

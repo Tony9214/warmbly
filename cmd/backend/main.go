@@ -870,6 +870,7 @@ func main() {
 		// onto the backend's advanced service (deliverability webhooks can ingest
 		// here too).
 		notificationService = notification.NewService(repository.NewNotificationRepository(primaryDB.Pool), streamingPublisher)
+		notificationService.WireDelivery(emailNotificationService, integrationServiceForHandler, userRepostory)
 		advancedService.WireNotifier(notificationService)
 		advancedService.WireRealtime(streamingPublisher)
 		emailSender := tasks.NewEmailSender(emailRepostory, eventsPublisher)

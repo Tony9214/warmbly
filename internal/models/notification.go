@@ -20,10 +20,11 @@ const (
 )
 
 // ChannelPrefs is the per-category delivery toggles. Only InApp is delivered
-// today; Email/Slack are modeled for forward-compat and rendered "coming soon".
+// today across in-app, email, and a connected Slack workspace.
 type ChannelPrefs struct {
 	InApp bool `json:"in_app"`
-	Email bool `json:"email"` // reserved; not enforced yet
+	Email bool `json:"email"`
+	Slack bool `json:"slack"`
 }
 
 // CategoryPref is the enable flag + channel toggles for one category.

@@ -2,7 +2,8 @@
 
 export interface ChannelPrefs {
     in_app: boolean;
-    email: boolean; // reserved; not delivered yet
+    email: boolean;
+    slack: boolean;
 }
 
 export interface CategoryPref {

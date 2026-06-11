@@ -35,6 +35,26 @@ export default function NotificationsSettingsPage() {
     const setEnabled = (key: NotificationCategoryKey, on: boolean) =>
         setDraft((d) => (d ? { ...d, [key]: { ...d[key], enabled: on } } : d));
 
+    const CATEGORY_KEYS: NotificationCategoryKey[] = [
+        "inbound_reply",
+        "inbound_out_of_office",
+        "health_bounce",
+        "health_complaint",
+        "health_worker_downtime",
+    ];
+    // Channels present globally: "on" when every category carries the channel.
+    const channelOn = (ch: "email" | "slack") =>
+        !!draft && CATEGORY_KEYS.every((k) => draft[k].channels[ch]);
+    const setChannel = (ch: "email" | "slack", on: boolean) =>
+        setDraft((d) => {
+            if (!d) return d;
+            const next = { ...d };
+            for (const k of CATEGORY_KEYS) {
+                next[k] = { ...d[k], channels: { ...d[k].channels, [ch]: on } };
+            }
+            return next;
+        });
+
     const save = async () => {
         if (!draft || !dirty || update.isPending) return;
         try {
@@ -55,7 +75,7 @@ export default function NotificationsSettingsPage() {
     return (
         <SectionShell
             title="Notifications"
-            description="Which events show up in your in-app feed (the bell). Defaults reflect the recommendation."
+            description="Which events notify you, and where they are delivered. Defaults reflect the recommendation."
             actions={
                 dirty ? (
                     <>
@@ -82,15 +102,15 @@ export default function NotificationsSettingsPage() {
                     <Section eyebrow="Health" description="Deliverability + infrastructure alerts. Recommended on.">
                         {rows(HEALTH)}
                     </Section>
-                    <Section eyebrow="Channels" description="Where notifications are delivered.">
+                    <Section eyebrow="Channels" description="Where enabled notifications are delivered. Applies across every category above.">
                         <Row label="In-app" description="The bell in the dashboard chrome (controlled per category above).">
                             <span className="text-[11px] font-medium text-emerald-600">On</span>
                         </Row>
                         <Row label="Email" description="Delivery to your account email.">
-                            <span className="text-[11px] text-slate-400">Coming soon</span>
+                            <Toggle on={channelOn("email")} onChange={(v) => setChannel("email", v)} />
                         </Row>
-                        <Row label="Slack" description="Connect via the Integrations tab.">
-                            <span className="text-[11px] text-slate-400">Coming soon</span>
+                        <Row label="Slack" description="Posts to your workspace's connected Slack. Connect it in the Integrations tab first.">
+                            <Toggle on={channelOn("slack")} onChange={(v) => setChannel("slack", v)} />
                         </Row>
                     </Section>
                 </>

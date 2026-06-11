@@ -7,6 +7,9 @@ package notification
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -15,6 +18,24 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
 )
+
+// EmailSender delivers a notification to a user's account email. Satisfied by
+// notify.EmailNotificationService.
+type EmailSender interface {
+	Send(ctx context.Context, to, cc, bcc []string, subject, message string) error
+}
+
+// SlackNotifier posts to the org's connected Slack. Satisfied by the
+// integration service (NotifySlack).
+type SlackNotifier interface {
+	NotifySlack(ctx context.Context, orgID uuid.UUID, title, body string) error
+}
+
+// UserLookup resolves a user's email + name for email delivery. Satisfied by
+// the user repository.
+type UserLookup interface {
+	GetUser(ctx context.Context, id uuid.UUID) (*models.User, error)
+}
 
 type Service interface {
 	GetPreferences(ctx context.Context, userID uuid.UUID) (*models.NotificationPreferences, *errx.Error)
@@ -26,11 +47,25 @@ type Service interface {
 
 	// Notify is the gated ingress — best-effort, never errors out the caller.
 	Notify(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, category models.NotificationCategory, title, body, link string, meta map[string]any)
+
+	// WireDelivery attaches the email + Slack + user-lookup dependencies for
+	// the email/Slack channels (wired post-construction in both mains). Any
+	// may be nil — the matching channel is then skipped.
+	WireDelivery(email EmailSender, slack SlackNotifier, users UserLookup)
 }
 
 type service struct {
 	repo      repository.NotificationRepository
 	publisher *pubsub.StreamingPublisher
+	email     EmailSender
+	slack     SlackNotifier
+	users     UserLookup
+}
+
+func (s *service) WireDelivery(email EmailSender, slack SlackNotifier, users UserLookup) {
+	s.email = email
+	s.slack = slack
+	s.users = users
 }
 
 func NewService(repo repository.NotificationRepository, publisher *pubsub.StreamingPublisher) Service {
@@ -93,22 +128,65 @@ func (s *service) Notify(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID
 		return
 	}
 	cat := prefs.CategoryPref(category)
-	if !cat.Enabled || !cat.Channels.InApp {
-		return // the gate
+	if !cat.Enabled {
+		return // category off — no channel fires
 	}
-	created, cerr := s.repo.Create(ctx, &models.Notification{
-		UserID:         userID,
-		OrganizationID: orgID,
-		Category:       category,
-		Title:          title,
-		Body:           body,
-		Link:           link,
-		Metadata:       meta,
-	})
-	if cerr != nil || created == nil {
+
+	// In-app: persist the feed row + push the realtime event.
+	if cat.Channels.InApp {
+		created, cerr := s.repo.Create(ctx, &models.Notification{
+			UserID:         userID,
+			OrganizationID: orgID,
+			Category:       category,
+			Title:          title,
+			Body:           body,
+			Link:           link,
+			Metadata:       meta,
+		})
+		if cerr == nil && created != nil && s.publisher != nil {
+			s.publisher.PublishNotificationCreated(ctx, userID.String(), created.ID.String(), string(category), title, link)
+		}
+	}
+
+	// Email: deliver to the user's account email (detached, best-effort).
+	if cat.Channels.Email && s.email != nil && s.users != nil {
+		go s.deliverEmail(userID, category, title, body, link)
+	}
+
+	// Slack: post to the org's connected workspace (detached, best-effort).
+	if cat.Channels.Slack && s.slack != nil && orgID != nil {
+		org := *orgID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			_ = s.slack.NotifySlack(ctx, org, title, body)
+		}()
+	}
+}
+
+// deliverEmail renders a minimal HTML notification and emails it to the user.
+func (s *service) deliverEmail(userID uuid.UUID, category models.NotificationCategory, title, body, link string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	user, err := s.users.GetUser(ctx, userID)
+	if err != nil || user == nil || user.Email == "" {
 		return
 	}
-	if s.publisher != nil {
-		s.publisher.PublishNotificationCreated(ctx, userID.String(), created.ID.String(), string(category), title, link)
+	href := link
+	if href != "" && len(href) > 0 && href[0] == '/' {
+		href = "https://app.warmbly.com" + href
 	}
+	cta := ""
+	if href != "" {
+		cta = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 20px;background:#0284c7;color:white;text-decoration:none;border-radius:6px;">Open in Warmbly</a></p>`, href)
+	}
+	html := fmt.Sprintf(`<h2 style="margin:0 0 8px;">%s</h2><p style="color:#475569;">%s</p>%s<p style="color:#94a3b8;font-size:12px;margin-top:24px;">You're receiving this because email notifications are on for %s. Manage them in Settings &rarr; Notifications.</p>`,
+		htmlEscape(title), htmlEscape(body), cta, htmlEscape(string(category)))
+	_ = s.email.Send(ctx, []string{user.Email}, nil, nil, title, html)
+}
+
+func htmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+	return r.Replace(s)
 }
