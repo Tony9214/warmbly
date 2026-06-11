@@ -117,7 +117,7 @@ export default function NotificationsSettingsPage() {
                         <Row label="Email" description="Delivery to your account email.">
                             <Toggle on={channelOn("email")} onChange={(v) => setChannel("email", v)} />
                         </Row>
-                        <Row label="Slack" description="Posts to your workspace's connected Slack. Connect it in the Integrations tab first.">
+                        <Row label="Slack" description="Posts to your connected Slack, on the channel set up for Slack in the Integrations tab. Connect Slack and configure a channel there first.">
                             <Toggle on={channelOn("slack")} onChange={(v) => setChannel("slack", v)} />
                         </Row>
                     </Section>

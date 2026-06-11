@@ -1110,6 +1110,31 @@ func buildDisplayFields(provider models.IntegrationProvider, config map[string]a
 	return df
 }
 
+// slackChannelFor resolves the channel to post org notifications to. The
+// OAuth connect flow doesn't capture a default channel, so we look (in order)
+// at the connection's own config, then reuse whatever channel the org already
+// configured for a Slack automation/event subscription. Empty when none.
+func (s *service) slackChannelFor(ctx context.Context, orgID uuid.UUID, c models.IntegrationConnection) string {
+	if ch := configString(c.DisplayFields, "channel"); ch != "" {
+		return ch
+	}
+	if ch := configString(c.ConfigCapabilities, "channel"); ch != "" {
+		return ch
+	}
+	subs, err := s.repo.ListEventSubscriptions(ctx, orgID, c.ID)
+	if err != nil {
+		return ""
+	}
+	for _, sub := range subs {
+		if sub.Action == models.IntegrationActionSlackNotify {
+			if ch := configString(sub.Config, "channel"); ch != "" {
+				return ch
+			}
+		}
+	}
+	return ""
+}
+
 // NotifySlack posts a one-off message to the org's connected Slack workspace,
 // on the default channel chosen at connect time. Used by the notification
 // system's Slack delivery channel (distinct from event-subscription actions).
@@ -1123,7 +1148,7 @@ func (s *service) NotifySlack(ctx context.Context, orgID uuid.UUID, title, body 
 		if c.Provider != models.IntegrationSlack || c.Status != models.IntegrationStatusConnected {
 			continue
 		}
-		channel := configString(c.DisplayFields, "channel")
+		channel := s.slackChannelFor(ctx, orgID, c)
 		if channel == "" {
 			continue
 		}
