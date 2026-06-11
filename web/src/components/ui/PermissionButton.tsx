@@ -31,8 +31,10 @@ export default function PermissionButton({
     return (
         <button
             {...rest}
-            // Not `disabled`: a disabled button can't receive clicks, so we keep
-            // it clickable and let the guard pop the explanation instead.
+            // When allowed, honor the caller's disabled (e.g. pending). When
+            // locked, stay clickable so the guard can pop the explanation — a
+            // truly-disabled button would swallow the click silently.
+            disabled={locked ? undefined : disabled}
             aria-disabled={locked || disabled || undefined}
             title={locked ? "You don't have permission for this" : title}
             onClick={guard(onClick)}

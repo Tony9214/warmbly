@@ -1,3 +1,4 @@
+import PermissionButton from "@/components/ui/PermissionButton";
 import React from "react";
 import { ArrowRightIcon, CalendarClockIcon, CalendarRangeIcon, GlobeIcon } from "lucide-react";
 import { differenceInCalendarDays, format } from "date-fns";
@@ -276,12 +277,13 @@ export default function CampaignSchedule() {
                 >
                     Reset
                 </button>
-                <button
+                <PermissionButton
+                    permission="MANAGE_CAMPAIGNS"
                     className="h-7 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-md text-[12px] font-medium transition-colors min-w-[110px] inline-flex items-center justify-center"
                     onClick={submit}
                 >
                     {loading ? <Loading className="h-4" /> : "Save changes"}
-                </button>
+                </PermissionButton>
             </div>
         </div>
     );

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import PermissionButton from "@/components/ui/PermissionButton";
 import { Link, Outlet, useLocation, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -119,7 +120,8 @@ export default function CampaignLayout() {
 
                     {canToggle && (
                         <div className="ml-auto shrink-0">
-                            <button
+                            <PermissionButton
+                                permission="SEND_CAMPAIGNS"
                                 type="button"
                                 onClick={onToggle}
                                 disabled={pending}
@@ -133,7 +135,7 @@ export default function CampaignLayout() {
                                     <PlayIcon className="w-3.5 h-3.5" />
                                 )}
                                 {isActive ? "Pause" : "Start"}
-                            </button>
+                            </PermissionButton>
                         </div>
                     )}
                 </div>

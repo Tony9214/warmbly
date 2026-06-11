@@ -1,3 +1,4 @@
+import PermissionButton from "@/components/ui/PermissionButton";
 import React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loading } from "@/components/loader";
@@ -416,13 +417,14 @@ export default function CampaignPreferences() {
                             >
                                 Reset
                             </button>
-                            <button
+                            <PermissionButton
+                                permission="MANAGE_CAMPAIGNS"
                                 className="h-7 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-md text-[12px] font-medium transition-colors min-w-[110px] inline-flex items-center justify-center disabled:opacity-60"
                                 onClick={submit}
                                 disabled={blocked}
                             >
                                 {loading ? <Loading className="h-4" /> : "Save changes"}
-                            </button>
+                            </PermissionButton>
                         </motion.div>
                     )}
                 </AnimatePresence>
