@@ -116,6 +116,16 @@ func (s *authService) ResetPasswordConfirm(ctx context.Context, data *ResetPassw
 		return err
 	}
 
+	// A forgotten-password reset means the account may be compromised: evict
+	// every existing session (no current device to keep — uuid.Nil matches
+	// none, so all are revoked) so a reset always fully cuts off prior access.
+	if s.tokenService != nil {
+		if err := s.tokenService.RevokeOtherSessions(ctx, sess.UserID, uuid.Nil); err != nil {
+			sentry.CaptureException(err)
+			// Non-fatal: the password is already reset.
+		}
+	}
+
 	return nil
 }
 
