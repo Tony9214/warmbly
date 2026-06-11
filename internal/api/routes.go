@@ -191,7 +191,7 @@ func Run(
 		protectedAuth.PATCH("/me/onboarding", h.CompleteOnboarding)
 		protectedAuth.POST("/me/avatar", h.UploadUserAvatar)
 		protectedAuth.DELETE("/me/avatar", h.DeleteUserAvatar)
-		protectedAuth.POST("/me/password", h.ChangePassword)
+		protectedAuth.POST("/me/password", m.RateLimitMiddleware(models.RateLimitWrite), h.ChangePassword)
 
 		// Notification preferences + in-app feed (user-scoped, no org gate).
 		protectedAuth.GET("/me/notification-preferences", h.GetNotificationPreferences)
