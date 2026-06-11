@@ -56,13 +56,14 @@ export default function RoleSelect({
                     <ChevronDownIcon className="w-2.5 h-2.5 opacity-60" />
                 </button>
             </PopoverMenuTrigger>
-            <PopoverMenuContent minWidth={288} className="max-w-[calc(100vw-2rem)]">
+            <PopoverMenuContent minWidth={200} className="max-w-[calc(100vw-2rem)]">
                 {roles.map((r) => {
                     const selected = r.id === value;
                     return (
                         <button
                             key={r.id}
                             type="button"
+                            title={r.description || undefined}
                             onClick={() => {
                                 setOpen(false);
                                 onChange(r);
@@ -76,9 +77,7 @@ export default function RoleSelect({
                                 <span className="text-[12px] font-medium text-slate-900">{r.name}</span>
                                 {selected && <CheckIcon className="ml-auto w-3 h-3 text-slate-500" />}
                             </div>
-                            {r.description && (
-                                <p className="text-[11px] text-slate-500 leading-tight mt-0.5">{r.description}</p>
-                            )}
+
                         </button>
                     );
                 })}

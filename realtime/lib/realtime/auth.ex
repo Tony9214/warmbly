@@ -134,7 +134,16 @@ defmodule Realtime.Auth do
     WHERE om.organization_id = $1 AND om.user_id = $2
     """
 
-    case Realtime.Repo.query(query, [org_id, user_id]) do
+    with {:ok, org_bin} <- dump_uuid(org_id),
+         {:ok, user_bin} <- dump_uuid(user_id) do
+      run_org_membership(query, org_bin, user_bin, org_id, user_id)
+    else
+      _ -> {:error, :not_a_member}
+    end
+  end
+
+  defp run_org_membership(query, org_bin, user_bin, org_id, user_id) do
+    case Realtime.Repo.query(query, [org_bin, user_bin]) do
       {:ok, %{rows: [[id, role, permissions] | _]}} ->
         {:ok,
          %{
@@ -185,7 +194,7 @@ defmodule Realtime.Auth do
     WHERE c.id = $1
     """
 
-    case Realtime.Repo.query(org_query, [campaign_id]) do
+    case dump_and_query(org_query, [campaign_id]) do
       {:ok, %{rows: [[org_id] | _]}} when not is_nil(org_id) ->
         # Check if user is a member of the organization
         check_org_membership(user_id, org_id)
@@ -212,7 +221,7 @@ defmodule Realtime.Auth do
     WHERE c.id = $1 AND c.user_id = $2
     """
 
-    case Realtime.Repo.query(query, [campaign_id, user_id]) do
+    case dump_and_query(query, [campaign_id, user_id]) do
       {:ok, %{rows: [_ | _]}} ->
         # Full permissions for direct owner
         {:ok, %{permissions: 65535}}
@@ -235,7 +244,7 @@ defmodule Realtime.Auth do
     WHERE ea.id = $1
     """
 
-    case Realtime.Repo.query(org_query, [email_account_id]) do
+    case dump_and_query(org_query, [email_account_id]) do
       {:ok, %{rows: [[org_id] | _]}} when not is_nil(org_id) ->
         check_org_membership(user_id, org_id)
 
@@ -261,7 +270,7 @@ defmodule Realtime.Auth do
     WHERE ea.id = $1 AND ea.user_id = $2
     """
 
-    case Realtime.Repo.query(query, [email_account_id, user_id]) do
+    case dump_and_query(query, [email_account_id, user_id]) do
       {:ok, %{rows: [_ | _]}} ->
         {:ok, %{permissions: 65535}}
 
@@ -270,6 +279,29 @@ defmodule Realtime.Auth do
 
       {:error, _reason} ->
         {:error, :database_error}
+    end
+  end
+
+  # Postgrex encodes uuid params as 16-byte binaries; accept both the raw
+  # binary (from a prior query's row) and the canonical string form.
+  defp dump_uuid(<<_::128>> = bin), do: {:ok, bin}
+  defp dump_uuid(value) when is_binary(value), do: Ecto.UUID.dump(value)
+  defp dump_uuid(_), do: :error
+
+  # Run a query whose params are all uuids, dumping each first. An
+  # undumpable value behaves like an empty result, not a crash.
+  defp dump_and_query(query, params) do
+    dumped =
+      Enum.reduce_while(params, {:ok, []}, fn value, {:ok, acc} ->
+        case dump_uuid(value) do
+          {:ok, bin} -> {:cont, {:ok, [bin | acc]}}
+          _ -> {:halt, :error}
+        end
+      end)
+
+    case dumped do
+      {:ok, bins} -> Realtime.Repo.query(query, Enum.reverse(bins))
+      :error -> {:ok, %{rows: []}}
     end
   end
 
