@@ -329,6 +329,9 @@ func main() {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
+		// Click-link signing: the tracking service refuses unsigned redirects,
+		// so the signer must be wired before any campaign send builds links.
+		tasks.SetTrackingLinkSecret(emailCfg.TrackingLinkSecret)
 
 		smtpCfg := cfg.LoadSMTPConfig(ctx)
 		if smtpCfg != nil {

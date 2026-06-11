@@ -38,10 +38,9 @@ pub struct AppState {
     pub dedupe_cache: Arc<DedupeCache>,
     /// Per-source request budget (anti-flood)
     pub rate_limiter: Arc<RateLimiter>,
-    /// Accepted signing secrets for click redirects, newest first (the
-    /// retired key rides along during a rotation so in-flight emails keep
-    /// working). None = legacy unsigned links.
-    pub link_secrets: Option<Arc<Vec<String>>>,
+    /// Signing secret for click redirects. Always enforced; rotating it
+    /// immediately invalidates links signed with the old secret.
+    pub link_secret: Arc<String>,
 }
 
 impl AppState {
@@ -56,21 +55,11 @@ impl AppState {
             .time_to_idle(Duration::from_secs(1800)) // 30 min idle
             .build();
 
-        // Enforcement is keyed on the CURRENT secret: a leftover previous
-        // secret with no current one means signing was turned off.
-        let link_secrets = config.link_secret.clone().map(|current| {
-            let mut secrets = vec![current];
-            if let Some(previous) = config.link_secret_previous.clone() {
-                secrets.push(previous);
-            }
-            Arc::new(secrets)
-        });
-
         Self {
             kafka,
             dedupe_cache: Arc::new(dedupe_cache),
             rate_limiter: Arc::new(RateLimiter::new(config.rate_limit_per_min)),
-            link_secrets,
+            link_secret: Arc::new(config.link_secret.clone()),
         }
     }
 
@@ -196,19 +185,17 @@ pub async fn track_click(
         return (StatusCode::BAD_REQUEST, "Invalid URL").into_response();
     }
 
-    // Signed-link enforcement: when the shared secret is configured, only
-    // redirects minted by our own send pipeline are honored. This is what
-    // stops the tracking domain from being abused as an open redirector.
-    // Any configured key may match (current, or the previous one during a
-    // rotation grace window).
-    if let Some(secrets) = &state.link_secrets {
-        let sig = params.get("s").map(String::as_str);
-        if !secrets
-            .iter()
-            .any(|secret| verify_signature(secret, &task_id, &original_url, sig))
-        {
-            return (StatusCode::NOT_FOUND, "Unknown link").into_response();
-        }
+    // Signed-link enforcement: only redirects minted by our own send
+    // pipeline are honored. This is what stops the tracking domain from
+    // being abused as an open redirector. There is exactly one valid key;
+    // a rotated-away key is dead, so its links 404 by design.
+    if !verify_signature(
+        &state.link_secret,
+        &task_id,
+        &original_url,
+        params.get("s").map(String::as_str),
+    ) {
+        return (StatusCode::NOT_FOUND, "Unknown link").into_response();
     }
 
     // Anti-flood: refuse the redirect outright over budget. Unlike the pixel

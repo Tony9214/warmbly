@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -20,16 +19,21 @@ import (
 )
 
 // trackingLinkSecret signs click-tracking redirects so the tracking service
-// can refuse forged ?url= values (open-redirect abuse). Shared with the Rust
-// service via the same TRACKING_LINK_SECRET env; empty = legacy unsigned.
-var trackingLinkSecret = os.Getenv("TRACKING_LINK_SECRET")
+// can refuse forged ?url= values (open-redirect abuse). Injected from the
+// required EmailConfig.TrackingLinkSecret at boot (SetTrackingLinkSecret);
+// the Rust service verifies with the same value and has no unsigned mode.
+var trackingLinkSecret string
+
+// SetTrackingLinkSecret wires the click-link signing secret after config
+// load. Must be called before any campaign send builds tracked links —
+// unsigned links are refused by the tracking service.
+func SetTrackingLinkSecret(secret string) {
+	trackingLinkSecret = secret
+}
 
 // signTrackingURL returns the hex HMAC-SHA256 tag binding a click redirect to
-// (taskID, originalURL), or "" when signing is not configured.
+// (taskID, originalURL).
 func signTrackingURL(taskID uuid.UUID, originalURL string) string {
-	if trackingLinkSecret == "" {
-		return ""
-	}
 	mac := hmac.New(sha256.New, []byte(trackingLinkSecret))
 	mac.Write([]byte(taskID.String()))
 	mac.Write([]byte("|"))
@@ -324,13 +328,11 @@ func WrapLinksForTracking(htmlBody string, taskID uuid.UUID, trackingDomain stri
 
 		// Use /t/c/ path to match Rust tracking service
 		// URL encode the original URL properly
-		trackingURL := fmt.Sprintf("https://%s/t/c/%s?url=%s",
+		trackingURL := fmt.Sprintf("https://%s/t/c/%s?url=%s&s=%s",
 			trackingDomain,
 			taskID.String(),
-			url.QueryEscape(originalURL))
-		if sig := signTrackingURL(taskID, originalURL); sig != "" {
-			trackingURL += "&s=" + sig
-		}
+			url.QueryEscape(originalURL),
+			signTrackingURL(taskID, originalURL))
 
 		return fmt.Sprintf(`href="%s"`, trackingURL)
 	})
