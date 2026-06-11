@@ -33,76 +33,124 @@ type EventGroup = {
   pill: string;     // tailwind classes for the count pill
   chip: string;     // tailwind classes for individual event chips
 };
-
-// Activity strip bars for the dashboard mock (24 buckets, last 24h).
-const buckets = [
-  4, 6, 5, 8, 10, 14, 18, 22, 28, 31, 27, 24,
-  29, 36, 41, 38, 33, 30, 26, 22, 19, 15, 11, 9,
+const eventGroups: EventGroup[] = [
+  {
+    surface: 'Replies',
+    blurb: 'Every inbound that lands on a sequenced thread, with the classifier verdict attached.',
+    events: ['reply.received', 'reply.classified'],
+    tone: 'emerald',
+    ring: 'ring-emerald-200',
+    eyebrow: 'text-emerald-700',
+    pill: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    chip: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+  },
+  {
+    surface: 'Deliverability',
+    blurb: 'Hard signals from mailbox providers and recipient action. Suppressed workspace-wide on first pass.',
+    events: ['bounce.hard', 'bounce.soft', 'complaint.received', 'unsubscribe.received'],
+    tone: 'rose',
+    ring: 'ring-rose-200',
+    eyebrow: 'text-rose-700',
+    pill: 'bg-rose-50 text-rose-700 ring-rose-200',
+    chip: 'bg-rose-50 text-rose-800 ring-rose-200',
+  },
+  {
+    surface: 'Mailboxes',
+    blurb: 'Lifecycle of each sender, from the first warmup pass through quarantine and back.',
+    events: ['mailbox.connected', 'mailbox.quarantined', 'mailbox.recovered'],
+    tone: 'amber',
+    ring: 'ring-amber-200',
+    eyebrow: 'text-amber-700',
+    pill: 'bg-amber-50 text-amber-700 ring-amber-200',
+    chip: 'bg-amber-50 text-amber-800 ring-amber-200',
+  },
+  {
+    surface: 'Sequences',
+    blurb: 'Pipeline state the dashboard shows you, in the same shape the dashboard reads.',
+    events: ['sequence.started', 'sequence.completed', 'campaign.paused'],
+    tone: 'sky',
+    ring: 'ring-[color:var(--sky-2)]',
+    eyebrow: 'text-[#0369a1]',
+    pill: 'bg-[color:var(--sky-1)]/60 text-[#0369a1] ring-[color:var(--sky-2)]',
+    chip: 'bg-[color:var(--sky-1)]/60 text-[#0369a1] ring-[color:var(--sky-2)]',
+  },
+  {
+    surface: 'CRM',
+    blurb: 'Contacts, deals, pipeline stage changes mirrored to the integration on the same event.',
+    events: ['contact.created', 'deal.stage_changed'],
+    tone: 'violet',
+    ring: 'ring-violet-200',
+    eyebrow: 'text-violet-700',
+    pill: 'bg-violet-50 text-violet-700 ring-violet-200',
+    chip: 'bg-violet-50 text-violet-800 ring-violet-200',
+  },
 ];
-const maxBucket = 41;
 
-// Event catalog from the consumer + advanced/outreach services.
-const events = [
-  { name: 'reply.received',        body: 'A new reply landed on a sequenced thread.' },
-  { name: 'reply.classified',      body: 'Reply has been categorised as positive, neutral, objection, or unsubscribe.' },
-  { name: 'bounce.hard',           body: 'A delivery hard-bounced. The recipient is suppressed workspace-wide.' },
-  { name: 'bounce.soft',           body: 'A delivery soft-bounced. Three on the same domain auto-suppress.' },
-  { name: 'complaint.received',    body: 'A recipient marked a message as spam at the provider.' },
-  { name: 'unsubscribe.received',  body: 'A one-click unsubscribe was processed for a recipient.' },
-  { name: 'mailbox.connected',     body: 'A mailbox completed OAuth and started its first warmup pass.' },
-  { name: 'mailbox.quarantined',   body: 'A mailbox crossed a health band and was removed from the shared pool.' },
-  { name: 'mailbox.recovered',     body: 'A mailbox passed re-entry probation and is healthy again.' },
-  { name: 'sequence.started',      body: 'A recipient entered a sequence and is queued for the first step.' },
-  { name: 'sequence.completed',    body: 'A recipient reached the last step without replying.' },
-  { name: 'campaign.paused',       body: 'A campaign was paused by the scheduler or an operator.' },
-  { name: 'contact.created',       body: 'A new contact was created by API, import, or CRM enrichment.' },
-  { name: 'deal.stage_changed',    body: 'A deal moved between pipeline stages.' },
+// =========================================================================
+// Section 4 · webhook delivery as a branching flow
+// =========================================================================
+const retries = [
+  { n: '01', when: '+30s', hint: 'Most transient outages resolve here.' },
+  { n: '02', when: '+2m',  hint: 'Receivers that throttle briefly recover.' },
+  { n: '03', when: '+10m', hint: 'Covers a short rolling restart.' },
+  { n: '04', when: '+1h',  hint: 'Covers a maintenance window.' },
+  { n: '05', when: '+6h',  hint: 'Last attempt before dead-letter.' },
 ];
 
-// Rate limit + scope spec sheet.
-const limits = [
-  { k: 'Default per-key limit',  v: '600 / min',     why: 'Set on key creation. Bumps available on request after a 7-day baseline.' },
-  { k: 'Read-only key limit',    v: '120 / min',     why: 'Lower default for read-scoped keys used by dashboards and pollers.' },
-  { k: 'Webhook delivery retries', v: '5 attempts',  why: 'Exponential backoff at 30s, 2m, 10m, 1h, 6h. After 5 fails the event lands in the dead-letter view.' },
-  { k: 'Webhook delivery timeout', v: '10s',         why: 'Receivers that take longer are treated as failed and retried. Return 2xx fast then process async.' },
-  { k: 'Idempotency-Key window',  v: '24h',          why: 'Identical write requests within the window are deduplicated. Stripe-compatible semantics.' },
-  { k: 'Event payload max',       v: '256 KB',       why: 'Webhook bodies above this size are truncated and the full payload is fetchable via the events API.' },
+// =========================================================================
+// Section 5 · scope matrix
+// =========================================================================
+const scopeRows = [
+  { resource: 'Mailboxes', read: 'mailboxes:read', write: 'mailboxes:write', admin: '' },
+  { resource: 'Sequences', read: 'sequences:read', write: 'sequences:write', admin: '' },
+  { resource: 'Contacts',  read: 'contacts:read',  write: 'contacts:write',  admin: '' },
+  { resource: 'Events',    read: 'events:read',    write: '',                admin: '' },
+  { resource: 'CRM',       read: 'crm:read',       write: 'crm:write',       admin: '' },
+  { resource: 'Workspace', read: '',               write: '',                admin: 'admin:write' },
 ];
 
-const scopes = [
-  { k: 'mailboxes:read',   why: 'List, inspect, fetch health snapshots. No writes.' },
-  { k: 'mailboxes:write',  why: 'Connect, pause, delete. Trigger warmup re-evaluation.' },
-  { k: 'sequences:read',   why: 'Inspect sequences, steps, variants, and per-recipient state.' },
-  { k: 'sequences:write',  why: 'Create, edit, version, pause, and resume sequences.' },
-  { k: 'contacts:read',    why: 'Query contacts, lists, custom fields, and suppression entries.' },
-  { k: 'contacts:write',   why: 'Create, update, import, and suppress contacts.' },
-  { k: 'events:read',      why: 'Subscribe to the firehose or replay historical events.' },
-  { k: 'crm:read',         why: 'Read pipelines, deals, stages, and tasks.' },
-  { k: 'crm:write',        why: 'Move deals, edit pipelines, complete tasks.' },
-  { k: 'admin:write',      why: 'Workspace-level settings. Granted explicitly per key.' },
+// =========================================================================
+// Section 6 · numbers
+// =========================================================================
+const numbers = [
+  { v: '600', u: '/ min',  l: 'default per-key limit',     note: 'per key, not per workspace' },
+  { v: '120', u: '/ min',  l: 'read-only key limit',       note: 'reads get their own lane' },
+  { v: '5',   u: 'tries',  l: 'webhook retry attempts',    note: 'backoff from 30s to 6h' },
+  { v: '10',  u: 's',      l: 'webhook delivery timeout',  note: 'then it counts as a miss' },
+  { v: '24',  u: 'h',      l: 'idempotency-key window',    note: 'same key, same result' },
+  { v: '256', u: 'KB',     l: 'event payload ceiling',     note: 'full body, never truncated' },
 ];
 
-const faq = [
-  ['How do I verify a webhook signature?', 'Compute HMAC-SHA256 of the raw request body using your endpoint secret. Compare the hex digest to the X-Warmbly-Signature header in constant time. Reject any request older than 5 minutes against X-Warmbly-Timestamp.'],
-  ['Are webhooks delivered exactly once?', 'No. We deliver at least once. Every event carries an idempotency_key. Persist it on first receipt and skip duplicates. Retries happen on any non-2xx response or a timeout above 10 seconds.'],
-  ['What happens after 5 retries?', 'The event lands in the dead-letter view in the dashboard. From there you can inspect the last failure, replay one event or a range, or rotate the endpoint secret without resetting delivery history.'],
-  ['Can a single key be scoped to one campaign or mailbox?', 'Yes. Each key carries a list of scopes and an optional resource filter, for example mailboxes:write limited to mbx_01HQX. Cross-resource calls return 403 with a scope_required error code.'],
+// =========================================================================
+// FAQ
+// =========================================================================
+const faq: [string, string][] = [
+  ['How do I verify a webhook signature?',
+   'Compute HMAC-SHA256 of the raw request body using your endpoint secret. Compare the hex digest to the X-Warmbly-Signature header in constant time. Reject any request older than 5 minutes against X-Warmbly-Timestamp.'],
+  ['Are webhooks delivered exactly once?',
+   'No. We deliver at least once. Every event carries an idempotency_key. Persist it on first receipt and skip duplicates. Retries happen on any non-2xx response or a timeout above 10 seconds.'],
+  ['What happens after 5 retries?',
+   'The event lands in the dead-letter view in the dashboard. From there you can inspect the last failure, replay one event or a range, or rotate the endpoint secret without resetting delivery history.'],
+  ['Can a single key be scoped to one campaign or mailbox?',
+   'Yes. Each key carries a list of scopes and an optional resource filter, for example mailboxes:write limited to mbx_01HQX. Cross-resource calls return 403 with a scope_required error code.'],
+  ['Do you publish OpenAPI?',
+   'Yes, at docs.warmbly.com/openapi.json. The same spec generates our TypeScript and Python SDKs, so the surface in the docs is the surface every client targets.'],
 ];
 ---
 <Layout
-  title="Developer API & Webhooks | Warmbly"
+  title="Developer API and Webhooks | Warmbly"
   description="REST API with idempotency keys, scoped keys, HMAC-signed webhooks, and a dead-letter view. The same surface the dashboard runs on."
 >
   <!-- ============================================================
-       HERO · HeroAtmosphere, same as home / pricing / warmup / campaigns
+       HERO · stands alone
   ============================================================ -->
   <section class="relative isolate overflow-hidden">
     <HeroAtmosphere />
 
-    <div class="container-page relative pt-16 md:pt-24 pb-44 md:pb-56 text-center">
+    <div class="container-page relative pt-16 md:pt-24 pb-20 md:pb-28 text-center">
       <div class="inline-flex items-center gap-2 h-7 pl-1 pr-3 rounded-full bg-white/15 backdrop-blur ring-1 ring-white/25 text-[12px] text-white/95 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.25)]">
         <span class="inline-flex items-center h-5 px-1.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] bg-white" style="color:#0369a1;">
-          API & webhooks
+          API and webhooks
         </span>
         The same surface our dashboard runs on
       </div>
@@ -129,405 +177,497 @@ const faq = [
   </section>
 
   <!-- ============================================================
-       FLOATING DASHBOARD MOCK · mirrors the real api-keys page
+       SECTION 1 · quickstart: key → endpoint → first event
   ============================================================ -->
-  <section class="relative -mt-36 md:-mt-44 pb-16 md:pb-24 z-10">
+  <section class="bg-white border-t border-[color:var(--border)] py-20 md:py-28">
     <div class="container-page">
-      <div class="rounded-[18px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden shadow-[0_40px_90px_-30px_rgba(2,32,71,0.35),0_12px_30px_-12px_rgba(15,23,42,0.12)]">
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 1 &middot; Quickstart</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          Key to first event in three steps.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
+          No OAuth dance, no app review queue. Create a key, point us at an endpoint, and the first signed event shows up the moment something happens in your workspace.
+        </p>
+      </div>
 
-        <!-- Topbar -->
-        <div class="px-6 py-3 border-b border-[color:var(--border)] flex items-baseline justify-between gap-3">
-          <div class="flex items-baseline gap-3">
-            <div class="text-[10.5px] font-mono uppercase tracking-[0.18em] text-muted-foreground">API keys</div>
-            <span class="text-[11.5px] text-foreground/55">Programmatic access · scoped tokens</span>
+      <div class="grid gap-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:gap-3 items-stretch">
+        <!-- Step 1 · scoped key -->
+        <div class="rounded-xl border border-sky-200 bg-white shadow-sm overflow-hidden flex flex-col">
+          <div class="flex items-center gap-2 border-b border-sky-200/70 bg-gradient-to-r from-sky-50 to-white px-3.5 py-2.5">
+            <span class="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-sky-100 text-sky-600 ring-1 ring-sky-200/70"><Icon name="key" size={13} /></span>
+            <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">Create a scoped key</span>
+            <span class="shrink-0 rounded bg-sky-600 px-1.5 py-px text-[9px] font-semibold uppercase tracking-[0.12em] text-white">Step 1</span>
           </div>
-          <div class="flex items-center gap-2">
-            <div class="h-7 px-2 rounded-md ring-1 ring-[color:var(--border)] bg-white flex items-center gap-1.5">
-              <Icon name="search" size={11} class="text-foreground/40" />
-              <span class="text-[11px] text-foreground/40">Search</span>
-            </div>
-            <span class="inline-flex items-center h-7 px-3 rounded-md text-[11.5px] font-semibold text-white bg-[#0284c7] gap-1.5">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-              Create key
-            </span>
-          </div>
-        </div>
-
-        <!-- Stat strip -->
-        <div class="grid grid-cols-2 md:grid-cols-4 divide-x divide-[color:var(--border)] border-b border-[color:var(--border)]">
-          {[
-            { l: 'Active keys',       v: '4',        s: '1 revoked', accent: true },
-            { l: 'Requests · 24h',    v: '482,113',  s: '0.04% errors' },
-            { l: 'Avg latency · 24h', v: '38ms',     s: 'across all keys' },
-            { l: 'Last call',         v: '14s ago',  s: 'May 27, 10:42' },
-          ].map((s) => (
-            <div class="px-6 py-4">
-              <div class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">{s.l}</div>
-              <div class={`mt-1.5 text-[22px] font-semibold tracking-[-0.02em] font-mono ${s.accent ? 'text-[#0369a1]' : 'text-heading'}`}>{s.v}</div>
-              <div class="mt-0.5 text-[11px] font-mono text-muted-foreground">{s.s}</div>
-            </div>
-          ))}
-        </div>
-
-        <!-- Section bar: traffic -->
-        <div class="px-6 py-2.5 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-baseline justify-between">
-          <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-foreground/70">Traffic · last 24h</div>
-          <div class="text-[10.5px] font-mono text-muted-foreground">482,113 calls</div>
-        </div>
-        <div class="px-6 py-4 border-b border-[color:var(--border)]">
-          <div class="flex items-end gap-1 h-[80px]">
-            {buckets.map((b, i) => {
-              const h = Math.max(4, Math.round((b / maxBucket) * 100));
-              const isHot = b > 28;
-              return (
-                <div class="flex-1 rounded-t-[2px]" style={`height: ${h}%; background: ${isHot ? '#0284c7' : '#7dd3fc'};`} title={`bucket ${i}`}></div>
-              );
-            })}
-          </div>
-          <div class="mt-2 flex items-center gap-3 text-[10.5px] font-mono text-muted-foreground">
-            <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-sm bg-emerald-500/80"></span>2xx</span>
-            <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-sm bg-amber-400/80"></span>4xx</span>
-            <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-sm bg-rose-500/80"></span>5xx</span>
-            <span class="ml-auto">refreshes every minute</span>
-          </div>
-        </div>
-
-        <!-- Section bar: keys -->
-        <div class="px-6 py-2.5 border-b border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-baseline justify-between">
-          <div class="text-[10.5px] uppercase tracking-[0.18em] font-mono text-foreground/70">Keys</div>
-          <div class="text-[10.5px] font-mono text-muted-foreground">{keys.length} total</div>
-        </div>
-
-        <!-- Keys table -->
-        <div class="divide-y divide-[color:var(--border)]">
-          {keys.map((k) => {
-            const tone = statusTone(k.status);
-            return (
-              <div class="grid grid-cols-[24px_minmax(0,1.2fr)_minmax(0,1.4fr)_72px_70px_1fr] gap-3 items-center px-6 py-3 hover:bg-[color:var(--surface-1)]/60 transition-colors">
-                <Icon name="key" size={13} class={k.status === 'active' ? 'text-foreground/55' : 'text-foreground/25'} />
-                <div class="min-w-0">
-                  <div class="text-[12.5px] font-medium text-heading truncate">{k.name}</div>
-                  <div class="text-[10.5px] font-mono text-muted-foreground truncate">scope: {k.scope}</div>
-                </div>
-                <div class="text-[11px] font-mono text-foreground/60 truncate">{k.prefix}…{k.suffix}</div>
-                <span class={`inline-flex items-center gap-1 h-5 px-1.5 rounded text-[10px] uppercase tracking-[0.08em] font-medium ${tone.bg} ${tone.text}`}>
-                  <span class={`w-1 h-1 rounded-full ${tone.dot}`}></span>
-                  {k.status}
-                </span>
-                <div class="text-[10.5px] font-mono text-muted-foreground tabular-nums">{k.rpm}/m</div>
-                <div class="text-[10.5px] font-mono text-muted-foreground tabular-nums text-right truncate">used {k.last}</div>
+          <div class="p-3.5 flex-1 flex flex-col">
+            <div class="rounded-lg bg-slate-50 ring-1 ring-slate-200/70 p-3 font-mono">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[11.5px] font-semibold text-slate-700 truncate">wmbly_live_8f3kq2&hellip;</span>
+                <span class="inline-flex items-center h-5 px-1.5 rounded bg-white ring-1 ring-sky-200 text-[9.5px] text-sky-700 shrink-0">600 req/min</span>
               </div>
-            );
-          })}
+              <div class="mt-2 flex flex-wrap gap-1">
+                <span class="inline-flex items-center h-5 px-1.5 rounded bg-sky-50 ring-1 ring-sky-200 text-[10px] text-sky-800">events:read</span>
+                <span class="inline-flex items-center h-5 px-1.5 rounded bg-sky-50 ring-1 ring-sky-200 text-[10px] text-sky-800">mailboxes:write</span>
+              </div>
+            </div>
+            <p class="mt-3 text-[12.5px] text-slate-600 leading-relaxed">Pick scopes in the dashboard. The key can never do more than what you picked, and a cross-scope call returns 403 with the scope it was missing.</p>
+          </div>
+        </div>
+
+        <div class="hidden lg:flex items-center text-slate-300" aria-hidden="true"><Icon name="arrowRight" size={16} /></div>
+
+        <!-- Step 2 · endpoint -->
+        <div class="rounded-xl border border-violet-200 bg-white shadow-sm overflow-hidden flex flex-col">
+          <div class="flex items-center gap-2 border-b border-violet-200/70 bg-gradient-to-r from-violet-50 to-white px-3.5 py-2.5">
+            <span class="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-violet-100 text-violet-600 ring-1 ring-violet-200/70"><Icon name="webhook" size={13} /></span>
+            <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">Register your endpoint</span>
+            <span class="shrink-0 rounded bg-violet-600 px-1.5 py-px text-[9px] font-semibold uppercase tracking-[0.12em] text-white">Step 2</span>
+          </div>
+          <div class="p-3.5 flex-1 flex flex-col">
+            <div class="rounded-lg bg-slate-50 ring-1 ring-slate-200/70 p-3 font-mono">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="inline-flex items-center h-5 px-1.5 rounded bg-violet-50 ring-1 ring-violet-200 text-[9.5px] font-semibold text-violet-700 shrink-0">POST</span>
+                <span class="text-[11.5px] text-slate-700 truncate">api.acme.dev/hooks/warmbly</span>
+              </div>
+              <div class="mt-2 flex items-center justify-between gap-2">
+                <span class="text-[10.5px] text-slate-500 truncate">whsec_9d41kk&hellip;</span>
+                <span class="inline-flex items-center h-5 px-1.5 rounded bg-white ring-1 ring-violet-200 text-[9.5px] text-violet-700 shrink-0">HMAC-SHA256</span>
+              </div>
+            </div>
+            <p class="mt-3 text-[12.5px] text-slate-600 leading-relaxed">Paste a URL, get a signing secret. Subscribe to one surface or the whole stream, and rotate the secret any time without losing delivery history.</p>
+          </div>
+        </div>
+
+        <div class="hidden lg:flex items-center text-slate-300" aria-hidden="true"><Icon name="arrowRight" size={16} /></div>
+
+        <!-- Step 3 · first event -->
+        <div class="rounded-xl border border-emerald-200 bg-white shadow-sm overflow-hidden flex flex-col">
+          <div class="flex items-center gap-2 border-b border-emerald-200/70 bg-gradient-to-r from-emerald-50 to-white px-3.5 py-2.5">
+            <span class="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-emerald-100 text-emerald-600 ring-1 ring-emerald-200/70"><Icon name="inbox" size={13} /></span>
+            <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">Catch the first event</span>
+            <span class="shrink-0 rounded bg-emerald-600 px-1.5 py-px text-[9px] font-semibold uppercase tracking-[0.12em] text-white">Step 3</span>
+          </div>
+          <div class="p-3.5 flex-1 flex flex-col">
+            <div class="rounded-lg bg-slate-50 ring-1 ring-slate-200/70 p-3 font-mono text-[11px] leading-[1.6] text-slate-600">
+              <div><span class="text-slate-400">type&nbsp;&nbsp;&nbsp;&nbsp;</span>reply.classified</div>
+              <div><span class="text-slate-400">verdict&nbsp;</span>positive</div>
+              <div class="mt-2 pt-2 border-t border-slate-200/70 flex items-center justify-between gap-2">
+                <span class="text-slate-400">your reply</span>
+                <span class="inline-flex items-center gap-1 h-5 px-1.5 rounded bg-emerald-50 ring-1 ring-emerald-200 text-[9.5px] text-emerald-700 shrink-0">
+                  <span class="w-1 h-1 rounded-full bg-emerald-500"></span>
+                  200 OK &middot; 41ms
+                </span>
+              </div>
+            </div>
+            <p class="mt-3 text-[12.5px] text-slate-600 leading-relaxed">Verify the signature in constant time, return 2xx inside ten seconds, process async. That is the whole contract.</p>
+          </div>
         </div>
       </div>
-      <div class="mt-3 text-center text-[11.5px] font-mono text-muted-foreground">
-        app.warmbly.com/settings/api-keys
+
+      <div class="mt-6 rounded-[12px] bg-[color:var(--surface-2)]/60 ring-1 ring-[color:var(--border)] px-5 py-3 flex flex-wrap items-center justify-between gap-2 text-[11.5px] font-mono text-muted-foreground">
+        <span>Keys and endpoints live in Settings &middot; every delivery is inspectable</span>
+        <span class="text-[#0369a1]">After step three it is just HTTP</span>
       </div>
     </div>
   </section>
 
   <!-- ============================================================
-       HELLO WORLD · code panels stacked, curl + JS + Python
+       SECTION 2 · pick your client (tabbed editor)
   ============================================================ -->
-  <section class="border-y border-[color:var(--border)] py-20 md:py-28">
+  <section class="bg-[color:var(--surface-2)]/60 border-y border-[color:var(--border)] py-20 md:py-28">
     <div class="container-page">
-      <div class="grid lg:grid-cols-[1fr_1.5fr] gap-12 lg:gap-16 items-start">
-        <div class="lg:sticky lg:top-24" style="align-self: start;">
-          <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Hello world</div>
-          <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
-            Three lines to the first call.
-          </h2>
-          <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
-            Pass the secret as a Bearer header. Every response returns rate-limit headers so well-behaved clients self-throttle before they hit 429.
-          </p>
-          <ul class="mt-6 space-y-2 text-[13.5px] text-foreground/80">
-            <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0" /><span>Pass an Idempotency-Key on writes to make retries safe.</span></li>
-            <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0" /><span>Read X-RateLimit-Remaining and back off on 429.</span></li>
-            <li class="flex items-start gap-2"><Icon name="check" size={13} class="text-[#0284c7] mt-1 shrink-0" /><span>Errors return a stable code so you can switch on it.</span></li>
-          </ul>
+      <div class="max-w-2xl mb-12">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 2 &middot; Pick your client</div>
+        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          One operation. Every client.
+        </h2>
+        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
+          First-class SDKs for TypeScript, Python, and Go. Plain HTTP if you want to call it from anywhere else. Same request shape, same idempotency semantics, same error codes.
+        </p>
+      </div>
+
+      <div class="rounded-[14px] overflow-hidden ring-1 ring-white/10 bg-[#0c1224] shadow-[0_30px_60px_-30px_rgba(2,32,71,0.35),0_8px_20px_-10px_rgba(15,23,42,0.1)]" data-tabs>
+        <div class="flex items-center gap-1 px-2 py-2 border-b border-white/10 overflow-x-auto" role="tablist">
+          <div class="flex items-center gap-1.5 shrink-0 pl-2 pr-3" aria-hidden="true">
+            <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/60"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/60"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/60"></span>
+          </div>
+          {clients.map((c, i) => (
+            <button
+              type="button"
+              data-tab-button={c.id}
+              class={`tab-trigger relative inline-flex items-center h-8 px-3 rounded-md text-[12.5px] font-mono ${i === 0 ? 'is-active' : ''}`}
+              aria-selected={i === 0 ? 'true' : 'false'}
+            >{c.label}</button>
+          ))}
+          <span class="ml-auto pr-2 text-[10.5px] font-mono text-white/40 hidden md:inline">create mailbox &middot; warmup pool: premium</span>
         </div>
 
-        <div class="space-y-4">
-          <!-- curl -->
-          <div class="rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
-            <div class="flex items-center gap-2 px-4 py-2.5 bg-[#0c1224] border-b border-white/10">
-              <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
-              <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
-              <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
-              <span class="ml-3 text-[11.5px] font-mono text-white/60">terminal · curl</span>
-            </div>
-            <pre class="bg-[#0c1224] text-white/85 p-5 text-[12.5px] leading-[1.65] font-mono overflow-x-auto"><code><span style="color:#94a3b8">$</span> curl <span style="color:#fde68a">https://api.warmbly.com/v1/mailboxes</span> \
-   -H <span style="color:#fde68a">"Authorization: Bearer $WARMBLY_KEY"</span> \
-   -H <span style="color:#fde68a">"Idempotency-Key: $(uuidgen)"</span>
-
-<span style="color:#a78bfa">HTTP/2 200</span>
-<span style="color:#7dd3fc">x-ratelimit-limit</span>: 600
-<span style="color:#7dd3fc">x-ratelimit-remaining</span>: 599
-<span style="color:#7dd3fc">x-ratelimit-reset</span>: 1746820392
-<span style="color:#7dd3fc">x-request-id</span>: req_01HQX9F7P3A8KY2NJM4R6BWT0S
-
-&#123;
-  <span style="color:#7dd3fc">"data"</span>: [
-    &#123;
-      <span style="color:#7dd3fc">"id"</span>: <span style="color:#fde68a">"mbx_01HQX..."</span>,
-      <span style="color:#7dd3fc">"address"</span>: <span style="color:#fde68a">"ben@acme.com"</span>,
-      <span style="color:#7dd3fc">"health"</span>: <span style="color:#fde68a">"healthy"</span>,
-      <span style="color:#7dd3fc">"cold_cap_per_day"</span>: <span style="color:#a78bfa">100</span>
-    &#125;
-  ],
-  <span style="color:#7dd3fc">"has_more"</span>: <span style="color:#a78bfa">false</span>
-&#125;</code></pre>
-          </div>
-
-          <!-- TypeScript -->
-          <div class="rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
-            <div class="flex items-center gap-2 px-4 py-2.5 bg-[#0c1224] border-b border-white/10">
-              <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
-              <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
-              <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
-              <span class="ml-3 text-[11.5px] font-mono text-white/60">add-mailbox.ts</span>
-            </div>
-            <pre class="bg-[#0c1224] text-white/85 p-5 text-[12.5px] leading-[1.65] font-mono overflow-x-auto"><code><span style="color:#7dd3fc">import</span> Warmbly <span style="color:#7dd3fc">from</span> <span style="color:#fde68a">"@warmbly/sdk"</span>;
+        <!-- Tab panel stack · panels share one grid cell so the editor keeps
+             the height of its tallest panel and the swap never jumps -->
+        <div data-tabs-stack>
+        <!-- TypeScript -->
+        <pre data-tab-panel="ts" data-state="active" class="tab-panel px-6 py-6 text-[12.5px] leading-[1.75] font-mono overflow-x-auto text-white/85"><code><span style="color:#94a3b8">// add-mailbox.ts</span>
+<span style="color:#7dd3fc">import</span> Warmbly <span style="color:#7dd3fc">from</span> <span style="color:#fde68a">"@warmbly/sdk"</span>;
 
 <span style="color:#7dd3fc">const</span> wb <span style="color:#f472b6">=</span> <span style="color:#7dd3fc">new</span> <span style="color:#a78bfa">Warmbly</span>(&#123; apiKey: process.env.WARMBLY_KEY! &#125;);
 
-<span style="color:#7dd3fc">const</span> mailbox <span style="color:#f472b6">=</span> <span style="color:#7dd3fc">await</span> wb.mailboxes.<span style="color:#a78bfa">create</span>(&#123;
-  address: <span style="color:#fde68a">"sara@acme.com"</span>,
-  provider: <span style="color:#fde68a">"google"</span>,
-  warmup: &#123; pool: <span style="color:#fde68a">"premium"</span> &#125;,
-&#125;, &#123; idempotencyKey: <span style="color:#fde68a">"sara-bootstrap-2026-05"</span> &#125;);
+<span style="color:#7dd3fc">const</span> mailbox <span style="color:#f472b6">=</span> <span style="color:#7dd3fc">await</span> wb.mailboxes.<span style="color:#a78bfa">create</span>(
+  &#123;
+    address:  <span style="color:#fde68a">"sara@acme.com"</span>,
+    provider: <span style="color:#fde68a">"google"</span>,
+    warmup:   &#123; pool: <span style="color:#fde68a">"premium"</span> &#125;,
+  &#125;,
+  &#123; idempotencyKey: <span style="color:#fde68a">"sara-bootstrap-2026-05"</span> &#125;,
+);
 
-<span style="color:#94a3b8">// Returns the saved mailbox, ready for OAuth handoff.</span>
 console.<span style="color:#a78bfa">log</span>(mailbox.id, mailbox.oauth_url);</code></pre>
-          </div>
 
-          <!-- Python -->
-          <div class="rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
-            <div class="flex items-center gap-2 px-4 py-2.5 bg-[#0c1224] border-b border-white/10">
-              <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
-              <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
-              <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
-              <span class="ml-3 text-[11.5px] font-mono text-white/60">handle_reply.py</span>
-            </div>
-            <pre class="bg-[#0c1224] text-white/85 p-5 text-[12.5px] leading-[1.65] font-mono overflow-x-auto"><code><span style="color:#7dd3fc">from</span> warmbly <span style="color:#7dd3fc">import</span> Warmbly
+        <!-- Python -->
+        <pre data-tab-panel="py" data-state="inactive" class="tab-panel px-6 py-6 text-[12.5px] leading-[1.75] font-mono overflow-x-auto text-white/85"><code><span style="color:#94a3b8"># add_mailbox.py</span>
+<span style="color:#7dd3fc">from</span> warmbly <span style="color:#7dd3fc">import</span> Warmbly
 
 wb <span style="color:#f472b6">=</span> <span style="color:#a78bfa">Warmbly</span>(api_key<span style="color:#f472b6">=</span>os.environ[<span style="color:#fde68a">"WARMBLY_KEY"</span>])
 
-<span style="color:#94a3b8"># Re-classify the most recent positive replies on a sequence.</span>
-<span style="color:#7dd3fc">for</span> ev <span style="color:#7dd3fc">in</span> wb.events.<span style="color:#a78bfa">list</span>(
-    type<span style="color:#f472b6">=</span><span style="color:#fde68a">"reply.classified"</span>,
-    classification<span style="color:#f472b6">=</span><span style="color:#fde68a">"positive"</span>,
-    sequence_id<span style="color:#f472b6">=</span><span style="color:#fde68a">"seq_01HQX..."</span>,
-    limit<span style="color:#f472b6">=</span><span style="color:#a78bfa">50</span>,
-):
-    crm.<span style="color:#a78bfa">log_intent</span>(ev.data.contact_id, ev.data.preview)</code></pre>
-          </div>
+mailbox <span style="color:#f472b6">=</span> wb.mailboxes.<span style="color:#a78bfa">create</span>(
+    address<span style="color:#f472b6">=</span><span style="color:#fde68a">"sara@acme.com"</span>,
+    provider<span style="color:#f472b6">=</span><span style="color:#fde68a">"google"</span>,
+    warmup<span style="color:#f472b6">=</span>&#123;<span style="color:#fde68a">"pool"</span>: <span style="color:#fde68a">"premium"</span>&#125;,
+    idempotency_key<span style="color:#f472b6">=</span><span style="color:#fde68a">"sara-bootstrap-2026-05"</span>,
+)
+
+<span style="color:#a78bfa">print</span>(mailbox.id, mailbox.oauth_url)</code></pre>
+
+        <!-- Go -->
+        <pre data-tab-panel="go" data-state="inactive" class="tab-panel px-6 py-6 text-[12.5px] leading-[1.75] font-mono overflow-x-auto text-white/85"><code><span style="color:#94a3b8">// main.go</span>
+<span style="color:#7dd3fc">package</span> main
+
+<span style="color:#7dd3fc">import</span> <span style="color:#fde68a">"github.com/warmbly/warmbly-go"</span>
+
+client <span style="color:#f472b6">:=</span> warmbly.<span style="color:#a78bfa">New</span>(os.<span style="color:#a78bfa">Getenv</span>(<span style="color:#fde68a">"WARMBLY_KEY"</span>))
+
+mailbox, err <span style="color:#f472b6">:=</span> client.Mailboxes.<span style="color:#a78bfa">Create</span>(ctx, &amp;warmbly.MailboxCreate&#123;
+    Address:  <span style="color:#fde68a">"sara@acme.com"</span>,
+    Provider: <span style="color:#fde68a">"google"</span>,
+    Warmup:   &amp;warmbly.Warmup&#123;Pool: <span style="color:#fde68a">"premium"</span>&#125;,
+&#125;, warmbly.<span style="color:#a78bfa">WithIdempotencyKey</span>(<span style="color:#fde68a">"sara-bootstrap-2026-05"</span>))
+
+<span style="color:#7dd3fc">if</span> err <span style="color:#f472b6">!=</span> <span style="color:#a78bfa">nil</span> &#123; <span style="color:#a78bfa">log</span>.<span style="color:#a78bfa">Fatal</span>(err) &#125;</code></pre>
+
+        <!-- curl -->
+        <pre data-tab-panel="curl" data-state="inactive" class="tab-panel px-6 py-6 text-[12.5px] leading-[1.75] font-mono overflow-x-auto text-white/85"><code><span style="color:#94a3b8"># terminal</span>
+<span style="color:#94a3b8">$</span> curl <span style="color:#f472b6">-X</span> <span style="color:#fde68a">POST</span> <span style="color:#fde68a">https://api.warmbly.com/v1/mailboxes</span> \
+    -H <span style="color:#fde68a">"Authorization: Bearer $WARMBLY_KEY"</span> \
+    -H <span style="color:#fde68a">"Idempotency-Key: sara-bootstrap-2026-05"</span> \
+    -H <span style="color:#fde68a">"Content-Type: application/json"</span> \
+    -d <span style="color:#fde68a">'&#123;
+      "address":  "sara@acme.com",
+      "provider": "google",
+      "warmup":   &#123; "pool": "premium" &#125;
+    &#125;'</span></code></pre>
         </div>
       </div>
+
+      <script is:inline>
+        (function () {
+          document.querySelectorAll('[data-tabs]').forEach(function (root) {
+            var buttons = root.querySelectorAll('[data-tab-button]');
+            var panels  = root.querySelectorAll('[data-tab-panel]');
+            buttons.forEach(function (btn) {
+              btn.addEventListener('click', function () {
+                var id = btn.getAttribute('data-tab-button');
+                buttons.forEach(function (b) {
+                  var on = b === btn;
+                  b.classList.toggle('is-active', on);
+                  b.setAttribute('aria-selected', on ? 'true' : 'false');
+                });
+                panels.forEach(function (p) {
+                  p.setAttribute('data-state', p.getAttribute('data-tab-panel') === id ? 'active' : 'inactive');
+                });
+              });
+            });
+          });
+        })();
+      </script>
     </div>
   </section>
 
   <!-- ============================================================
-       WEBHOOKS · split signed payload + verification semantics
+       SECTION 3 · event catalog, colored per surface
   ============================================================ -->
-  <section class="bg-[color:var(--surface-1)]/40 border-b border-[color:var(--border)] py-20 md:py-28">
-    <div class="container-page">
-      <div class="max-w-3xl mb-12">
-        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Webhook delivery</div>
-        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
-          Signed bodies. Replay-safe. Dead-letter visible.
-        </h2>
-        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
-          Every event is HMAC-signed with your endpoint secret and carries an idempotency key. Failures retry five times on an exponential backoff. After the fifth failure the event lands in the dead-letter view, where you can inspect the response and replay one event or a range.
-        </p>
-      </div>
-
-      <div class="grid lg:grid-cols-[1.25fr_1fr] gap-6">
-        <!-- Payload + verification code -->
-        <div class="rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
-          <div class="px-5 py-2.5 bg-[#0c1224] border-b border-white/10 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]/80"></span>
-              <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]/80"></span>
-              <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]/80"></span>
-            </div>
-            <span class="text-[11px] font-mono text-white/55">POST /webhooks/warmbly · reply.received</span>
-          </div>
-          <pre class="bg-[#0c1224] text-white/85 p-5 text-[12px] leading-[1.65] font-mono overflow-x-auto"><code><span style="color:#7dd3fc">X-Warmbly-Signature</span>: t=1748340453,v1=8e3c<span style="color:#94a3b8">…</span>a17f
-<span style="color:#7dd3fc">X-Warmbly-Timestamp</span>: 1748340453
-<span style="color:#7dd3fc">X-Warmbly-Event-Id</span>:  evt_01HQX9F7P3A8KY2NJM4R6BWT0S
-<span style="color:#7dd3fc">X-Warmbly-Attempt</span>:   1
-
-&#123;
-  <span style="color:#7dd3fc">"id"</span>: <span style="color:#fde68a">"evt_01HQX9F7P3A8KY2NJM4R6BWT0S"</span>,
-  <span style="color:#7dd3fc">"type"</span>: <span style="color:#fde68a">"reply.received"</span>,
-  <span style="color:#7dd3fc">"created_at"</span>: <span style="color:#fde68a">"2026-05-27T16:01:33Z"</span>,
-  <span style="color:#7dd3fc">"workspace_id"</span>: <span style="color:#fde68a">"ws_acme"</span>,
-  <span style="color:#7dd3fc">"idempotency_key"</span>: <span style="color:#fde68a">"reply:th_01HQX..."</span>,
-  <span style="color:#7dd3fc">"data"</span>: &#123;
-    <span style="color:#7dd3fc">"mailbox_id"</span>:     <span style="color:#fde68a">"mbx_01HQX..."</span>,
-    <span style="color:#7dd3fc">"sequence_id"</span>:    <span style="color:#fde68a">"seq_01HQX..."</span>,
-    <span style="color:#7dd3fc">"contact_id"</span>:     <span style="color:#fde68a">"ct_01HQX..."</span>,
-    <span style="color:#7dd3fc">"classification"</span>: <span style="color:#fde68a">"positive"</span>,
-    <span style="color:#7dd3fc">"preview"</span>:        <span style="color:#fde68a">"Sure, send a calendar invite for Thursday."</span>
-  &#125;
-&#125;
-
-<span style="color:#94a3b8"># Verify in your handler (Node example).</span>
-<span style="color:#7dd3fc">import</span> &#123; createHmac, timingSafeEqual &#125; <span style="color:#7dd3fc">from</span> <span style="color:#fde68a">"node:crypto"</span>;
-
-<span style="color:#7dd3fc">function</span> <span style="color:#a78bfa">verify</span>(rawBody, header, secret) &#123;
-  <span style="color:#7dd3fc">const</span> [t, v1] <span style="color:#f472b6">=</span> header.<span style="color:#a78bfa">split</span>(<span style="color:#fde68a">","</span>).<span style="color:#a78bfa">map</span>(p <span style="color:#f472b6">=&gt;</span> p.<span style="color:#a78bfa">split</span>(<span style="color:#fde68a">"="</span>)[1]);
-  <span style="color:#7dd3fc">const</span> signed <span style="color:#f472b6">=</span> <span style="color:#fde68a">`$&#123;t&#125;.$&#123;rawBody&#125;`</span>;
-  <span style="color:#7dd3fc">const</span> mac    <span style="color:#f472b6">=</span> <span style="color:#a78bfa">createHmac</span>(<span style="color:#fde68a">"sha256"</span>, secret).<span style="color:#a78bfa">update</span>(signed).<span style="color:#a78bfa">digest</span>(<span style="color:#fde68a">"hex"</span>);
-  <span style="color:#7dd3fc">return</span> <span style="color:#a78bfa">timingSafeEqual</span>(Buffer.<span style="color:#a78bfa">from</span>(mac), Buffer.<span style="color:#a78bfa">from</span>(v1));
-&#125;</code></pre>
-        </div>
-
-        <!-- Retry policy panel -->
-        <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
-          <div class="px-5 py-3 border-b border-[color:var(--border)] text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">Retry schedule</div>
-          <div class="divide-y divide-[color:var(--border)]">
-            {[
-              { n: '01', when: '+30 seconds',  desc: 'First retry after transient failures. Most outages resolve here.' },
-              { n: '02', when: '+2 minutes',   desc: 'Second attempt. Receivers that throttle briefly recover by now.' },
-              { n: '03', when: '+10 minutes',  desc: 'Third attempt. Survives short rolling restarts of your receiver.' },
-              { n: '04', when: '+1 hour',      desc: 'Fourth attempt. Covers planned maintenance windows.' },
-              { n: '05', when: '+6 hours',     desc: 'Last attempt. After this the event moves to the dead-letter view.' },
-            ].map((r) => (
-              <div class="grid grid-cols-[40px_110px_1fr] gap-3 px-5 py-3.5 items-baseline">
-                <span class="font-mono text-[11px] text-[#0284c7] font-semibold">{r.n}</span>
-                <span class="text-[12.5px] font-mono text-heading font-semibold">{r.when}</span>
-                <span class="text-[12.5px] text-foreground/70 leading-snug">{r.desc}</span>
-              </div>
-            ))}
-          </div>
-          <div class="px-5 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-1)]/60 flex items-center justify-between text-[11.5px] font-mono">
-            <span class="text-muted-foreground">After 5 failed attempts</span>
-            <span class="inline-flex items-center gap-1 text-rose-700"><span class="w-1 h-1 rounded-full bg-rose-500"></span> dead-letter</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       EVENT CATALOG · 2-col grid of subscribable event types
-  ============================================================ -->
-  <section class="border-b border-[color:var(--border)] py-20 md:py-28">
+  <section class="bg-white border-b border-[color:var(--border)] py-20 md:py-28">
     <div class="container-page">
       <div class="max-w-2xl mb-12">
-        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Event catalog</div>
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 3 &middot; Event catalog</div>
         <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
-          Every meaningful state change, addressable.
+          Five surfaces, one firehose.
         </h2>
         <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
-          Subscribe to the firehose, filter by type, or scope to a single sequence or mailbox. The same event the dashboard reads is the event you receive, in the same shape.
+          Subscribe to the whole stream or pick the surfaces you care about. The same event the dashboard reads is the event you receive, in the same shape.
         </p>
       </div>
 
-      <div class="grid md:grid-cols-2 gap-px bg-[color:var(--border)] rounded-[12px] overflow-hidden ring-1 ring-[color:var(--border)]">
-        {events.map((e) => (
-          <div class="bg-white px-6 py-4">
-            <div class="flex items-baseline justify-between gap-3">
-              <div class="font-mono text-[13px] text-[#0369a1] font-semibold">{e.name}</div>
-              <span class="inline-flex items-center gap-1 h-5 px-1.5 rounded text-[10px] font-mono text-emerald-700 bg-emerald-50">
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
+        {eventGroups.map((g) => (
+          <div class={`rounded-[14px] bg-white ring-1 ${g.ring} overflow-hidden flex flex-col`}>
+            <div class="px-5 py-3 border-b border-[color:var(--border)] bg-[color:var(--surface-2)]/40 flex items-baseline justify-between">
+              <span class={`text-[11px] font-mono uppercase tracking-[0.18em] font-semibold ${g.eyebrow}`}>{g.surface}</span>
+              <span class={`inline-flex items-center h-5 px-1.5 rounded text-[10px] font-mono uppercase tracking-[0.08em] ring-1 ${g.pill}`}>{g.events.length} events</span>
+            </div>
+            <div class="p-5 flex-1">
+              <p class="text-[13px] text-foreground/70 leading-relaxed">{g.blurb}</p>
+              <div class="mt-4 flex flex-wrap gap-1.5">
+                {g.events.map((e) => (
+                  <code class={`inline-flex items-center h-6 px-2 rounded-md font-mono text-[11.5px] ring-1 ${g.chip}`}>{e}</code>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+        <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden flex flex-col p-5 items-start justify-center">
+          <div class="text-[11px] font-mono uppercase tracking-[0.18em] text-muted-foreground mb-2">Subscribe to all</div>
+          <code class="font-mono text-[12.5px] text-heading bg-[color:var(--surface-2)]/60 ring-1 ring-[color:var(--border)] px-2.5 py-1 rounded">events: ["*"]</code>
+          <p class="mt-3 text-[12.5px] text-foreground/65 leading-relaxed">
+            Or pick by surface, by type, or by a single sequence or mailbox. The dispatcher filters before the network hop.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       SECTION 4 · webhook delivery as a flow
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-2)]/60 border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page">
+      <div class="grid lg:grid-cols-[1fr_1.55fr] gap-12 lg:gap-16 items-start">
+        <div class="lg:sticky lg:top-24" style="align-self: start;">
+          <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 4 &middot; Delivery</div>
+          <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+            Signed bodies. Replayable. Dead-letter visible.
+          </h2>
+          <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+            Every event is HMAC-signed with your endpoint secret and carries an idempotency key. A 2xx in ten seconds closes the delivery. Anything else, and we walk a five-step retry schedule before the event lands in a view you can replay from.
+          </p>
+          <ul class="mt-6 space-y-3 text-[14px] text-foreground/85">
+            <li class="flex items-start gap-3">
+              <span class="mt-px inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200/70"><Icon name="lock" size={13} /></span>
+              <span><span class="font-medium text-heading">Signed with your secret.</span> Verify the signature in constant time before you trust the body.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-px inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-amber-50 text-amber-600 ring-1 ring-amber-200/70"><Icon name="clock" size={13} /></span>
+              <span><span class="font-medium text-heading">Ten seconds to ack.</span> Return 2xx fast and process async.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-px inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-rose-50 text-rose-600 ring-1 ring-rose-200/70"><Icon name="warning" size={13} /></span>
+              <span><span class="font-medium text-heading">Dead-letter is a screen.</span> Inspect, replay a range, rotate the secret without losing history.</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Branching canvas -->
+        <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
+          <div class="px-5 py-3.5 border-b border-[color:var(--border)] bg-[color:var(--surface-2)]/70 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-baseline gap-3">
+              <div class="text-[13px] font-semibold text-heading">POST /webhooks/yours</div>
+              <span class="inline-flex items-center gap-1.5 h-5 px-2 rounded-full bg-emerald-50 ring-1 ring-emerald-200 text-emerald-700 text-[10.5px] font-medium font-mono uppercase tracking-[0.08em]">
                 <span class="w-1 h-1 rounded-full bg-emerald-500"></span>
-                subscribable
+                reply.classified
               </span>
             </div>
-            <p class="mt-1.5 text-[13px] text-foreground/65 leading-snug">{e.body}</p>
+            <span class="inline-flex items-center gap-1.5 text-[10.5px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+              <Icon name="webhook" size={11} /> at-least-once
+            </span>
           </div>
-        ))}
-      </div>
 
-      <div class="mt-6 text-[11.5px] font-mono text-muted-foreground">
-        Source: <span class="text-foreground/75">internal/app/consumer</span> · <span class="text-foreground/75">internal/app/advanced/service.go</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       LIMITS · 2-column spec sheet (pattern from warmup / campaigns)
-  ============================================================ -->
-  <section class="py-20 md:py-28">
-    <div class="container-page">
-      <div class="max-w-2xl mb-12">
-        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Limits and quotas</div>
-        <h2 class="text-[32px] md:text-[44px] font-semibold tracking-[-0.03em] leading-[1.05] text-heading">
-          The numbers the platform enforces.
-        </h2>
-        <p class="mt-4 text-[15.5px] text-foreground/70 leading-relaxed">
-          Hard limits in the codebase. Per-key overrides are possible after a 7-day baseline. The right column is the reasoning we will defend in an incident review.
-        </p>
-      </div>
-
-      <div class="grid md:grid-cols-2 gap-x-12 gap-y-px">
-        {limits.map((d, i) => (
-          <div class="grid grid-cols-[1fr_auto] gap-6 py-6 border-b border-[color:var(--border)] items-baseline hover:bg-[color:var(--surface-1)]/40 -mx-3 px-3 rounded-[6px] transition-colors">
-            <div>
-              <div class="text-[10.5px] uppercase tracking-[0.22em] font-mono text-muted-foreground">
-                {String(i + 1).padStart(2, '0')} · {d.k}
+          <div class="p-4 sm:p-5">
+            <!-- Event fires card -->
+            <div class="rounded-xl border border-sky-200 bg-white shadow-sm">
+              <div class="flex items-center gap-2 rounded-t-xl border-b border-sky-200/70 bg-gradient-to-r from-sky-50 to-white px-3 py-2">
+                <span class="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-sky-100 text-sky-600 ring-1 ring-sky-200/70"><Icon name="zap" size={13} /></span>
+                <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">Event fires on the consumer</span>
+                <span class="shrink-0 rounded bg-sky-600 px-1.5 py-px text-[9px] font-semibold uppercase tracking-[0.12em] text-white">Start</span>
               </div>
-              <p class="mt-2 text-[13.5px] text-foreground/65 leading-relaxed max-w-md">{d.why}</p>
+              <div class="px-3 py-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-slate-300">Payload</span>
+                  <span class="text-[10px] font-mono text-slate-400">signed t+ts.body</span>
+                </div>
+                <div class="mt-2 rounded-lg bg-slate-50 ring-1 ring-slate-200/70 p-3 font-mono text-[11px] leading-[1.6] text-slate-600">
+                  <div><span class="text-slate-400">id&nbsp;&nbsp;&nbsp;</span>evt_01HQX9F7P3A8KY2NJM4R6BWT0S</div>
+                  <div><span class="text-slate-400">type&nbsp;</span>reply.classified</div>
+                  <div><span class="text-slate-400">idem&nbsp;</span>reply:th_01HQX…</div>
+                </div>
+              </div>
             </div>
-            <div class="text-right">
-              <div class="text-[22px] md:text-[26px] font-semibold tracking-[-0.02em] text-heading font-mono whitespace-nowrap">{d.v}</div>
+
+            <!-- Branches -->
+            <div class="ml-3.5 border-l-2 border-dashed border-slate-200 pl-4 sm:pl-5 pt-3 space-y-4">
+              <!-- 2xx branch -->
+              <div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="inline-flex items-center gap-1.5 h-6 px-2 rounded-md bg-emerald-50 ring-1 ring-emerald-200 text-[11px] font-medium text-emerald-700">
+                    <Icon name="check" size={11} />
+                    2xx in under 10s
+                  </span>
+                  <span class="text-slate-300"><Icon name="arrowRight" size={12} /></span>
+                  <span class="inline-flex items-center gap-1 h-5 px-1.5 rounded bg-emerald-50 ring-1 ring-emerald-200 text-[10px] font-medium text-emerald-700">acknowledged</span>
+                </div>
+                <p class="mt-2 text-[12px] text-slate-500 leading-snug">Delivery closes. A duplicate retry from us is a no-op on your side.</p>
+              </div>
+
+              <!-- retry chain -->
+              <div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="inline-flex items-center gap-1.5 h-6 px-2 rounded-md bg-amber-50 ring-1 ring-amber-200 text-[11px] font-medium text-amber-700">
+                    <Icon name="warning" size={11} />
+                    non-2xx or timeout
+                  </span>
+                  <span class="text-slate-300"><Icon name="arrowRight" size={12} /></span>
+                  <span class="text-[11px] font-medium text-slate-500">walk the retry schedule</span>
+                </div>
+
+                <div class="mt-3 rounded-xl border border-amber-200/70 bg-amber-50/30 p-3 sm:p-4">
+                  <div class="divide-y divide-amber-200/40">
+                    {retries.map((r) => (
+                      <div class="grid grid-cols-[44px_72px_1fr] gap-3 py-2 items-center">
+                        <span class="font-mono text-[10.5px] text-amber-700 font-semibold">{r.n}</span>
+                        <span class="inline-flex items-center h-5 px-1.5 rounded bg-white ring-1 ring-amber-200 text-[10.5px] font-mono text-amber-800 w-fit">{r.when}</span>
+                        <span class="text-[12px] text-slate-600 leading-snug">{r.hint}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div class="mt-3 pt-3 border-t border-amber-200/60 flex items-center gap-2 text-[11px] font-mono">
+                    <span class="text-amber-700">After 5 failed attempts</span>
+                    <span class="text-slate-300"><Icon name="arrowRight" size={11} /></span>
+                    <span class="inline-flex items-center gap-1 h-5 px-1.5 rounded bg-rose-50 ring-1 ring-rose-200 text-rose-700">
+                      <span class="w-1 h-1 rounded-full bg-rose-500"></span>
+                      dead-letter view
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        ))}
-      </div>
 
-      <div class="mt-8 text-[11.5px] font-mono text-muted-foreground">
-        Source: <span class="text-foreground/75">internal/app/ratelimit/service.go</span> · <span class="text-foreground/75">internal/api/middleware/ratelimit.go</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       SCOPES · per-key scope catalog (paired with limits visually)
-  ============================================================ -->
-  <section class="border-y border-[color:var(--border)] bg-[color:var(--surface-1)]/40 py-20 md:py-28">
-    <div class="container-page">
-      <div class="max-w-2xl mb-12">
-        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Per-key scopes</div>
-        <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
-          Scope down. Stay down.
-        </h2>
-        <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed">
-          A key only does what its scopes allow. A read-scope key cannot create a mailbox. A sequences-scoped key cannot move CRM deals. Cross-scope calls return 403 with scope_required and the exact scope the call needs.
-        </p>
-      </div>
-
-      <div class="rounded-[14px] bg-white ring-1 ring-[color:var(--border)] overflow-hidden">
-        <div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)] px-6 py-3 bg-[color:var(--surface-1)] border-b border-[color:var(--border)] text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground">
-          <div>Scope</div>
-          <div>What it grants</div>
+          <div class="px-5 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-2)]/60 flex flex-wrap items-center justify-between gap-2 text-[11.5px] font-mono text-muted-foreground">
+            <span>Signed payload, idempotent on event id</span>
+            <span class="text-[#0369a1]">Replay any range from the dashboard</span>
+          </div>
         </div>
-        {scopes.map((s) => (
-          <div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)] px-6 py-3.5 border-b border-[color:var(--border)] last:border-b-0 items-baseline">
-            <div class="font-mono text-[13px] text-[#0369a1] font-semibold">{s.k}</div>
-            <div class="text-[13.5px] text-foreground/75 leading-snug">{s.why}</div>
-          </div>
-        ))}
-      </div>
-
-      <div class="mt-8 text-[11.5px] font-mono text-muted-foreground">
-        Source: <span class="text-foreground/75">internal/api/handler</span> · <span class="text-foreground/75">internal/repository/pg_api_key.go</span>
       </div>
     </div>
   </section>
 
   <!-- ============================================================
-       FAQ · animated accordion (same JS as warmup / campaigns)
+       SECTION 5 · scope matrix
   ============================================================ -->
-  <section class="bg-[color:var(--surface-1)]/40 border-t border-[color:var(--border)] py-20 md:py-24">
+  <section class="bg-white border-b border-[color:var(--border)] py-20 md:py-28">
+    <div class="container-page">
+      <div class="grid lg:grid-cols-[1fr_2fr] gap-12 lg:gap-16 items-start">
+        <div class="lg:sticky lg:top-24" style="align-self: start;">
+          <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 5 &middot; Per-key scopes</div>
+          <h2 class="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+            Scope down. Stay down.
+          </h2>
+          <p class="mt-4 text-[15px] text-foreground/70 leading-relaxed max-w-md">
+            Six resources, two verbs, one admin scope. A cross-scope call returns 403 with <code class="font-mono text-[13px] text-[#0369a1]">scope_required</code> and the exact scope the call needs.
+          </p>
+          <ul class="mt-6 space-y-2.5 text-[13.5px] text-foreground/80">
+            <li class="flex items-start gap-3">
+              <span class="inline-flex items-center justify-center h-5 px-1.5 rounded font-mono text-[10px] font-semibold bg-sky-50 text-sky-700 ring-1 ring-sky-200 mt-0.5">read</span>
+              <span>List, inspect, subscribe.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="inline-flex items-center justify-center h-5 px-1.5 rounded font-mono text-[10px] font-semibold bg-violet-50 text-violet-700 ring-1 ring-violet-200 mt-0.5">write</span>
+              <span>Create, mutate, delete.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="inline-flex items-center justify-center h-5 px-1.5 rounded font-mono text-[10px] font-semibold bg-amber-50 text-amber-700 ring-1 ring-amber-200 mt-0.5">admin</span>
+              <span>Workspace, billing, members.</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="rounded-[14px] ring-1 ring-[color:var(--border)] overflow-hidden bg-white">
+          <table class="w-full border-collapse">
+            <thead>
+              <tr class="bg-[color:var(--surface-2)]/70 border-b border-[color:var(--border)]">
+                <th class="text-left px-5 py-3 text-[10.5px] uppercase tracking-[0.18em] font-mono text-muted-foreground font-medium">Resource</th>
+                <th class="text-left px-5 py-3 text-[10.5px] uppercase tracking-[0.18em] font-mono text-sky-700 font-medium">Read</th>
+                <th class="text-left px-5 py-3 text-[10.5px] uppercase tracking-[0.18em] font-mono text-violet-700 font-medium">Write</th>
+                <th class="text-left px-5 py-3 text-[10.5px] uppercase tracking-[0.18em] font-mono text-amber-700 font-medium">Admin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scopeRows.map((r) => (
+                <tr class="border-b border-[color:var(--border)] last:border-b-0 hover:bg-[color:var(--surface-2)]/30 transition-colors">
+                  <td class="px-5 py-4 text-[13.5px] font-semibold text-heading">{r.resource}</td>
+                  <td class="px-5 py-4">
+                    {r.read
+                      ? <code class="inline-flex items-center h-6 px-2 rounded-md bg-sky-50 ring-1 ring-sky-200 font-mono text-[11.5px] text-sky-800">{r.read}</code>
+                      : <span class="inline-block w-3 h-px bg-[color:var(--border-strong)]"></span>}
+                  </td>
+                  <td class="px-5 py-4">
+                    {r.write
+                      ? <code class="inline-flex items-center h-6 px-2 rounded-md bg-violet-50 ring-1 ring-violet-200 font-mono text-[11.5px] text-violet-800">{r.write}</code>
+                      : <span class="inline-block w-3 h-px bg-[color:var(--border-strong)]"></span>}
+                  </td>
+                  <td class="px-5 py-4">
+                    {r.admin
+                      ? <code class="inline-flex items-center h-6 px-2 rounded-md bg-amber-50 ring-1 ring-amber-200 font-mono text-[11.5px] text-amber-800">{r.admin}</code>
+                      : <span class="inline-block w-3 h-px bg-[color:var(--border-strong)]"></span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div class="px-5 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface-2)]/60 flex flex-wrap items-center justify-between gap-2 text-[11.5px] font-mono text-muted-foreground">
+            <span>403 scope_required carries the exact scope the call needs</span>
+            <span class="text-[#0369a1]">Keys can also be pinned to one mailbox or sequence</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       SECTION 6 · numbers
+  ============================================================ -->
+  <section class="bg-[color:var(--surface-2)]/60 border-b border-[color:var(--border)] py-16 md:py-20">
+    <div class="container-page">
+      <div class="max-w-2xl mb-10">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Section 6 &middot; By the numbers</div>
+        <h2 class="text-[26px] md:text-[34px] font-semibold tracking-[-0.025em] leading-[1.06] text-heading">
+          The whole rate policy, in one row.
+        </h2>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-[color:var(--border)] rounded-[14px] overflow-hidden ring-1 ring-[color:var(--border)]">
+        {numbers.map((n) => (
+          <div class="bg-white p-5 md:p-6">
+            <div class="flex items-baseline gap-1">
+              <span class="text-[28px] md:text-[34px] font-semibold tracking-[-0.025em] font-mono text-heading">{n.v}</span>
+              <span class="text-[12px] text-muted-foreground">{n.u}</span>
+            </div>
+            <div class="mt-2 text-[11.5px] uppercase tracking-[0.14em] font-mono text-foreground/70">{n.l}</div>
+            <div class="mt-3 pt-3 border-t border-[color:var(--border)] text-[11px] text-muted-foreground">{n.note}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FAQ
+  ============================================================ -->
+  <section class="bg-white border-b border-[color:var(--border)] py-20 md:py-24">
     <div class="container-page grid lg:grid-cols-[1fr_1.8fr] gap-12 lg:gap-20 items-start">
       <div class="lg:sticky lg:top-24" style="align-self: start;">
         <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-3">Developer FAQ</div>
         <h2 class="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.08] text-heading">
-          Four questions we get most.
+          The questions we get a lot.
         </h2>
         <p class="mt-4 text-[14.5px] text-foreground/70 leading-relaxed">
           Full reference and SDK guides at <a class="text-[#0369a1] hover:text-[#075985] font-medium" href="https://docs.warmbly.com">docs.warmbly.com</a>.
@@ -580,6 +720,50 @@ wb <span style="color:#f472b6">=</span> <span style="color:#a78bfa">Warmbly</spa
     secondaryLabel="Read the docs"
     secondaryHref="https://docs.warmbly.com"
   />
+
+  <style is:inline>
+    /* Tab triggers for the client editor in Section 2. State lives in one
+       class so the script never juggles utility names. */
+    .tab-trigger {
+      color: rgba(255, 255, 255, 0.55);
+      transition: color 180ms ease, background-color 180ms ease;
+    }
+    .tab-trigger:hover {
+      color: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .tab-trigger.is-active {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.10);
+    }
+
+    /* Panel stack: every panel occupies the same grid cell, so the editor
+       holds the height of its tallest panel and the swap never jumps.
+       Outgoing panel fades down and hides; incoming one fades up after a
+       short beat so the two never read as a blur. */
+    [data-tabs-stack] {
+      display: grid;
+    }
+    [data-tabs-stack] > .tab-panel {
+      grid-area: 1 / 1;
+      min-width: 0;
+      transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1) 70ms,
+                  transform 260ms cubic-bezier(0.22, 1, 0.36, 1) 70ms;
+    }
+    [data-tabs-stack] > .tab-panel[data-state="inactive"] {
+      opacity: 0;
+      transform: translateY(10px);
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease,
+                  visibility 0s linear 160ms;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      [data-tabs-stack] > .tab-panel,
+      [data-tabs-stack] > .tab-panel[data-state="inactive"] {
+        transition: none;
+        transform: none;
+      }
+    }
+  </style>
 </Layout>
-</content>
-</invoke>
