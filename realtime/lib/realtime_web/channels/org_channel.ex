@@ -107,11 +107,20 @@ defmodule RealtimeWeb.OrgChannel do
     {:noreply, socket}
   end
 
-  # Presence diffs (and any other channel broadcasts) reach the client through
-  # the transport fastlane; this clause only swallows the duplicate delivered
-  # to the channel process by our manual PubSub subscription above.
+  # Swallow the duplicate %Broadcast{} our manual PubSub subscription delivers
+  # to the channel process (the fastlane copy is what reaches the client).
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{}, socket), do: {:noreply, socket}
+
+  # Presence diffs arrive as channel out-events. Phoenix routes them to
+  # handle_out/3, so we must define it (its absence crashed the channel and
+  # dropped the socket). Push presence_state/presence_diff straight to the
+  # client — they are low-volume and not permission-sensitive.
+  @impl true
+  def handle_out(event, payload, socket) do
+    push(socket, event, payload)
+    {:noreply, socket}
+  end
 
   @impl true
   def handle_in("ping", _payload, socket) do
