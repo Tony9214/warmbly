@@ -25,12 +25,15 @@ import {
     SettingsIcon,
     ShieldCheckIcon,
     UsersIcon,
+    LockIcon,
     XIcon,
     ZapIcon,
 } from "lucide-react";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useAppStore } from "@/stores";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
+import { usePermission, type PermissionKey } from "@/hooks/usePermission";
+import AccessLockedDialog from "./AccessLockedDialog";
 import useCampaigns from "@/lib/api/hooks/app/campaigns/useCampaigns";
 import useEmails from "@/lib/api/hooks/app/emails/useEmails";
 import useTasksSummary from "@/lib/api/hooks/app/crm/tasks/useTasksSummary";
@@ -70,6 +73,11 @@ interface NavItem {
     requires?: "inbox" | "advanced";
     /** Role gate — when set, sidebar hides the row entirely for non-matching roles. */
     rolesAllowed?: "manage";
+    /** Permission gate — when the member lacks it, the row shows a lock and a
+     *  click pops an access dialog instead of navigating to an empty page. */
+    permission?: PermissionKey;
+    /** Friendly label of the permission, for the access dialog. */
+    permissionLabel?: string;
     /** Live indicator key — renders an ambient, realtime activity cluster.
      *  Each key has its OWN motif (campaigns = dot-grid, accounts = flame,
      *  tasks = red attention dot) so the rows stay visually distinct rather
@@ -111,6 +119,8 @@ const topItems: NavItem[] = [
         icon: InboxIcon,
         badgeStoreKey: "unseenCount",
         requires: "inbox",
+        permission: "ACCESS_UNIBOX",
+        permissionLabel: "Use unified inbox",
     },
 ];
 
@@ -118,29 +128,29 @@ const sections: NavSection[] = [
     {
         label: "Email",
         items: [
-            { title: "Accounts", url: "/app/emails", icon: MailIcon, indicator: "accounts" },
-            { title: "Campaigns", url: "/app/campaigns", icon: MegaphoneIcon, indicator: "campaigns" },
-            { title: "Contacts", url: "/app/contacts", icon: UsersIcon, indicator: "contacts" },
-            { title: "Analytics", url: "/app/analytics", icon: BarChart3Icon, indicator: "analytics" },
-            { title: "Deliverability", url: "/app/deliverability", icon: ShieldCheckIcon },
+            { title: "Accounts", url: "/app/emails", icon: MailIcon, indicator: "accounts", permission: "MANAGE_EMAILS", permissionLabel: "Manage mailboxes" },
+            { title: "Campaigns", url: "/app/campaigns", icon: MegaphoneIcon, indicator: "campaigns", permission: "VIEW_CAMPAIGNS", permissionLabel: "View campaigns" },
+            { title: "Contacts", url: "/app/contacts", icon: UsersIcon, indicator: "contacts", permission: "VIEW_CONTACTS", permissionLabel: "View contacts" },
+            { title: "Analytics", url: "/app/analytics", icon: BarChart3Icon, indicator: "analytics", permission: "VIEW_ANALYTICS", permissionLabel: "View analytics" },
+            { title: "Deliverability", url: "/app/deliverability", icon: ShieldCheckIcon, permission: "VIEW_ANALYTICS", permissionLabel: "View analytics" },
         ],
     },
     {
         label: "CRM",
         items: [
-            { title: "Pipelines", url: "/app/crm/pipelines", icon: GitBranchIcon, indicator: "pipelines" },
-            { title: "Deals", url: "/app/crm/deals", icon: CircleDollarSignIcon, indicator: "deals" },
-            { title: "Tasks", url: "/app/crm/tasks", icon: CheckSquareIcon, indicator: "tasks" },
-            { title: "Meetings", url: "/app/crm/meetings", icon: CalendarClockIcon, indicator: "meetings" },
+            { title: "Pipelines", url: "/app/crm/pipelines", icon: GitBranchIcon, indicator: "pipelines", permission: "VIEW_CONTACTS", permissionLabel: "View contacts" },
+            { title: "Deals", url: "/app/crm/deals", icon: CircleDollarSignIcon, indicator: "deals", permission: "VIEW_CONTACTS", permissionLabel: "View contacts" },
+            { title: "Tasks", url: "/app/crm/tasks", icon: CheckSquareIcon, indicator: "tasks", permission: "VIEW_CONTACTS", permissionLabel: "View contacts" },
+            { title: "Meetings", url: "/app/crm/meetings", icon: CalendarClockIcon, indicator: "meetings", permission: "VIEW_CONTACTS", permissionLabel: "View contacts" },
         ],
     },
     {
         label: "Resources",
         items: [
             { title: "Templates", url: "/app/templates", icon: FileTextIcon, indicator: "templates" },
-            { title: "Integrations", url: "/app/integrations", icon: CableIcon, indicator: "integrations" },
-            { title: "Automations", url: "/app/automations", icon: ZapIcon },
-            { title: "API Keys", url: "/app/api-keys", icon: KeyIcon, indicator: "apikeys" },
+            { title: "Integrations", url: "/app/integrations", icon: CableIcon, indicator: "integrations", permission: "USE_INTEGRATIONS", permissionLabel: "Use integrations" },
+            { title: "Automations", url: "/app/automations", icon: ZapIcon, permission: "USE_INTEGRATIONS", permissionLabel: "Use integrations" },
+            { title: "API Keys", url: "/app/api-keys", icon: KeyIcon, indicator: "apikeys", permission: "MANAGE_API_KEYS", permissionLabel: "Manage API keys" },
             { title: "Audit log", url: "/app/audit", icon: ListChecksIcon, rolesAllowed: "manage" },
         ],
     },
@@ -150,6 +160,8 @@ function NavRow({ item }: { item: NavItem }) {
     const { pathname } = useLocation();
     const unseen = useAppStore((s) => s.unseenCount);
     const access = useFeatureAccess();
+    const hasItemPermission = usePermission(item.permission ?? "VIEW_CAMPAIGNS");
+    const [deniedOpen, setDeniedOpen] = useState(false);
     const active =
         pathname === item.url || pathname.startsWith(item.url + "/");
     const badge = item.badgeStoreKey === "unseenCount" ? unseen : undefined;
@@ -158,6 +170,32 @@ function NavRow({ item }: { item: NavItem }) {
     // can't access them, instead of showing a lock — these are
     // administrative tools, not premium features to tease.
     if (item.rolesAllowed === "manage" && !access.canManage) return null;
+
+    // Permission-gated items the member lacks: render a locked row that pops
+    // an access dialog on click, so the feature is visibly unavailable (a
+    // lock) rather than a blank/empty page that reads as "no data".
+    const accessDenied = !!item.permission && !hasItemPermission;
+    if (accessDenied) {
+        return (
+            <>
+                <button
+                    type="button"
+                    onClick={() => setDeniedOpen(true)}
+                    title={`${item.title} · no access`}
+                    className="group w-[calc(100%-1rem)] mx-2 flex items-center gap-2.5 px-2.5 h-7 rounded-md text-[12.5px] text-slate-400 hover:text-slate-600 hover:bg-slate-200/40 transition-colors duration-100"
+                >
+                    <LockIcon className="w-[13px] h-[13px] shrink-0 text-slate-300 group-hover:text-slate-500" strokeWidth={1.8} />
+                    <span className="truncate flex-1 min-w-0 text-left">{item.title}</span>
+                </button>
+                <AccessLockedDialog
+                    open={deniedOpen}
+                    onClose={() => setDeniedOpen(false)}
+                    feature={item.title}
+                    permissionLabel={item.permissionLabel ?? "the required"}
+                />
+            </>
+        );
+    }
 
     // Subscription-gated items stay visible but dim with a lock so
     // the user knows the feature exists.

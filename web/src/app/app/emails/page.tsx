@@ -74,7 +74,7 @@ function healthTone(status?: AccountStatus): { dot: string; text: string; label:
 export default function AddressesPage() {
     const p = useUserProfile();
     const confirm = useConfirm();
-    const canView = usePermission("VIEW_CAMPAIGNS");
+    const canView = usePermission("MANAGE_EMAILS");
 
     const [query, setQuery] = React.useState<string>("");
     const [tag, setTag] = React.useState<string>("");
@@ -185,7 +185,7 @@ export default function AddressesPage() {
     }
 
     if (!canView) {
-        return <NoAccess feature="email accounts" permissionLabel="View campaigns" />;
+        return <NoAccess feature="email accounts" permissionLabel="Manage mailboxes" />;
     }
 
     return (
