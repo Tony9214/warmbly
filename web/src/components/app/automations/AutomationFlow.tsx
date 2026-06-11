@@ -55,6 +55,7 @@ import {
     ZapIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import PermissionButton from "@/components/ui/PermissionButton";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import { Label, NumberInput, TextInput } from "@/components/ui/field";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
@@ -808,7 +809,8 @@ export default function AutomationFlow({
                         <WandSparklesIcon className="w-3.5 h-3.5 md:hidden" />
                         <span className="hidden md:inline">Tidy up</span>
                     </button>
-                    <button
+                    <PermissionButton
+                        permission="USE_INTEGRATIONS"
                         type="button"
                         onClick={save}
                         disabled={!dirty || update.isPending}
@@ -829,7 +831,7 @@ export default function AutomationFlow({
                             <CheckIcon className="w-3.5 h-3.5 text-slate-300" />
                         )}
                         <span className="hidden md:inline">{dirty ? "Save" : "Saved"}</span>
-                    </button>
+                    </PermissionButton>
                 </div>
             </header>
 
