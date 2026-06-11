@@ -432,6 +432,8 @@ export default function AutomationFlow({
     const [panel, setPanel] = React.useState<"test" | "history" | null>(null);
     const [testResult, setTestResult] = React.useState<DryRunResponse | null>(null);
     const seeded = React.useRef(false);
+    // A teammate saved while we have unsaved edits — offer to load their version.
+    const [remoteUpdate, setRemoteUpdate] = React.useState<Automation | null>(null);
 
     const confirm = useConfirm();
 
@@ -543,27 +545,67 @@ export default function AutomationFlow({
         [automation.trigger_event, connLabel, providerOf, deleteNode],
     );
 
-    // Seed the canvas once from the saved graph.
+    // Lay a server automation onto the canvas (used on first mount AND when a
+    // teammate's save arrives over realtime). Also resets the dirty baseline.
+    const seedFrom = React.useCallback(
+        (a: Automation) => {
+            setName(a.name);
+            setEnabled(a.enabled);
+            setTrigger(a.trigger_event);
+            let g = a.graph?.nodes?.length
+                ? a.graph
+                : ({ nodes: [{ id: "trigger", type: "trigger", x: 0, y: 0 }], edges: [] } as AutomationGraph);
+            if (!g.nodes.some((n) => n.type === "trigger")) {
+                g = { nodes: [{ id: "trigger", type: "trigger", x: 0, y: 0 }, ...g.nodes], edges: g.edges };
+            }
+            let rfNodes = g.nodes.map(toRFNode);
+            const rfEdges = (g.edges ?? []).map((e: GEdge) =>
+                styledEdge(e.id || uid(), e.source, e.target, whenToHandle(e.when), (e.when ?? "") as When),
+            );
+            const noPositions = g.nodes.length > 1 && g.nodes.every((n) => (n.x ?? 0) === 0 && (n.y ?? 0) === 0);
+            if (noPositions) rfNodes = stackComponents(layoutGraph(rfNodes, rfEdges), rfEdges);
+            setNodes(rfNodes);
+            setEdges(rfEdges);
+            baselineRef.current = flowSig(a.name, a.enabled, a.trigger_event, rfNodes, rfEdges);
+        },
+        [toRFNode, setNodes, setEdges, flowSig],
+    );
+
+    // A stable signature of the SERVER automation, to detect a teammate's save
+    // (the detail query is invalidated by the AUTOMATION_UPDATED realtime event).
+    const serverSig = React.useCallback(
+        (a: Automation) =>
+            JSON.stringify({ name: (a.name || "").trim(), enabled: a.enabled, trigger: a.trigger_event, graph: a.graph ?? null }),
+        [],
+    );
+    const serverVersionRef = React.useRef("");
+
+    // Seed once on mount.
     React.useEffect(() => {
         if (seeded.current) return;
         seeded.current = true;
-        let g = automation.graph?.nodes?.length
-            ? automation.graph
-            : ({ nodes: [{ id: "trigger", type: "trigger", x: 0, y: 0 }], edges: [] } as AutomationGraph);
-        if (!g.nodes.some((n) => n.type === "trigger")) {
-            g = { nodes: [{ id: "trigger", type: "trigger", x: 0, y: 0 }, ...g.nodes], edges: g.edges };
+        seedFrom(automation);
+        serverVersionRef.current = serverSig(automation);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Live collaboration: when the automation changes on the server (a teammate
+    // saved), reflect it. If we have no unsaved edits, apply it instantly; if we
+    // do, surface a non-destructive banner so we never clobber local work.
+    React.useEffect(() => {
+        if (!seeded.current) return;
+        const incoming = serverSig(automation);
+        if (incoming === serverVersionRef.current) return; // unchanged / our own save
+        if (!dirty) {
+            seedFrom(automation);
+            serverVersionRef.current = incoming;
+            toast.success("Updated by a teammate", { id: "automation-remote" });
+        } else {
+            serverVersionRef.current = incoming; // mark seen so we don't re-prompt
+            setRemoteUpdate(automation);
         }
-        let rfNodes = g.nodes.map(toRFNode);
-        const rfEdges = (g.edges ?? []).map((e: GEdge) =>
-            styledEdge(e.id || uid(), e.source, e.target, whenToHandle(e.when), (e.when ?? "") as When),
-        );
-        const noPositions = g.nodes.length > 1 && g.nodes.every((n) => (n.x ?? 0) === 0 && (n.y ?? 0) === 0);
-        if (noPositions) rfNodes = stackComponents(layoutGraph(rfNodes, rfEdges), rfEdges);
-        setNodes(rfNodes);
-        setEdges(rfEdges);
-        // Baseline for dirty detection, captured from the exact seeded canvas.
-        baselineRef.current = flowSig(automation.name, automation.enabled, automation.trigger_event, rfNodes, rfEdges);
-    }, [automation.graph, automation.name, automation.enabled, automation.trigger_event, toRFNode, setNodes, setEdges, flowSig]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [automation, dirty]);
 
     const updateNodeData = React.useCallback(
         (id: string, patch: Record<string, unknown>) =>
@@ -690,9 +732,13 @@ export default function AutomationFlow({
             })),
         };
         try {
-            await update.mutateAsync({ id: automation.id, w: { name: name.trim() || "Automation", enabled, trigger_event: trigger, filter, graph } });
+            const res = await update.mutateAsync({ id: automation.id, w: { name: name.trim() || "Automation", enabled, trigger_event: trigger, filter, graph } });
             // Re-baseline so the canvas is no longer "dirty" after a successful save.
             baselineRef.current = flowSig(name, enabled, trigger, nodes, edges);
+            // Mark this as the known server version so our own refetch doesn't
+            // read back as a "teammate changed it" event.
+            if (res?.automation) serverVersionRef.current = serverSig(res.automation);
+            setRemoteUpdate(null);
             toast.success("Automation saved");
             return true;
         } catch (e) {
@@ -869,6 +915,32 @@ export default function AutomationFlow({
                 >
                     <Background color="#e9eef5" gap={24} size={1} />
                     <Controls showInteractive={false} />
+                    {remoteUpdate && (
+                        <Panel position="top-center">
+                            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 shadow-sm">
+                                <span className="text-[12px] font-medium text-amber-800">
+                                    A teammate changed this automation.
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        seedFrom(remoteUpdate);
+                                        setRemoteUpdate(null);
+                                    }}
+                                    className="h-6 px-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-[11.5px] font-medium transition-colors"
+                                >
+                                    Load their version
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setRemoteUpdate(null)}
+                                    className="h-6 px-2 rounded text-[11.5px] font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                                >
+                                    Keep mine
+                                </button>
+                            </div>
+                        </Panel>
+                    )}
                     <Panel position="top-left">
                         <div className="flex items-center gap-1.5">
                             <button
