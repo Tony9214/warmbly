@@ -71,6 +71,8 @@ import useCampaign from "@/lib/api/hooks/app/campaigns/useCampaign";
 import useUpdateCampaign from "@/lib/api/hooks/app/campaigns/useUpdateCampaign";
 import { useConfirm } from "@/hooks/context/confirm";
 import useClickOutside from "@/hooks/useClickOutside";
+import { usePermission, showPermissionDenied } from "@/hooks/usePermission";
+import { LockIcon } from "lucide-react";
 import { NumberInput, Label, TextInput } from "@/components/ui/field";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
 import { PopoverMenu, PopoverMenuContent, PopoverMenuTrigger } from "@/components/ui/popover-menu";
@@ -562,6 +564,9 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
     const [adding, setAdding] = React.useState(false);
     // While dragging a node, kill the position transition so the drag is 1:1.
     const [dragging, setDragging] = React.useState(false);
+    // Editing the sequence flow (add a step, drag a node, draw a branch) needs
+    // the manage-sequences permission. View-only members can pan/zoom/inspect.
+    const canEditFlow = usePermission("MANAGE_SEQUENCES");
     const structureSig = React.useRef("");
     const ifMetaRef = React.useRef<Record<string, IfMeta>>({});
 
@@ -1226,11 +1231,40 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onNodeDragStart={() => setDragging(true)}
+                onNodesChange={(changes) => {
+                    if (!canEditFlow) {
+                        // Block structural edits (drag-move, delete); keep
+                        // select/dimension so the canvas still renders for viewing.
+                        onNodesChange(
+                            changes.filter((c) => c.type !== "position" && c.type !== "remove"),
+                        );
+                        return;
+                    }
+                    onNodesChange(changes);
+                }}
+                onEdgesChange={(changes) => {
+                    if (!canEditFlow) {
+                        onEdgesChange(changes.filter((c) => c.type !== "remove"));
+                        return;
+                    }
+                    onEdgesChange(changes);
+                }}
+                onNodeDragStart={() => {
+                    if (!canEditFlow) {
+                        showPermissionDenied("MANAGE_SEQUENCES");
+                        return;
+                    }
+                    setDragging(true);
+                }}
                 onNodeDragStop={() => setDragging(false)}
-                onConnect={onConnect}
+                onConnect={(c) => {
+                    if (!canEditFlow) {
+                        showPermissionDenied("MANAGE_SEQUENCES");
+                        return;
+                    }
+                    onConnect(c);
+                }}
+                nodesConnectable={canEditFlow}
                 nodesDraggable={!isCoarse}
                 zoomOnScroll={false}
                 panOnScroll={false}
@@ -1291,10 +1325,17 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                     <div className="flex max-w-[calc(100vw-1.5rem)] flex-col gap-1.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                             <AddNodeMenu
-                                onAddEmail={addStep}
-                                onAddAction={addAction}
+                                onAddEmail={
+                                    canEditFlow ? addStep : () => showPermissionDenied("MANAGE_SEQUENCES")
+                                }
+                                onAddAction={
+                                    canEditFlow
+                                        ? addAction
+                                        : () => showPermissionDenied("MANAGE_SEQUENCES")
+                                }
                                 disabled={adding || atMax}
                                 busy={adding}
+                                locked={!canEditFlow}
                             />
                             <button
                                 type="button"
@@ -1766,11 +1807,13 @@ function AddNodeMenu({
     onAddAction,
     disabled,
     busy,
+    locked,
 }: {
     onAddEmail: () => void;
     onAddAction: (t: SequenceActionType) => void;
     disabled: boolean;
     busy: boolean;
+    locked?: boolean;
 }) {
     const [open, setOpen] = React.useState(false);
     const ref = React.useRef<HTMLDivElement>(null);
@@ -1780,11 +1823,17 @@ function AddNodeMenu({
             {/* Primary click = add an email step (the default, common case). */}
             <button
                 type="button"
-                disabled={disabled}
+                disabled={locked ? false : disabled}
                 onClick={onAddEmail}
-                className="inline-flex h-8 items-center gap-1.5 rounded-l-md bg-sky-600 px-3 text-[12px] font-medium text-white shadow-sm transition-colors hover:bg-sky-700 disabled:opacity-60"
+                className={`inline-flex h-8 items-center gap-1.5 rounded-l-md bg-sky-600 px-3 text-[12px] font-medium text-white shadow-sm transition-colors hover:bg-sky-700 disabled:opacity-60 ${locked ? "opacity-60" : ""}`}
             >
-                {busy ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlusIcon className="w-3.5 h-3.5" />}
+                {locked ? (
+                    <LockIcon className="w-3.5 h-3.5" />
+                ) : busy ? (
+                    <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                    <PlusIcon className="w-3.5 h-3.5" />
+                )}
                 Add step
             </button>
             {/* Chevron = the full list of node types (email + actions). */}

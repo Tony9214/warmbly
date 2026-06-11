@@ -3,6 +3,7 @@ import { LayersIcon, Loader2Icon, PlusIcon } from "lucide-react";
 import toast from "react-hot-toast";
 import { useCampaign } from "@/hooks/context/campaign";
 import CampaignFlow from "@/components/app/campaigns/sequences/CampaignFlow";
+import PermissionButton from "@/components/ui/PermissionButton";
 import useSequences from "@/lib/api/hooks/app/campaigns/sequences/useSequences";
 import useCreateSequence from "@/lib/api/hooks/app/campaigns/sequences/useCreateSequence";
 import type { AppError } from "@/lib/api/client/normalizeError";
@@ -52,7 +53,8 @@ function SequencesBuilder({ campaignId }: { campaignId: string }) {
                     replies. The first email sends immediately; later steps wait and thread as
                     follow-ups.
                 </p>
-                <button
+                <PermissionButton
+                    permission="MANAGE_SEQUENCES"
                     type="button"
                     onClick={create}
                     disabled={creating}
@@ -64,7 +66,7 @@ function SequencesBuilder({ campaignId }: { campaignId: string }) {
                         <PlusIcon className="w-3.5 h-3.5" />
                     )}
                     Add your first step
-                </button>
+                </PermissionButton>
             </div>
         );
     }
