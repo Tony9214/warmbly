@@ -2,6 +2,7 @@
 // Explains which permission they're missing instead of silently doing nothing
 // or routing them to a misleadingly-empty page.
 
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { LockIcon, XIcon } from "lucide-react";
 
@@ -16,7 +17,10 @@ export default function AccessLockedDialog({
     feature: string;
     permissionLabel: string;
 }) {
-    return (
+    // Portal to <body>: this dialog renders inside the sidebar <aside>, which has
+    // a transform (slide-in) + overflow, so a `fixed` overlay would clip to the
+    // sidebar instead of the viewport. The portal escapes that containing block.
+    return createPortal(
         <AnimatePresence>
             {open && (
                 <motion.div
@@ -66,6 +70,7 @@ export default function AccessLockedDialog({
                     </motion.div>
                 </motion.div>
             )}
-        </AnimatePresence>
+        </AnimatePresence>,
+        document.body,
     );
 }
