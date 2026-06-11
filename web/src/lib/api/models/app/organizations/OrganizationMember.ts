@@ -12,6 +12,8 @@ export default interface OrganizationMember {
     email?: string;
     name?: string;
     role: OrganizationRole;
+    // Set when the member is assigned a custom role (id into /organization/roles).
+    role_id?: string;
     permissions?: number;
     joined_at?: Date;
 }
