@@ -220,8 +220,13 @@ export default function LoginPage() {
         } catch {
             // UserProvider re-attempts and redirects to login on a real failure.
         }
-        navigate("/app/emails");
-    }, [navigate, queryClient]);
+        // Honor a post-auth ?next= (internal paths only), else the default
+        // home. Powers the /invite link: sign in, then bounce back to accept.
+        const params = new URLSearchParams(location.search);
+        const next = params.get("next");
+        const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "/app/emails";
+        navigate(safeNext);
+    }, [navigate, queryClient, location.search]);
 
     // Conditional UI: surface passkeys inside the email field's native autofill
     // — no modal, no layout shift. Stays pending until the user picks a passkey

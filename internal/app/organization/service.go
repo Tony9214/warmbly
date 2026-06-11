@@ -43,6 +43,9 @@ type OrganizationService interface {
 	GetMembership(ctx context.Context, orgID, userID uuid.UUID) (*models.OrganizationMember, *errx.Error)
 	InviteMember(ctx context.Context, orgID uuid.UUID, inviterID uuid.UUID, req *models.InviteMemberRequest) (*models.OrganizationInvitation, *errx.Error)
 	AcceptInvitation(ctx context.Context, token string, userID uuid.UUID, email string) (*models.OrganizationMember, *errx.Error)
+	AcceptInvitationByID(ctx context.Context, invitationID, userID uuid.UUID, email string) (*models.OrganizationMember, *errx.Error)
+	PreviewInvitation(ctx context.Context, token string) (*models.InvitationPreview, *errx.Error)
+	GetInvitationToken(ctx context.Context, orgID, invitationID uuid.UUID) (string, *errx.Error)
 
 	// Custom roles
 	ListRoles(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationRole, *errx.Error)
@@ -447,6 +450,69 @@ func (s *organizationService) AcceptInvitation(ctx context.Context, token string
 	if inv == nil {
 		return nil, errx.New(errx.NotFound, "invitation not found")
 	}
+	return s.acceptResolved(ctx, inv, userID, email)
+}
+
+// AcceptInvitationByID accepts an invitation the logged-in user found in their
+// own pending list (no token needed; the email-match check still gates it).
+func (s *organizationService) AcceptInvitationByID(ctx context.Context, invitationID, userID uuid.UUID, email string) (*models.OrganizationMember, *errx.Error) {
+	inv, err := s.orgRepo.GetInvitationByID(ctx, invitationID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to get invitation")
+	}
+	if inv == nil {
+		return nil, errx.New(errx.NotFound, "invitation not found")
+	}
+	return s.acceptResolved(ctx, inv, userID, email)
+}
+
+// PreviewInvitation returns the safe public view for the /invite landing page.
+func (s *organizationService) PreviewInvitation(ctx context.Context, token string) (*models.InvitationPreview, *errx.Error) {
+	inv, err := s.orgRepo.GetInvitationByToken(ctx, token)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to get invitation")
+	}
+	if inv == nil {
+		return nil, errx.New(errx.NotFound, "invitation not found")
+	}
+	preview := &models.InvitationPreview{
+		Email:   inv.Email,
+		Expired: inv.IsExpired(),
+	}
+	if inv.Organization != nil {
+		preview.OrganizationName = inv.Organization.Name
+		if inv.Organization.AvatarURL != nil {
+			preview.OrganizationAvatar = *inv.Organization.AvatarURL
+		}
+	}
+	if inviter, _ := s.userRepo.GetUser(ctx, inv.InvitedBy); inviter != nil {
+		preview.InviterName = strings.TrimSpace(inviter.FirstName + " " + inviter.LastName)
+	}
+	list := []models.OrganizationInvitation{*inv}
+	if err := s.orgRepo.HydrateInvitationRoles(ctx, list); err == nil {
+		preview.Roles = list[0].Roles
+	}
+	return preview, nil
+}
+
+// GetInvitationToken returns the secure token for one of the org's pending
+// invitations, so a team manager can copy a shareable /invite link.
+func (s *organizationService) GetInvitationToken(ctx context.Context, orgID, invitationID uuid.UUID) (string, *errx.Error) {
+	inv, err := s.orgRepo.GetInvitationByID(ctx, invitationID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return "", errx.New(errx.Internal, "failed to get invitation")
+	}
+	if inv == nil || inv.OrganizationID != orgID {
+		return "", errx.New(errx.NotFound, "invitation not found")
+	}
+	return inv.Token, nil
+}
+
+// acceptResolved performs the actual join given an already-loaded invitation.
+func (s *organizationService) acceptResolved(ctx context.Context, inv *models.OrganizationInvitation, userID uuid.UUID, email string) (*models.OrganizationMember, *errx.Error) {
 
 	// Verify email matches
 	if strings.ToLower(email) != strings.ToLower(inv.Email) {

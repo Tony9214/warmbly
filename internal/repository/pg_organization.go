@@ -55,6 +55,7 @@ type OrganizationRepository interface {
 	// Invitations
 	CreateInvitation(ctx context.Context, inv *models.OrganizationInvitation) error
 	GetInvitationByToken(ctx context.Context, token string) (*models.OrganizationInvitation, error)
+	GetInvitationByID(ctx context.Context, id uuid.UUID) (*models.OrganizationInvitation, error)
 	GetInvitationByEmail(ctx context.Context, orgID uuid.UUID, email string) (*models.OrganizationInvitation, error)
 	GetPendingInvitations(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationInvitation, error)
 	GetUserPendingInvitations(ctx context.Context, email string) ([]models.OrganizationInvitation, error)
@@ -383,6 +384,36 @@ func (r *organizationRepository) GetInvitationByToken(ctx context.Context, token
 		WHERE i.token = $1
 	`
 	row := r.db.QueryRow(ctx, query, token)
+	var inv models.OrganizationInvitation
+	var org models.Organization
+	err := row.Scan(
+		&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.RoleID, &inv.Permissions,
+		&inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt,
+		&org.ID, &org.Name, &org.Slug, &org.AvatarURL, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt,
+		&org.DeletionScheduledAt, &org.DeletionScheduledFor,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	inv.Organization = &org
+	return &inv, nil
+}
+
+// GetInvitationByID retrieves an invitation by its id, with org joined.
+func (r *organizationRepository) GetInvitationByID(ctx context.Context, id uuid.UUID) (*models.OrganizationInvitation, error) {
+	query := `
+		SELECT
+			i.id, i.organization_id, i.email, i.role, i.role_id, i.permissions, i.invited_by, i.token, i.expires_at, i.created_at,
+			o.id, o.name, o.slug, o.avatar_url, o.owner_user_id, o.created_at, o.updated_at,
+			o.deletion_scheduled_at, o.deletion_scheduled_for
+		FROM organization_invitations i
+		JOIN organizations o ON o.id = i.organization_id
+		WHERE i.id = $1
+	`
+	row := r.db.QueryRow(ctx, query, id)
 	var inv models.OrganizationInvitation
 	var org models.Organization
 	err := row.Scan(

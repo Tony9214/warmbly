@@ -228,7 +228,22 @@ type TransferOwnershipRequest struct {
 
 // AcceptInvitationRequest represents the request to accept an invitation
 type AcceptInvitationRequest struct {
-	Token string `json:"token" binding:"required"`
+	// Either a secure token (public /invite link) or the invitation id (the
+	// logged-in user accepting from their own pending list).
+	Token        string     `json:"token,omitempty"`
+	InvitationID *uuid.UUID `json:"invitation_id,omitempty"`
+}
+
+// InvitationPreview is the safe, public view of an invitation rendered on the
+// /invite landing page. It deliberately omits the token, permissions bitmask,
+// and ids — only what a human needs to decide to accept.
+type InvitationPreview struct {
+	OrganizationName   string       `json:"organization_name"`
+	OrganizationAvatar string       `json:"organization_avatar,omitempty"`
+	InviterName        string       `json:"inviter_name,omitempty"`
+	Email              string       `json:"email"`
+	Roles              []MemberRole `json:"roles"`
+	Expired            bool         `json:"expired"`
 }
 
 // OrganizationCounts represents resource counts for an organization

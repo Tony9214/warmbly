@@ -61,6 +61,10 @@ func Run(
 	r.GET("/unsubscribe", h.Unsubscribe)
 	r.POST("/unsubscribe", h.Unsubscribe)
 
+	// Public invitation preview for the /invite landing page. Unauthenticated:
+	// the secret token in the query is the capability.
+	r.GET("/invitations/lookup", h.PreviewInvitation)
+
 	// Internal backend-to-backend endpoints. Workers call these instead of
 	// touching Postgres directly, per the no-direct-data-services rule in
 	// CLAUDE.md. Auth: shared bearer token (INTERNAL_API_TOKEN).
@@ -684,6 +688,7 @@ func Run(
 
 			org.GET("/invitations", m.RequireOrganization(), m.RequirePermission(models.PermManageTeam), h.GetPendingInvitations)
 			org.DELETE("/invitations/:id", m.RequireOrganization(), m.RequirePermission(models.PermManageTeam), h.CancelInvitation)
+			org.GET("/invitations/:id/link", m.RequireOrganization(), m.RequirePermission(models.PermManageTeam), h.GetInvitationLink)
 
 			org.POST("/transfer-ownership", m.RequireOrganization(), m.RequirePermission(models.PermTransferOwnership), h.TransferOwnership)
 

@@ -70,6 +70,7 @@ import ResetPasswordConfirmPage from './app/auth/reset-password/confirm/page';
 import OnboardingLayout from './app/onboarding/layout';
 import OnboardingPage from './app/onboarding/page';
 import SelectOrgPage from './app/select-org/page';
+import InviteAcceptPage from './app/invite/page';
 import AdminLayout from './app/app/admin/layout';
 import AdminPage from './app/app/admin/page';
 import AdminWorkersPage from './app/app/admin/workers/page';
@@ -179,6 +180,10 @@ const router = createBrowserRouter([
       {
         path: "select-org",
         element: <SelectOrgPage />,
+      },
+      {
+        path: "invite",
+        element: <InviteAcceptPage />,
       },
       {
         path: "app",

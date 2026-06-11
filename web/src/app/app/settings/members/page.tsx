@@ -32,6 +32,7 @@ import type OrganizationRole from "@/lib/api/models/app/organizations/Organizati
 import { useAppStore } from "@/stores";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
+import getInvitationLink from "@/lib/api/client/app/organizations/getInvitationLink";
 import RoleMultiSelect, { RoleChips } from "../_components/RoleMultiSelect";
 import {
     RolePill,
@@ -88,12 +89,15 @@ export default function MembersSettingsPage() {
             }
         });
     }
-    function copyInviteLink(invitationId: string) {
-        const url = `${window.location.origin}/select-org?invitation=${invitationId}`;
-        navigator.clipboard.writeText(url).then(
-            () => toast.success("Invite link copied"),
-            () => toast.error("Couldn't copy"),
-        );
+    async function copyInviteLink(invitationId: string) {
+        try {
+            const { token } = await getInvitationLink(invitationId);
+            const url = `${window.location.origin}/invite?token=${encodeURIComponent(token)}`;
+            await navigator.clipboard.writeText(url);
+            toast.success("Invite link copied");
+        } catch (e) {
+            toast.error(buildError(e as AppError));
+        }
     }
     async function changeRoles(memberId: string, roleIds: string[]) {
         try {
