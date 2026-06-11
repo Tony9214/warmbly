@@ -1,9 +1,13 @@
 package tasks
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -14,6 +18,24 @@ import (
 	"github.com/warmbly/warmbly/internal/pkg/tmplfuncs"
 	"github.com/warmbly/warmbly/internal/pkg/warmpersona"
 )
+
+// trackingLinkSecret signs click-tracking redirects so the tracking service
+// can refuse forged ?url= values (open-redirect abuse). Shared with the Rust
+// service via the same TRACKING_LINK_SECRET env; empty = legacy unsigned.
+var trackingLinkSecret = os.Getenv("TRACKING_LINK_SECRET")
+
+// signTrackingURL returns the hex HMAC-SHA256 tag binding a click redirect to
+// (taskID, originalURL), or "" when signing is not configured.
+func signTrackingURL(taskID uuid.UUID, originalURL string) string {
+	if trackingLinkSecret == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(trackingLinkSecret))
+	mac.Write([]byte(taskID.String()))
+	mac.Write([]byte("|"))
+	mac.Write([]byte(originalURL))
+	return hex.EncodeToString(mac.Sum(nil))
+}
 
 // Conversation represents a warmup conversation for AI generation
 type Conversation struct {
@@ -306,6 +328,9 @@ func WrapLinksForTracking(htmlBody string, taskID uuid.UUID, trackingDomain stri
 			trackingDomain,
 			taskID.String(),
 			url.QueryEscape(originalURL))
+		if sig := signTrackingURL(taskID, originalURL); sig != "" {
+			trackingURL += "&s=" + sig
+		}
 
 		return fmt.Sprintf(`href="%s"`, trackingURL)
 	})

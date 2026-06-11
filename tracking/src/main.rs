@@ -1,3 +1,4 @@
+mod abuse;
 mod aws;
 mod config;
 mod handlers;
@@ -49,7 +50,7 @@ async fn main() {
         }
     };
 
-    let state = AppState::new(kafka);
+    let state = AppState::new(kafka, &config);
 
     // Build router
     let app = Router::new()

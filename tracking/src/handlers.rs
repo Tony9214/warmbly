@@ -10,7 +10,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::abuse::{is_prefetch, is_scanner, verify_signature, RateLimiter};
+use crate::config::Config;
 use crate::kafka::{KafkaProducer, TrackingEvent};
+
+/// Raw (still-encoded) `?url=` values longer than this are rejected before
+/// decoding; decoded URLs are capped at the practical browser URL limit.
+const MAX_RAW_URL_LEN: usize = 4096;
+const MAX_URL_LEN: usize = 2048;
 
 // 1x1 transparent GIF (43 bytes)
 const TRANSPARENT_GIF: &[u8] = &[
@@ -29,10 +36,14 @@ pub struct AppState {
     /// Cache to deduplicate tracking events
     /// Each event type + task + IP is cached for 1 hour
     pub dedupe_cache: Arc<DedupeCache>,
+    /// Per-source request budget (anti-flood)
+    pub rate_limiter: Arc<RateLimiter>,
+    /// Shared secret for signed click redirects; None = legacy unsigned links
+    pub link_secret: Option<Arc<String>>,
 }
 
 impl AppState {
-    pub fn new(kafka: KafkaProducer) -> Self {
+    pub fn new(kafka: KafkaProducer, config: &Config) -> Self {
         // Create cache with:
         // - Max 100k entries
         // - TTL of 1 hour per entry
@@ -46,6 +57,8 @@ impl AppState {
         Self {
             kafka,
             dedupe_cache: Arc::new(dedupe_cache),
+            rate_limiter: Arc::new(RateLimiter::new(config.rate_limit_per_min)),
+            link_secret: config.link_secret.clone().map(Arc::new),
         }
     }
 
@@ -94,12 +107,13 @@ pub async fn track_open(
         return pixel_response();
     }
 
-    // Extract IP hash for deduplication
+    // Extract IP hash for deduplication + rate limiting
     let ip_hash = extract_ip_hash(&headers);
 
-    // Check for duplicate (same task + IP within 1 hour)
-    if state.is_duplicate("OPEN", &task_id, &ip_hash).await {
-        // Still return pixel but don't publish event
+    // Anti-flood: over-budget sources still get the pixel (real mail clients
+    // must never see a broken image), but nothing is published.
+    let source = ip_hash.clone().unwrap_or_else(|| "unknown".to_string());
+    if !state.rate_limiter.allow(&source).await {
         return pixel_response();
     }
 
@@ -108,6 +122,17 @@ pub async fn track_open(
         .get(header::USER_AGENT)
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
+
+    // Speculative fetches and scanners are served but never counted.
+    if is_prefetch(&headers) || is_scanner(user_agent.as_deref()) {
+        return pixel_response();
+    }
+
+    // Check for duplicate (same task + IP within 1 hour)
+    if state.is_duplicate("OPEN", &task_id, &ip_hash).await {
+        // Still return pixel but don't publish event
+        return pixel_response();
+    }
 
     // Publish event asynchronously (fire and forget)
     let kafka = state.kafka.clone();
@@ -138,6 +163,9 @@ pub async fn track_click(
     // Get original URL from query params first (we need to redirect regardless)
     let original_url = match params.get("url") {
         Some(url) => {
+            if url.len() > MAX_RAW_URL_LEN {
+                return (StatusCode::BAD_REQUEST, "URL too long").into_response();
+            }
             // Decode URL
             urlencoding::decode(url)
                 .map(|s| s.into_owned())
@@ -149,8 +177,29 @@ pub async fn track_click(
     };
 
     // Basic URL validation
+    if original_url.len() > MAX_URL_LEN {
+        return (StatusCode::BAD_REQUEST, "URL too long").into_response();
+    }
     if !original_url.starts_with("http://") && !original_url.starts_with("https://") {
         return (StatusCode::BAD_REQUEST, "Invalid URL").into_response();
+    }
+
+    // Signed-link enforcement: when the shared secret is configured, only
+    // redirects minted by our own send pipeline are honored. This is what
+    // stops the tracking domain from being abused as an open redirector.
+    if let Some(secret) = &state.link_secret {
+        if !verify_signature(secret, &task_id, &original_url, params.get("s").map(String::as_str)) {
+            return (StatusCode::NOT_FOUND, "Unknown link").into_response();
+        }
+    }
+
+    // Anti-flood: refuse the redirect outright over budget. Unlike the pixel
+    // there is no rendering concern, and serving unlimited redirects would
+    // keep the redirector attractive to abusers even with events suppressed.
+    let ip_hash = extract_ip_hash(&headers);
+    let source = ip_hash.clone().unwrap_or_else(|| "unknown".to_string());
+    if !state.rate_limiter.allow(&source).await {
+        return (StatusCode::TOO_MANY_REQUESTS, "Slow down").into_response();
     }
 
     // Validate task_id is a valid UUID format
@@ -158,9 +207,6 @@ pub async fn track_click(
         // Still redirect but don't track
         return Redirect::temporary(&original_url).into_response();
     }
-
-    // Extract IP hash for deduplication
-    let ip_hash = extract_ip_hash(&headers);
 
     // Create a unique key for this specific link click (task + URL + IP)
     let url_hash = {
@@ -172,17 +218,23 @@ pub async fn track_click(
 
     let dedupe_key = format!("{}:{}", task_id, url_hash);
 
-    // Check for duplicate (same task + URL + IP within 1 hour)
-    if state.is_duplicate("CLICK", &dedupe_key, &ip_hash).await {
-        // Still redirect but don't publish event
-        return Redirect::temporary(&original_url).into_response();
-    }
-
     // Extract metadata from request
     let user_agent = headers
         .get(header::USER_AGENT)
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
+
+    // Security gateways and link previewers follow every URL in a message;
+    // serve them the destination but never count a click.
+    if is_prefetch(&headers) || is_scanner(user_agent.as_deref()) {
+        return Redirect::temporary(&original_url).into_response();
+    }
+
+    // Check for duplicate (same task + URL + IP within 1 hour)
+    if state.is_duplicate("CLICK", &dedupe_key, &ip_hash).await {
+        // Still redirect but don't publish event
+        return Redirect::temporary(&original_url).into_response();
+    }
 
     // Publish event asynchronously (fire and forget)
     let kafka = state.kafka.clone();

@@ -31,6 +31,11 @@ pub struct Config {
     pub schema_registry_url: String,
     pub schema_registry_key: Option<String>,
     pub schema_registry_secret: Option<String>,
+    /// Shared secret for HMAC-signed click redirects. When set, unsigned or
+    /// mis-signed /t/c/ requests are refused (open-redirect protection).
+    pub link_secret: Option<String>,
+    /// Per-source request budget for both tracking endpoints (default 300/min).
+    pub rate_limit_per_min: u32,
 }
 
 impl Config {
@@ -119,6 +124,21 @@ impl Config {
             info!("Schema Registry authentication enabled");
         }
 
+        // Optional signed-link secret (must match the sender's TRACKING_LINK_SECRET)
+        let link_secret =
+            Self::get_secret_optional("TRACKING_LINK_SECRET", "tracking/link_secret", &secrets)
+                .await
+                .filter(|s| !s.is_empty());
+        if link_secret.is_some() {
+            info!("Signed click redirects enforced");
+        }
+
+        let rate_limit_per_min: u32 = env::var("TRACKING_RATE_LIMIT_PER_MIN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(300);
+        info!("Per-source rate limit: {}/min", rate_limit_per_min);
+
         Ok(Self {
             env: env_name,
             host,
@@ -130,6 +150,8 @@ impl Config {
             schema_registry_url,
             schema_registry_key,
             schema_registry_secret,
+            link_secret,
+            rate_limit_per_min,
         })
     }
 
@@ -179,6 +201,11 @@ impl Config {
             info!("Schema Registry authentication enabled");
         }
 
+        let link_secret = secrets
+            .get_optional("tracking/link_secret")
+            .await
+            .filter(|s| !s.is_empty());
+
         Ok(Self {
             env: env.to_string(),
             host,
@@ -190,6 +217,8 @@ impl Config {
             schema_registry_url,
             schema_registry_key,
             schema_registry_secret,
+            link_secret,
+            rate_limit_per_min: 300,
         })
     }
 
