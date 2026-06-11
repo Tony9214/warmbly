@@ -56,6 +56,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import PermissionButton from "@/components/ui/PermissionButton";
+import { usePermission } from "@/hooks/usePermission";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import { Label, NumberInput, TextInput } from "@/components/ui/field";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
@@ -416,10 +417,11 @@ export default function AutomationFlow({
     const update = useUpdateAutomation();
     const test = useTestAutomation();
 
-    // Collaboration: claim this automation as "editing" while the builder is
-    // open, so a teammate opening the same flow sees who's already in it
-    // before they start moving nodes around.
-    usePresenceResource(`automation:${automation.id}`, "editing");
+    // Collaboration: claim this automation while the builder is open so a
+    // teammate sees who's here. Editors show as "editing"; members without the
+    // integration permission (view-only) show as "viewing".
+    const canEditAutomation = usePermission("USE_INTEGRATIONS");
+    usePresenceResource(`automation:${automation.id}`, canEditAutomation ? "editing" : "viewing");
 
     const [name, setName] = React.useState(automation.name);
     const [enabled, setEnabled] = React.useState(automation.enabled);
