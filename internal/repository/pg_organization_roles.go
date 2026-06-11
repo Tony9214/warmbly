@@ -103,54 +103,81 @@ func (r *organizationRepository) UpdateRole(ctx context.Context, role *models.Or
 		return err
 	}
 
-	// role <> 'owner' is belt-and-suspenders: owner rows must never carry a
-	// role_id, but a stray one must still not let an edit demote the owner.
+	// Recompute the effective OR snapshot for every member assigned this
+	// role (they may hold others), excluding the owner.
 	if _, err := tx.Exec(ctx, `
-		UPDATE organization_members
-		SET role = $2, permissions = $3
-		WHERE role_id = $1 AND role <> 'owner'
-	`, role.ID, role.Name, role.Permissions); err != nil {
+		UPDATE organization_members om
+		SET permissions = COALESCE((
+			SELECT bit_or(r.permissions)
+			FROM organization_member_roles mr
+			JOIN organization_roles r ON r.id = mr.role_id
+			WHERE mr.organization_id = om.organization_id AND mr.user_id = om.user_id
+		), 0),
+		role = COALESCE((
+			SELECT r2.name FROM organization_member_roles mr2
+			JOIN organization_roles r2 ON r2.id = mr2.role_id
+			WHERE mr2.organization_id = om.organization_id AND mr2.user_id = om.user_id
+			ORDER BY r2.created_at ASC LIMIT 1
+		), om.role)
+		WHERE om.role <> 'owner' AND EXISTS (
+			SELECT 1 FROM organization_member_roles mx
+			WHERE mx.organization_id = om.organization_id
+			  AND mx.user_id = om.user_id AND mx.role_id = $1
+		)
+	`, role.ID); err != nil {
 		return err
 	}
 
-	// Pending invitations snapshot the role too; keep them in sync so an
-	// invite accepted after an edit lands with the role's CURRENT shape.
+	// Pending invitations snapshot the role name for display; keep in sync.
 	if _, err := tx.Exec(ctx, `
 		UPDATE organization_invitations
-		SET role = $2, permissions = $3
+		SET role = $2
 		WHERE role_id = $1
-	`, role.ID, role.Name, role.Permissions); err != nil {
+	`, role.ID, role.Name); err != nil {
 		return err
 	}
 
 	return tx.Commit(ctx)
 }
 
-// DeleteRole removes a custom role. Returns inUse=true (and deletes nothing)
-// while members or pending invitations still reference it. The guard lives
-// inside the DELETE itself, so a concurrent assignment can never race past
-// the check and strand a member on a phantom permission snapshot.
-func (r *organizationRepository) DeleteRole(ctx context.Context, orgID, roleID uuid.UUID) (bool, error) {
-	tag, err := r.db.Exec(ctx, `
-		DELETE FROM organization_roles rl
-		WHERE rl.organization_id = $1 AND rl.id = $2
-		  AND NOT EXISTS (SELECT 1 FROM organization_members om WHERE om.role_id = rl.id)
-		  AND NOT EXISTS (SELECT 1 FROM organization_invitations i WHERE i.role_id = rl.id)
-	`, orgID, roleID)
+// DeleteRole removes a role. Members keep their other roles; the join FK
+// cascades the assignment rows away and each affected member's effective
+// snapshot is recomputed in the same transaction. Roles are freely
+// deletable (a member left with no roles simply has no permissions).
+func (r *organizationRepository) DeleteRole(ctx context.Context, orgID, roleID uuid.UUID) error {
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
-	if tag.RowsAffected() > 0 {
-		return false, nil
-	}
+	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Nothing deleted: in use, or already gone (idempotent success).
-	var exists bool
-	if err := r.db.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM organization_roles WHERE organization_id = $1 AND id = $2)`,
-		orgID, roleID,
-	).Scan(&exists); err != nil {
-		return false, err
+	// Capture who holds this role before the cascade clears the rows.
+	rows, err := tx.Query(ctx,
+		`SELECT user_id FROM organization_member_roles WHERE role_id = $1`, roleID)
+	if err != nil {
+		return err
 	}
-	return exists, nil
+	var affected []uuid.UUID
+	for rows.Next() {
+		var uid uuid.UUID
+		if err := rows.Scan(&uid); err != nil {
+			rows.Close()
+			return err
+		}
+		affected = append(affected, uid)
+	}
+	rows.Close()
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM organization_roles WHERE organization_id = $1 AND id = $2`, orgID, roleID); err != nil {
+		return err
+	}
+	// FK ON DELETE CASCADE already removed the member/invitation role rows;
+	// recompute each affected member's snapshot.
+	for _, uid := range affected {
+		if err := recomputeMemberPermissions(ctx, tx, orgID, uid); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }

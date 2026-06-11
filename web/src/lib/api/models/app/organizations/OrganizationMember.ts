@@ -2,6 +2,12 @@
 // `role` and `permissions` come from the server; `permissions` is a
 // uint16 bitmask matching internal/models/organization_permission.go.
 
+export interface MemberRole {
+    id: string;
+    name: string;
+    color: string;
+}
+
 export default interface OrganizationMember {
     id: string;
     user_id: string;
@@ -13,6 +19,8 @@ export default interface OrganizationMember {
     role: string;
     // Set when the member is assigned a custom role (id into /organization/roles).
     role_id?: string;
+    // Full assigned role set (a member can hold several).
+    roles?: MemberRole[];
     permissions?: number;
     joined_at?: Date;
 }

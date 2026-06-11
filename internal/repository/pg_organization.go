@@ -39,7 +39,14 @@ type OrganizationRepository interface {
 	CountRoles(ctx context.Context, orgID uuid.UUID) (int, error)
 	CreateRole(ctx context.Context, role *models.OrganizationRole) error
 	UpdateRole(ctx context.Context, role *models.OrganizationRole) error
-	DeleteRole(ctx context.Context, orgID, roleID uuid.UUID) (bool, error)
+	DeleteRole(ctx context.Context, orgID, roleID uuid.UUID) error
+
+	// Multi-role assignment (pg_member_roles.go)
+	SetMemberRoles(ctx context.Context, orgID, userID uuid.UUID, roleIDs []uuid.UUID) error
+	GetMemberRoles(ctx context.Context, orgID, userID uuid.UUID) ([]models.MemberRole, error)
+	HydrateMemberRoles(ctx context.Context, orgID uuid.UUID, members []models.OrganizationMember) error
+	SetInvitationRoles(ctx context.Context, invitationID uuid.UUID, roleIDs []uuid.UUID) error
+	GetInvitationRoles(ctx context.Context, invitationID uuid.UUID) ([]uuid.UUID, error)
 	RemoveMember(ctx context.Context, orgID, userID uuid.UUID) error
 	GetMemberCount(ctx context.Context, orgID uuid.UUID) (int, error)
 

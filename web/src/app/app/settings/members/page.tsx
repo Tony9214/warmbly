@@ -32,7 +32,7 @@ import type OrganizationRole from "@/lib/api/models/app/organizations/Organizati
 import { useAppStore } from "@/stores";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
-import RoleSelect from "../_components/RoleSelect";
+import RoleMultiSelect, { RoleChips } from "../_components/RoleMultiSelect";
 import {
     RolePill,
     Section,
@@ -95,21 +95,19 @@ export default function MembersSettingsPage() {
             () => toast.error("Couldn't copy"),
         );
     }
-    function changeRole(memberId: string, next: OrganizationRole, email: string) {
-        confirm?.show(`Change ${email}'s role to ${next.name}?`, async () => {
-            try {
-                await toast.promise(
-                    updateRole.mutateAsync({ id: memberId, data: { role_id: next.id } }),
-                    {
-                        loading: "Saving…",
-                        success: `Role updated to ${next.name}`,
-                        error: (e: AppError) => buildError(e),
-                    },
-                );
-            } catch {
-                /* surfaced */
-            }
-        });
+    async function changeRoles(memberId: string, roleIds: string[]) {
+        try {
+            await toast.promise(
+                updateRole.mutateAsync({ id: memberId, data: { role_ids: roleIds } }),
+                {
+                    loading: "Saving…",
+                    success: "Roles updated",
+                    error: (e: AppError) => buildError(e),
+                },
+            );
+        } catch {
+            /* surfaced */
+        }
     }
 
     return (
@@ -125,12 +123,12 @@ export default function MembersSettingsPage() {
                     <InviteFlow
                         pending={invite.isPending}
                         customRoles={customRoles.data ?? []}
-                        onSubmit={async (emails, role) => {
+                        onSubmit={async (emails, roleIds) => {
                             let ok = 0;
                             let failed = 0;
                             for (const e of emails) {
                                 try {
-                                    await invite.mutateAsync({ email: e, role_id: role.id });
+                                    await invite.mutateAsync({ email: e, role_ids: roleIds });
                                     ok++;
                                 } catch {
                                     failed++;
@@ -198,11 +196,10 @@ export default function MembersSettingsPage() {
                                             </td>
                                             <td className="px-3">
                                                 {access.canManage && !isOwner ? (
-                                                    <RoleSelect
+                                                    <RoleMultiSelect
                                                         roles={customRoles.data ?? []}
-                                                        value={m.role_id}
-                                                        fallbackLabel={m.role}
-                                                        onChange={(next) => changeRole(m.user_id, next, email)}
+                                                        value={(m.roles ?? []).map((r) => r.id)}
+                                                        onChange={(ids) => changeRoles(m.user_id, ids)}
                                                         pending={updateRole.isPending}
                                                     />
                                                 ) : isOwner ? (
@@ -211,7 +208,7 @@ export default function MembersSettingsPage() {
                                                         Owner
                                                     </span>
                                                 ) : (
-                                                    <RolePill role={m.role} color={(customRoles.data ?? []).find((r) => r.id === m.role_id)?.color} />
+                                                    <RoleChips roles={m.roles ?? []} />
                                                 )}
                                             </td>
                                             <td className="px-3 font-mono text-[11px] text-slate-500 tabular-nums hidden md:table-cell">
@@ -338,18 +335,17 @@ function InviteFlow({
     pending,
     customRoles,
 }: {
-    onSubmit: (emails: string[], role: OrganizationRole) => Promise<void>;
+    onSubmit: (emails: string[], roleIds: string[]) => Promise<void>;
     pending: boolean;
     customRoles: OrganizationRole[];
 }) {
     const [chips, setChips] = React.useState<{ email: string; valid: boolean }[]>([]);
     const [draft, setDraft] = React.useState("");
-    const [roleId, setRoleId] = React.useState<string | null>(null);
+    const [roleIds, setRoleIds] = React.useState<string[]>([]);
     // Default to the seeded Viewer (least privilege), else the first role.
-    const selectedRole =
-        customRoles.find((r) => r.id === roleId) ??
-        customRoles.find((r) => r.name === "Viewer") ??
-        customRoles[0];
+    const defaultRole = customRoles.find((r) => r.name === "Viewer") ?? customRoles[0];
+    const effectiveRoleIds = roleIds.length > 0 ? roleIds : defaultRole ? [defaultRole.id] : [];
+    const selectedRoles = customRoles.filter((r) => effectiveRoleIds.includes(r.id));
     const SEPARATOR_RE = /[\s,;]+/;
 
     function commitDrafts(value: string) {
@@ -407,20 +403,26 @@ function InviteFlow({
                 icon: "⚠️",
             });
         }
-        if (!selectedRole) {
+        if (effectiveRoleIds.length === 0) {
             toast.error("Create a role first (Settings → Roles & access)");
             return;
         }
-        await onSubmit(valid, selectedRole);
+        await onSubmit(valid, effectiveRoleIds);
         setChips([]);
         setDraft("");
     }
 
     const totalCount = chips.length + (draft.trim() ? draft.trim().split(SEPARATOR_RE).filter(Boolean).length : 0);
-    const activeLabel = selectedRole?.name ?? "No roles yet";
+    const activeLabel =
+        selectedRoles.length === 0
+            ? "No roles yet"
+            : selectedRoles.map((r) => r.name).join(", ");
     const activeDescription =
-        selectedRole?.description ??
-        "Create a role under Settings → Roles & access before inviting members.";
+        selectedRoles.length === 0
+            ? "Create a role under Settings → Roles & access before inviting members."
+            : selectedRoles.length === 1
+                ? (selectedRoles[0].description || "This role's permissions apply to the invitee.")
+                : "The invitee gets the combined permissions of every selected role.";
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
@@ -483,12 +485,11 @@ function InviteFlow({
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <Label className="!mb-0 w-16">Role</Label>
-                    <RoleSelect
+                    <Label className="!mb-0 w-16">Roles</Label>
+                    <RoleMultiSelect
                         roles={customRoles}
-                        value={selectedRole?.id}
-                        onChange={(r) => setRoleId(r.id)}
-                        pending={false}
+                        value={effectiveRoleIds}
+                        onChange={setRoleIds}
                     />
                 </div>
 

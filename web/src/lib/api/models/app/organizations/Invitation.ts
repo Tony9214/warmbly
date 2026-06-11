@@ -6,6 +6,7 @@ export default interface Invitation {
     role: string;
     // Workspace role row this invitation lands in.
     role_id?: string
+    roles?: { id: string; name: string; color: string }[]
     invited_by: string
     created_at: Date
     expires_at: Date

@@ -38,9 +38,11 @@ type OrganizationMember struct {
 	OrganizationID uuid.UUID `json:"organization_id"`
 	UserID         uuid.UUID `json:"user_id"`
 	Role           string    `json:"role"`
-	// RoleID links to a custom organization_roles row; nil for built-in
-	// roles. Permissions stays the effective snapshot either way.
+	// RoleID is the member's primary role (first assigned), kept for legacy
+	// single-role consumers. Roles is the full assigned set; Permissions is
+	// the effective OR snapshot across all of them.
 	RoleID      *uuid.UUID             `json:"role_id,omitempty"`
+	Roles       []MemberRole           `json:"roles,omitempty"`
 	Permissions OrganizationPermission `json:"permissions"`
 	InvitedBy   *uuid.UUID             `json:"invited_by,omitempty"`
 	InvitedAt   time.Time              `json:"invited_at"`
@@ -74,6 +76,7 @@ type OrganizationInvitation struct {
 	Email          string                 `json:"email"`
 	Role           string                 `json:"role"`
 	RoleID         *uuid.UUID             `json:"role_id,omitempty"`
+	Roles          []MemberRole           `json:"roles,omitempty"`
 	Permissions    OrganizationPermission `json:"permissions"`
 	InvitedBy      uuid.UUID              `json:"invited_by"`
 	Token          string                 `json:"-"` // Never expose token in JSON
@@ -129,16 +132,60 @@ type UpdateOrganizationRequest struct {
 // InviteMemberRequest represents the request to invite a new member
 type InviteMemberRequest struct {
 	Email string `json:"email" binding:"required,email"`
-	// RoleID is the workspace role the invitee lands in (required: roles
-	// are data rows, there are no hardcoded role names anymore).
-	RoleID *uuid.UUID `json:"role_id,omitempty"`
+	// RoleIDs are the workspace roles the invitee lands in (at least one).
+	// RoleID stays accepted as a single-role shorthand.
+	RoleIDs []uuid.UUID `json:"role_ids,omitempty"`
+	RoleID  *uuid.UUID  `json:"role_id,omitempty"`
+}
+
+// Resolved returns the requested role ids, merging the single-role shorthand.
+func (r *InviteMemberRequest) Resolved() []uuid.UUID {
+	ids := append([]uuid.UUID(nil), r.RoleIDs...)
+	if r.RoleID != nil {
+		ids = append(ids, *r.RoleID)
+	}
+	return dedupeUUIDs(ids)
 }
 
 // UpdateMemberRequest represents the request to update a member's role/permissions
 type UpdateMemberRequest struct {
-	// RoleID is the only way to change a member's access (owner is a
-	// membership status, not a role).
-	RoleID *uuid.UUID `json:"role_id,omitempty"`
+	// RoleIDs replaces the member's assigned role set (at least one). RoleID
+	// stays accepted as a single-role shorthand.
+	RoleIDs []uuid.UUID `json:"role_ids,omitempty"`
+	RoleID  *uuid.UUID  `json:"role_id,omitempty"`
+}
+
+// Resolved returns the requested role ids, merging the single-role shorthand.
+func (r *UpdateMemberRequest) Resolved() []uuid.UUID {
+	ids := append([]uuid.UUID(nil), r.RoleIDs...)
+	if r.RoleID != nil {
+		ids = append(ids, *r.RoleID)
+	}
+	return dedupeUUIDs(ids)
+}
+
+func dedupeUUIDs(ids []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if id == uuid.Nil {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// MemberRole is a lightweight role reference for rendering a member's
+// assigned roles (chips) without the full permission payload.
+type MemberRole struct {
+	ID    uuid.UUID `json:"id"`
+	Name  string    `json:"name"`
+	Color string    `json:"color"`
 }
 
 // OrganizationRole is an org-scoped custom role: a named permission set

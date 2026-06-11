@@ -149,7 +149,8 @@ A few rules keep custom roles safe:
 - **Editing a role updates everyone assigned to it, immediately.** The editor shows how many members will be affected before you save.
 - **You can only grant permissions you hold yourself.** A manager with team access cannot mint a role stronger than their own and assign it to someone.
 - **Ownership transfer can never be part of a custom role.** It stays exclusive to the owner.
-- **A role in use cannot be deleted.** Reassign its members first, so nobody silently loses access.
+- **Members can hold several roles at once.** Their effective access is the combined (union) permissions of every role assigned to them.
+- **Deleting a role is always allowed.** It is removed from anyone holding it; their remaining roles still apply. A member left with no roles keeps their membership but has no permissions until reassigned.
 - Each workspace can have up to 25 roles in total (including the seeded ones).
 
 Custom roles apply everywhere permissions do: API access checks, dashboard visibility, and which realtime events a member's live dashboard receives.
