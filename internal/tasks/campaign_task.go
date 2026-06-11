@@ -117,6 +117,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		}
 		s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
 			BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+			OrgID:          campaignOrgID(campaign),
 			CampaignID:     campaign.ID.String(),
 			TaskID:         taskID.String(),
 			Status:         "active",
@@ -210,6 +211,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 						EventType: pubsub.EventCampaignCompleted,
 						UserID:    campaign.UserID,
 					},
+					OrgID:      campaignOrgID(campaign),
 					CampaignID: campaign.ID.String(),
 					Name:       campaign.Name,
 					Status:     "completed",
@@ -518,6 +520,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 			}
 			s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
 				BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+				OrgID:          campaignOrgID(campaign),
 				CampaignID:     campaign.ID.String(),
 				TaskID:         taskID.String(),
 				Status:         "failed",
@@ -622,8 +625,11 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 				break
 			}
 		}
-		s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
+		// EMAIL_SENT (org-scoped): the whole team sees the send + which
+		// lead/step fired, live in the campaign view.
+		s.streamingPublisher.PublishEmailSent(ctx, &pubsub.TaskProgressEvent{
 			BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+			OrgID:          campaignOrgID(campaign),
 			CampaignID:     campaign.ID.String(),
 			TaskID:         taskID.String(),
 			Status:         "completed",
@@ -924,4 +930,13 @@ func (s *tasksService) publishEmailSentEvent(
 	if err := s.eventsPublisher.PublishEmailSent(ctx, task, account, campaign, contact, sequence); err != nil {
 		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", task.ID.String()).Msg("Failed to publish email sent event")
 	}
+}
+
+// campaignOrgID returns the campaign's organization id for org-scoped
+// realtime events, or "" for legacy orgless rows.
+func campaignOrgID(campaign *Campaign) string {
+	if campaign == nil || campaign.OrganizationID == nil {
+		return ""
+	}
+	return campaign.OrganizationID.String()
 }

@@ -43,6 +43,19 @@ func (s *service) EmitCampaignEvent(ctx context.Context, orgID uuid.UUID, eventT
 	s.emit(ctx, orgID, eventType, data)
 }
 
+// ReplyRealtimePublisher pushes an org-scoped EMAIL_REPLIED pulse to the live
+// dashboard. Satisfied by *pubsub.StreamingPublisher; primitive-typed local
+// interface so this package stays decoupled from the pubsub event types.
+type ReplyRealtimePublisher interface {
+	PublishEmailReplied(ctx context.Context, orgID, userID, campaignID, contactID, contactEmail, sequenceID string)
+}
+
+// WireRealtime attaches the realtime publisher after construction. No-op if
+// never called: the emit site guards on nil.
+func (s *service) WireRealtime(p ReplyRealtimePublisher) {
+	s.realtime = p
+}
+
 // Notifier raises a per-user in-app notification (gated by the user's prefs).
 // Satisfied by *notification.Service. Local interface to avoid an import cycle;
 // wired post-construction in the consumer (where reply/bounce/complaint run).

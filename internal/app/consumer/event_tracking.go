@@ -246,13 +246,19 @@ func (tc *TrackingConsumer) publishTrackingEvent(ctx context.Context, task *repo
 		return
 	}
 
-	// Publish tracking event
+	// Publish tracking event (org-scoped: opens/clicks pulse live for the
+	// whole team, not just the campaign owner)
+	var orgID string
+	if campaign.OrganizationID != nil {
+		orgID = campaign.OrganizationID.String()
+	}
 	trackingPayload := &pubsub.TrackingEventPayload{
 		BaseEvent: pubsub.BaseEvent{
 			EventType: eventType,
 			UserID:    campaign.UserID,
 			Timestamp: time.Now(),
 		},
+		OrgID:        orgID,
 		CampaignID:   task.CampaignID.String(),
 		ContactID:    task.ContactID.String(),
 		ContactEmail: contactEmail,

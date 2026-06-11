@@ -79,6 +79,8 @@ type Service interface {
 	WireDispatcher(d EventDispatcher)
 	// WireNotifier attaches the in-app notification gate (reply/bounce/complaint).
 	WireNotifier(n Notifier)
+	// WireRealtime attaches the org-scoped EMAIL_REPLIED realtime pulse.
+	WireRealtime(p ReplyRealtimePublisher)
 
 	// EmitCampaignEvent dispatches a campaign event (e.g. from a sequence
 	// "notify" action node) to customer webhooks and wired integrations.
@@ -112,6 +114,7 @@ type service struct {
 	warmupService        warmupapp.Service
 	dispatcher           EventDispatcher
 	notifier             Notifier
+	realtime             ReplyRealtimePublisher
 }
 
 func NewService(
@@ -788,6 +791,12 @@ func (s *service) ProcessIncomingReply(ctx context.Context, emailAccountID uuid.
 		if !replyclassify.IsAutomated(replyResult.Class) {
 			_ = s.campaignProgressRepo.RecordEmailReplied(ctx, cID, ctID, sID)
 			_ = s.repo.MarkVariantEvent(ctx, cID, ctID, string(models.DeliverabilityEventReply))
+
+			// Live org-wide pulse: the team sees the reply land on the
+			// campaign without a refresh.
+			if s.realtime != nil && account.OrganizationID != nil {
+				s.realtime.PublishEmailReplied(ctx, account.OrganizationID.String(), account.UserID, cID.String(), ctID.String(), sender, sID.String())
+			}
 		}
 
 		// INSTANT reply trigger: if the contact's CURRENT step has a reply_* intent

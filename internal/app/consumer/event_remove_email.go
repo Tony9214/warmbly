@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 
+	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
 )
 
@@ -26,6 +27,21 @@ func (s *JobsService) HandleRemoveEmail(ctx context.Context, e *models.JobEventR
 
 	if s.UniboxRepository != nil {
 		_ = s.UniboxRepository.Delete(ctx, e.UserID, e.ID)
+	}
+
+	// Tell open dashboards the row is gone (org-scoped so every teammate's
+	// unibox drops it live, not just the mailbox owner's).
+	if s.StreamingPublisher != nil {
+		var orgID string
+		if account, err := s.EmailRepository.GetByID(ctx, e.EmailID); err == nil && account != nil && account.OrganizationID != nil {
+			orgID = account.OrganizationID.String()
+		}
+		s.StreamingPublisher.PublishEmailDeleted(ctx, &pubsub.EmailInboxEvent{
+			BaseEvent:      pubsub.BaseEvent{UserID: e.UserID.String()},
+			OrgID:          orgID,
+			EmailAccountID: e.EmailID.String(),
+			MessageID:      e.ID.String(),
+		})
 	}
 	return nil
 }

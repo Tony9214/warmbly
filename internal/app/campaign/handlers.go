@@ -51,6 +51,7 @@ func (s *campaignService) Create(ctx context.Context, userID string, orgID *uuid
 				EventType: pubsub.EventCampaignCreated,
 				UserID:    userID,
 			},
+			OrgID:      modelOrgID(orgID),
 			CampaignID: resp.ID.String(),
 			Name:       resp.Name,
 			Status:     resp.Status,
@@ -218,6 +219,7 @@ func (s *campaignService) StartCampaign(ctx context.Context, orgID uuid.UUID, ca
 				EventType: pubsub.EventCampaignStarted,
 				UserID:    campaign.UserID,
 			},
+			OrgID:      modelOrgID(campaign.OrganizationID),
 			CampaignID: cID.String(),
 			Name:       campaign.Name,
 			Status:     "active",
@@ -341,6 +343,7 @@ func (s *campaignService) StopCampaign(ctx context.Context, orgID uuid.UUID, cam
 				EventType: pubsub.EventCampaignPaused,
 				UserID:    campaign.UserID,
 			},
+			OrgID:      modelOrgID(campaign.OrganizationID),
 			CampaignID: cID.String(),
 			Name:       campaign.Name,
 			Status:     "paused",
@@ -464,4 +467,12 @@ func (s *campaignService) VerifyCampaignTrackingDomain(ctx context.Context, orgI
 		return nil, errx.InternalError()
 	}
 	return status, nil
+}
+
+// modelOrgID renders an optional org UUID for org-scoped realtime events.
+func modelOrgID(orgID *uuid.UUID) string {
+	if orgID == nil {
+		return ""
+	}
+	return orgID.String()
 }

@@ -869,6 +869,7 @@ func main() {
 		// here too).
 		notificationService = notification.NewService(repository.NewNotificationRepository(primaryDB.Pool), streamingPublisher)
 		advancedService.WireNotifier(notificationService)
+		advancedService.WireRealtime(streamingPublisher)
 		emailSender := tasks.NewEmailSender(emailRepostory, eventsPublisher)
 		tasksService = tasks.NewService(
 			tasksClient,

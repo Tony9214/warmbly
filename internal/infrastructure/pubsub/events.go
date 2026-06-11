@@ -53,6 +53,9 @@ const (
 	EventEmailOpened  EventType = "EMAIL_OPENED"
 	EventEmailClicked EventType = "EMAIL_CLICKED"
 
+	// A human reply landed for a campaign contact (org-scoped pulse).
+	EventEmailReplied EventType = "EMAIL_REPLIED"
+
 	// Task progress events
 	EventTaskProgress EventType = "TASK_PROGRESS"
 
@@ -88,6 +91,7 @@ type BaseEvent struct {
 // EmailInboxEvent for new/updated emails
 type EmailInboxEvent struct {
 	BaseEvent
+	OrgID          string `json:"org_id,omitempty"`
 	EmailAccountID string `json:"email_account_id"`
 	MessageID      string `json:"message_id"`
 	ThreadID       string `json:"thread_id,omitempty"`
@@ -120,6 +124,7 @@ type BulkOperationEvent struct {
 // CampaignEvent for campaign changes
 type CampaignEvent struct {
 	BaseEvent
+	OrgID      string                `json:"org_id,omitempty"`
 	CampaignID string                `json:"campaign_id"`
 	Name       string                `json:"name,omitempty"`
 	Status     string                `json:"status,omitempty"`
@@ -139,6 +144,7 @@ type CampaignProgressData struct {
 // AccountEvent for email account status changes
 type AccountEvent struct {
 	BaseEvent
+	OrgID          string `json:"org_id,omitempty"`
 	EmailAccountID string `json:"email_account_id"`
 	Email          string `json:"email"`
 	Provider       string `json:"provider,omitempty"`
@@ -164,6 +170,7 @@ type WarmupStatsEvent struct {
 // TrackingEventPayload for email open/click tracking events
 type TrackingEventPayload struct {
 	BaseEvent
+	OrgID        string `json:"org_id,omitempty"`
 	CampaignID   string `json:"campaign_id"`
 	ContactID    string `json:"contact_id,omitempty"`
 	ContactEmail string `json:"contact_email,omitempty"`
@@ -174,6 +181,7 @@ type TrackingEventPayload struct {
 // TaskProgressEvent for detailed campaign task progress
 type TaskProgressEvent struct {
 	BaseEvent
+	OrgID          string `json:"org_id,omitempty"`
 	CampaignID     string `json:"campaign_id"`
 	TaskID         string `json:"task_id"`
 	Status         string `json:"status"` // pending, active, completed, failed
@@ -375,7 +383,7 @@ func (p *StreamingPublisher) PublishAccountEvent(ctx context.Context, event *Acc
 // owning user's realtime stream. The dashboard treats it as an ACCOUNT event
 // and refreshes account status live; the explicit state fields let consumers
 // react without a refetch.
-func (p *StreamingPublisher) PublishAccountHealth(ctx context.Context, userID, accountID, email, prevState, newState, reason string) {
+func (p *StreamingPublisher) PublishAccountHealth(ctx context.Context, orgID, userID, accountID, email, prevState, newState, reason string) {
 	if p == nil || p.client == nil {
 		return
 	}
@@ -384,6 +392,7 @@ func (p *StreamingPublisher) PublishAccountHealth(ctx context.Context, userID, a
 			EventType: EventAccountHealthChanged,
 			UserID:    userID,
 		},
+		OrgID:          orgID,
 		EmailAccountID: accountID,
 		Email:          email,
 		Status:         newState,
@@ -561,6 +570,48 @@ func (p *StreamingPublisher) PublishTaskProgress(ctx context.Context, event *Tas
 
 	if err := p.client.Publish(ctx, TopicCampaignUpdate, event, attrs); err != nil {
 		// Log error but don't fail
+	}
+}
+
+// PublishEmailReplied emits an org-scoped EMAIL_REPLIED pulse when a human
+// reply lands for a campaign contact. Primitive-typed so app packages can wire
+// it through a narrow local interface.
+func (p *StreamingPublisher) PublishEmailReplied(ctx context.Context, orgID, userID, campaignID, contactID, contactEmail, sequenceID string) {
+	if p == nil || p.client == nil {
+		return
+	}
+	p.PublishTrackingEvent(ctx, &TrackingEventPayload{
+		BaseEvent: BaseEvent{
+			EventType: EventEmailReplied,
+			UserID:    userID,
+		},
+		OrgID:        orgID,
+		CampaignID:   campaignID,
+		ContactID:    contactID,
+		ContactEmail: contactEmail,
+		SequenceID:   sequenceID,
+	})
+}
+
+// PublishEmailSent emits an org-scoped EMAIL_SENT pulse when a campaign email
+// goes out, carrying the same rich payload as task progress so the dashboard
+// can show which contact/step just fired without a refetch.
+func (p *StreamingPublisher) PublishEmailSent(ctx context.Context, event *TaskProgressEvent) {
+	if p == nil || p.client == nil {
+		return
+	}
+
+	event.EventType = EventEmailSent
+	event.Timestamp = time.Now()
+
+	attrs := map[string]string{
+		"user_id":     event.UserID,
+		"campaign_id": event.CampaignID,
+		"event_type":  string(EventEmailSent),
+	}
+
+	if err := p.client.Publish(ctx, TopicCampaignUpdate, event, attrs); err != nil {
+		// Best-effort: realtime is a nicety, not a requirement.
 	}
 }
 

@@ -229,6 +229,8 @@ func main() {
 	// created.
 	notificationService := notification.NewService(repository.NewNotificationRepository(primaryDB.Pool), streamingPublisher)
 	advancedService.WireNotifier(notificationService)
+	// Reply pulses fire in THIS process too (inbox ingest classifies replies).
+	advancedService.WireRealtime(streamingPublisher)
 
 	// Events publisher — wraps the existing Kafka producer in an EventBus,
 	// wraps Avrov2 in a Codec. Once EVENTBUS_PROVIDER=nats is exercised in

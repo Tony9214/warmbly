@@ -132,11 +132,16 @@ func (s *emailService) publishAccountEvent(ctx context.Context, eventType pubsub
 		return
 	}
 
+	var orgID string
+	if account.OrganizationID != nil {
+		orgID = account.OrganizationID.String()
+	}
 	s.streamingPublisher.PublishAccountEvent(ctx, &pubsub.AccountEvent{
 		BaseEvent: pubsub.BaseEvent{
 			EventType: eventType,
 			UserID:    account.UserID,
 		},
+		OrgID:          orgID,
 		EmailAccountID: account.ID.String(),
 		Email:          account.Email,
 		Provider:       account.Provider,
