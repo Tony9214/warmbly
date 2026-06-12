@@ -263,6 +263,10 @@ const (
 	IntegrationActionCreateDeal    IntegrationAction = "warmbly.create_deal"
 	IntegrationActionMoveDealStage IntegrationAction = "warmbly.move_deal_stage"
 	IntegrationActionUnsubscribe   IntegrationAction = "warmbly.unsubscribe"
+	// IntegrationActionLabelEmail applies unibox conversation labels (categories)
+	// to the thread the event belongs to. Reply triggers carry the thread_id +
+	// mailbox owner; on other triggers (no thread) it is a logged no-op.
+	IntegrationActionLabelEmail IntegrationAction = "warmbly.label_email"
 	// IntegrationActionRunAutomation launches another automation's flow, passing
 	// the current event data through. Bounded by the chain-depth guard so it
 	// cannot loop forever or fan out unbounded compute.
@@ -275,7 +279,7 @@ func IsNativeAction(a IntegrationAction) bool {
 	switch a {
 	case IntegrationActionAddTag, IntegrationActionRemoveTag, IntegrationActionCreateTask,
 		IntegrationActionCreateDeal, IntegrationActionMoveDealStage, IntegrationActionUnsubscribe,
-		IntegrationActionRunAutomation:
+		IntegrationActionRunAutomation, IntegrationActionLabelEmail:
 		return true
 	default:
 		return false
