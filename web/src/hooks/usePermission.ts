@@ -26,7 +26,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
     VIEW_ANALYTICS: "View analytics",
     SEND_CAMPAIGNS: "Send campaigns",
     ACCESS_UNIBOX: "Use unified inbox",
-    MANAGE_SEQUENCES: "Manage sequences",
+    MANAGE_SEQUENCES: "Manage steps",
     MANAGE_SETTINGS: "Manage settings",
     VIEW_CAMPAIGNS: "View campaigns",
     VIEW_CONTACTS: "View contacts",

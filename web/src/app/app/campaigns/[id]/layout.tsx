@@ -24,7 +24,7 @@ import { usePresenceResource } from "@/hooks/PresenceProvider";
 const TABS = [
     { label: "Overview", path: "", Icon: BarChart3Icon },
     { label: "Leads", path: "/leads", Icon: UsersIcon },
-    { label: "Steps", path: "/sequences", Icon: ListChecksIcon },
+    { label: "Steps", path: "/steps", Icon: ListChecksIcon },
     { label: "Schedule", path: "/schedule", Icon: CalendarIcon },
     { label: "Settings", path: "/preferences", Icon: Settings2Icon },
 ] as const;

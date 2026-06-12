@@ -39,11 +39,11 @@ export interface PermissionDef {
 
 export const PERMISSION_CATALOG: PermissionDef[] = [
     // Data
-    { key: "VIEW_CAMPAIGNS",     bit: PERMISSION_BITS.VIEW_CAMPAIGNS,     label: "View campaigns",    description: "Read campaign settings, sequences, and analytics.",      category: "data" },
+    { key: "VIEW_CAMPAIGNS",     bit: PERMISSION_BITS.VIEW_CAMPAIGNS,     label: "View campaigns",    description: "Read campaign settings, steps, and analytics.",      category: "data" },
     { key: "MANAGE_CAMPAIGNS",   bit: PERMISSION_BITS.MANAGE_CAMPAIGNS,   label: "Manage campaigns",  description: "Create, edit and archive campaigns.",                     category: "data" },
     { key: "VIEW_CONTACTS",      bit: PERMISSION_BITS.VIEW_CONTACTS,      label: "View contacts",     description: "Read contacts, segments and tags.",                       category: "data" },
     { key: "MANAGE_CONTACTS",    bit: PERMISSION_BITS.MANAGE_CONTACTS,    label: "Manage contacts",   description: "Create, edit and delete contacts.",                       category: "data" },
-    { key: "MANAGE_SEQUENCES",   bit: PERMISSION_BITS.MANAGE_SEQUENCES,   label: "Manage sequences",  description: "Edit step content + spacing inside a campaign.",          category: "data" },
+    { key: "MANAGE_SEQUENCES",   bit: PERMISSION_BITS.MANAGE_SEQUENCES,   label: "Manage steps",  description: "Edit step content + spacing inside a campaign.",          category: "data" },
     { key: "VIEW_ANALYTICS",     bit: PERMISSION_BITS.VIEW_ANALYTICS,     label: "View analytics",    description: "See deliverability + engagement reports.",                category: "data" },
     { key: "USE_INTEGRATIONS",   bit: PERMISSION_BITS.USE_INTEGRATIONS,   label: "Use integrations",  description: "Push contacts and deals to connected CRMs and tools.",    category: "data" },
     // People

@@ -74,7 +74,7 @@ const PARAM_ROUTES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/app\/campaigns\/[^/]+\/leads$/, "Campaign leads"],
   [/^\/app\/campaigns\/[^/]+\/preferences$/, "Campaign settings"],
   [/^\/app\/campaigns\/[^/]+\/schedule$/, "Campaign schedule"],
-  [/^\/app\/campaigns\/[^/]+\/sequences$/, "Campaign sequences"],
+  [/^\/app\/campaigns\/[^/]+\/steps$/, "Campaign steps"],
   [/^\/app\/campaigns\/[^/]+$/, "Campaign"],
   [/^\/app\/admin\/workers\/[^/]+$/, "Worker"],
 ];

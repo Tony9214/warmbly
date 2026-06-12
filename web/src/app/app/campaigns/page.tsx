@@ -324,7 +324,7 @@ export default function CampaignsPage() {
                         ? "Loading…"
                         : campaignsData.isError
                             ? "Failed to load"
-                            : `${campaigns.length} ${campaigns.length === 1 ? "sequence" : "sequences"}`
+                            : `${campaigns.length} ${campaigns.length === 1 ? "campaign" : "campaigns"}`
                 }
             >
                 <TopbarAction
