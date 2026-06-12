@@ -14,6 +14,7 @@
 // - Nothing connects automatically; a step with no outgoing path ends in STOP.
 
 import React from "react";
+import { createPortal } from "react-dom";
 import {
     ArrowRightLeftIcon,
     BellOffIcon,
@@ -317,8 +318,7 @@ function StepNode({ data, selected }: NodeProps) {
                 <ZapIcon className="w-3 h-3" />
                 On reply
             </button>
-            {/* Right dot = start an "if" branch; bottom dot = plain "go there". */}
-            <Handle type="source" id="if" position={Position.Right} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-amber-400" />
+            {/* One output dot: drag it out to add the next step, action, or condition. */}
             <Handle type="source" id="s" position={Position.Bottom} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-sky-500" />
         </div>
     );
@@ -472,14 +472,55 @@ function ActionNode({ data, selected }: NodeProps) {
                     Ends here
                 </div>
             ) : null}
-            {/* Same handles as a step: right = "if" branch, bottom = "go there". */}
-            <Handle type="source" id="if" position={Position.Right} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-amber-400" />
+            {/* One output dot: drag it out to add the next step, action, or condition. */}
             <Handle type="source" id="s" position={Position.Bottom} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-sky-500" />
         </div>
     );
 }
 
-const nodeTypes = { step: StepNode, ifcond: IfNode, stop: StopNode, action: ActionNode };
+type ConditionNodeData = { label: string; endsHere: boolean; orphan: boolean; onDelete: () => void };
+
+// A Condition node is a pure router (no email, no action): it just branches.
+// Drag from it to add conditional paths, and chain Condition nodes to build
+// nested decision trees. Persisted as a no-op step (kind "wait").
+function ConditionNode({ data, selected }: NodeProps) {
+    const d = data as ConditionNodeData;
+    return (
+        <div
+            className={`w-[200px] rounded-xl border bg-white shadow-sm transition-shadow duration-200 hover:shadow-md ${
+                d.orphan ? "border-dashed border-amber-300" : "border-amber-200"
+            } ${selected ? "border-sky-400 ring-2 ring-sky-100" : ""}`}
+        >
+            <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-2 !border-white !bg-slate-300" />
+            <div className="flex items-center gap-2 rounded-t-xl border-b border-amber-200/60 bg-gradient-to-r from-amber-50/80 to-white px-2.5 py-1.5">
+                <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-600 ring-1 ring-amber-200/70">
+                    <GitBranchIcon className="w-3 h-3" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-slate-800">
+                    {d.label || "Condition"}
+                </span>
+                <button
+                    type="button"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        d.onDelete();
+                    }}
+                    title="Delete condition"
+                    className="nodrag inline-flex size-5 shrink-0 items-center justify-center rounded text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                >
+                    <Trash2Icon className="w-3 h-3" />
+                </button>
+            </div>
+            <div className="px-2.5 py-1.5 text-[10.5px] text-slate-400">
+                {d.endsHere ? "Drag out to add the branches" : "Routes by your conditions"}
+            </div>
+            {/* One output dot: drag out to add each conditional path. */}
+            <Handle type="source" id="s" position={Position.Bottom} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-sky-500" />
+        </div>
+    );
+}
+
+const nodeTypes = { step: StepNode, ifcond: IfNode, stop: StopNode, action: ActionNode, condition: ConditionNode };
 
 // Convergent edge.
 // Several branches can route to the same next step (many in -> one node). They
@@ -561,6 +602,9 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
     const [selectedEdge, setSelectedEdge] = React.useState<{ sourceId: string; branchId: string } | null>(null);
     const [editStepId, setEditStepId] = React.useState<string | null>(null);
     const [adding, setAdding] = React.useState(false);
+    // When you drag a node's dot out to empty canvas, we open a create menu at
+    // the drop point instead of immediately making an email step.
+    const [dragCreate, setDragCreate] = React.useState<{ x: number; y: number; sourceId: string } | null>(null);
     // While dragging a node, kill the position transition so the drag is 1:1.
     const [dragging, setDragging] = React.useState(false);
     // Editing the sequence flow (add a step, drag a node, draw a branch) needs
@@ -796,28 +840,48 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         },
         [adding, sequences.length, seqById, createSequence, saveBranches],
     );
-    // Drag from an IF block's side to empty -> new step + new if-branch.
-    const addIfToNew = React.useCallback(
+    // Drag out -> new action step of the chosen type, connected unconditionally.
+    const dragOutAction = React.useCallback(
+        async (sourceId: string, type: SequenceActionType) => {
+            if (adding || sequences.length >= MAX_STEPS) return;
+            const src = seqById.get(sourceId);
+            setAdding(true);
+            try {
+                const created = (await createSequence.mutateAsync()) as Sequence;
+                await updateSequence(campaignId, created.id, { kind: "action", action: defaultActionFor(type) });
+                await saveBranches(sourceId, [
+                    ...(src?.conditions?.branches ?? []),
+                    { branch_id: newBranchId(), target_step_id: created.id, conditions: [] },
+                ]);
+            } catch {
+                toast.error("Couldn't add the action");
+            } finally {
+                setAdding(false);
+            }
+        },
+        [adding, sequences.length, seqById, createSequence, campaignId, saveBranches],
+    );
+    // Drag out -> a Condition router node (no-op step) you branch from. Chain
+    // these to build nested decision trees.
+    const dragOutCondition = React.useCallback(
         async (sourceId: string) => {
             if (adding || sequences.length >= MAX_STEPS) return;
             const src = seqById.get(sourceId);
             setAdding(true);
             try {
                 const created = (await createSequence.mutateAsync()) as Sequence;
-                const branch: SequenceBranch = {
-                    branch_id: newBranchId(),
-                    target_step_id: created.id,
-                    conditions: [{ field: "opened", operator: "within_days", value: 3 }],
-                };
-                await saveBranches(sourceId, [...(src?.conditions?.branches ?? []), branch]);
-                openCondition(sourceId, branch.branch_id);
+                await updateSequence(campaignId, created.id, { kind: "wait", name: "Condition" });
+                await saveBranches(sourceId, [
+                    ...(src?.conditions?.branches ?? []),
+                    { branch_id: newBranchId(), target_step_id: created.id, conditions: [] },
+                ]);
             } catch {
-                toast.error("Couldn't add the step");
+                toast.error("Couldn't add the condition");
             } finally {
                 setAdding(false);
             }
         },
-        [adding, sequences.length, seqById, createSequence, saveBranches, openCondition],
+        [adding, sequences.length, seqById, createSequence, campaignId, saveBranches],
     );
     // "On reply" on a step: create a new action step + a reply branch that fires
     // it the moment the contact replies, then open the branch so you can pick the
@@ -943,6 +1007,20 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         const allNodes: Node[] = sequences.map((s, i) => {
             const branches = s.conditions?.branches ?? [];
             const isAction = s.kind !== "email";
+            if (s.kind === "wait") {
+                // Pure router: a Condition node that only branches.
+                return {
+                    id: s.id,
+                    type: "condition",
+                    position: { x: 0, y: 0 },
+                    data: {
+                        label: s.name?.trim() || "Condition",
+                        endsHere: branches.length === 0,
+                        orphan: !reachable.has(s.id),
+                        onDelete: () => deleteStepRef.current(s.id),
+                    } satisfies ConditionNodeData,
+                };
+            }
             if (isAction) {
                 const at = s.action?.type ?? "add_tag";
                 const fallback = ACTION_META[at]?.label ?? "Action";
@@ -1270,9 +1348,13 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                 preventScrolling={false}
                 minZoom={0.2}
                 maxZoom={1.75}
-                onConnectEnd={(_, state) => {
+                onConnectEnd={(event, state) => {
                     const from = state.fromNode;
                     if (!from || state.toNode) return;
+                    if (!canEditFlow) {
+                        showPermissionDenied("MANAGE_SEQUENCES");
+                        return;
+                    }
                     const handle = state.fromHandle?.id;
                     if (isIfId(from.id)) {
                         const m = ifMetaRef.current[from.id];
@@ -1281,10 +1363,13 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         // step reached unconditionally ("always / just go there").
                         if (handle === "out") retargetToNew(m.sourceId, m.branchId);
                         else dragOutStep(m.sourceId);
-                    } else if (handle === "if") {
-                        addIfToNew(from.id);
                     } else {
-                        dragOutStep(from.id);
+                        // Open the create menu at the drop point: email / action / condition.
+                        const pt =
+                            "changedTouches" in event && event.changedTouches.length
+                                ? event.changedTouches[0]
+                                : (event as MouseEvent);
+                        setDragCreate({ x: pt.clientX, y: pt.clientY, sourceId: from.id });
                     }
                 }}
                 onReconnect={(oldEdge, conn) => {
@@ -1360,11 +1445,26 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         canvas (touch users remove edges via the editor's Disconnect). */}
                     <div className="hidden md:flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/95 px-3 py-1.5 text-[11px] text-slate-500 shadow-sm">
                         <span className="text-slate-400">
-                            step: bottom dot = go there, right (amber) dot = add an “if” · IF block: right dot = then, bottom (gray) dot = else / just go there · click a line then press Delete to remove it · no match = stop
+                            drag a node’s bottom dot onto another node to connect, or onto empty space to pick what to add (email, action, or a condition) · click a line to set its condition · add Condition nodes to branch, and chain them for nested trees · click a line then press Delete to remove it · no match = stop
                         </span>
                     </div>
                 </Panel>
             </ReactFlow>
+
+            {dragCreate && (
+                <DragCreateMenu
+                    x={dragCreate.x}
+                    y={dragCreate.y}
+                    onClose={() => setDragCreate(null)}
+                    onPick={(choice) => {
+                        const sid = dragCreate.sourceId;
+                        setDragCreate(null);
+                        if (choice === "email") dragOutStep(sid);
+                        else if (choice === "condition") dragOutCondition(sid);
+                        else dragOutAction(sid, choice);
+                    }}
+                />
+            )}
 
             {selected && (
                 <ConnectionEditor
@@ -1792,6 +1892,69 @@ const ADD_ACTION_OPTIONS: { type: SequenceActionType; label: string }[] = [
     { type: "notify", label: "Notify (webhook)" },
     { type: "run_automation", label: "Run automation" },
 ];
+
+type CreateChoice = "email" | "condition" | SequenceActionType;
+
+// The menu that opens where you drop a dragged connection on empty canvas:
+// pick what the next node is (email, an action, or a condition router).
+function DragCreateMenu({
+    x,
+    y,
+    onPick,
+    onClose,
+}: {
+    x: number;
+    y: number;
+    onPick: (choice: CreateChoice) => void;
+    onClose: () => void;
+}) {
+    const vw = typeof window !== "undefined" ? window.innerWidth : x + 240;
+    const vh = typeof window !== "undefined" ? window.innerHeight : y + 360;
+    const left = Math.max(8, Math.min(x, vw - 232));
+    const top = Math.max(8, Math.min(y, vh - 360));
+    return createPortal(
+        <>
+            <div className="fixed inset-0 z-40" onMouseDown={onClose} />
+            <div
+                className="fixed z-50 max-h-[340px] w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl"
+                style={{ left, top }}
+                role="menu"
+            >
+                <div className="px-2 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Add</div>
+                <CreateRow icon={<MailIcon className="w-3.5 h-3.5 text-sky-600" />} label="Email step" onClick={() => onPick("email")} />
+                <CreateRow icon={<GitBranchIcon className="w-3.5 h-3.5 text-amber-600" />} label="Condition (branch)" onClick={() => onPick("condition")} />
+                <div className="my-1 h-px bg-slate-100" />
+                <div className="px-2 pt-0.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Actions</div>
+                {ADD_ACTION_OPTIONS.map((o) => {
+                    const meta = ACTION_META[o.type];
+                    const Icon = meta?.Icon ?? ZapIcon;
+                    return (
+                        <CreateRow
+                            key={o.type}
+                            icon={<Icon className={`w-3.5 h-3.5 ${meta?.tint ?? "text-slate-500"}`} />}
+                            label={o.label}
+                            onClick={() => onPick(o.type)}
+                        />
+                    );
+                })}
+            </div>
+        </>,
+        document.body,
+    );
+}
+
+function CreateRow({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12.5px] text-slate-700 transition-colors hover:bg-slate-100"
+        >
+            {icon}
+            {label}
+        </button>
+    );
+}
 
 function AddNodeMenu({
     onAddEmail,
