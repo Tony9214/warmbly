@@ -47,6 +47,7 @@ You can apply a saved template to a step, or save the current step as a reusable
 A step does not have to send an email. From the add menu (the chevron next to "Add step"), or by switching a step's type in its editor, a step can instead perform an action when a contact reaches it:
 
 - Add tag or remove tag
+- Label email (applies inbox labels to the conversation the contact replied on)
 - Create task
 - Create deal or move deal stage
 - Unsubscribe the contact
@@ -54,6 +55,10 @@ A step does not have to send an email. From the add menu (the chevron next to "A
 - Run automation
 
 Action steps connect the same way as email steps and are most useful at the end of a reply branch (for example: on a positive reply, create a deal and notify your team).
+
+<Callout type="info">
+**Label email** is reply-only. It labels the conversation the contact replied on with the same labels you use by hand in the unibox, so it does something only once they have replied. Place it on a reply branch (if replied / positive / negative); on any other path it is a no-op because there is no thread to label.
+</Callout>
 
 ## Wait and spacing
 

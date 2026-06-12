@@ -115,12 +115,13 @@ These act directly on the event's contact and need no external connection. Pick 
 | --- | --- |
 | Add a tag | Adds a contact category (tag) |
 | Remove a tag | Removes a contact category (tag) |
+| Label the email | Applies inbox labels to the conversation the contact replied on |
 | Create a task | Creates a task assigned to the workspace owner |
 | Create a deal | Creates a CRM deal in a chosen pipeline and stage |
 | Move the deal stage | Moves the contact's most recent open deal in a pipeline |
 | Unsubscribe the contact | Unsubscribes the contact (works when the event carries a campaign) |
 
-**Move the deal stage** acts on the contact's most recent open deal in the chosen pipeline. If they have no open deal there, nothing happens. **Unsubscribe the contact** only applies when the triggering event carries a campaign, such as a reply, bounce, or unsubscribe.
+**Move the deal stage** acts on the contact's most recent open deal in the chosen pipeline. If they have no open deal there, nothing happens. **Unsubscribe the contact** only applies when the triggering event carries a campaign, such as a reply, bounce, or unsubscribe. **Label the email** only works on a **Reply received** automation: it labels the conversation that reply belongs to (the same labels you set by hand in the unibox), so it needs an inbox thread to act on.
 
 ### Templating action text
 
