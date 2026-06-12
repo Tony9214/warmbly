@@ -22,6 +22,14 @@ type Organization struct {
 	DeletionScheduledAt  *time.Time `json:"deletion_scheduled_at,omitempty"`
 	DeletionScheduledFor *time.Time `json:"deletion_scheduled_for,omitempty"`
 
+	// Team presence privacy (org-wide, admin-controlled). When
+	// PresenceShowOnline is false the realtime service tracks no member, so
+	// nobody can see who is online. When PresenceShowActivity is false, online
+	// is still shown but the viewing/editing detail is stripped. The realtime
+	// service reads both on channel join.
+	PresenceShowOnline   bool `json:"presence_show_online"`
+	PresenceShowActivity bool `json:"presence_show_activity"`
+
 	// Joined data
 	Owner *User `json:"owner,omitempty"`
 }
@@ -127,6 +135,9 @@ type CreateOrganizationRequest struct {
 type UpdateOrganizationRequest struct {
 	Name *string `json:"name,omitempty"`
 	Slug *string `json:"slug,omitempty"`
+	// Org-wide team presence privacy toggles (admin-controlled).
+	PresenceShowOnline   *bool `json:"presence_show_online,omitempty"`
+	PresenceShowActivity *bool `json:"presence_show_activity,omitempty"`
 }
 
 // InviteMemberRequest represents the request to invite a new member

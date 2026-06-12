@@ -147,6 +147,12 @@ func (h *Handler) UpdateOrganization(c *gin.Context) {
 
 	h.auditOrg(c, models.AuditActionUpdate, models.AuditEntityOrganization, orgID, nil, nil)
 
+	// A presence privacy change re-gates connected sockets live (re-track /
+	// untrack / strip activity) rather than waiting for members to reconnect.
+	if req.PresenceShowOnline != nil || req.PresenceShowActivity != nil {
+		h.StreamingPublisher.PublishPresencePolicy(c.Request.Context(), *orgID, org.PresenceShowOnline, org.PresenceShowActivity)
+	}
+
 	c.JSON(http.StatusOK, org)
 }
 

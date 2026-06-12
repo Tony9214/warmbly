@@ -79,6 +79,11 @@ const (
 	EventMeetingBooked      EventType = "MEETING_BOOKED"
 	EventMeetingRescheduled EventType = "MEETING_RESCHEDULED"
 	EventMeetingCanceled    EventType = "MEETING_CANCELED"
+
+	// Org-wide presence privacy policy changed. The realtime OrgChannel handles
+	// this internally (re-track / untrack / strip activity) to apply the new
+	// policy live; it is not forwarded to web clients.
+	EventPresencePolicyUpdated EventType = "PRESENCE_POLICY_UPDATED"
 )
 
 // BaseEvent contains common fields for all events
@@ -480,6 +485,40 @@ func (p *StreamingPublisher) PublishAutomationEvent(ctx context.Context, orgID, 
 		"user_id":    actorID.String(),
 		"org_id":     orgID.String(),
 		"event_type": string(eventType),
+	}
+	if err := p.client.Publish(ctx, TopicUserEvents, event, attrs); err != nil {
+		// Best-effort: realtime is a nicety, not a requirement.
+	}
+}
+
+// PresencePolicyEvent tells the realtime service to re-gate team presence for an
+// org live, so a privacy toggle applies without waiting for members to reconnect.
+// Handled inside the OrgChannel (not pushed to web clients).
+type PresencePolicyEvent struct {
+	BaseEvent
+	OrgID                string `json:"org_id"`
+	PresenceShowOnline   bool   `json:"presence_show_online"`
+	PresenceShowActivity bool   `json:"presence_show_activity"`
+}
+
+// PublishPresencePolicy emits an org-scoped presence policy change so connected
+// OrgChannels re-evaluate tracking immediately.
+func (p *StreamingPublisher) PublishPresencePolicy(ctx context.Context, orgID uuid.UUID, showOnline, showActivity bool) {
+	if p == nil || p.client == nil || orgID == uuid.Nil {
+		return
+	}
+	event := &PresencePolicyEvent{
+		BaseEvent: BaseEvent{
+			EventType: EventPresencePolicyUpdated,
+			Timestamp: time.Now(),
+		},
+		OrgID:                orgID.String(),
+		PresenceShowOnline:   showOnline,
+		PresenceShowActivity: showActivity,
+	}
+	attrs := map[string]string{
+		"org_id":     orgID.String(),
+		"event_type": string(EventPresencePolicyUpdated),
 	}
 	if err := p.client.Publish(ctx, TopicUserEvents, event, attrs); err != nil {
 		// Best-effort: realtime is a nicety, not a requirement.

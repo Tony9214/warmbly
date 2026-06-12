@@ -282,6 +282,12 @@ func (s *organizationService) Update(ctx context.Context, orgID uuid.UUID, req *
 		}
 		org.Slug = req.Slug
 	}
+	if req.PresenceShowOnline != nil {
+		org.PresenceShowOnline = *req.PresenceShowOnline
+	}
+	if req.PresenceShowActivity != nil {
+		org.PresenceShowActivity = *req.PresenceShowActivity
+	}
 
 	org.UpdatedAt = time.Now()
 
