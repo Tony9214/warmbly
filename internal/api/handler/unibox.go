@@ -203,28 +203,28 @@ func (h *Handler) GetUniboxEmail(c *gin.Context) {
 }
 
 func (h *Handler) GetUniboxThread(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
+	// Org-scoped: the inbox list is org-wide, so the thread view must be too.
+	// Otherwise a non-owner member sees the conversation in the list but an
+	// empty thread when they open it — the messages are keyed to the mailbox
+	// owner's user_id, not theirs.
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
 		errx.Handle(c, errx.ErrUser)
 		return
 	}
 
 	// Check if organization can use unibox
 	if h.FeatureGateService != nil {
-		orgID := middleware.GetOrganizationID(c)
-		if orgID != nil {
-			canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
-			if !canUse {
-				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires an active trial or paid subscription"))
-				return
-			}
+		canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
+		if !canUse {
+			errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires an active trial or paid subscription"))
+			return
 		}
 	}
 
-	// email_id is optional. When omitted, the thread is read across
-	// every mailbox the user owns — the natural unified-inbox view
-	// where the caller only knows the thread.
+	// email_id is optional. When omitted, the thread is read across every
+	// mailbox in the organization — the natural unified-inbox view where the
+	// caller only knows the thread.
 	var eid uuid.UUID
 	emailID := c.Query("email")
 	if emailID == "" {
@@ -252,7 +252,7 @@ func (h *Handler) GetUniboxThread(c *gin.Context) {
 
 	resp, xerr := h.UniboxService.GetByThread(
 		c.Request.Context(),
-		uid, eid,
+		*orgID, eid,
 		threadID, limit, cursor,
 	)
 	if xerr != nil {

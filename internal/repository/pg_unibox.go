@@ -26,7 +26,7 @@ type UniboxRepository interface {
 	UpdateEntry(ctx context.Context, userID, emailID, id uuid.UUID, e *UpdateUniboxEntry) error
 	GetIncoming(ctx context.Context, userID uuid.UUID, limit int, cursor string) (*models.MailSearchResult, error)
 	GetByID(ctx context.Context, userID, id uuid.UUID) (*models.EmailMessageStoreData, error)
-	GetByThread(ctx context.Context, userID, emailID uuid.UUID, threadID string, limit int, cursor string) (*models.MailSearchResult, error)
+	GetByThread(ctx context.Context, orgID, emailID uuid.UUID, threadID string, limit int, cursor string) (*models.MailSearchResult, error)
 	GetBySender(ctx context.Context, userID uuid.UUID, sender string, limit int, cursor string) (*models.MailSearchResult, error)
 	Search(ctx context.Context, orgID, userID uuid.UUID, params *models.MailSearchParams) (*models.MailSearchResult, error)
 	GetUnseenCount(ctx context.Context, orgID uuid.UUID, emailAccountID *uuid.UUID) (int64, error)
@@ -203,16 +203,19 @@ func (r *uniboxRepository) GetByID(ctx context.Context, userID, id uuid.UUID) (*
 }
 
 // GetByThread returns the messages in a thread. emailID is optional —
-// pass uuid.Nil to span every mailbox the user owns (the typical
-// unified-inbox case where the caller only knows the thread).
-func (r *uniboxRepository) GetByThread(ctx context.Context, userID, emailID uuid.UUID, threadID string, limit int, cursor string) (*models.MailSearchResult, error) {
+// pass uuid.Nil to span every mailbox in the organization (the typical
+// unified-inbox case where the caller only knows the thread). Scoped by org,
+// not user_id, so any member with unibox access sees the whole conversation,
+// matching the org-scoped inbox list.
+func (r *uniboxRepository) GetByThread(ctx context.Context, orgID, emailID uuid.UUID, threadID string, limit int, cursor string) (*models.MailSearchResult, error) {
 	query := fmt.Sprintf(`
 		SELECT %s
 		FROM unibox_emails
-		WHERE user_id = $1 AND thread_id = $2
+		WHERE email_id IN (SELECT id FROM email_accounts WHERE organization_id = $1)
+		  AND thread_id = $2
 	`, strings.Join(mailFieldsPreview, ", "))
 
-	args := []any{userID, threadID}
+	args := []any{orgID, threadID}
 	argPos := 3
 
 	if emailID != uuid.Nil {

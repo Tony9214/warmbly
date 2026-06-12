@@ -31,7 +31,7 @@ type UniboxService interface {
 	) (*models.EmailMessage, *errx.Error)
 	GetByThread(
 		ctx context.Context,
-		userID, emailID uuid.UUID,
+		orgID, emailID uuid.UUID,
 		threadID, limit, cursor string,
 	) (*models.MailSearchResult, *errx.Error)
 	GetUnseenCount(
