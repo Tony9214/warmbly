@@ -11,7 +11,8 @@ import type ABVariant from "@/lib/api/models/app/campaigns/ABVariant";
 import type { ABVariantStats } from "@/lib/api/models/app/campaigns/ABVariant";
 import { Label, TextInput, NumberInput } from "@/components/ui/field";
 import { Toggle } from "../preferences/components/CampaignPreferenceBoolBox";
-import RichTextEditor, { VariableMenu } from "./RichTextEditor";
+import EmailContentEditor from "./EmailContentEditor";
+import { htmlToPlain } from "./emailPreview";
 import {
     useCampaignABVariants,
     useCampaignABAnalysis,
@@ -23,20 +24,9 @@ import { useConfirm } from "@/hooks/context/confirm";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 
-const VARIABLES = ["{{.FirstName}}", "{{.LastName}}", "{{.Email}}", "{{.Company}}", "{{.Phone}}"];
 const LETTERS = ["B", "C", "D", "E", "F"];
 // Must match abControlWeight in internal/app/advanced/service.go.
 const CONTROL_WEIGHT = 100;
-
-function htmlToPlain(html: string): string {
-    const withBreaks = html
-        .replace(/<\s*br\s*\/?>/gi, "\n")
-        .replace(/<\/\s*(p|div|h[1-6]|li|tr)\s*>/gi, "\n");
-    if (typeof document === "undefined") return withBreaks.replace(/<[^>]+>/g, "");
-    const tmp = document.createElement("div");
-    tmp.innerHTML = withBreaks;
-    return (tmp.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
-}
 
 export default function StepVariants({
     campaignId,
@@ -299,26 +289,14 @@ function VariantCard({
                     </button>
                 </div>
             </div>
-            <div>
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <Label className="mb-0">Subject</Label>
-                    <VariableMenu variables={VARIABLES} onPick={(v) => setSubject(subject + v)} />
-                </div>
-                <TextInput
-                    value={subject}
-                    onChange={setSubject}
-                    placeholder="Leave blank to reuse the step's subject"
-                />
-            </div>
-            <div>
-                <Label>Body</Label>
-                <RichTextEditor
-                    html={bodyHtml}
-                    onChange={setBodyHtml}
-                    variables={VARIABLES}
-                    placeholder="Leave blank to reuse the step's body"
-                />
-            </div>
+            <EmailContentEditor
+                subject={subject}
+                onSubjectChange={setSubject}
+                bodyHtml={bodyHtml}
+                onBodyChange={(html) => setBodyHtml(html)}
+                subjectPlaceholder="Leave blank to reuse the step's subject"
+                bodyPlaceholder="Leave blank to reuse the step's body"
+            />
         </div>
     );
 }
