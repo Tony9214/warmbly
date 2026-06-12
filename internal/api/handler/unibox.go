@@ -331,9 +331,10 @@ func (h *Handler) SetUniboxThreadLabels(c *gin.Context) {
 }
 
 func (h *Handler) UniboxMarkSeen(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
+	// Org-scoped: the inbox + unread count are org-wide, so marking read must be
+	// too, otherwise a non-owner member can never clear the shared unread badge.
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
 		errx.Handle(c, errx.ErrUser)
 		return
 	}
@@ -344,7 +345,7 @@ func (h *Handler) UniboxMarkSeen(c *gin.Context) {
 		return
 	}
 
-	resp, xerr := h.UniboxService.MarkSeenBulk(c.Request.Context(), uid, &data)
+	resp, xerr := h.UniboxService.MarkSeenBulk(c.Request.Context(), *orgID, &data)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return

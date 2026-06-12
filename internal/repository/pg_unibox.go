@@ -31,7 +31,7 @@ type UniboxRepository interface {
 	Search(ctx context.Context, orgID, userID uuid.UUID, params *models.MailSearchParams) (*models.MailSearchResult, error)
 	GetUnseenCount(ctx context.Context, orgID uuid.UUID, emailAccountID *uuid.UUID) (int64, error)
 	MarkSeen(ctx context.Context, userID, id uuid.UUID, seen bool) error
-	MarkSeenBulk(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, seen bool) error
+	MarkSeenBulk(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID, seen bool) error
 	Delete(ctx context.Context, userID, id uuid.UUID) error
 
 	// Snooze: per (user, thread). UpsertSnooze adopts the new
@@ -460,17 +460,18 @@ func (r *uniboxRepository) MarkSeen(ctx context.Context, userID, id uuid.UUID, s
 	return err
 }
 
-func (r *uniboxRepository) MarkSeenBulk(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, seen bool) error {
+func (r *uniboxRepository) MarkSeenBulk(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID, seen bool) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if len(ids) == 1 {
-		return r.MarkSeen(ctx, userID, ids[0], seen)
-	}
-
+	// Org-scoped so any member with unibox access can clear the shared inbox's
+	// unread state, not only the mailbox owner. The unread count is org-wide, so
+	// a user_id filter would leave the badge stuck for non-owner members. ANY($3)
+	// also covers the single-id case.
 	_, err := r.db.Exec(ctx,
-		`UPDATE unibox_emails SET seen = $1, updated_at = NOW() WHERE user_id = $2 AND id = ANY($3)`,
-		seen, userID, ids,
+		`UPDATE unibox_emails SET seen = $1, updated_at = NOW()
+		 WHERE id = ANY($3) AND email_id IN (SELECT id FROM email_accounts WHERE organization_id = $2)`,
+		seen, orgID, ids,
 	)
 	return err
 }

@@ -18,12 +18,12 @@ func (s *uniboxService) MarkSeen(ctx context.Context, userID, emailID uuid.UUID,
 	return nil
 }
 
-func (s *uniboxService) MarkSeenBulk(ctx context.Context, userID uuid.UUID, data *models.MarkSeen) (*models.MarkSeen, *errx.Error) {
+func (s *uniboxService) MarkSeenBulk(ctx context.Context, orgID uuid.UUID, data *models.MarkSeen) (*models.MarkSeen, *errx.Error) {
 	if len(data.EmailIDs) > 500 {
 		return nil, errx.ErrSeenMax
 	}
 
-	if err := s.uniboxRepository.MarkSeenBulk(ctx, userID, data.EmailIDs, data.Seen); err != nil {
+	if err := s.uniboxRepository.MarkSeenBulk(ctx, orgID, data.EmailIDs, data.Seen); err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.InternalError()
 	}
