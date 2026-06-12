@@ -8,4 +8,8 @@ export default interface Organization {
     // Caller's effective permission bitmask in this org (custom-role aware).
     permissions?: number
     created_at: Date
+    // Org-wide team presence privacy (admin-controlled). When false, the
+    // realtime service stops broadcasting that signal to teammates.
+    presence_show_online?: boolean
+    presence_show_activity?: boolean
 }

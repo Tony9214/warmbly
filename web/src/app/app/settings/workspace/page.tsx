@@ -11,6 +11,8 @@ import { Row, Section, SectionShell, ToggleRow } from "../_components/SectionShe
 import SaveStatus from "../_components/SaveStatus";
 import { useAutosave } from "@/hooks/useAutosave";
 import { useRegisterUnsaved } from "@/hooks/context/unsaved";
+import useCurrentOrganization from "@/lib/api/hooks/app/organizations/useCurrentOrganization";
+import { usePermission } from "@/hooks/usePermission";
 
 export default function WorkspaceSettingsPage() {
     const currentOrg = useAppStore((s) => s.currentOrganization);
@@ -19,6 +21,29 @@ export default function WorkspaceSettingsPage() {
     const uploadOrgAvatar = useUploadOrgAvatar();
     const removeOrgAvatar = useDeleteOrgAvatar();
     const updateOrg = useUpdateOrganization();
+
+    // Team presence privacy. The full org (with the flags) comes from
+    // /organization/current; toggling saves immediately and the realtime
+    // service re-gates everyone live. Only admins with Manage settings can edit.
+    const orgQuery = useCurrentOrganization();
+    const canManageSettings = usePermission("MANAGE_SETTINGS");
+    const [showOnline, setShowOnline] = React.useState(true);
+    const [showActivity, setShowActivity] = React.useState(true);
+    React.useEffect(() => {
+        if (!orgQuery.data) return;
+        setShowOnline(orgQuery.data.presence_show_online ?? true);
+        setShowActivity(orgQuery.data.presence_show_activity ?? true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orgQuery.data?.presence_show_online, orgQuery.data?.presence_show_activity]);
+
+    const onToggleOnline = (next: boolean) => {
+        setShowOnline(next);
+        updateOrg.mutate({ presence_show_online: next });
+    };
+    const onToggleActivity = (next: boolean) => {
+        setShowActivity(next);
+        updateOrg.mutate({ presence_show_activity: next });
+    };
 
     // Auto-save the workspace name ~700ms after typing stops. An empty name is
     // never persisted; the field just stays unsaved until it's valid again.
@@ -115,6 +140,26 @@ export default function WorkspaceSettingsPage() {
                 <ToggleRow
                     label="Track opens by default"
                     description="Inserts a 1×1 pixel. Disable for highest deliverability."
+                />
+            </Section>
+
+            <Section
+                eyebrow="Team presence"
+                description="What members can see about each other in real time. Applies to everyone in the workspace."
+            >
+                <ToggleRow
+                    label="Show who's online"
+                    description="Display the live avatar stack of members currently in the dashboard. Off hides all online presence from teammates."
+                    checked={showOnline}
+                    onChange={onToggleOnline}
+                    disabled={!canManageSettings}
+                />
+                <ToggleRow
+                    label="Show activity"
+                    description="Let teammates see what someone is viewing, editing, or replying to. Off keeps online status but hides the detail."
+                    checked={showActivity && showOnline}
+                    onChange={onToggleActivity}
+                    disabled={!canManageSettings || !showOnline}
                 />
             </Section>
 

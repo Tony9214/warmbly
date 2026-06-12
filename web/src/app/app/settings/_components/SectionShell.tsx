@@ -146,19 +146,22 @@ export function Row({
 export function Toggle({
     on,
     onChange,
+    disabled,
 }: {
     on: boolean;
     onChange: (next: boolean) => void;
+    disabled?: boolean;
 }) {
     return (
         <button
             type="button"
-            onClick={() => onChange(!on)}
+            onClick={() => !disabled && onChange(!on)}
+            disabled={disabled}
             role="switch"
             aria-checked={on}
             className={`relative h-4 w-7 rounded-full transition-colors shrink-0 after:absolute after:-inset-3 after:content-[''] ${
                 on ? "bg-slate-900" : "bg-slate-200"
-            }`}
+            } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
         >
             <span
                 className={`absolute top-0.5 left-0.5 size-3 rounded-full bg-white transition-transform ${
@@ -178,15 +181,31 @@ export function ToggleRow({
     label,
     description,
     defaultOn,
+    checked,
+    onChange,
+    disabled,
 }: {
     label: string;
     description: string;
     defaultOn?: boolean;
+    /** Controlled value. When provided, the row is controlled and `onChange` fires on toggle. */
+    checked?: boolean;
+    onChange?: (next: boolean) => void;
+    disabled?: boolean;
 }) {
-    const [on, setOn] = React.useState(!!defaultOn);
+    const [internal, setInternal] = React.useState(!!defaultOn);
+    const controlled = checked !== undefined;
+    const on = controlled ? !!checked : internal;
     return (
         <Row label={label} description={description}>
-            <Toggle on={on} onChange={setOn} />
+            <Toggle
+                on={on}
+                disabled={disabled}
+                onChange={(next) => {
+                    if (!controlled) setInternal(next);
+                    onChange?.(next);
+                }}
+            />
         </Row>
     );
 }
