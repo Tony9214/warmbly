@@ -52,6 +52,12 @@ type UniboxRepository interface {
 	// set for one thread.
 	SetThreadLabels(ctx context.Context, userID uuid.UUID, threadID string, categoryIDs []uuid.UUID) ([]models.MiniCategory, error)
 	ListThreadLabels(ctx context.Context, userID uuid.UUID, threadID string) ([]models.MiniCategory, error)
+	// AddThreadLabels attaches labels to a thread WITHOUT removing existing ones
+	// (additive; for automation/step "label email" actions). LatestThreadIDForContact
+	// finds the user's most recent conversation with an address, so a campaign
+	// step that knows the contact but not the thread can still label it.
+	AddThreadLabels(ctx context.Context, userID uuid.UUID, threadID string, categoryIDs []uuid.UUID) error
+	LatestThreadIDForContact(ctx context.Context, userID uuid.UUID, email string) (string, error)
 }
 
 type uniboxRepository struct {
@@ -649,6 +655,63 @@ func (r *uniboxRepository) ListThreadLabels(ctx context.Context, userID uuid.UUI
 		out = append(out, mc)
 	}
 	return out, nil
+}
+
+// AddThreadLabels additively attaches labels to a thread (never removes any),
+// so an automation/step action can tag a conversation without clobbering labels
+// a teammate set by hand. Only the user's own categories are attached
+// (SELECT-guarded), mirroring SetThreadLabels; a bogus id is silently dropped.
+func (r *uniboxRepository) AddThreadLabels(ctx context.Context, userID uuid.UUID, threadID string, categoryIDs []uuid.UUID) error {
+	if threadID == "" || len(categoryIDs) == 0 {
+		return nil
+	}
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO unibox_thread_labels (user_id, thread_id, category_id)
+		SELECT $1, $2, c.id
+		FROM categories c
+		WHERE c.user_id = $1 AND c.id = ANY($3)
+		ON CONFLICT (user_id, thread_id, category_id) DO NOTHING
+	`, userID, threadID, categoryIDs)
+	return err
+}
+
+// LatestThreadIDForContact returns the thread id of the most recent conversation
+// where the address SENT a message into the user's unibox (an inbound reply), or
+// "" when there is none. Matching on from_addr (not to_addr) is deliberate: the
+// "label email" action only makes sense once the contact has replied, so a
+// contact that never responded resolves to "" and the action is a clean no-op.
+// Addresses are raw header forms ("Name <a@b.com>" or a bare address); the EXACT
+// address is extracted (the text inside angle brackets, else the trimmed value)
+// and compared case-insensitively — never a substring contains, so a@b.com does
+// not match xa@b.com or a@b.com.evil.
+func (r *uniboxRepository) LatestThreadIDForContact(ctx context.Context, userID uuid.UUID, email string) (string, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", nil
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT thread_id
+		FROM unibox_emails
+		WHERE user_id = $1 AND thread_id <> ''
+		  AND EXISTS (
+			SELECT 1 FROM unnest(from_addr) a
+			WHERE lower(coalesce(substring(a from '<([^>]*)>'), btrim(a))) = lower($2)
+		  )
+		ORDER BY internal_date DESC
+		LIMIT 1
+	`, userID, email)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var threadID string
+		if err := rows.Scan(&threadID); err != nil {
+			return "", err
+		}
+		return threadID, nil
+	}
+	return "", rows.Err()
 }
 
 // ── Snoozes ────────────────────────────────────────────────────────────
