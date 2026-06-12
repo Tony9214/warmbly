@@ -1,14 +1,5 @@
 ---
 title: Campaigns
-description: Create campaigns and sequences, manage senders, ramp and tracking settings, A/B variants, attachments, preflight, and start or stop sends.
-icon: Megaphone
----
-```
-
-Let me confirm the Search `q`/`folder` query params and that `Search` always returns the `CampaignsResult` envelope (data + Pagination). Already confirmed from handler and model. Now writing the final output.
-
----
-title: Campaigns
 description: Create campaigns and sequences, manage senders, A/B variants, attachments, ramp and tracking settings, preflight checks, and start or stop sends.
 icon: Megaphone
 ---
@@ -916,5 +907,6 @@ Generate outreach copy with the AI writing assistant. Gated to paid and free-tri
   "credits_remaining": 248,
   "model": "claude-..."
 }
+```
 
 When the organization is out of credits the endpoint returns `402` with `code: "insufficient_credits"` and the standard envelope. A depleted balance is checked before any provider call, so no completion is ever burned on a `402`.
