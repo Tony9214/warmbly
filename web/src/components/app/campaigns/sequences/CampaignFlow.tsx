@@ -2099,43 +2099,57 @@ function AddNodeMenu({
             >
                 <ChevronDownIcon className="w-3.5 h-3.5" />
             </button>
-            {open && (
-                <div className="absolute left-0 top-full z-30 mt-1 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            onAddEmail();
-                            setOpen(false);
+            <AnimatePresence>
+                {open && (
+                    <motion.div
+                        key="add-node-menu"
+                        className="absolute left-0 top-full z-30 mt-1 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]"
+                        style={{ transformOrigin: "top left", willChange: "transform, opacity" }}
+                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.97, y: -2 }}
+                        transition={{
+                            opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
+                            scale: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+                            y: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
                         }}
-                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] font-medium text-slate-800 transition-colors hover:bg-slate-100"
                     >
-                        <MailIcon className="w-3.5 h-3.5 text-sky-600" />
-                        Send email
-                        <span className="ml-auto rounded bg-slate-100 px-1 py-px text-[9px] uppercase tracking-[0.1em] text-slate-400">
-                            default
-                        </span>
-                    </button>
-                    <div className="my-1 border-t border-slate-100" />
-                    {ADD_ACTION_OPTIONS.map((o) => {
-                        const meta = ACTION_META[o.type];
-                        const Icon = meta.Icon;
-                        return (
-                            <button
-                                key={o.type}
-                                type="button"
-                                onClick={() => {
-                                    onAddAction(o.type);
-                                    setOpen(false);
-                                }}
-                                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-slate-700 transition-colors hover:bg-slate-100"
-                            >
-                                <Icon className={`w-3.5 h-3.5 ${meta.tint}`} />
-                                {o.label}
-                            </button>
-                        );
-                    })}
-                </div>
-            )}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                onAddEmail();
+                                setOpen(false);
+                            }}
+                            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] font-medium text-slate-800 transition-colors hover:bg-slate-100"
+                        >
+                            <MailIcon className="w-3.5 h-3.5 text-sky-600" />
+                            Send email
+                            <span className="ml-auto rounded bg-slate-100 px-1 py-px text-[9px] uppercase tracking-[0.1em] text-slate-400">
+                                default
+                            </span>
+                        </button>
+                        <div className="my-1 border-t border-slate-100" />
+                        {ADD_ACTION_OPTIONS.map((o) => {
+                            const meta = ACTION_META[o.type];
+                            const Icon = meta.Icon;
+                            return (
+                                <button
+                                    key={o.type}
+                                    type="button"
+                                    onClick={() => {
+                                        onAddAction(o.type);
+                                        setOpen(false);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-slate-700 transition-colors hover:bg-slate-100"
+                                >
+                                    <Icon className={`w-3.5 h-3.5 ${meta.tint}`} />
+                                    {o.label}
+                                </button>
+                            );
+                        })}
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
