@@ -46,6 +46,8 @@ The org channel carries team presence for the collaboration features in the dash
 
 Clients update their own activity by pushing a `presence:update` event with `{ "page": "/app/unibox", "resource": "thread:<id>", "action": "viewing" }`. Valid actions are `viewing`, `editing`, `replying`, and `idle`.
 
+Presence is subject to the workspace's privacy settings. An admin can turn off "show who's online", in which case no member is tracked and the presence map stays empty, or "show activity", in which case members appear online but their `page`, `resource`, and `action` are stripped. These are enforced server-side, so the hidden detail never reaches any subscriber. Changing the setting re-gates connected sockets immediately and emits the corresponding `presence_diff`.
+
 API-key connections receive presence events but are never tracked as presences themselves: machines are not teammates.
 
 ## Rate limits and connection caps

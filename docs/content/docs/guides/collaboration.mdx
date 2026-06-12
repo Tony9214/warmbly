@@ -34,6 +34,15 @@ Beyond presence, the dashboard reflects changes from any source in real time:
 
 Events are permission-aware: a member without inbox access never receives unibox events, and billing events only reach members who can manage billing. See [Team roles](/guides/team-roles/) for the permission model.
 
+## Presence privacy
+
+Presence is a workspace setting, controlled by an admin under Settings, Workspace, Team presence. Two independent toggles decide how much members see about each other:
+
+- **Show who's online** turns the live avatar stack and online indicators on or off for the whole workspace. With it off, no one can see who has the dashboard open.
+- **Show activity** keeps online status but hides what each person is doing, so teammates no longer see "viewing", "editing", or "replying to" a specific record. Online stays visible; only the detail is hidden.
+
+The toggles are enforced by the realtime service, so when a control is off the hidden signal is never sent to teammates, not merely hidden in the interface. Changes apply immediately to everyone connected, with no reload. Editing the settings requires the Manage settings permission.
+
 ## Developers
 
 The same realtime stream is available to API consumers over a WebSocket, including the presence events that power these indicators. See the [Realtime WebSocket](/api/realtime/) reference for connection details, channels, and rate limits.
