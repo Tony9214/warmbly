@@ -580,12 +580,17 @@ export default function AutomationFlow({
     // different (key order, defaults) and make the editor falsely think a
     // teammate changed it. Falls back to a content hash only if a record somehow
     // has no timestamp.
-    const serverVersion = React.useCallback(
-        (a: Automation) =>
-            a.updated_at ||
-            JSON.stringify({ name: (a.name || "").trim(), enabled: a.enabled, trigger: a.trigger_event, graph: a.graph ?? null }),
-        [],
-    );
+    const serverVersion = React.useCallback((a: Automation) => {
+        // The API client revives ISO date strings into Date objects, so
+        // `updated_at` is a Date here, not a string. Normalize to a primitive:
+        // comparing Date instances with === is by reference, so two reads of the
+        // same timestamp would never match and the editor would flag its OWN
+        // save as a teammate change.
+        const u = a.updated_at as unknown;
+        if (u instanceof Date) return `t:${u.getTime()}`;
+        if (typeof u === "string" && u) return `t:${u}`;
+        return JSON.stringify({ name: (a.name || "").trim(), enabled: a.enabled, trigger: a.trigger_event, graph: a.graph ?? null });
+    }, []);
     const serverVersionRef = React.useRef("");
 
     // Seed once on mount.
