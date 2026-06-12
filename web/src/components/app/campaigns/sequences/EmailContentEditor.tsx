@@ -2,7 +2,7 @@
 // with an Edit/Preview toggle that renders {{variables}}, conditionals, and
 // spintax through the real send engine (with an instant local fallback) plus
 // template-validity warnings. Used by BOTH the step composer (SequenceView) and
-// each A/B variant (StepVariants), so a variant is edited and previewed exactly
+// each A/B variant (StepEmailArms), so a variant is edited and previewed exactly
 // like the main email.
 
 import React from "react";

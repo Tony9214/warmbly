@@ -78,8 +78,7 @@ import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
 import { PopoverMenu, PopoverMenuContent, PopoverMenuTrigger } from "@/components/ui/popover-menu";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
-import SequenceView from "./SequenceView";
-import StepVariants from "./StepVariants";
+import StepEmailArms from "./StepEmailArms";
 import CategoryPicker from "@/components/app/contacts/CategoryPicker";
 import type { ActionKV, SequenceAction, SequenceActionType } from "@/lib/api/models/app/campaigns/sequences/Action";
 import { useAutomations } from "@/lib/api/hooks/app/automations/useAutomations";
@@ -1424,15 +1423,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         {editStep.kind !== "email" ? (
                             <ActionEditor campaignId={campaignId} sequence={editStep} onSaved={invalidate} />
                         ) : (
-                            <div className="space-y-4">
-                                <SequenceView campaignId={campaignId} sequence={editStep} index={editIndex} />
-                                <StepVariants
-                                    campaignId={campaignId}
-                                    sequenceId={editStep.id}
-                                    baseSubject={editStep.subject ?? ""}
-                                    baseBodyHtml={editStep.body_html ?? ""}
-                                />
-                            </div>
+                            <StepEmailArms campaignId={campaignId} sequence={editStep} index={editIndex} />
                         )}
                     </div>
                 </div>

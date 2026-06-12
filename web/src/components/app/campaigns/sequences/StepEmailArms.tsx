@@ -1,18 +1,22 @@
-// Per-step A/B variants editor, shown directly under the step's email composer.
-// The step's own email is the CONTROL arm: when A/B testing is on, each contact
-// is split across the original plus the active variants by weight (the backend
-// includes the original as a control arm with weight 100). This editor surfaces
-// all the arms together so it is obvious which email a contact can receive.
+// The step's email editor as a tabbed set of arms. The first tab is the
+// Original (the step's own email, the control), then one tab per A/B variant,
+// then Add. Each tab edits that arm in place with the same composer, so the
+// original and the variants are first-class siblings, split by weight at send
+// time (see internal/app/advanced SelectVariant). Replaces the old stacked
+// "main composer + separate variants box".
 
 import React from "react";
-import { PlusIcon, Loader2Icon, Trash2Icon, FlaskConicalIcon, TrophyIcon } from "lucide-react";
+import { motion } from "framer-motion";
+import { PlusIcon, Loader2Icon, Trash2Icon, TrophyIcon } from "lucide-react";
 import toast from "react-hot-toast";
+import type Sequence from "@/lib/api/models/app/campaigns/sequences/Sequence";
 import type ABVariant from "@/lib/api/models/app/campaigns/ABVariant";
 import type { ABVariantStats } from "@/lib/api/models/app/campaigns/ABVariant";
 import { Label, TextInput, NumberInput } from "@/components/ui/field";
 import { Toggle } from "../preferences/components/CampaignPreferenceBoolBox";
 import EmailContentEditor from "./EmailContentEditor";
 import { htmlToPlain } from "./emailPreview";
+import SequenceView from "./SequenceView";
 import {
     useCampaignABVariants,
     useCampaignABAnalysis,
@@ -28,22 +32,19 @@ const LETTERS = ["B", "C", "D", "E", "F"];
 // Must match abControlWeight in internal/app/advanced/service.go.
 const CONTROL_WEIGHT = 100;
 
-export default function StepVariants({
+export default function StepEmailArms({
     campaignId,
-    sequenceId,
-    baseSubject,
-    baseBodyHtml,
+    sequence,
+    index,
 }: {
     campaignId: string;
-    sequenceId: string;
-    baseSubject: string;
-    baseBodyHtml: string;
+    sequence: Sequence;
+    index: number;
 }) {
-    const { data: all, isLoading } = useCampaignABVariants(campaignId);
+    const { data: all } = useCampaignABVariants(campaignId);
+    const variants = (all ?? []).filter((v) => v.sequence_id === sequence.id);
     const create = useCreateABVariant(campaignId);
-    const variants = (all ?? []).filter((v) => v.sequence_id === sequenceId);
 
-    // Per-variant performance + the campaign winner (only fetched once variants exist).
     const { data: analysis } = useCampaignABAnalysis(campaignId, (all ?? []).length > 0);
     const statsById = React.useMemo(() => {
         const m = new Map<string, ABVariantStats>();
@@ -51,137 +52,149 @@ export default function StepVariants({
         return m;
     }, [analysis]);
     const winnerId = analysis?.winner_id ?? null;
-    const stepHasWinner = !!winnerId && variants.some((v) => v.id === winnerId);
 
-    // The split: the original (control) plus every ACTIVE variant, by weight.
+    // The split: control plus every ACTIVE variant, by weight.
     const wOf = (v: ABVariant) => (v.weight > 0 ? v.weight : CONTROL_WEIGHT);
     const totalWeight =
         CONTROL_WEIGHT + variants.filter((v) => v.is_active).reduce((s, v) => s + wOf(v), 0);
     const pct = (w: number) => (totalWeight > 0 ? Math.round((w / totalWeight) * 100) : 0);
 
-    const addVariant = () => {
-        const name = `Variant ${LETTERS[variants.length] ?? variants.length + 1}`;
-        create.mutate(
-            {
-                name,
-                sequence_id: sequenceId,
+    const [selected, setSelected] = React.useState<string>("original");
+    // If the selected variant disappears (deleted here or elsewhere), fall back.
+    React.useEffect(() => {
+        if (selected !== "original" && !variants.some((v) => v.id === selected)) {
+            setSelected("original");
+        }
+    }, [variants, selected]);
+
+    const addVariant = async () => {
+        try {
+            const v = await create.mutateAsync({
+                name: `Variant ${LETTERS[variants.length] ?? variants.length + 1}`,
+                sequence_id: sequence.id,
                 weight: CONTROL_WEIGHT,
                 is_active: true,
-                subject: baseSubject,
-                body_html: baseBodyHtml,
-                body_plain: htmlToPlain(baseBodyHtml),
-            },
-            { onError: (e) => toast.error(buildError(e as unknown as AppError)) },
-        );
+                subject: sequence.subject,
+                body_html: sequence.body_html,
+                body_plain: htmlToPlain(sequence.body_html ?? ""),
+            });
+            if (v?.id) setSelected(v.id);
+        } catch (e) {
+            toast.error(buildError(e as unknown as AppError));
+        }
     };
 
-    // No variants yet: a slim, inline affordance under the email, not a section.
-    if (!isLoading && variants.length === 0) {
-        return (
-            <button
-                type="button"
-                onClick={addVariant}
-                disabled={create.isPending}
-                className="group flex w-full items-center gap-2 rounded-md border border-dashed border-slate-200 px-3 py-2 text-left hover:border-sky-300 hover:bg-sky-50/40 disabled:opacity-50"
-            >
-                {create.isPending ? (
-                    <Loader2Icon className="w-3.5 h-3.5 animate-spin text-slate-400" />
-                ) : (
-                    <FlaskConicalIcon className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600" />
-                )}
-                <span className="text-[12px] font-medium text-slate-700 group-hover:text-sky-700">
-                    Add an A/B variant
-                </span>
-                <span className="truncate text-[11px] text-slate-400">
-                    test alternate copy, contacts split against this email
-                </span>
-                <PlusIcon className="ml-auto w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600" />
-            </button>
-        );
-    }
+    const selectedVariant = variants.find((v) => v.id === selected) ?? null;
 
     return (
         <div className="rounded-md border border-slate-200 bg-white">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200/70 px-3 py-2.5">
-                <div className="flex items-center gap-2 min-w-0">
-                    <FlaskConicalIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <div className="min-w-0">
-                        <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
-                            A/B test
-                        </div>
-                        <p className="truncate text-[11px] text-slate-400">
-                            Each contact gets one version, split by weight. The email above is the control.
-                        </p>
-                    </div>
-                </div>
+            {/* Arm tabs: Original (control) plus each variant, then Add. */}
+            <div className="shrink-0 px-2 flex items-center gap-1 border-b border-slate-200 overflow-x-auto no-scrollbar">
+                <ArmTab
+                    active={selected === "original"}
+                    onClick={() => setSelected("original")}
+                    label="Original"
+                    hint={variants.length > 0 ? `${pct(CONTROL_WEIGHT)}%` : undefined}
+                />
+                {variants.map((v, i) => (
+                    <ArmTab
+                        key={v.id}
+                        active={selected === v.id}
+                        onClick={() => setSelected(v.id)}
+                        label={v.name || `Variant ${LETTERS[i] ?? i + 1}`}
+                        hint={v.is_active ? `${pct(wOf(v))}%` : "off"}
+                        winner={winnerId === v.id}
+                    />
+                ))}
                 <button
                     type="button"
                     onClick={addVariant}
                     disabled={create.isPending || variants.length >= 5}
-                    className="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 hover:border-slate-300 hover:text-slate-900 disabled:opacity-50 shrink-0"
+                    title="Add an A/B variant"
+                    className="ml-1 h-7 px-2 inline-flex items-center gap-1 rounded-md text-[12px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 shrink-0"
                 >
                     {create.isPending ? (
                         <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
                     ) : (
                         <PlusIcon className="w-3.5 h-3.5" />
                     )}
-                    Add variant
+                    Add
                 </button>
             </div>
-            {stepHasWinner && (
-                <div className="flex items-center gap-1.5 border-b border-amber-200/70 bg-amber-50/60 px-3 py-1.5">
-                    <TrophyIcon className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                    <span className="text-[11.5px] text-amber-800">
-                        Winner: <span className="font-medium">{analysis?.winner_name || "a variant"}</span>
-                        {analysis?.winning_rule ? ` · by ${analysis.winning_rule}` : ""}
-                        {analysis?.confidence ? ` · ${analysis.confidence} confidence` : ""}
-                    </span>
+
+            {selected === "original" ? (
+                <div>
+                    <SequenceView embedded campaignId={campaignId} sequence={sequence} index={index} />
+                    {variants.length > 0 && (
+                        <p className="px-3 pb-3 text-[11px] text-slate-400">
+                            This is the control arm. About {pct(CONTROL_WEIGHT)}% of contacts get it, the rest split across the variants.
+                        </p>
+                    )}
                 </div>
-            )}
-            {isLoading ? (
-                <div className="px-3 py-4 text-[11.5px] text-slate-400">Loading variants…</div>
-            ) : (
-                <div className="divide-y divide-slate-200/60">
-                    {/* The control arm: the step's own email, shown so the split is obvious. */}
-                    <div className="flex items-center gap-2.5 px-3 py-2.5">
-                        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
-                            Original
-                        </span>
-                        <span className="text-[11.5px] text-slate-500">
-                            The email above, sent as the control.
-                        </span>
-                        <span className="ml-auto text-[11px] tabular-nums text-slate-500">
-                            ~{pct(CONTROL_WEIGHT)}% of contacts
-                        </span>
-                    </div>
-                    {variants.map((v) => (
-                        <VariantCard
-                            key={v.id}
-                            campaignId={campaignId}
-                            variant={v}
-                            stats={statsById.get(v.id)}
-                            isWinner={winnerId === v.id}
-                            splitPct={v.is_active ? pct(wOf(v)) : 0}
-                        />
-                    ))}
-                </div>
-            )}
+            ) : selectedVariant ? (
+                <VariantEditor
+                    key={selectedVariant.id}
+                    campaignId={campaignId}
+                    variant={selectedVariant}
+                    stats={statsById.get(selectedVariant.id)}
+                    isWinner={winnerId === selectedVariant.id}
+                    splitPct={selectedVariant.is_active ? pct(wOf(selectedVariant)) : 0}
+                    onDeleted={() => setSelected("original")}
+                />
+            ) : null}
         </div>
     );
 }
 
-function VariantCard({
+function ArmTab({
+    active,
+    onClick,
+    label,
+    hint,
+    winner,
+}: {
+    active: boolean;
+    onClick: () => void;
+    label: string;
+    hint?: string;
+    winner?: boolean;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`relative h-10 px-2.5 inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] transition-colors ${
+                active ? "text-slate-900 font-medium" : "text-slate-500 hover:text-slate-800"
+            }`}
+        >
+            {winner && <TrophyIcon className="w-3 h-3 text-amber-500" />}
+            {label}
+            {hint && <span className="text-[10.5px] tabular-nums text-slate-400">{hint}</span>}
+            {active && (
+                <motion.span
+                    layoutId="arm-tab-underline"
+                    className="absolute left-1.5 right-1.5 -bottom-px h-0.5 rounded-full bg-sky-600"
+                    transition={{ type: "spring", duration: 0.3, bounce: 0.15 }}
+                />
+            )}
+        </button>
+    );
+}
+
+function VariantEditor({
     campaignId,
     variant,
     stats,
     isWinner,
     splitPct,
+    onDeleted,
 }: {
     campaignId: string;
     variant: ABVariant;
     stats?: ABVariantStats;
     isWinner?: boolean;
     splitPct: number;
+    onDeleted: () => void;
 }) {
     const update = useUpdateABVariant(campaignId);
     const del = useDeleteABVariant(campaignId);
@@ -193,8 +206,6 @@ function VariantCard({
     const [bodyHtml, setBodyHtml] = React.useState(variant.body_html);
     const [active, setActive] = React.useState(variant.is_active);
 
-    // Re-seed from the canonical record after a save (updated_at changes) or when
-    // a different variant renders into this card slot.
     React.useEffect(() => {
         setName(variant.name);
         setWeight(variant.weight);
@@ -215,14 +226,7 @@ function VariantCard({
         update.mutate(
             {
                 variantId: variant.id,
-                input: {
-                    name,
-                    weight,
-                    subject,
-                    body_html: bodyHtml,
-                    body_plain: htmlToPlain(bodyHtml),
-                    is_active: active,
-                },
+                input: { name, weight, subject, body_html: bodyHtml, body_plain: htmlToPlain(bodyHtml), is_active: active },
             },
             {
                 onSuccess: () => toast.success("Variant saved."),
@@ -235,11 +239,12 @@ function VariantCard({
         confirm.show(`Delete "${variant.name}"? Its content will be removed from this step.`, async () => {
             await del.mutateAsync(variant.id);
             toast.success("Variant removed.");
+            onDeleted();
         });
     };
 
     return (
-        <div className={`p-3 space-y-3 ${isWinner ? "bg-amber-50/40" : ""}`}>
+        <div className={`space-y-3 p-3 ${isWinner ? "bg-amber-50/30" : ""}`}>
             {stats && stats.total_sent > 0 && (
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px]">
                     {isWinner && (
@@ -301,7 +306,6 @@ function VariantCard({
     );
 }
 
-// Metric — a compact "label value" pair in the variant performance strip.
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
     return (
         <span className="inline-flex items-center gap-1 tabular-nums">

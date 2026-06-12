@@ -187,10 +187,14 @@ export default function SequenceView({
     campaignId,
     sequence,
     index,
+    embedded = false,
 }: {
     campaignId: string;
     sequence: Sequence;
     index: number;
+    // When embedded inside the tabbed arms editor, drop the outer card chrome
+    // and the "Step N" eyebrow (the tab already provides that context).
+    embedded?: boolean;
 }) {
     const updateSequence = useUpdateSequence(campaignId, sequence.id);
     const createTemplate = useCreateTemplate();
@@ -296,15 +300,21 @@ export default function SequenceView({
     }
 
     return (
-        <div className="rounded-md border border-slate-200 bg-white">
-            <div className="flex flex-col gap-3 border-b border-slate-200 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                    <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
-                        Step {index + 1}
+        <div className={embedded ? "" : "rounded-md border border-slate-200 bg-white"}>
+            <div
+                className={`flex flex-col gap-3 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between ${
+                    embedded ? "" : "border-b border-slate-200"
+                }`}
+            >
+                {!embedded && (
+                    <div className="min-w-0">
+                        <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
+                            Step {index + 1}
+                        </div>
+                        <p className="mt-0.5 truncate text-[11px] text-slate-400">Compose the email this step sends.</p>
                     </div>
-                    <p className="mt-0.5 truncate text-[11px] text-slate-400">Compose the email this step sends.</p>
-                </div>
-                <div className="flex flex-wrap shrink-0 items-center gap-2">
+                )}
+                <div className="flex flex-wrap shrink-0 items-center gap-2 sm:ml-auto">
                     {/* Template picker */}
                     <PopoverMenu>
                         <PopoverMenuTrigger asChild>
