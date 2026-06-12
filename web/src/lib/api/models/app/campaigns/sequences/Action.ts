@@ -5,6 +5,7 @@
 export type SequenceActionType =
     | "add_tag"
     | "remove_tag"
+    | "label_email"
     | "unsubscribe"
     | "notify"
     | "create_task"
@@ -23,6 +24,10 @@ export interface SequenceAction {
     type: SequenceActionType;
     // add_tag / remove_tag — a contact category id
     category_id?: string | null;
+    // label_email — unibox conversation labels (same category registry as tags)
+    // applied to the thread the contact replied on. Reply-branch only; a no-op
+    // when the contact has not replied.
+    label_ids?: string[];
     // notify
     notify_event?: string;
     notify_data?: Record<string, unknown>;

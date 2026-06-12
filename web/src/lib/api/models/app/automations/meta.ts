@@ -41,6 +41,7 @@ export const ACTION_LABELS: Record<string, string> = {
     "warmbly.move_deal_stage": "Move the deal stage",
     "warmbly.unsubscribe": "Unsubscribe the contact",
     "warmbly.run_automation": "Run another automation",
+    "warmbly.label_email": "Label the email",
 };
 
 export function actionLabel(a: string): string {
@@ -60,6 +61,7 @@ export const NATIVE_ACTIONS: string[] = [
     "warmbly.move_deal_stage",
     "warmbly.unsubscribe",
     "warmbly.run_automation",
+    "warmbly.label_email",
 ];
 
 export function isNativeAction(a: string): boolean {
@@ -67,11 +69,13 @@ export function isNativeAction(a: string): boolean {
 }
 
 // What config a native action needs, so the editor shows the right picker.
-export function nativeActionNeeds(action: string): "tag" | "deal" | "task" | "automation" | "none" {
+export function nativeActionNeeds(action: string): "tag" | "label" | "deal" | "task" | "automation" | "none" {
     switch (action) {
         case "warmbly.add_tag":
         case "warmbly.remove_tag":
             return "tag";
+        case "warmbly.label_email":
+            return "label";
         case "warmbly.create_deal":
         case "warmbly.move_deal_stage":
             return "deal";
@@ -82,6 +86,12 @@ export function nativeActionNeeds(action: string): "tag" | "deal" | "task" | "au
         default:
             return "none";
     }
+}
+
+// Which triggers carry an inbox thread, so a "label email" action has something
+// to label (the reply event payload includes thread_id + the mailbox owner).
+export function triggerCarriesThread(ev: string): boolean {
+    return ev === "campaign.reply_received";
 }
 
 // Per-action config field needs, so the node editor shows the right inputs.
