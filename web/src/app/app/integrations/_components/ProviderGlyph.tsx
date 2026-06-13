@@ -1,14 +1,13 @@
-// Real brand marks for each provider: single-path SVG logos from simple-icons
-// (CC0 / public domain), drawn in each brand's official color on a neutral
-// rounded tile. Providers without a bundled mark fall back to a tinted initial.
+// Real brand marks for each provider. Multi-color logos (Slack's hash, Close's
+// orb) render their published markup as-is; the rest are single-path marks from
+// simple-icons drawn in the brand's color on a white tile. Providers with no
+// usable square mark get a solid tile in the brand color, then a neutral initial.
 
 import { cn } from "@/lib/utils";
 
+import { RAW_BRAND_LOGOS } from "./brandLogos";
+
 const BRAND_ICON: Record<string, { hex: string; path: string }> = {
-    slack: {
-        hex: "#4A154B",
-        path: "M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z",
-    },
     discord: {
         hex: "#5865F2",
         path: "M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z",
@@ -43,11 +42,14 @@ const BRAND_ICON: Record<string, { hex: string; path: string }> = {
     },
 };
 
-// Tinted-initial fallback for providers without a bundled brand mark.
-const BRAND_TINT: Record<string, { bg: string; ring: string; text: string }> = {
-    pipedrive: { bg: "bg-emerald-50", ring: "ring-emerald-200", text: "text-emerald-700" },
-    close: { bg: "bg-indigo-50", ring: "ring-indigo-200", text: "text-indigo-600" },
+// Solid app-icon tile (white initial on the brand color) for providers whose
+// only published mark is a wordmark, not a square symbol.
+const BRAND_SOLID: Record<string, { hex: string }> = {
+    pipedrive: { hex: "#08A742" },
 };
+
+// Neutral tinted-initial fallback for anything without a mark or brand color.
+const BRAND_TINT: Record<string, { bg: string; ring: string; text: string }> = {};
 
 export default function ProviderGlyph({
     provider,
@@ -59,10 +61,30 @@ export default function ProviderGlyph({
     size?: 7 | 9 | 10;
 }) {
     const tileDim = size === 7 ? "w-7 h-7" : size === 10 ? "w-10 h-10" : "w-9 h-9";
-    const icon = BRAND_ICON[provider];
+    const iconDim = size === 7 ? "w-4 h-4" : size === 10 ? "w-6 h-6" : "w-5 h-5";
 
+    const raw = RAW_BRAND_LOGOS[provider];
+    if (raw) {
+        return (
+            <div
+                className={cn(
+                    "rounded-md ring-1 ring-slate-200 bg-white inline-flex items-center justify-center shrink-0",
+                    tileDim,
+                )}
+            >
+                <svg
+                    viewBox={raw.viewBox}
+                    role="img"
+                    aria-label={name}
+                    className={iconDim}
+                    dangerouslySetInnerHTML={{ __html: raw.inner }}
+                />
+            </div>
+        );
+    }
+
+    const icon = BRAND_ICON[provider];
     if (icon) {
-        const iconDim = size === 7 ? "w-4 h-4" : size === 10 ? "w-6 h-6" : "w-5 h-5";
         return (
             <div
                 className={cn(
@@ -77,8 +99,26 @@ export default function ProviderGlyph({
         );
     }
 
-    const tint = BRAND_TINT[provider] ?? { bg: "bg-sky-50", ring: "ring-sky-100", text: "text-sky-700" };
     const textDim = size === 7 ? "text-[12px]" : size === 10 ? "text-[15px]" : "text-[13px]";
+    const solid = BRAND_SOLID[provider];
+    if (solid) {
+        return (
+            <div
+                className={cn(
+                    "rounded-md inline-flex items-center justify-center font-semibold uppercase text-white shrink-0",
+                    tileDim,
+                    textDim,
+                )}
+                style={{ backgroundColor: solid.hex }}
+                role="img"
+                aria-label={name}
+            >
+                {name.charAt(0)}
+            </div>
+        );
+    }
+
+    const tint = BRAND_TINT[provider] ?? { bg: "bg-sky-50", ring: "ring-sky-100", text: "text-sky-700" };
     return (
         <div
             className={cn(
