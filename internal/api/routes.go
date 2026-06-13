@@ -38,6 +38,9 @@ func Run(
 	// rotatable from the dashboard.
 	r.POST("/api/v1/integrations/inbound/calendly/:secret", h.InboundCalendly)
 	r.POST("/api/v1/integrations/inbound/cal-com/:secret", h.InboundCalCom)
+	// Generic per-automation inbound trigger: the token in the path is the
+	// credential, resolving to one automation that runs with the JSON body.
+	r.POST("/api/v1/integrations/inbound/automation/:token", h.InboundAutomation)
 
 	// Public worker enrollment. The one-time enrollment token is the
 	// credential; successful exchange returns a dotenv file for the installer

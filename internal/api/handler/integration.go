@@ -796,6 +796,32 @@ func (h *Handler) InboundCalCom(c *gin.Context) {
 	h.handleInboundBooking(c, models.IntegrationCalCom)
 }
 
+// InboundAutomation runs the automation whose inbound-webhook token is in the
+// URL, using the POSTed JSON body as the event payload. Public + token-gated
+// (the high-entropy token is the credential); the body is capped and the run is
+// dispatched in the background so the caller gets a fast 202.
+func (h *Handler) InboundAutomation(c *gin.Context) {
+	token := strings.TrimSpace(c.Param("token"))
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "token required"})
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "read body failed"})
+		return
+	}
+	if err := h.IntegrationService.TriggerInboundAutomation(c.Request.Context(), token, body); err != nil {
+		if errors.Is(err, integration.ErrInboundAutomationNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "unknown webhook token"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "trigger failed"})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"received": true})
+}
+
 func (h *Handler) handleInboundBooking(c *gin.Context, provider models.IntegrationProvider) {
 	secret := strings.TrimSpace(c.Param("secret"))
 	if secret == "" {

@@ -80,6 +80,10 @@ type Service interface {
 	DryRunAutomation(ctx context.Context, orgID, id uuid.UUID, req models.DryRunRequest) (*models.DryRunResponse, error)
 	// ListAutomationRuns returns recent run history for an automation.
 	ListAutomationRuns(ctx context.Context, orgID, id uuid.UUID, limit int) ([]models.AutomationRun, error)
+	// TriggerInboundAutomation runs the automation whose inbound-webhook token is
+	// given, using body (JSON) as the event payload. Returns
+	// ErrInboundAutomationNotFound for an unknown/non-inbound token.
+	TriggerInboundAutomation(ctx context.Context, token string, body []byte) error
 	// SetNativeActions wires the native CRM/contact action executor + the realtime
 	// publisher post-construction (they depend on services built after this one).
 	SetNativeActions(n NativeActions)
@@ -490,11 +494,23 @@ func (s *service) DeleteEventSubscription(ctx context.Context, orgID, id uuid.UU
 // --- Automations ------------------------------------------------------------
 
 func (s *service) ListAutomations(ctx context.Context, orgID uuid.UUID) ([]models.Automation, error) {
-	return s.repo.ListAutomations(ctx, orgID)
+	list, err := s.repo.ListAutomations(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		decorateAutomation(&list[i])
+	}
+	return list, nil
 }
 
 func (s *service) GetAutomation(ctx context.Context, orgID, id uuid.UUID) (*models.Automation, error) {
-	return s.repo.GetAutomation(ctx, orgID, id)
+	a, err := s.repo.GetAutomation(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	decorateAutomation(a)
+	return a, nil
 }
 
 func (s *service) CreateAutomation(ctx context.Context, orgID uuid.UUID, w models.AutomationWrite) (*models.Automation, error) {
@@ -502,10 +518,17 @@ func (s *service) CreateAutomation(ctx context.Context, orgID uuid.UUID, w model
 	if err != nil {
 		return nil, err
 	}
+	if isInboundTrigger(a.TriggerEvent) {
+		tok, terr := generateAutomationInboundToken()
+		if terr != nil {
+			return nil, terr
+		}
+		a.InboundToken = tok
+	}
 	if err := s.repo.CreateAutomation(ctx, a); err != nil {
 		return nil, err
 	}
-	return s.repo.GetAutomation(ctx, orgID, a.ID)
+	return s.GetAutomation(ctx, orgID, a.ID)
 }
 
 func (s *service) UpdateAutomation(ctx context.Context, orgID, id uuid.UUID, w models.AutomationWrite) (*models.Automation, error) {
@@ -514,10 +537,40 @@ func (s *service) UpdateAutomation(ctx context.Context, orgID, id uuid.UUID, w m
 		return nil, err
 	}
 	a.ID = id
+	// Preserve the inbound token across edits; mint one the first time a flow
+	// becomes inbound; clear it when the trigger changes away (so the old URL
+	// stops firing).
+	if isInboundTrigger(a.TriggerEvent) {
+		existing, _ := s.repo.GetAutomation(ctx, orgID, id)
+		switch {
+		case existing != nil && existing.InboundToken != "":
+			a.InboundToken = existing.InboundToken
+		default:
+			tok, terr := generateAutomationInboundToken()
+			if terr != nil {
+				return nil, terr
+			}
+			a.InboundToken = tok
+		}
+	}
 	if err := s.repo.UpdateAutomation(ctx, a); err != nil {
 		return nil, err
 	}
-	return s.repo.GetAutomation(ctx, orgID, id)
+	return s.GetAutomation(ctx, orgID, id)
+}
+
+// isInboundTrigger reports whether a trigger event is the inbound webhook.
+func isInboundTrigger(trigger string) bool {
+	return trigger == string(models.WebhookEventInboundWebhook)
+}
+
+// decorateAutomation fills the computed, non-stored fields on an automation
+// (today: the public InboundURL derived from its token).
+func decorateAutomation(a *models.Automation) {
+	if a == nil {
+		return
+	}
+	a.InboundURL = BuildInboundAutomationURL(a.InboundToken)
 }
 
 func (s *service) DeleteAutomation(ctx context.Context, orgID, id uuid.UUID) error {
@@ -1077,6 +1130,77 @@ func BuildInboundURL(provider models.IntegrationProvider, secret string) string 
 		return "/api/v1/integrations/inbound/cal-com/" + secret
 	}
 	return ""
+}
+
+// ErrInboundAutomationNotFound means no enabled inbound-webhook automation owns
+// the given token (unknown, or the automation's trigger is no longer inbound).
+var ErrInboundAutomationNotFound = errors.New("inbound automation not found")
+
+// generateAutomationInboundToken returns the high-entropy secret embedded in an
+// automation's inbound-webhook URL (192 bits of randomness, prefixed).
+func generateAutomationInboundToken() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return "wmauto_" + hex.EncodeToString(buf), nil
+}
+
+// BuildInboundAutomationURL is the public POST path that fires an inbound-webhook
+// automation. Empty token (non-inbound automation) yields an empty URL.
+func BuildInboundAutomationURL(token string) string {
+	if token == "" {
+		return ""
+	}
+	return "/api/v1/integrations/inbound/automation/" + token
+}
+
+// parseInboundPayload turns an inbound webhook body into the event data map. A
+// JSON object is used as-is (minus internal underscore keys a caller must not
+// set); anything else is exposed verbatim under "body" so a template/condition
+// can still read it.
+func parseInboundPayload(body []byte) map[string]any {
+	if len(body) > 0 {
+		var m map[string]any
+		if json.Unmarshal(body, &m) == nil && m != nil {
+			for k := range m {
+				if strings.HasPrefix(k, "_") {
+					delete(m, k)
+				}
+			}
+			return m
+		}
+	}
+	out := map[string]any{}
+	if len(body) > 0 {
+		out["body"] = string(body)
+	}
+	return out
+}
+
+// TriggerInboundAutomation resolves the automation an inbound-webhook token
+// points at and runs its graph (in the background) with the POSTed body as the
+// event payload. Unknown/non-inbound token -> ErrInboundAutomationNotFound; a
+// disabled automation is accepted as a no-op (it must not leak that it exists).
+func (s *service) TriggerInboundAutomation(ctx context.Context, token string, body []byte) error {
+	a, err := s.repo.GetAutomationByInboundToken(ctx, strings.TrimSpace(token))
+	if err != nil {
+		return err
+	}
+	if a == nil || !isInboundTrigger(a.TriggerEvent) {
+		return ErrInboundAutomationNotFound
+	}
+	if !a.Enabled {
+		return nil
+	}
+	data := parseInboundPayload(body)
+	data["trigger"] = "inbound"
+	go func(au models.Automation, d map[string]any) {
+		bg, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s.executeAutomationGraph(bg, au, string(models.WebhookEventInboundWebhook), d)
+	}(*a, data)
+	return nil
 }
 
 // buildDisplayFields extracts the public, non-secret bits of the config that

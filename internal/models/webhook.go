@@ -52,6 +52,11 @@ const (
 	WebhookEventMeetingBooked      WebhookEventType = "meeting.booked"
 	WebhookEventMeetingRescheduled WebhookEventType = "meeting.rescheduled"
 	WebhookEventMeetingCanceled    WebhookEventType = "meeting.canceled"
+
+	// Inbound webhook: a trigger only (never emitted outbound). An external
+	// system POSTs JSON to a per-automation URL, running that one automation with
+	// the body as the event payload. Routed by its URL token, not org fan-out.
+	WebhookEventInboundWebhook WebhookEventType = "inbound.webhook"
 )
 
 // AllWebhookEventTypes lists every emitted event so the CRUD endpoint can
@@ -81,6 +86,7 @@ var AllWebhookEventTypes = []WebhookEventType{
 	WebhookEventMeetingBooked,
 	WebhookEventMeetingRescheduled,
 	WebhookEventMeetingCanceled,
+	WebhookEventInboundWebhook,
 }
 
 func IsValidWebhookEventType(s string) bool {

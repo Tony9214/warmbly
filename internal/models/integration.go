@@ -337,6 +337,13 @@ type Automation struct {
 	Graph     AutomationGraph `json:"graph"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
+	// InboundToken is the per-automation secret embedded in the inbound-webhook
+	// URL, set only when TriggerEvent is inbound.webhook. Server-only; the URL
+	// that carries it is surfaced to clients via InboundURL instead.
+	InboundToken string `json:"-"`
+	// InboundURL is the public POST path that fires this automation when its
+	// trigger is the inbound webhook. Computed from InboundToken, never stored.
+	InboundURL string `json:"inbound_url,omitempty"`
 }
 
 // AutomationGraph is the editable flow: nodes + the edges connecting them.
