@@ -890,6 +890,8 @@ func main() {
 			Orgs:     organizationRepository,
 		})
 		integrationServiceForHandler.SetPublisher(streamingPublisher)
+		// Per-org daily outbound-action quota (anti-abuse on the HTTP-request node).
+		integrationServiceForHandler.SetOutboundQuotaCache(cache)
 		// In-app notifications: API reads/writes happen here; also wire the gate
 		// onto the backend's advanced service (deliverability webhooks can ingest
 		// here too).

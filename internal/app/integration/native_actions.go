@@ -158,6 +158,9 @@ func (s *service) execNativeAction(ctx context.Context, a models.Automation, n m
 	// http_request makes a configurable outbound call and writes the response
 	// back into `data`. It needs no contact, so handle it before resolution.
 	if n.Action == models.IntegrationActionHTTPRequest {
+		if !s.allowOutbound(ctx, a.OrganizationID) {
+			return fmt.Errorf("daily outbound request limit reached (%d/day); contact support to raise it", outboundDailyQuota)
+		}
 		return runHTTPRequest(ctx, a.OrganizationID, a.ID, n, cfg, data)
 	}
 

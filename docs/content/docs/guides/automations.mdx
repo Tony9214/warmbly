@@ -139,7 +139,7 @@ These act directly on the event's contact and need no external connection. Pick 
 
 **HTTP request / webhook** is the generic "call any API" step. Choose a method, a URL, optional headers and query, and a body, all of which can use the same `{{.variable}}` templating as everywhere else. The call is retried briefly on a network or 5xx failure. The response is written back into the flow under the output name you choose (default `response`), so a later step can read `{{.response.body.id}}` or `{{.response.status}}`, and a condition can branch on `{{.response.ok}}` to handle failures.
 
-For safety the URL must be HTTPS and resolve to a public address. Warmbly blocks requests to private, loopback, link-local, and cloud-metadata addresses, checked at the moment the request is made (so a hostname that resolves to an internal IP is caught too) and again on any redirect. This is why the action can't be pointed at internal services.
+For safety the URL must be HTTPS and resolve to a public address. Warmbly blocks requests to private, loopback, link-local, and cloud-metadata addresses, checked at the moment the request is made (so a hostname that resolves to an internal IP is caught too) and again on any redirect. This is why the action can't be pointed at internal services. Outbound requests are also subject to a generous per-workspace daily limit to keep the feature from being used for abuse.
 
 **Set variables** computes one or more named values from templates and writes them back into the flow, so you can normalize or combine fields once and reuse the result (`{{.name}}`) in several later steps. Each value is a Go template; it does not run arbitrary code.
 
