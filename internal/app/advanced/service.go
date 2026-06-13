@@ -91,6 +91,9 @@ type Service interface {
 	WireNotifier(n Notifier)
 	// WireRealtime attaches the org-scoped EMAIL_REPLIED realtime pulse.
 	WireRealtime(p ReplyRealtimePublisher)
+	// WireAutomationRunner attaches the automation runner so instant
+	// "run_automation" action nodes (reply/open/click branches) can launch a flow.
+	WireAutomationRunner(r AutomationRunner)
 
 	// EmitCampaignEvent dispatches a campaign event (e.g. from a sequence
 	// "notify" action node) to customer webhooks and wired integrations.
@@ -126,6 +129,7 @@ type service struct {
 	dispatcher           EventDispatcher
 	notifier             Notifier
 	realtime             ReplyRealtimePublisher
+	automationRunner     AutomationRunner
 }
 
 func NewService(

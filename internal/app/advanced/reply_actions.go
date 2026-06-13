@@ -375,6 +375,38 @@ func (s *service) executeInstantActionNode(ctx context.Context, campaign *models
 		if _, xerr := s.MoveContactDealStage(ctx, *campaign.OrganizationID, contact.ID, *cfg.DealPipelineID, *cfg.DealStageID); xerr != nil {
 			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
+	case "run_automation":
+		// Mirror tasks.executeActionNode's run_automation case so an automation
+		// placed directly on a reply/open/click branch fires NOW. Without this the
+		// walker would stamp the node sent (below) with the automation never run,
+		// and the scheduler's sentIDs guard would then skip it forever.
+		if s.automationRunner == nil || campaign.OrganizationID == nil || cfg.AutomationID == nil {
+			return
+		}
+		data := map[string]any{
+			"campaign_id":   campaign.ID.String(),
+			"campaign_name": campaign.Name,
+			"contact_id":    contact.ID.String(),
+			"contact_email": contact.Email,
+			"first_name":    contact.FirstName,
+			"last_name":     contact.LastName,
+			"company":       contact.Company,
+			"phone":         contact.Phone,
+			"trigger":       eventKind,
+			// Stable per-(campaign,contact,trigger) key so a duplicate instant
+			// delivery dedupes downstream (same contract as the scheduler path).
+			"idempotency_key": fmt.Sprintf("campaign:%s:%s:%s", campaign.ID, contact.ID, eventKind),
+		}
+		for _, kv := range cfg.AutomationValues {
+			key := strings.TrimSpace(kv.Key)
+			if key == "" {
+				continue
+			}
+			data[key] = renderContactTemplate(kv.Value, contact)
+		}
+		if xerr := s.automationRunner.RunAutomationByID(ctx, *campaign.OrganizationID, *cfg.AutomationID, data); xerr != nil {
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
+		}
 	default:
 		// "wait" / "end" are handled by the chain walker (they stop the walk);
 		// unknown types are ignored.

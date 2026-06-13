@@ -68,6 +68,21 @@ func (s *service) WireNotifier(n Notifier) {
 	s.notifier = n
 }
 
+// AutomationRunner launches an automation graph by id, so an instant
+// "run_automation" action node (reply/open/click branch) can fire the same flow
+// the scheduler runs at a step boundary. Satisfied by *integration.Service;
+// kept as a local interface to avoid an import cycle (integration imports
+// advanced) and wired post-construction once the integration service exists.
+type AutomationRunner interface {
+	RunAutomationByID(ctx context.Context, orgID, automationID uuid.UUID, data map[string]any) error
+}
+
+// WireAutomationRunner attaches the automation runner after construction. No-op
+// if never called: the run_automation instant case guards on a nil runner.
+func (s *service) WireAutomationRunner(r AutomationRunner) {
+	s.automationRunner = r
+}
+
 // notify raises an in-app notification off the hot path. It detaches from the
 // request context (the ingest call may return first) and is best-effort.
 func (s *service) notify(userID uuid.UUID, orgID *uuid.UUID, category models.NotificationCategory, title, body, link string, meta map[string]any) {
