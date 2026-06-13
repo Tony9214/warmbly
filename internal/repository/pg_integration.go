@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // ConnectionWrite is the full upsert payload for an integration connection.
@@ -1057,18 +1058,13 @@ func (r *integrationRepository) SearchMeetingBookings(ctx context.Context, orgID
 	}
 
 	hasMore := offset+len(data) < total
+	total64 := int64(total)
 	page := &models.MeetingBookingPage{
-		Data: data,
-		Pagination: models.MeetingBookingPagination{
-			Total:   int64(total),
-			Limit:   limit,
-			Offset:  offset,
-			HasMore: hasMore,
-		},
+		Data:       data,
+		Pagination: models.Pagination{Total: &total64, HasMore: hasMore},
 	}
 	if hasMore {
-		next := offset + limit
-		page.Pagination.NextOffset = &next
+		page.Pagination.NextCursor = paging.EncodeOffset(offset + limit)
 	}
 	return page, nil
 }

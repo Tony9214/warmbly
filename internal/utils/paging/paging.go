@@ -10,11 +10,45 @@ package paging
 import (
 	"encoding/base64"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
 )
+
+// offsetPrefix versions the opaque offset-cursor format. Offset-paginated
+// endpoints (faceted searches that sort by nullable columns, where a keyset
+// cursor would drop NULL rows) expose the SAME opaque next_cursor token as
+// keyset endpoints, so every list looks identical to a client. The offset is an
+// implementation detail hidden inside the token.
+const offsetPrefix = "o1_"
+
+// EncodeOffset wraps a next-page offset in an opaque cursor token.
+func EncodeOffset(offset int) *string {
+	tok := offsetPrefix + base64.RawURLEncoding.EncodeToString([]byte(strconv.Itoa(offset)))
+	return &tok
+}
+
+// DecodeOffsetCursor decodes an opaque offset cursor back to its 0-based offset.
+// An empty token yields (0, nil) (first page); an invalid token returns a 400.
+func DecodeOffsetCursor(token string) (int, *errx.Error) {
+	if token == "" {
+		return 0, nil
+	}
+	if !strings.HasPrefix(token, offsetPrefix) {
+		return 0, errx.New(errx.BadRequest, "invalid cursor")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(token, offsetPrefix))
+	if err != nil {
+		return 0, errx.New(errx.BadRequest, "invalid cursor")
+	}
+	n, err := strconv.Atoi(string(raw))
+	if err != nil || n < 0 {
+		return 0, errx.New(errx.BadRequest, "invalid cursor")
+	}
+	return n, nil
+}
 
 // prefix versions the token format. Bump it if the encoding ever changes so old
 // tokens decode to a clear error instead of garbage.

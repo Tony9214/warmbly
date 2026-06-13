@@ -503,17 +503,10 @@ type MeetingBookingSummary struct {
 	Canceled int `json:"canceled"`
 }
 
-// MeetingBookingPage is an offset-paginated meetings result (Total is exact so
-// the UI can show "N of M").
+// MeetingBookingPage is a meetings result. Offset pagination under the hood, but
+// it exposes the standard {total, next_cursor, has_more} envelope with an OPAQUE
+// cursor like every other list (Total is exact so the UI can show "N of M").
 type MeetingBookingPage struct {
-	Data       []MeetingBooking         `json:"data"`
-	Pagination MeetingBookingPagination `json:"pagination"`
-}
-
-type MeetingBookingPagination struct {
-	Total      int64 `json:"total"`
-	Limit      int   `json:"limit"`
-	Offset     int   `json:"offset"`
-	HasMore    bool  `json:"has_more"`
-	NextOffset *int  `json:"next_offset,omitempty"`
+	Data       []MeetingBooking `json:"data"`
+	Pagination Pagination       `json:"pagination"`
 }

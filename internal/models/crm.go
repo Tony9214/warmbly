@@ -205,21 +205,14 @@ type SearchDeals struct {
 	Reverse       bool       `json:"reverse"`        // true = ASC, false = DESC (default)
 }
 
-// DealsSearchResult is the offset-paginated result of POST /crm/deals/search.
-// Offset (not keyset) pagination is used because the sortable columns include
-// nullable value/expected_close_date, where a keyset cursor would silently
-// drop NULL-valued rows. Total is exact so the UI can show "N of M".
+// DealsSearchResult is the result of POST /crm/deals/search. It uses offset
+// pagination under the hood (the sortable columns include nullable
+// value/expected_close_date, where a keyset cursor would silently drop NULL
+// rows), but exposes the standard {total, next_cursor, has_more} envelope with
+// an OPAQUE cursor, so it looks identical to every other list. Total is exact.
 type DealsSearchResult struct {
-	Data       []Deal                `json:"data"`
-	Pagination DealsSearchPagination `json:"pagination"`
-}
-
-type DealsSearchPagination struct {
-	Total      int64 `json:"total"`
-	Limit      int   `json:"limit"`
-	Offset     int   `json:"offset"`
-	HasMore    bool  `json:"has_more"`
-	NextOffset *int  `json:"next_offset,omitempty"`
+	Data       []Deal     `json:"data"`
+	Pagination Pagination `json:"pagination"`
 }
 
 // DealsSummary is the server-side aggregate over the SAME filter body as a
@@ -385,21 +378,13 @@ type SearchTasks struct {
 	Reverse    bool        `json:"reverse"`     // true = ASC, false = DESC (default)
 }
 
-// TasksSearchResult is the offset-paginated result of POST /crm/tasks/search.
-// Offset (not keyset) pagination is used because the sortable columns include
-// the nullable due_date, where a keyset cursor would silently drop NULL-valued
-// rows. Total is exact so the UI can show "N of M".
+// TasksSearchResult is the result of POST /crm/tasks/search. Offset pagination
+// under the hood (the sortable nullable due_date rules out a keyset cursor), but
+// it exposes the standard {total, next_cursor, has_more} envelope with an OPAQUE
+// cursor like every other list. Total is exact so the UI can show "N of M".
 type TasksSearchResult struct {
-	Data       []CRMTask             `json:"data"`
-	Pagination TasksSearchPagination `json:"pagination"`
-}
-
-type TasksSearchPagination struct {
-	Total      int64 `json:"total"`
-	Limit      int   `json:"limit"`
-	Offset     int   `json:"offset"`
-	HasMore    bool  `json:"has_more"`
-	NextOffset *int  `json:"next_offset,omitempty"`
+	Data       []CRMTask  `json:"data"`
+	Pagination Pagination `json:"pagination"`
 }
 
 // TasksSummary is the server-side aggregate over the SAME filter body as a

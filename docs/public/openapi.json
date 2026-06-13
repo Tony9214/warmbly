@@ -23122,7 +23122,7 @@
             }
           },
           "pagination": {
-            "$ref": "#/components/schemas/OffsetPagination"
+            "$ref": "#/components/schemas/Pagination"
           }
         }
       },
@@ -23642,7 +23642,7 @@
             }
           },
           "pagination": {
-            "$ref": "#/components/schemas/OffsetPagination"
+            "$ref": "#/components/schemas/Pagination"
           }
         }
       },
@@ -23686,39 +23686,6 @@
           "high_priority_count": {
             "type": "integer",
             "format": "int64"
-          }
-        }
-      },
-      "OffsetPagination": {
-        "type": "object",
-        "description": "Offset-based pagination envelope used by the CRM .../search endpoints. total is exact.",
-        "required": [
-          "total",
-          "limit",
-          "offset",
-          "has_more"
-        ],
-        "properties": {
-          "total": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Exact count of all matching rows."
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          },
-          "next_offset": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "description": "Offset for the next page; omitted/null on the last page."
           }
         }
       },

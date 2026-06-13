@@ -461,7 +461,12 @@ func (h *Handler) SearchDeals(c *gin.Context) {
 		limit = l
 	}
 	offset := 0
-	if o, err := strconv.Atoi(c.Query("offset")); err == nil && o > 0 {
+	if cur := c.Query("cursor"); cur != "" {
+		o, cerr := paging.DecodeOffsetCursor(cur)
+		if cerr != nil {
+			errx.Handle(c, cerr)
+			return
+		}
 		offset = o
 	}
 
@@ -779,7 +784,12 @@ func (h *Handler) SearchCRMTasks(c *gin.Context) {
 		limit = l
 	}
 	offset := 0
-	if o, err := strconv.Atoi(c.Query("offset")); err == nil && o > 0 {
+	if cur := c.Query("cursor"); cur != "" {
+		o, cerr := paging.DecodeOffsetCursor(cur)
+		if cerr != nil {
+			errx.Handle(c, cerr)
+			return
+		}
 		offset = o
 	}
 

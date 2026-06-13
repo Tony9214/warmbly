@@ -833,11 +833,11 @@ Auth: **Scope** `READ_CONTACTS` · **Org permission** `view_contacts`.
 | `status` | query | string | Exact status filter (`booked`, `rescheduled`, `canceled`, `completed`, `no_show`), or empty for any. |
 | `q` | query | string | Matches invitee name/email or event name. |
 | `limit` | query | int | Page size (clamped 1..200 server-side). |
-| `offset` | query | int | Row offset (clamped to >= 0). |
+| `cursor` | query | string | Opaque cursor from a previous page's `pagination.next_cursor`. Omit for the first page. |
 
 ### Response
 
-An offset-paginated `data` + `pagination` envelope. Note this uses `offset` / `total`, not the opaque-cursor shape used by other list endpoints.
+A `data` array plus the standard `pagination` envelope with an opaque `next_cursor` and an exact `total` (offset-paginated under the hood, identical shape to every other list).
 
 ```json
 {
@@ -859,10 +859,8 @@ An offset-paginated `data` + `pagination` envelope. Note this uses `offset` / `t
   ],
   "pagination": {
     "total": 42,
-    "limit": 50,
-    "offset": 0,
-    "has_more": false,
-    "next_offset": null
+    "next_cursor": null,
+    "has_more": false
   }
 }
 ```

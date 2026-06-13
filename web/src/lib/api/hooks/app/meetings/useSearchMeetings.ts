@@ -8,21 +8,22 @@ interface UseSearchMeetingsProps {
     enabled?: boolean;
 }
 
-// Offset infinite scroll over booked meetings. Pages flatten into one list;
-// `total` comes off the server so the UI can show "N of M".
+// Infinite scroll over booked meetings, paginated by the same opaque next_cursor
+// every other list uses. Pages flatten into one list; `total` comes off the
+// server so the UI can show "N of M".
 export default function useSearchMeetings({ filters, limit = 50, enabled = true }: UseSearchMeetingsProps) {
     const queryResult = useInfiniteQuery<
         MeetingsPage,
         Error,
-        InfiniteData<MeetingsPage, number>,
+        InfiniteData<MeetingsPage, string | undefined>,
         [string, string, MeetingsSearch, number],
-        number
+        string | undefined
     >({
         queryKey: ["meetings", "search", filters, limit],
         queryFn: async ({ pageParam }) => searchMeetings(filters, pageParam, limit),
-        initialPageParam: 0,
+        initialPageParam: undefined,
         getNextPageParam: (lastPage) =>
-            lastPage.pagination.has_more ? (lastPage.pagination.next_offset ?? undefined) : undefined,
+            lastPage.pagination.has_more ? (lastPage.pagination.next_cursor ?? undefined) : undefined,
         staleTime: 15_000,
         enabled,
     });

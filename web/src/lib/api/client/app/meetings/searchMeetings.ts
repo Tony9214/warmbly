@@ -1,18 +1,19 @@
 import type { MeetingsPage, MeetingsSearch } from "@/lib/api/models/app/integrations/Integration";
 import Request from "../../Request";
 
-// Meetings page list. Offset-paginated (the backend uses offset so nullable
-// scheduled_for sorts don't drop rows), so the page param is the next offset.
+// Meetings page list. Offset pagination under the hood (so nullable scheduled_for
+// sorts don't drop rows), but the page param is the same opaque next_cursor every
+// other list uses.
 export default async function searchMeetings(
     filters: MeetingsSearch,
-    offset = 0,
+    cursor?: string | null,
     limit = 50,
 ): Promise<MeetingsPage> {
     const qs = new URLSearchParams();
     if (filters.timeframe) qs.set("timeframe", filters.timeframe);
     if (filters.status) qs.set("status", filters.status);
     if (filters.q) qs.set("q", filters.q);
-    if (offset) qs.set("offset", String(offset));
+    if (cursor) qs.set("cursor", cursor);
     if (limit) qs.set("limit", String(limit));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
 

@@ -6,7 +6,7 @@ icon: Briefcase
 
 The CRM endpoints model your sales pipeline: deals move through stages of a pipeline, and CRM tasks track the follow-up work attached to contacts and deals. Every route is organization-scoped and requires an active organization on the session or API key. Read access uses the **CRM** read scope (`READ_CRM` / org permission `view_contacts`), and mutations use the **CRM** write scope (`WRITE_CRM` / org permission `manage_contacts`), except team membership operations which gate on `manage_team`. See [authentication](/api/authentication/) and [permissions](/api/permissions/) for how scopes map to API keys and member roles.
 
-List endpoints come in two flavors. The simple `GET` list endpoints (deals, tasks) return a `data` array plus a keyset `pagination` envelope with an opaque `next_cursor`. The faceted `POST .../search` endpoints return a `data` array plus an offset-based `pagination` envelope with an exact `total`.
+Every list endpoint returns a `data` array plus the standard `pagination` envelope with an opaque `next_cursor`. The simple `GET` list endpoints use a keyset cursor; the faceted `POST .../search` endpoints paginate by offset under the hood (their nullable sort columns rule out a keyset cursor) but expose the same opaque `next_cursor`, and add an exact `total`.
 
 ## List pipelines
 
@@ -274,7 +274,7 @@ Auth: **Scope** `READ_CRM` · **Org permission** `view_contacts`
 | `pipeline_id` | query | uuid | Restrict to deals in this pipeline. |
 | `stage_id` | query | uuid | Restrict to deals in this stage. |
 | `status` | query | string | Restrict to `open`, `won`, or `lost`. |
-| `cursor` | query | uuid | Opaque cursor from a previous page's `pagination.next_cursor`. |
+| `cursor` | query | string | Opaque cursor from a previous page's `pagination.next_cursor`. |
 | `limit` | query | int | Page size, 1 to 100 (default 50). |
 
 ### Response
@@ -305,7 +305,7 @@ A `data` array of deal objects plus a keyset `pagination` envelope. List rows ma
   ],
   "pagination": {
     "total": null,
-    "next_cursor": "1f2e3d4c-5b6a-4789-90ab-cdef01234567",
+    "next_cursor": "c1_b3BhcXVlLWN1cnNvcg",
     "has_more": true
   }
 }
@@ -372,14 +372,14 @@ Auth: **Scope** `WRITE_CRM` · **Org permission** `manage_contacts`
 
 `POST /crm/deals/search`
 
-Faceted, server-paginated deal search. Every filter is optional; an empty body matches every deal in the organization. Filters are sent in the JSON body, while `limit` and `offset` are query params.
+Faceted, server-paginated deal search. Every filter is optional; an empty body matches every deal in the organization. Filters are sent in the JSON body, while `limit` and `cursor` are query params.
 
 Auth: **Scope** `READ_CRM` · **Org permission** `view_contacts`
 
 | Parameter | In | Type | Description |
 | --- | --- | --- | --- |
 | `limit` | query | int | Page size, 1 to 200 (default 50). |
-| `offset` | query | int | Row offset for pagination (default 0). |
+| `cursor` | query | string | Opaque cursor from a previous page's `pagination.next_cursor`. Omit for the first page. |
 
 ### Request body
 
@@ -413,7 +413,7 @@ Auth: **Scope** `READ_CRM` · **Org permission** `view_contacts`
 
 ### Response
 
-A `data` array of deal objects (with joined `contact`, `stage`, and `campaign_name`) plus an offset-based `pagination` envelope with an exact `total`.
+A `data` array of deal objects (with joined `contact`, `stage`, and `campaign_name`) plus the standard `pagination` envelope (opaque `next_cursor`) with an exact `total`.
 
 ```json
 {
@@ -433,10 +433,8 @@ A `data` array of deal objects (with joined `contact`, `stage`, and `campaign_na
   ],
   "pagination": {
     "total": 137,
-    "limit": 50,
-    "offset": 0,
-    "has_more": true,
-    "next_offset": 50
+    "next_cursor": "o1_NTA",
+    "has_more": true
   }
 }
 ```
@@ -698,7 +696,7 @@ Auth: **Scope** `READ_CRM` · **Org permission** `view_contacts`
 | `deal_id` | query | uuid | Restrict to tasks linked to this deal. |
 | `assigned_to` | query | uuid | Restrict to tasks assigned to this user. |
 | `status` | query | string | One of `pending`, `in_progress`, `completed`, `cancelled`. |
-| `cursor` | query | uuid | Opaque cursor from a previous page's `pagination.next_cursor`. |
+| `cursor` | query | string | Opaque cursor from a previous page's `pagination.next_cursor`. |
 | `limit` | query | int | Page size, 1 to 100 (default 50). |
 
 ### Response
@@ -727,7 +725,7 @@ A `data` array of task objects plus a keyset `pagination` envelope.
   ],
   "pagination": {
     "total": null,
-    "next_cursor": "3b4c5d6e-7f80-4912-a3b4-c5d6e7f80912",
+    "next_cursor": "c1_b3BhcXVlLWN1cnNvcg",
     "has_more": false
   }
 }
@@ -793,14 +791,14 @@ Auth: **Scope** `WRITE_CRM` · **Org permission** `manage_contacts`
 
 `POST /crm/tasks/search`
 
-Faceted, server-paginated task search. Every filter is optional; an empty body matches every task in the organization. Filters are sent in the JSON body, while `limit` and `offset` are query params.
+Faceted, server-paginated task search. Every filter is optional; an empty body matches every task in the organization. Filters are sent in the JSON body, while `limit` and `cursor` are query params.
 
 Auth: **Scope** `READ_CRM` · **Org permission** `view_contacts`
 
 | Parameter | In | Type | Description |
 | --- | --- | --- | --- |
 | `limit` | query | int | Page size, 1 to 200 (default 50). |
-| `offset` | query | int | Row offset for pagination (default 0). |
+| `cursor` | query | string | Opaque cursor from a previous page's `pagination.next_cursor`. Omit for the first page. |
 
 ### Request body
 
@@ -832,7 +830,7 @@ Auth: **Scope** `READ_CRM` · **Org permission** `view_contacts`
 
 ### Response
 
-A `data` array of task objects plus an offset-based `pagination` envelope with an exact `total`.
+A `data` array of task objects plus the standard `pagination` envelope (opaque `next_cursor`) with an exact `total`.
 
 ```json
 {
@@ -852,10 +850,8 @@ A `data` array of task objects plus an offset-based `pagination` envelope with a
   ],
   "pagination": {
     "total": 64,
-    "limit": 50,
-    "offset": 0,
-    "has_more": true,
-    "next_offset": 50
+    "next_cursor": "o1_NTA",
+    "has_more": true
   }
 }
 ```

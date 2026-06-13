@@ -983,21 +983,14 @@ func (r *crmRepository) SearchDeals(ctx context.Context, orgID uuid.UUID, filter
 	}
 
 	hasMore := int64(offset+len(deals)) < total
-	var nextOffset *int
+	pag := models.Pagination{Total: &total, HasMore: hasMore}
 	if hasMore {
-		n := offset + limit
-		nextOffset = &n
+		pag.NextCursor = paging.EncodeOffset(offset + limit)
 	}
 
 	return &models.DealsSearchResult{
-		Data: deals,
-		Pagination: models.DealsSearchPagination{
-			Total:      total,
-			Limit:      limit,
-			Offset:     offset,
-			HasMore:    hasMore,
-			NextOffset: nextOffset,
-		},
+		Data:       deals,
+		Pagination: pag,
 	}, nil
 }
 
@@ -1346,21 +1339,14 @@ func (r *crmRepository) SearchCRMTasks(ctx context.Context, orgID uuid.UUID, fil
 	}
 
 	hasMore := int64(offset+len(tasks)) < total
-	var nextOffset *int
+	pag := models.Pagination{Total: &total, HasMore: hasMore}
 	if hasMore {
-		n := offset + limit
-		nextOffset = &n
+		pag.NextCursor = paging.EncodeOffset(offset + limit)
 	}
 
 	return &models.TasksSearchResult{
-		Data: tasks,
-		Pagination: models.TasksSearchPagination{
-			Total:      total,
-			Limit:      limit,
-			Offset:     offset,
-			HasMore:    hasMore,
-			NextOffset: nextOffset,
-		},
+		Data:       tasks,
+		Pagination: pag,
 	}, nil
 }
 

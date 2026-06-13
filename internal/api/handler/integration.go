@@ -19,6 +19,7 @@ import (
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // requireIntegrationActor resolves the org + user for a mutating integration
@@ -947,7 +948,11 @@ func (h *Handler) SearchMeetings(c *gin.Context) {
 		return
 	}
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	offset, _ := strconv.Atoi(c.Query("offset"))
+	offset, cerr := paging.DecodeOffsetCursor(c.Query("cursor"))
+	if cerr != nil {
+		errx.JSON(c, cerr)
+		return
+	}
 	filter := models.MeetingBookingFilter{
 		Timeframe: strings.TrimSpace(c.Query("timeframe")),
 		Status:    strings.TrimSpace(c.Query("status")),

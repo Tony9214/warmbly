@@ -26,7 +26,7 @@ Auth: **Scope** `API_KEYS` · **Org permission** `manage_api_keys`
 
 | Parameter | In | Type | Description |
 | --- | --- | --- | --- |
-| `cursor` | query | uuid | Opaque cursor from the previous page's `pagination.next_cursor`. Omit for the first page. |
+| `cursor` | query | string | Opaque cursor from the previous page's `pagination.next_cursor`. Omit for the first page. |
 | `limit` | query | integer | Page size, 1 to 100. Defaults to 50. Out-of-range or invalid values fall back to the default. |
 
 ### Response
@@ -58,7 +58,7 @@ A `data` plus `pagination` envelope. Each item is an API key without its secret.
   ],
   "pagination": {
     "total": null,
-    "next_cursor": "0b2d5e7a-1c3f-4a9b-8c2d-1e2f3a4b5c6d",
+    "next_cursor": "c1_b3BhcXVlLWN1cnNvcg",
     "has_more": true
   }
 }
@@ -349,7 +349,7 @@ Auth: **Scope** `API_KEYS` · **Org permission** `manage_api_keys`
 | Parameter | In | Type | Description |
 | --- | --- | --- | --- |
 | `id` | path | uuid | The API key id. |
-| `cursor` | query | uuid | Opaque cursor from the previous page's `pagination.next_cursor`. |
+| `cursor` | query | string | Opaque cursor from the previous page's `pagination.next_cursor`. |
 | `limit` | query | integer | Page size, 1 to 200. Defaults to 50. |
 
 ### Response
@@ -373,7 +373,7 @@ A `data` plus `pagination` envelope. Each entry is one recorded request.
   ],
   "pagination": {
     "total": null,
-    "next_cursor": "7c1f9a2b-3d4e-5f60-7a8b-9c0d1e2f3a4b",
+    "next_cursor": "c1_b3BhcXVlLWN1cnNvcg",
     "has_more": true
   }
 }

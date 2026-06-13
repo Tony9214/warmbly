@@ -9,23 +9,23 @@ interface UseSearchDealsProps {
     enabled?: boolean;
 }
 
-// Cross-pipeline deals fetch. Offset-paginated (the backend uses offset rather
-// than a keyset cursor so nullable value/close-date sorts don't drop rows), so
-// the page param is the next offset. Pages flatten into a single `deals` list
+// Cross-pipeline deals fetch. Offset pagination under the hood (so nullable
+// value/close-date sorts don't drop rows), but the page param is the same opaque
+// next_cursor every other list uses. Pages flatten into a single `deals` list
 // and `total` comes straight off the server so the UI can show "N of M".
 export default function useSearchDeals({ filters, limit = 50, enabled = true }: UseSearchDealsProps) {
     const queryResult = useInfiniteQuery<
         DealsSearchResult,
         Error,
-        InfiniteData<DealsSearchResult, number>,
+        InfiniteData<DealsSearchResult, string | undefined>,
         [string, string, string, SearchDeals, number],
-        number
+        string | undefined
     >({
         queryKey: ["crm", "deals", "search", filters, limit],
         queryFn: async ({ pageParam }) => searchDeals(filters, pageParam, limit),
-        initialPageParam: 0,
+        initialPageParam: undefined,
         getNextPageParam: (lastPage) =>
-            lastPage.pagination.has_more ? (lastPage.pagination.next_offset ?? undefined) : undefined,
+            lastPage.pagination.has_more ? (lastPage.pagination.next_cursor ?? undefined) : undefined,
         staleTime: 30_000,
         enabled,
     });
