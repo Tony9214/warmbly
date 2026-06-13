@@ -27,6 +27,9 @@ import TasksPage from './app/app/crm/tasks/page';
 import MeetingsPage from './app/app/crm/meetings/page';
 import TemplatesPage from './app/app/templates/page';
 import APIKeysPage from './app/app/api-keys/page';
+import OAuthAppsPage from './app/app/oauth-apps/page';
+import OAuthLayout from './app/oauth/layout';
+import OAuthConsentPage from './app/oauth/authorize/page';
 import IntegrationsPage from './app/app/integrations/page';
 import AutomationsPage from './app/app/automations/page';
 import AutomationBuilderPage from './app/app/automations/[id]/page';
@@ -186,6 +189,16 @@ const router = createBrowserRouter([
         element: <InviteAcceptPage />,
       },
       {
+        path: "oauth",
+        element: <OAuthLayout />,
+        children: [
+          {
+            path: "authorize",
+            element: <OAuthConsentPage />,
+          },
+        ],
+      },
+      {
         path: "app",
         element: <RootAppLayout />,
         children: [
@@ -276,6 +289,10 @@ const router = createBrowserRouter([
           {
             path: "api-keys",
             element: <APIKeysPage />,
+          },
+          {
+            path: "oauth-apps",
+            element: <OAuthAppsPage />,
           },
           {
             path: "integrations",
