@@ -16,6 +16,7 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/pkg/encrypt"
 	"github.com/warmbly/warmbly/internal/utils"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
@@ -481,12 +482,12 @@ func (r *emailRepository) Search(ctx context.Context, orgID, search string, curs
 	}
 
 	var total *int64
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	var hasMore bool
 
 	if len(inboxes) > int(limit) {
 		hasMore = true
-		nextCursor = &inboxes[limit].ID
+		nextCursor = paging.EncodeUUID(inboxes[limit].ID)
 		inboxes = inboxes[:limit]
 	}
 

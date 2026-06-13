@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // OrganizationRepository defines the interface for organization data access
@@ -924,7 +925,7 @@ func (r *organizationRepository) SearchOrganizationsForAdmin(ctx context.Context
 	if len(items) > limit {
 		result.Data = items[:limit]
 		last := items[limit-1].ID
-		result.Pagination.NextCursor = &last
+		result.Pagination.NextCursor = paging.UUIDString(last)
 	}
 
 	// Total count for the same filter — drop the trailing LIMIT arg.
@@ -1326,7 +1327,7 @@ func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, 
 	if len(items) > limit {
 		result.Data = items[:limit]
 		last := items[limit-1].ID
-		result.Pagination.NextCursor = &last
+		result.Pagination.NextCursor = paging.UUIDString(last)
 	}
 
 	// Total count for the same filter — drop the trailing LIMIT arg.

@@ -19,6 +19,7 @@ import (
 	"github.com/warmbly/warmbly/internal/pkg/emailverify"
 	"github.com/warmbly/warmbly/internal/pkg/encrypt"
 	"github.com/warmbly/warmbly/internal/utils"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 type ContactRepository interface {
@@ -1009,12 +1010,12 @@ func (r *contactRepository) Search(
 	}
 
 	// Next cursor
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	var hasMore bool
 	if len(contacts) > int(limit) {
 		hasMore = true
 		nextID := contacts[limit].ID
-		nextCursor = &nextID
+		nextCursor = paging.EncodeUUID(nextID)
 		contacts = contacts[:limit]
 	}
 
@@ -1749,7 +1750,13 @@ func (r *contactRepository) ExportAll(ctx context.Context, userID string, filter
 		if !page.Pagination.HasMore || page.Pagination.NextCursor == nil {
 			break
 		}
-		s := page.Pagination.NextCursor.String()
+		// NextCursor is now an opaque token; decode it back to the id the next
+		// Search call keys on.
+		id, derr := paging.DecodeUUID(*page.Pagination.NextCursor)
+		if derr != nil {
+			break
+		}
+		s := id.String()
 		cursor = &s
 	}
 	return out, nil
@@ -1984,10 +1991,10 @@ func (r *contactRepository) ListSentEmails(ctx context.Context, userID, contactI
 	}
 
 	hasMore := false
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	if len(out) > limit {
 		hasMore = true
-		nextCursor = &out[limit].TaskID
+		nextCursor = paging.EncodeUUID(out[limit].TaskID)
 		out = out[:limit]
 	}
 

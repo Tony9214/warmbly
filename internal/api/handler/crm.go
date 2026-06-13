@@ -9,6 +9,7 @@ import (
 	"github.com/warmbly/warmbly/internal/api/middleware"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // =====================
@@ -68,9 +69,12 @@ func (h *Handler) ListContactNotes(c *gin.Context) {
 
 	var cursor *uuid.UUID
 	if cursorStr := c.Query("cursor"); cursorStr != "" {
-		if id, err := uuid.Parse(cursorStr); err == nil {
-			cursor = &id
+		id, err := paging.DecodeUUID(cursorStr)
+		if err != nil {
+			errx.Handle(c, errx.New(errx.BadRequest, "invalid cursor"))
+			return
 		}
+		cursor = &id
 	}
 
 	result, xerr := h.CRMService.ListNotes(c.Request.Context(), *orgID, contactID, limit, cursor)
@@ -157,9 +161,12 @@ func (h *Handler) ListContactActivities(c *gin.Context) {
 
 	var cursor *uuid.UUID
 	if cursorStr := c.Query("cursor"); cursorStr != "" {
-		if id, err := uuid.Parse(cursorStr); err == nil {
-			cursor = &id
+		id, err := paging.DecodeUUID(cursorStr)
+		if err != nil {
+			errx.Handle(c, errx.New(errx.BadRequest, "invalid cursor"))
+			return
 		}
+		cursor = &id
 	}
 
 	result, xerr := h.CRMService.ListActivities(c.Request.Context(), *orgID, contactID, limit, cursor)
@@ -416,9 +423,12 @@ func (h *Handler) ListDeals(c *gin.Context) {
 
 	var cursor *uuid.UUID
 	if cursorStr := c.Query("cursor"); cursorStr != "" {
-		if id, err := uuid.Parse(cursorStr); err == nil {
-			cursor = &id
+		id, err := paging.DecodeUUID(cursorStr)
+		if err != nil {
+			errx.Handle(c, errx.New(errx.BadRequest, "invalid cursor"))
+			return
 		}
+		cursor = &id
 	}
 
 	result, xerr := h.CRMService.ListDeals(c.Request.Context(), *orgID, pipelineID, stageID, status, limit, cursor)
@@ -731,9 +741,12 @@ func (h *Handler) ListCRMTasks(c *gin.Context) {
 
 	var cursor *uuid.UUID
 	if cursorStr := c.Query("cursor"); cursorStr != "" {
-		if id, err := uuid.Parse(cursorStr); err == nil {
-			cursor = &id
+		id, err := paging.DecodeUUID(cursorStr)
+		if err != nil {
+			errx.Handle(c, errx.New(errx.BadRequest, "invalid cursor"))
+			return
 		}
+		cursor = &id
 	}
 
 	result, xerr := h.CRMService.ListCRMTasks(c.Request.Context(), *orgID, contactID, dealID, assignedTo, status, limit, cursor)

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // AdminRepository defines the interface for admin data access
@@ -291,7 +292,7 @@ func (r *adminRepository) SearchUsers(ctx context.Context, search *models.AdminU
 	if len(users) > limit {
 		result.Data = users[:limit]
 		lastID := users[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	// Get total count
@@ -607,7 +608,7 @@ func (r *adminRepository) GetUserEmails(ctx context.Context, userID uuid.UUID, c
 
 	if len(emails) > limit {
 		emails = emails[:limit]
-		pagination.NextCursor = &emails[limit-1].ID
+		pagination.NextCursor = paging.UUIDString(emails[limit-1].ID)
 	}
 
 	return emails, pagination, nil
@@ -680,7 +681,7 @@ func (r *adminRepository) ListAdmins(ctx context.Context, cursor *uuid.UUID, lim
 	if len(admins) > limit {
 		result.Data = admins[:limit]
 		lastID := admins[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	return result, nil
@@ -741,7 +742,7 @@ func (r *adminRepository) ListWorkers(ctx context.Context, cursor *uuid.UUID, li
 	if len(workers) > limit {
 		result.Data = workers[:limit]
 		lastID := workers[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	return result, nil
@@ -877,7 +878,7 @@ func (r *adminRepository) GetWorkerEmails(ctx context.Context, workerID uuid.UUI
 
 	if len(emails) > limit {
 		emails = emails[:limit]
-		pagination.NextCursor = &emails[limit-1].ID
+		pagination.NextCursor = paging.UUIDString(emails[limit-1].ID)
 	}
 
 	return emails, pagination, nil
@@ -1024,7 +1025,7 @@ func (r *adminRepository) GetPoolParticipants(ctx context.Context, poolType stri
 	}
 	if len(participants) > limit {
 		result.Data = participants[:limit]
-		result.Pagination.NextCursor = &participants[limit-1].ID
+		result.Pagination.NextCursor = paging.UUIDString(participants[limit-1].ID)
 	}
 
 	return result, nil
@@ -1095,7 +1096,7 @@ func (r *adminRepository) ListBlockedAccounts(ctx context.Context, cursor *uuid.
 	}
 	if len(accounts) > limit {
 		result.Data = accounts[:limit]
-		result.Pagination.NextCursor = &accounts[limit-1].ID
+		result.Pagination.NextCursor = paging.UUIDString(accounts[limit-1].ID)
 	}
 
 	return result, nil
@@ -1219,7 +1220,7 @@ func (r *adminRepository) ListAppeals(ctx context.Context, status string, cursor
 	if len(appeals) > limit {
 		result.Data = appeals[:limit]
 		lastID := appeals[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	return result, nil
@@ -1505,7 +1506,7 @@ func (r *adminRepository) SearchCampaigns(ctx context.Context, search *models.Ad
 	if len(campaigns) > limit {
 		result.Data = campaigns[:limit]
 		lastID := campaigns[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	// Total count for the same filter — drop the trailing LIMIT arg.
@@ -1676,7 +1677,7 @@ func (r *adminRepository) SearchAuditLogs(ctx context.Context, search *models.Ad
 	if len(logs) > limit {
 		result.Data = logs[:limit]
 		lastID := logs[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	return result, nil
@@ -2042,7 +2043,7 @@ func (r *adminRepository) SearchPlansForAdmin(ctx context.Context, search *model
 	if len(plans) > limit {
 		result.Data = plans[:limit]
 		last := plans[limit-1].ID
-		result.Pagination.NextCursor = &last
+		result.Pagination.NextCursor = paging.UUIDString(last)
 	}
 
 	countQuery := `SELECT COUNT(*) FROM plans p LEFT JOIN durations d ON d.id = p.duration_id ` + where
@@ -2322,7 +2323,7 @@ func (r *adminRepository) ListEnterpriseInquiries(ctx context.Context, search *m
 	if len(inquiries) > limit {
 		result.Data = inquiries[:limit]
 		lastID := inquiries[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	// Total count for the same filter — drop the trailing LIMIT arg.
@@ -2650,7 +2651,7 @@ func (r *adminRepository) SearchMailboxesForAdmin(ctx context.Context, search *m
 	if len(items) > limit {
 		result.Data = items[:limit]
 		last := items[limit-1].ID
-		result.Pagination.NextCursor = &last
+		result.Pagination.NextCursor = paging.UUIDString(last)
 	}
 
 	// Total count for the same filter (drop the trailing LIMIT arg).

@@ -12,6 +12,7 @@ import (
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 type APIKeyRepository interface {
@@ -177,11 +178,11 @@ func (r *apiKeyRepository) List(ctx context.Context, orgID uuid.UUID, limit int,
 		keys = append(keys, key)
 	}
 
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	hasMore := false
 	if len(keys) > limit {
 		hasMore = true
-		nextCursor = &keys[limit].ID
+		nextCursor = paging.EncodeUUID(keys[limit].ID)
 		keys = keys[:limit]
 	}
 
@@ -501,11 +502,11 @@ func (r *apiKeyRepository) ListUsageLogs(ctx context.Context, orgID, keyID uuid.
 		logs = append(logs, l)
 	}
 
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	hasMore := false
 	if len(logs) > limit {
 		hasMore = true
-		nextCursor = &logs[limit].ID
+		nextCursor = paging.EncodeUUID(logs[limit].ID)
 		logs = logs[:limit]
 	}
 

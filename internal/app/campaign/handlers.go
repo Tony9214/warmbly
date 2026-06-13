@@ -19,6 +19,7 @@ import (
 	"github.com/warmbly/warmbly/internal/scheduler"
 	"github.com/warmbly/warmbly/internal/tasks"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
@@ -75,7 +76,7 @@ func (s *campaignService) Get(ctx context.Context, orgID, id string) (*models.Ca
 }
 
 func (s *campaignService) Search(ctx context.Context, orgID, query, cursor, folder, limit string) (*models.CampaignsResult, *errx.Error) {
-	cursorId, err := validate.Uuid(cursor)
+	cursorId, err := paging.DecodeCursor(cursor)
 	if err != nil {
 		return nil, err
 	}

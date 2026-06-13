@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
@@ -42,7 +43,7 @@ func (s *contactService) Add(ctx context.Context, userID string, contacts []mode
 }
 
 func (s *contactService) Search(ctx context.Context, orgID, cursor, category, limit string, filters models.SearchContacts) (*models.ContactsResult, *errx.Error) {
-	cursorId, err := validate.Uuid(cursor)
+	cursorId, err := paging.DecodeCursor(cursor)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
@@ -679,11 +680,11 @@ func (r *campaignRepository) Search(ctx context.Context, orgID, query string, cu
 	}
 
 	var total *int64
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	var hasMore bool
 	if len(campaigns) > int(limit) {
 		hasMore = true
-		nextCursor = &campaigns[limit].ID
+		nextCursor = paging.EncodeUUID(campaigns[limit].ID)
 		campaigns = campaigns[:limit]
 	}
 

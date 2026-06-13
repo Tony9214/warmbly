@@ -10,6 +10,7 @@ import (
 	"github.com/warmbly/warmbly/internal/api/middleware"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // CreateAPIKey creates a new API key for the organization
@@ -56,9 +57,12 @@ func (h *Handler) ListAPIKeys(c *gin.Context) {
 
 	var cursor *uuid.UUID
 	if cursorStr := c.Query("cursor"); cursorStr != "" {
-		if id, err := uuid.Parse(cursorStr); err == nil {
-			cursor = &id
+		id, err := paging.DecodeUUID(cursorStr)
+		if err != nil {
+			errx.Handle(c, errx.New(errx.BadRequest, "invalid cursor"))
+			return
 		}
+		cursor = &id
 	}
 
 	limit := 50
@@ -244,9 +248,12 @@ func (h *Handler) ListAPIKeyUsageLogs(c *gin.Context) {
 
 	var cursor *uuid.UUID
 	if cursorStr := c.Query("cursor"); cursorStr != "" {
-		if id, err := uuid.Parse(cursorStr); err == nil {
-			cursor = &id
+		id, err := paging.DecodeUUID(cursorStr)
+		if err != nil {
+			errx.Handle(c, errx.New(errx.BadRequest, "invalid cursor"))
+			return
 		}
+		cursor = &id
 	}
 
 	limit := 50

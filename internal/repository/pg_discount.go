@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // Sentinel errors so the service layer can map redemption capacity failures to
@@ -361,7 +362,7 @@ func (r *discountCodeRepository) List(ctx context.Context, search *models.AdminD
 		result.Data = codes[:limit]
 		ids = ids[:limit]
 		lastID := result.Data[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	// Attach plan eligibility for the returned page in one query.
@@ -646,7 +647,7 @@ func (r *discountRedemptionRepository) ListByCode(ctx context.Context, codeID uu
 	if len(items) > limit {
 		result.Data = items[:limit]
 		lastID := result.Data[limit-1].ID
-		result.Pagination.NextCursor = &lastID
+		result.Pagination.NextCursor = paging.UUIDString(lastID)
 	}
 
 	return result, nil
