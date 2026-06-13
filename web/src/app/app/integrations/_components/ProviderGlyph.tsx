@@ -42,12 +42,6 @@ const BRAND_ICON: Record<string, { hex: string; path: string }> = {
     },
 };
 
-// Solid app-icon tile (white initial on the brand color) for providers whose
-// only published mark is a wordmark, not a square symbol.
-const BRAND_SOLID: Record<string, { hex: string }> = {
-    pipedrive: { hex: "#08A742" },
-};
-
 // Neutral tinted-initial fallback for anything without a mark or brand color.
 const BRAND_TINT: Record<string, { bg: string; ring: string; text: string }> = {};
 
@@ -100,24 +94,6 @@ export default function ProviderGlyph({
     }
 
     const textDim = size === 7 ? "text-[12px]" : size === 10 ? "text-[15px]" : "text-[13px]";
-    const solid = BRAND_SOLID[provider];
-    if (solid) {
-        return (
-            <div
-                className={cn(
-                    "rounded-md inline-flex items-center justify-center font-semibold uppercase text-white shrink-0",
-                    tileDim,
-                    textDim,
-                )}
-                style={{ backgroundColor: solid.hex }}
-                role="img"
-                aria-label={name}
-            >
-                {name.charAt(0)}
-            </div>
-        );
-    }
-
     const tint = BRAND_TINT[provider] ?? { bg: "bg-sky-50", ring: "ring-sky-100", text: "text-sky-700" };
     return (
         <div
