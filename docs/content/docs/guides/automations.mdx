@@ -41,9 +41,19 @@ A trigger is the event that starts the flow. Pick one in the trigger node's edit
 | Unsubscribed | A contact unsubscribes |
 | Warmup health changed | A mailbox's warmup health state changes |
 | Deliverability complaint | A spam complaint is recorded |
+| Inbound webhook | An external system POSTs to this automation's unique URL |
 | Campaign action | Launched on demand from a campaign step, not from a real event |
 
 The **Campaign action** trigger is special: it never fires by itself. It only runs when a campaign sequence reaches a "Run automation" step, which lets you trigger an automation as part of a campaign flow. (A campaign-launched run still evaluates your conditions, and an automation that is **Off** is a no-op.)
+
+### Inbound webhook trigger
+
+The **Inbound webhook** trigger lets anything outside Warmbly start a flow. Pick it on the trigger node and **save**: the editor then shows a unique URL for this automation. Any system that can send an HTTP request (a form tool, your backend, a no-code platform) `POST`s JSON to that URL and the flow runs.
+
+- The JSON body becomes the event payload, so reference its keys directly in actions and conditions with `{{.field}}` (a body of `{"email":"a@b.com","plan":"pro"}` gives you `{{.email}}` and `{{.plan}}`). A body that is not a JSON object is exposed verbatim as `{{.body}}`.
+- The URL itself is the credential: it carries a high-entropy token, so treat it like a secret and rotate it (by switching the trigger away and back) if it leaks. Send it over HTTPS.
+- The request returns immediately and the flow runs in the background, so a slow action never blocks the caller. An automation that is **Off** accepts the request and does nothing.
+- Keys beginning with an underscore are stripped from the payload, and the body is capped at 1 MB.
 
 Each trigger carries its own event data (for example, a reply carries the contact email, the reply intent, and a classifier confidence). Those values are what your conditions test and what your action text can insert. See [Personalization & expressions](/guides/expressions) for the full list of variables per trigger.
 
