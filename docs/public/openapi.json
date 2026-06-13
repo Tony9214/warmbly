@@ -9593,14 +9593,12 @@
             }
           },
           {
-            "name": "offset",
+            "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "Row offset for pagination.",
+            "description": "Opaque cursor from a previous response's pagination.next_cursor. Omit for the first page.",
             "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0
+              "type": "string"
             }
           }
         ],
@@ -10581,14 +10579,12 @@
             }
           },
           {
-            "name": "offset",
+            "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "Row offset for pagination.",
+            "description": "Opaque cursor from a previous response's pagination.next_cursor. Omit for the first page.",
             "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0
+              "type": "string"
             }
           }
         ],
@@ -20993,10 +20989,6 @@
           "reverse": {
             "type": "boolean",
             "description": "Descending when true."
-          },
-          "offset": {
-            "type": "integer",
-            "description": "Offset pagination alternative."
           }
         }
       },

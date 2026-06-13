@@ -573,10 +573,6 @@ func (r *contactRepository) Search(
 	var args []any
 	argIndex := 1
 
-	if filters.Offset < 0 {
-		filters.Offset = 0
-	}
-
 	// -----------------------------
 	// Base filter: user_id
 	// -----------------------------

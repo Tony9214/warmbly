@@ -285,7 +285,6 @@ type SearchContacts struct {
 	UpdatedBefore      *time.Time             `json:"updated_before"`       // Contacts updated before this date
 	SortBy             string                 `json:"sort_by"`              // e.g., "first_name ASC", "campaign_count DESC"
 	Reverse            bool                   `json:"reverse"`              // ASC or DESC
-	Offset             int                    `json:"offset"`               // Pagination
 }
 
 type BulkEditContactsFieldType string
