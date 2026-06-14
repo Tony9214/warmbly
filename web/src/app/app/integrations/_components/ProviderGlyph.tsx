@@ -59,6 +59,21 @@ export default function ProviderGlyph({
 
     const raw = RAW_BRAND_LOGOS[provider];
     if (raw) {
+        // Full-bleed marks bring their own background and fill the tile (clipped to
+        // the rounded corners); the rest sit on a white tile at icon size.
+        if (raw.fullBleed) {
+            return (
+                <div className={cn("rounded-md ring-1 ring-black/5 overflow-hidden inline-flex shrink-0", tileDim)}>
+                    <svg
+                        viewBox={raw.viewBox}
+                        role="img"
+                        aria-label={name}
+                        className="w-full h-full"
+                        dangerouslySetInnerHTML={{ __html: raw.inner }}
+                    />
+                </div>
+            );
+        }
         return (
             <div
                 className={cn(

@@ -2,7 +2,9 @@
 // SVG markup is rendered as-is inside a <svg viewBox> tile. Sourced from the
 // brands' published logos (Slack: the four-color hash; Close: the faceted orb).
 
-export type RawBrandLogo = { viewBox: string; inner: string };
+// fullBleed marks paint their own (non-white) background and fill the whole tile,
+// so the glyph wrapper skips the white tile and clips them to the rounded corners.
+export type RawBrandLogo = { viewBox: string; inner: string; fullBleed?: boolean };
 
 const SLACK: RawBrandLogo = {
     viewBox: "0 0 256 256",
@@ -45,17 +47,14 @@ const CLOSE: RawBrandLogo = {
     ].join(""),
 };
 
-// Pipedrive has no published single-path symbol, only a wordmark. This is its
-// real app mark rebuilt to match: a Green Haze (#08A742) circle with a white
-// blocky lowercase "p" (stem with descender + square-counter bowl).
+// Pipedrive's real monogram (the official "P" mark) in white on a Green Haze
+// (#08A742) tile, matching its app icon. Full-bleed: the green fills the tile.
 const PIPEDRIVE: RawBrandLogo = {
-    viewBox: "0 0 48 48",
+    viewBox: "0 0 304 304",
+    fullBleed: true,
     inner: [
-        '<circle cx="24" cy="24" r="24" fill="#08A742"/>',
-        '<rect x="14" y="12" width="6" height="26" fill="#fff"/>',
-        '<rect x="14" y="12" width="20" height="6" fill="#fff"/>',
-        '<rect x="28" y="12" width="6" height="18" fill="#fff"/>',
-        '<rect x="14" y="24" width="20" height="6" fill="#fff"/>',
+        '<rect width="304" height="304" fill="#08A742"/>',
+        '<g transform="translate(67,44)"><path fill="#fff" d="M59.6807,81.1772 C59.6807,101.5343 70.0078,123.4949 92.7336,123.4949 C109.5872,123.4949 126.6277,110.3374 126.6277,80.8785 C126.6277,55.0508 113.232,37.7119 93.2944,37.7119 C77.0483,37.7119 59.6807,49.1244 59.6807,81.1772 Z M101.3006,0 C142.0482,0 169.4469,32.2728 169.4469,80.3126 C169.4469,127.5978 140.584,160.60942 99.3224,160.60942 C79.6495,160.60942 67.0483,152.1836 60.4595,146.0843 C60.5063,147.5305 60.5374,149.1497 60.5374,150.8788 L60.5374,215 L18.32565,215 L18.32565,44.157 C18.32565,41.6732 17.53126,40.8873 15.07021,40.8873 L0.5531,40.8873 L0.5531,3.4741 L35.9736,3.4741 C52.282,3.4741 56.4564,11.7741 57.2508,18.1721 C63.8708,10.7524 77.5935,0 101.3006,0 Z"/></g>',
     ].join(""),
 };
 
