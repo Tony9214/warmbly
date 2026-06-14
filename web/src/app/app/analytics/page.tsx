@@ -108,14 +108,14 @@ export default function AnalyticsPage() {
                     <div className="grid lg:grid-cols-[1fr_300px] min-h-0 flex-1">
                         <section className="flex flex-col min-h-0 lg:border-r lg:border-slate-200">
                             <SectionBar label="Email performance">
-                                <div className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 max-w-full overflow-x-auto">
+                                <div className="inline-flex items-center gap-0.5 rounded-md bg-slate-100 p-0.5 max-w-full overflow-x-auto">
                                     {METRICS.map((m) => (
                                         <button
                                             key={m.key}
                                             onClick={() => setMetric(m.key)}
                                             className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${
                                                 metric === m.key
-                                                    ? "bg-slate-900 text-white"
+                                                    ? "bg-white text-slate-900 shadow-sm"
                                                     : "text-slate-500 hover:text-slate-900"
                                             }`}
                                         >
@@ -285,13 +285,13 @@ function ActivityRow({ a }: { a: { type: string; campaign_name: string; contact_
 function RangeTabs({ value, onChange }: { value: Range; onChange: (v: Range) => void }) {
     const opts: Range[] = ["7d", "30d", "90d"];
     return (
-        <div className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+        <div className="inline-flex items-center gap-0.5 rounded-md bg-slate-100 p-0.5">
             {opts.map((o) => (
                 <button
                     key={o}
                     onClick={() => onChange(o)}
-                    className={`h-6 px-2 rounded text-[11px] font-medium tabular-nums transition-colors ${
-                        value === o ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-900"
+                    className={`h-7 px-2.5 rounded text-[12px] font-medium transition-colors ${
+                        value === o ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900"
                     }`}
                 >
                     {o}
@@ -315,7 +315,7 @@ function ErrorState({ onRetry, isRefetching }: { onRetry: () => void; isRefetchi
                 type="button"
                 onClick={onRetry}
                 disabled={isRefetching}
-                className="mt-4 h-7 px-2.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                className="mt-4 h-7 px-2.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
             >
                 {isRefetching ? <Loader2Icon className="w-3 h-3 animate-spin" /> : <RefreshCcwIcon className="w-3 h-3" />}
                 Try again

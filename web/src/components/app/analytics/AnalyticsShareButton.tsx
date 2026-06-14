@@ -218,7 +218,7 @@ export default function AnalyticsShareButton({
                                         url && downloadPng(url, withPresetSuffix(filename, current.suffix))
                                     }
                                     disabled={!url}
-                                    className="h-8 px-3 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                                    className="h-8 px-3 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
                                 >
                                     <DownloadIcon className="w-3.5 h-3.5" />
                                     Download PNG
