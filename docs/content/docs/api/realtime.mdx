@@ -20,12 +20,15 @@ The socket speaks the Phoenix channel protocol (serializer version `1.0.0`) at:
 wss://realtime.warmbly.com/socket/websocket?vsn=1.0.0&token=<TOKEN>
 ```
 
-Two token types are accepted:
+Three token types are accepted, and all of them go in the same `token` query parameter:
 
-- **API key**: pass a key with the `REALTIME_SUBSCRIBE` permission (bit 11) directly as `token`. See [Permissions](/api/permissions/) for how to grant it.
+- **API key** (`wmbly_…`): pass a key with the `REALTIME_SUBSCRIBE` permission (bit 11) directly as `token`. See [Permissions](/api/permissions/) for how to grant it.
+- **OAuth access token** (`wmat_…`): pass an access token whose grant includes the realtime scope (the lowercased permission, `realtime_subscribe`). It connects on the granting user's behalf with exactly the scopes they approved. See [OAuth](/api/oauth/).
 - **Short-lived JWT**: browser sessions call the authenticated socket endpoint to mint a 10-minute connection token. This is what the dashboard itself uses.
 
-If the key has IP restrictions configured, they are enforced on the socket handshake as well.
+In short, both developer auth methods work here: an API key with `REALTIME_SUBSCRIBE`, or an OAuth access token with the realtime scope. They authenticate through the same gate, so everything below applies to either.
+
+If the key (or OAuth app) has IP restrictions configured, they are enforced on the socket handshake as well.
 
 ## Channels
 
@@ -69,7 +72,7 @@ You can have Warmbly emit your own events to this stream, so your app reacts to 
 }
 ```
 
-`name` is the event name you chose and `payload` is your fields. Subscribe with an API key carrying `REALTIME_SUBSCRIBE` and match on `name` (or use the `CUSTOM` intent to receive only these). This is the recommended way to "tell my system this happened" — no inbound endpoint, no SSRF surface, and it works behind a firewall.
+`name` is the event name you chose and `payload` is your fields. Subscribe with an API key carrying `REALTIME_SUBSCRIBE` (or an OAuth access token with the realtime scope) and match on `name` (or use the `CUSTOM` intent to receive only these). This is the recommended way to "tell my system this happened": no inbound endpoint, no SSRF surface, and it works behind a firewall.
 
 ## Heartbeats
 
@@ -109,6 +112,135 @@ The server then either replays what you missed or tells you to resync:
 
 Resume is **at-least-once**: a replay may re-deliver an event you already handled, so dedupe by `seq`. The buffer holds roughly the most recent events per organization, bounded by both size and time, so resume covers short disconnects (deploys, network blips, tab sleep) but not arbitrarily long ones.
 
+## Reference client
+
+The serializer (`vsn=1.0.0`) frames every message as a five-element array `[join_ref, ref, topic, event, payload]`. The client below speaks that wire format directly over a plain `WebSocket`, so it has no dependencies (if you already use the `phoenix` npm package, its `Socket`/`Channel` classes do the same framing for you). It walks the whole lifecycle: connect with a token, join `org:<org_id>` with intents, read the HELLO join reply, run the heartbeat loop at the advertised cadence, resume from the last `seq` on reconnect, handle events (including `CUSTOM_EVENT`), and back off on close or rejection.
+
+```js
+// No dependencies. token can be an API key (wmbly_… with REALTIME_SUBSCRIBE)
+// or an OAuth access token (wmat_… with the realtime scope).
+function connectRealtime({ token, orgId, intents = ["CUSTOM"], onEvent }) {
+  const url = `wss://realtime.warmbly.com/socket/websocket?vsn=1.0.0&token=${encodeURIComponent(token)}`;
+  const topic = `org:${orgId}`;
+
+  let ws, ref = 0, joinRef = null, heartbeatTimer = null, watchdog = null;
+  let heartbeatRef = null, backoff = 1000, closedByUs = false;
+  let lastSeq = 0; // highest seq processed; survives reconnects so we can resume
+
+  const nextRef = () => String(++ref);
+
+  // Phoenix frame: [join_ref, ref, topic, event, payload]
+  const send = (frameTopic, event, payload, useJoinRef = false) => {
+    const r = nextRef();
+    ws.send(JSON.stringify([useJoinRef ? joinRef : null, r, frameTopic, event, payload]));
+    return r;
+  };
+
+  const join = () => {
+    joinRef = nextRef();
+    // Resume from last_seq when we have one, otherwise a fresh join.
+    const payload = { intents };
+    if (lastSeq > 0) payload.resume = { last_seq: lastSeq };
+    ws.send(JSON.stringify([joinRef, joinRef, topic, "phx_join", payload]));
+  };
+
+  const startHeartbeats = (intervalMs) => {
+    stopHeartbeats();
+    heartbeatTimer = setInterval(() => {
+      heartbeatRef = send("phoenix", "heartbeat", {});
+      // Watchdog: if the reply never lands, the socket is silently dead.
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => ws.close(4000, "heartbeat timeout"), intervalMs);
+    }, intervalMs);
+  };
+
+  const stopHeartbeats = () => {
+    clearInterval(heartbeatTimer);
+    clearTimeout(watchdog);
+    heartbeatTimer = watchdog = null;
+  };
+
+  const open = () => {
+    closedByUs = false;
+    ws = new WebSocket(url);
+
+    ws.onopen = () => { backoff = 1000; join(); };
+
+    ws.onmessage = (e) => {
+      const [, msgRef, msgTopic, event, payload] = JSON.parse(e.data);
+
+      // Heartbeat reply on the phoenix topic clears the watchdog.
+      if (msgTopic === "phoenix" && msgRef === heartbeatRef) {
+        clearTimeout(watchdog);
+        return;
+      }
+
+      // Join reply doubles as HELLO (heartbeat cadence, current seq, resume support).
+      if (event === "phx_reply" && msgRef === joinRef) {
+        if (payload.status === "ok") {
+          const hello = payload.response || {};
+          lastSeq = Math.max(lastSeq, hello.seq || 0);
+          startHeartbeats(hello.heartbeat_interval_ms || 25000);
+          console.log("joined", { seq: hello.seq, resume_supported: hello.resume_supported });
+        } else {
+          // Post-join rejection: structured { code, reason }.
+          const err = payload.response || {};
+          console.error("join rejected", err.code, err.reason);
+          ws.close(4000, "join rejected");
+        }
+        return;
+      }
+
+      // Resume outcome markers.
+      if (event === "resumed") { lastSeq = Math.max(lastSeq, payload.current_seq || lastSeq); return; }
+      if (event === "resume_failed") {
+        lastSeq = payload.current_seq || lastSeq; // resync over REST, then continue live
+        console.warn("resume_failed", payload.reason, "-> resync from", lastSeq);
+        return;
+      }
+
+      // Server-side throttle of outbound delivery.
+      if (event === "rate_limited") return;
+
+      // Real events. Track seq for resume and dedupe by it (delivery is at-least-once).
+      if (typeof payload?.seq === "number") {
+        if (payload.seq <= lastSeq) return; // already handled
+        lastSeq = payload.seq;
+      }
+      if (event === "CUSTOM_EVENT") {
+        onEvent?.({ name: payload.name, payload: payload.payload, raw: payload });
+      } else {
+        onEvent?.({ name: event, payload, raw: payload });
+      }
+    };
+
+    ws.onclose = (e) => {
+      stopHeartbeats();
+      // Connect-level rejections currently surface as a failed handshake (HTTP 403
+      // carrying the reason), not a close code; either way, reconnect with backoff.
+      // Re-mint the token first if it may have expired (4004).
+      if (closedByUs) return;
+      console.warn("closed", e.code, e.reason, "- retrying in", backoff, "ms");
+      setTimeout(open, backoff);
+      backoff = Math.min(backoff * 2, 30000); // exponential backoff, capped
+    };
+
+    ws.onerror = () => { try { ws.close(); } catch {} };
+  };
+
+  open();
+  return { close: () => { closedByUs = true; stopHeartbeats(); ws?.close(1000); } };
+}
+
+// Usage
+const conn = connectRealtime({
+  token: "wmbly_…",            // or an OAuth "wmat_…" access token
+  orgId: "org_123",
+  intents: ["CUSTOM", "EMAIL", "AUDIT"],
+  onEvent: ({ name, payload }) => console.log(name, payload),
+});
+```
+
 ## Presence
 
 The org channel carries team presence for the collaboration features in the dashboard (who is online, who is viewing or replying to a record). Standard Phoenix presence events are used:
@@ -138,17 +270,22 @@ When a client-sent event is throttled you receive an error reply with `reason: "
 
 ## Connection rejections
 
-If authentication, the realtime permission, the IP allowlist, the rate limit, or the connection cap fails, the WebSocket upgrade is rejected at the HTTP layer: the client observes a failed upgrade (no application close frame). The server records a reason code for each case:
+A connection can be refused at two points, and the two surface differently today:
+
+- **Connect-level** (authentication, the realtime permission, the IP allowlist, the rate limit, the connection cap): the WebSocket upgrade is refused at the HTTP layer. The handshake returns an **HTTP 403** carrying the reason, and the client observes a failed upgrade rather than an application close frame.
+- **Post-join** (a `phx_join` that fails after the socket is open, for example a channel you may not see): the join reply comes back with `status: "error"` and a structured error object `{ code, reason }` in its `response`.
+
+Both paths use the same reason codes:
 
 | Code | Meaning | Client action |
 | --- | --- | --- |
-| 4003 | Missing token | Fix the connection URL |
-| 4004 | Invalid or expired token | Re-mint the token, then reconnect |
+| 4003 | Not authenticated (token missing) | Add a valid `token` to the connection URL |
+| 4004 | Authentication failed: token expired, or invalid key | Re-mint the token (or check the key), then reconnect |
 | 4007 | Rate limited | Back off and retry |
 | 4009 | Connection limit exceeded | Reduce concurrent sockets |
-| 4010 | Key lacks the realtime permission | Grant `REALTIME_SUBSCRIBE` |
+| 4010 | Permission denied, or IP not allowed | Grant `REALTIME_SUBSCRIBE` (or the realtime scope), or fix the IP allowlist |
 
-Because the code is not delivered as a WebSocket close frame today, a client cannot branch on it programmatically: treat any failed upgrade as "re-mint the token if it expired, otherwise back off". Surfacing these as application close codes is planned.
+Because connect-level rejections are an HTTP 403 and not a WebSocket close frame today, a client cannot branch on the connect-level code programmatically: treat any failed upgrade as "re-mint the token if it expired, otherwise back off". Post-join rejections are already machine-readable through `{ code, reason }`. Surfacing connect-level reasons as application close codes too is planned.
 
 ## Delivery guarantees
 
