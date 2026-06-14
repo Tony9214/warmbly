@@ -17,11 +17,19 @@ export const TRIGGER_EVENTS: string[] = [
     "campaign.unsubscribed",
     "warmup.health_changed",
     "deliverability.complaint",
+    "inbound.webhook",
     "campaign.action",
 ];
 
 export function triggerLabel(ev: string): string {
     return EVENT_LABELS[ev] ?? ev;
+}
+
+// The inbound-webhook trigger fires when an external system POSTs to this
+// automation's unique URL; the JSON body becomes the event payload, so its
+// fields are caller-defined rather than fixed.
+export function triggerIsInboundWebhook(ev: string): boolean {
+    return ev === "inbound.webhook";
 }
 
 // Human labels for the provider action handlers (the action a step performs).
@@ -41,6 +49,10 @@ export const ACTION_LABELS: Record<string, string> = {
     "warmbly.move_deal_stage": "Move the deal stage",
     "warmbly.unsubscribe": "Unsubscribe the contact",
     "warmbly.run_automation": "Run another automation",
+    "warmbly.label_email": "Label the email",
+    "warmbly.http_request": "HTTP request / webhook",
+    "warmbly.set_variables": "Set variables",
+    "warmbly.fire_event": "Fire event",
 };
 
 export function actionLabel(a: string): string {
@@ -60,6 +72,10 @@ export const NATIVE_ACTIONS: string[] = [
     "warmbly.move_deal_stage",
     "warmbly.unsubscribe",
     "warmbly.run_automation",
+    "warmbly.label_email",
+    "warmbly.http_request",
+    "warmbly.set_variables",
+    "warmbly.fire_event",
 ];
 
 export function isNativeAction(a: string): boolean {
@@ -67,11 +83,15 @@ export function isNativeAction(a: string): boolean {
 }
 
 // What config a native action needs, so the editor shows the right picker.
-export function nativeActionNeeds(action: string): "tag" | "deal" | "task" | "automation" | "none" {
+export function nativeActionNeeds(
+    action: string,
+): "tag" | "label" | "deal" | "task" | "automation" | "http" | "vars" | "event" | "none" {
     switch (action) {
         case "warmbly.add_tag":
         case "warmbly.remove_tag":
             return "tag";
+        case "warmbly.label_email":
+            return "label";
         case "warmbly.create_deal":
         case "warmbly.move_deal_stage":
             return "deal";
@@ -79,9 +99,21 @@ export function nativeActionNeeds(action: string): "tag" | "deal" | "task" | "au
             return "task";
         case "warmbly.run_automation":
             return "automation";
+        case "warmbly.http_request":
+            return "http";
+        case "warmbly.set_variables":
+            return "vars";
+        case "warmbly.fire_event":
+            return "event";
         default:
             return "none";
     }
+}
+
+// Which triggers carry an inbox thread, so a "label email" action has something
+// to label (the reply event payload includes thread_id + the mailbox owner).
+export function triggerCarriesThread(ev: string): boolean {
+    return ev === "campaign.reply_received";
 }
 
 // Per-action config field needs, so the node editor shows the right inputs.
@@ -282,10 +314,61 @@ export const TRIGGER_VARIABLES: Record<string, string[]> = {
     "campaign.unsubscribed": ["contact_email", "contact_id", "campaign_id", "source"],
     "warmup.health_changed": ["email", "new_state", "previous_state", "reason"],
     "campaign.action": ["contact_email", "contact_id", "campaign_id", "campaign_name", "first_name", "last_name", "company", "phone"],
+    // Inbound webhook payloads are caller-defined, so there are no fixed
+    // variables to offer; the user references their own JSON keys directly.
+    "inbound.webhook": [],
 };
 
 export function triggerVariables(triggerEvent: string): string[] {
     return TRIGGER_VARIABLES[triggerEvent] ?? ["contact_email", "contact_id"];
+}
+
+// A representative sample event payload for a trigger, mirroring the backend's
+// sampleEventData (internal/app/integration/graph_executor.go). Seeds the test
+// panel so a dry run has realistic data to evaluate conditions and render action
+// previews against. The user can edit it freely before running.
+export function sampleEventData(triggerEvent: string): Record<string, unknown> {
+    const base: Record<string, unknown> = {
+        contact_email: "jane@example.com",
+        contact_id: "00000000-0000-0000-0000-000000000001",
+        campaign_id: "00000000-0000-0000-0000-000000000002",
+        campaign_name: "Q3 Outbound",
+        first_name: "Jane",
+        last_name: "Doe",
+        company: "Example Inc",
+    };
+    switch (triggerEvent) {
+        case "campaign.reply_received":
+            base.intent = "positive";
+            base.confidence = 0.92;
+            base.subject = "Re: quick question";
+            base.snippet = "Sure, let's talk next week.";
+            break;
+        case "meeting.booked":
+        case "meeting.rescheduled":
+        case "meeting.canceled":
+            base.source = "calendly";
+            base.invitee_email = "jane@example.com";
+            base.invitee_name = "Jane Doe";
+            base.event_name = "Intro call";
+            base.scheduled_for = "2026-07-01T15:00:00Z";
+            base.join_url = "https://example.com/join/abc";
+            break;
+        case "campaign.email_bounced":
+        case "deliverability.bounce":
+        case "deliverability.complaint":
+            base.event_type = "bounce";
+            base.provider = "ses";
+            base.reason = "mailbox full";
+            break;
+        case "warmup.health_changed":
+            base.email = "sender@example.com";
+            base.new_state = "watch";
+            base.previous_state = "healthy";
+            base.reason = "spam placement rising";
+            break;
+    }
+    return base;
 }
 
 const prettyKey = (k: string) => k.replace(/_/g, " ");

@@ -1,3 +1,5 @@
+import { NoAccess } from "@/components/layout/NoAccess";
+import { usePermission } from "@/hooks/usePermission";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -49,6 +51,7 @@ function num(v: number | undefined): string {
 }
 
 export default function AnalyticsPage() {
+    const canView = usePermission("VIEW_ANALYTICS");
     const [range, setRange] = useState<Range>("7d");
     const [metric, setMetric] = useState<Metric>("sent");
     const dash = useDashboard(range);
@@ -62,7 +65,7 @@ export default function AnalyticsPage() {
 
     const breakdown = [
         { label: "Sent", value: os?.total_emails_sent, icon: SendIcon, dot: "bg-slate-400" },
-        { label: "Opens", value: os?.total_opens, icon: MailCheckIcon, dot: "bg-emerald-500" },
+        { label: "Opens", value: os?.total_opens, icon: MailCheckIcon, dot: "bg-emerald-500", note: os?.machine_opens ? `${num(os.machine_opens)} auto` : undefined },
         { label: "Clicks", value: os?.total_clicks, icon: MousePointerClickIcon, dot: "bg-violet-500" },
         { label: "Replies", value: os?.total_replies, icon: ReplyIcon, dot: "bg-amber-500" },
         { label: "Bounces", value: os?.total_bounces, icon: TriangleAlertIcon, dot: "bg-rose-500" },
@@ -79,6 +82,8 @@ export default function AnalyticsPage() {
         ],
         daily: (d?.daily_trend ?? []).map((p) => ({ label: p.date, value: p.sent })),
     };
+
+    if (!canView) return <NoAccess feature="analytics" permissionLabel="View analytics" />;
 
     return (
         <Page>
@@ -103,14 +108,14 @@ export default function AnalyticsPage() {
                     <div className="grid lg:grid-cols-[1fr_300px] min-h-0 flex-1">
                         <section className="flex flex-col min-h-0 lg:border-r lg:border-slate-200">
                             <SectionBar label="Email performance">
-                                <div className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 max-w-full overflow-x-auto">
+                                <div className="inline-flex items-center gap-0.5 rounded-md bg-slate-100 p-0.5 max-w-full overflow-x-auto">
                                     {METRICS.map((m) => (
                                         <button
                                             key={m.key}
                                             onClick={() => setMetric(m.key)}
                                             className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${
                                                 metric === m.key
-                                                    ? "bg-slate-900 text-white"
+                                                    ? "bg-white text-slate-900 shadow-sm"
                                                     : "text-slate-500 hover:text-slate-900"
                                             }`}
                                         >
@@ -140,6 +145,14 @@ export default function AnalyticsPage() {
                                     <div key={q.label} className="h-9 px-4 flex items-center gap-2">
                                         <span className={`size-1.5 rounded-full ${q.dot}`} />
                                         <span className="text-[12px] text-slate-700">{q.label}</span>
+                                        {"note" in q && q.note && (
+                                            <span
+                                                className="text-[9.5px] text-slate-400 font-mono"
+                                                title="Auto-opens: pixel fetches from privacy proxies (e.g. Apple Mail), not a person reading"
+                                            >
+                                                {q.note}
+                                            </span>
+                                        )}
                                         <span className="ml-auto font-mono text-[11px] text-slate-500 tabular-nums">
                                             {dash.isPending ? "—" : num(q.value)}
                                         </span>
@@ -272,13 +285,13 @@ function ActivityRow({ a }: { a: { type: string; campaign_name: string; contact_
 function RangeTabs({ value, onChange }: { value: Range; onChange: (v: Range) => void }) {
     const opts: Range[] = ["7d", "30d", "90d"];
     return (
-        <div className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+        <div className="inline-flex items-center gap-0.5 rounded-md bg-slate-100 p-0.5">
             {opts.map((o) => (
                 <button
                     key={o}
                     onClick={() => onChange(o)}
-                    className={`h-6 px-2 rounded text-[11px] font-medium tabular-nums transition-colors ${
-                        value === o ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-900"
+                    className={`h-7 px-2.5 rounded text-[12px] font-medium transition-colors ${
+                        value === o ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900"
                     }`}
                 >
                     {o}
@@ -302,7 +315,7 @@ function ErrorState({ onRetry, isRefetching }: { onRetry: () => void; isRefetchi
                 type="button"
                 onClick={onRetry}
                 disabled={isRefetching}
-                className="mt-4 h-7 px-2.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                className="mt-4 h-7 px-2.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
             >
                 {isRefetching ? <Loader2Icon className="w-3 h-3 animate-spin" /> : <RefreshCcwIcon className="w-3 h-3" />}
                 Try again

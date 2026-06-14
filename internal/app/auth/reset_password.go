@@ -116,5 +116,65 @@ func (s *authService) ResetPasswordConfirm(ctx context.Context, data *ResetPassw
 		return err
 	}
 
+	// A forgotten-password reset means the account may be compromised: evict
+	// every existing session (no current device to keep — uuid.Nil matches
+	// none, so all are revoked) so a reset always fully cuts off prior access.
+	if s.tokenService != nil {
+		if err := s.tokenService.RevokeOtherSessions(ctx, sess.UserID, uuid.Nil); err != nil {
+			sentry.CaptureException(err)
+			// Non-fatal: the password is already reset.
+		}
+	}
+
+	return nil
+}
+
+// ChangePassword updates a logged-in user's password. It verifies the current
+// password first (so a hijacked but unattended session can't silently change
+// it), rejects OAuth-only accounts, and enforces the password policy.
+func (s *authService) ChangePassword(ctx context.Context, userID, currentSessionID uuid.UUID, data *ChangePassword) *errx.Error {
+	hash, xerr := s.authRepository.GetPasswordHash(ctx, userID)
+	if xerr != nil {
+		return xerr
+	}
+	if hash == "" {
+		return errx.New(errx.BadRequest, "this account signs in without a password")
+	}
+
+	ok, verr := argon2.Verify(data.CurrentPassword, hash)
+	if verr != nil {
+		sentry.CaptureException(verr)
+		return errx.InternalError()
+	}
+	if !ok {
+		return errx.ErrCredentials
+	}
+
+	if !crypt.ValidatePassword(data.NewPassword) {
+		return errx.ErrPassword
+	}
+	if data.NewPassword == data.CurrentPassword {
+		return errx.New(errx.BadRequest, "the new password must be different")
+	}
+
+	newHash, hashErr := argon2.Hash(data.NewPassword)
+	if hashErr != nil {
+		sentry.CaptureException(hashErr)
+		return errx.InternalError()
+	}
+	if err := s.authRepository.ResetPassword(ctx, userID, newHash); err != nil {
+		return err
+	}
+
+	// Changing the password evicts every OTHER signed-in device (the whole
+	// point of changing it when a session may be compromised). The current
+	// device keeps its session so the user isn't logged out of the action
+	// they just performed.
+	if s.tokenService != nil && currentSessionID != uuid.Nil {
+		if err := s.tokenService.RevokeOtherSessions(ctx, userID, currentSessionID); err != nil {
+			sentry.CaptureException(err)
+			// Non-fatal: the password is already changed.
+		}
+	}
 	return nil
 }

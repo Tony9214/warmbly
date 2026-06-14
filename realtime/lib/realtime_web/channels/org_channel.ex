@@ -1,15 +1,20 @@
 defmodule RealtimeWeb.OrgChannel do
   @moduledoc """
-  Channel for organization-specific events.
+  Channel for organization-specific events and team presence.
 
-  Users can join their organization's channel to receive events like:
-  - member_joined: New member joined the organization
-  - member_left: Member left or was removed
-  - member_role_changed: Member's role/permissions changed
-  - settings_changed: Organization settings updated
-  - subscription_changed: Subscription status changed
+  Users join their organization's channel to receive org-scoped dashboard
+  events (campaign sends, inbox arrivals, audit entries, member changes, ...)
+  filtered by their member permissions.
 
-  Authorization is handled by checking organization membership.
+  Presence: every JWT member is tracked in `RealtimeWeb.Presence` with
+  display metadata and a live activity descriptor. Clients push
+  `presence:update` (rate-limited like any client event) with:
+
+      %{"page" => "/app/unibox", "resource" => "thread:<id>", "action" => "replying"}
+
+  so teammates see who is online, who is viewing the same record, and who is
+  already replying to an email. API-key (developer) sockets receive events but
+  are never tracked as presences.
   """
 
   use Phoenix.Channel
@@ -19,9 +24,12 @@ defmodule RealtimeWeb.OrgChannel do
   alias Realtime.Auth
   alias Realtime.Connections
   alias Realtime.RateLimiter
+  alias RealtimeWeb.Presence
+
+  @presence_actions ~w(viewing editing replying idle)
 
   @impl true
-  def join("org:" <> org_id, _params, socket) do
+  def join("org:" <> org_id, params, socket) do
     user_id = socket.assigns.user_id
 
     case Auth.check_org_membership(user_id, org_id) do
@@ -33,17 +41,50 @@ defmodule RealtimeWeb.OrgChannel do
           |> assign(:org_id, org_id)
           |> assign(:member, member)
           |> assign(:permissions, Map.get(member, :permissions, 0))
+          # Org-wide presence privacy, read once at join. Re-read on rejoin, so a
+          # settings change applies live once clients reconnect to the channel.
+          |> assign(:presence_show_online, Map.get(member, :presence_show_online, true))
+          |> assign(:presence_show_activity, Map.get(member, :presence_show_activity, true))
+          # Optional event-family intents: a client may join with
+          # {"intents": ["AUDIT", "CAMPAIGN"]} to receive only matching event
+          # types. Absent or empty means the full org stream (back-compatible).
+          |> assign(:intents, parse_intents(params))
+          # Resume token from a reconnecting client: the last sequence it saw.
+          |> assign(:resume_from, parse_resume(params))
 
         send(self(), :after_join)
-        {:ok, %{org_id: org_id, role: member.role}, socket}
+
+        # The join reply doubles as a HELLO: advertise the heartbeat cadence the
+        # server expects (so library authors do not hardcode it) and the current
+        # stream sequence. Every event carries a monotonic `seq`; track the
+        # highest you have seen and rejoin with {"resume": {"last_seq": seq}} to
+        # replay what you missed across a disconnect. Heartbeats are
+        # client-initiated on the "phoenix" topic; send one within
+        # server_timeout_ms or the socket is closed.
+        {:ok,
+         %{
+           org_id: org_id,
+           role: member.role,
+           heartbeat_interval_ms: 25_000,
+           server_timeout_ms: 60_000,
+           seq: Realtime.EventLog.current_seq(org_id),
+           resume_supported: true
+         }, socket}
 
       {:error, :not_a_member} ->
-        {:error, %{reason: "not_a_member"}}
+        join_error(:not_a_member)
 
       {:error, reason} ->
         Logger.warning("Failed to join org channel: #{inspect(reason)}")
-        {:error, %{reason: to_string(reason)}}
+        join_error(reason)
     end
+  end
+
+  # Structured join rejection the client can branch on: a numeric `code`
+  # (Auth.error_code/1) plus a human-readable `reason` (Auth.error_message/1),
+  # mirroring the socket-level auth error shape.
+  defp join_error(reason) do
+    {:error, %{code: Auth.error_code(reason), reason: Auth.error_message(reason)}}
   end
 
   @impl true
@@ -51,6 +92,70 @@ defmodule RealtimeWeb.OrgChannel do
     # Subscribe to the organization's Pub/Sub topic
     org_id = socket.assigns.org_id
     Phoenix.PubSub.subscribe(Realtime.PubSub, "org:#{org_id}")
+
+    # Track presence for human members only; developer API-key sockets are
+    # event consumers, not teammates. When the org has turned off "show who's
+    # online", we track no one — so nobody appears online for anybody — but
+    # still push the (empty) roster so the client's join-complete logic runs.
+    if Map.get(socket.assigns, :auth_type) == :jwt do
+      if socket.assigns[:presence_show_online] do
+        profile = Auth.get_user_profile(socket.assigns.user_id)
+
+        {:ok, _} =
+          Presence.track(socket, socket.assigns.user_id, %{
+            online_at: System.system_time(:second),
+            name: profile.name,
+            avatar: profile.avatar,
+            page: nil,
+            resource: nil,
+            action: nil
+          })
+      end
+
+      push(socket, "presence_state", Presence.list(socket))
+    end
+
+    # If the client reconnected with a resume token, replay the events it missed
+    # (re-applying the same permission + intent filter as live delivery), or tell
+    # it the buffer no longer covers its position so it should do a full resync.
+    maybe_replay(socket)
+
+    {:noreply, socket}
+  end
+
+  # Org-wide presence privacy changed. Re-gate THIS socket live instead of
+  # waiting for a reconnect: drop the current presence, then re-add it only if
+  # "show online" is now on (re-added with nil activity, which also enforces
+  # "activity off" until the next — stripped — client push). Phoenix broadcasts
+  # the resulting presence diff, so every teammate's UI updates immediately.
+  # Not forwarded to web clients (the audit event refreshes the settings UI).
+  @impl true
+  def handle_info({:pubsub_event, %{"event_type" => "PRESENCE_POLICY_UPDATED"} = event}, socket) do
+    show_online = event["presence_show_online"] != false
+    show_activity = event["presence_show_activity"] != false
+
+    socket =
+      socket
+      |> assign(:presence_show_online, show_online)
+      |> assign(:presence_show_activity, show_activity)
+
+    if Map.get(socket.assigns, :auth_type) == :jwt do
+      Presence.untrack(socket, socket.assigns.user_id)
+
+      if show_online do
+        profile = Auth.get_user_profile(socket.assigns.user_id)
+
+        Presence.track(socket, socket.assigns.user_id, %{
+          online_at: System.system_time(:second),
+          name: profile.name,
+          avatar: profile.avatar,
+          page: nil,
+          resource: nil,
+          action: nil
+        })
+      end
+    end
+
     {:noreply, socket}
   end
 
@@ -63,8 +168,9 @@ defmodule RealtimeWeb.OrgChannel do
 
     case RateLimiter.check(user_id, :ws_message, ws_message_limit) do
       {:ok, _remaining} ->
-        # Check if user has permission to see this event
-        if can_see_event?(socket, event) do
+        # Forward only if the member may see it AND it matches the client's
+        # declared intents (if any).
+        if can_see_event?(socket, event) and intents_allow?(socket, event) do
           push(socket, event["event_type"], event)
         end
 
@@ -77,6 +183,21 @@ defmodule RealtimeWeb.OrgChannel do
         Logger.debug("User #{user_id} rate limited on ws_message")
     end
 
+    {:noreply, socket}
+  end
+
+  # Swallow the duplicate %Broadcast{} our manual PubSub subscription delivers
+  # to the channel process (the fastlane copy is what reaches the client).
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{}, socket), do: {:noreply, socket}
+
+  # Presence diffs arrive as channel out-events. Phoenix routes them to
+  # handle_out/3, so we must define it (its absence crashed the channel and
+  # dropped the socket). Push presence_state/presence_diff straight to the
+  # client — they are low-volume and not permission-sensitive.
+  @impl true
+  def handle_out(event, payload, socket) do
+    push(socket, event, payload)
     {:noreply, socket}
   end
 
@@ -116,38 +237,230 @@ defmodule RealtimeWeb.OrgChannel do
 
   # Private functions
 
-  # Check if user has permission to see a specific event type
-  defp can_see_event?(socket, event) do
-    event_type = Map.get(event, "event_type", "")
-    permissions = socket.assigns.permissions
+  # Normalize the optional intents list into upcased family tokens, or nil for
+  # "everything". Each token is substring-matched against the event type, so
+  # "CAMPAIGN" matches CAMPAIGN_* and "AUDIT" matches AUDIT_CREATED.
+  defp parse_intents(params) when is_map(params) do
+    case params["intents"] do
+      list when is_list(list) ->
+        tokens =
+          list
+          |> Enum.filter(&is_binary/1)
+          |> Enum.map(fn s -> s |> String.upcase() |> String.replace(~r/[.:\s-]+/, "_") end)
+          |> Enum.reject(&(&1 == ""))
 
-    case event_type do
-      # Billing events require billing permission
-      "subscription_changed" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_billing))
+        if tokens == [], do: nil, else: tokens
 
-      # Member events require team management permission
-      "member_joined" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_team))
-
-      "member_left" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_team))
-
-      "member_role_changed" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_team))
-
-      # Settings changes require settings permission
-      "settings_changed" ->
-        Auth.has_permission?(%{permissions: permissions}, Auth.permission(:manage_settings))
-
-      # Default: allow all other events
       _ ->
+        nil
+    end
+  end
+
+  defp parse_intents(_), do: nil
+
+  # Resume support -------------------------------------------------------------
+
+  # A reconnecting client may join with {"resume": {"last_seq": <n>}} to replay
+  # the events it missed. Returns the sequence (>= 0), :invalid for a malformed
+  # token, or nil for a fresh (non-resuming) join.
+  defp parse_resume(params) when is_map(params) do
+    case params["resume"] do
+      %{"last_seq" => v} -> normalize_seq(v)
+      _ -> nil
+    end
+  end
+
+  defp parse_resume(_), do: nil
+
+  defp normalize_seq(v) when is_integer(v) and v >= 0, do: v
+
+  defp normalize_seq(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} when n >= 0 -> n
+      _ -> :invalid
+    end
+  end
+
+  defp normalize_seq(_), do: :invalid
+
+  # Replay the gap for a resuming client, or signal that a full resync is needed.
+  # Runs after the PubSub subscribe, so a live event landing during replay may be
+  # delivered twice (once here, once live) — resume is at-least-once, so clients
+  # dedupe by `seq`. The replay is bounded by the buffer size.
+  defp maybe_replay(socket) do
+    org_id = socket.assigns.org_id
+
+    case socket.assigns[:resume_from] do
+      nil ->
+        :ok
+
+      :invalid ->
+        push(socket, "resume_failed", %{
+          reason: "invalid_resume",
+          current_seq: Realtime.EventLog.current_seq(org_id)
+        })
+
+      last_seq ->
+        case Realtime.EventLog.replay(org_id, last_seq) do
+          {:ok, events} ->
+            replayed =
+              Enum.reduce(events, 0, fn ev, n ->
+                if can_see_event?(socket, ev) and intents_allow?(socket, ev) do
+                  push(socket, ev["event_type"], ev)
+                  n + 1
+                else
+                  n
+                end
+              end)
+
+            push(socket, "resumed", %{
+              from: last_seq,
+              current_seq: Realtime.EventLog.current_seq(org_id),
+              replayed: replayed
+            })
+
+          {:gap, current} ->
+            push(socket, "resume_failed", %{reason: "buffer_evicted", current_seq: current})
+        end
+    end
+
+    :ok
+  end
+
+  # When a client declared intents, forward only events whose normalized type
+  # contains one of the requested tokens. No intents = forward everything.
+  defp intents_allow?(socket, event) do
+    case socket.assigns[:intents] do
+      nil ->
+        true
+
+      tokens ->
+        type =
+          event
+          |> Map.get("event_type", "")
+          |> to_string()
+          |> String.upcase()
+          |> String.replace(~r/[.:\s-]+/, "_")
+
+        Enum.any?(tokens, fn t -> String.contains?(type, t) end)
+    end
+  end
+
+  # Gate org-broadcast events on member permissions. Event types are
+  # normalized (upcased, separators collapsed to "_") so both the legacy
+  # lowercase names and the Go publisher's UPPER_SNAKE names match.
+  defp can_see_event?(socket, event) do
+    event_type =
+      event
+      |> Map.get("event_type", "")
+      |> to_string()
+      |> String.upcase()
+      |> String.replace(~r/[.:\s-]+/, "_")
+
+    permissions = socket.assigns.permissions
+    has = fn perm -> Auth.has_permission?(%{permissions: permissions}, Auth.permission(perm)) end
+
+    cond do
+      # Billing
+      String.contains?(event_type, "SUBSCRIPTION") or String.contains?(event_type, "BILLING") ->
+        has.(:manage_billing)
+
+      # Team / member events
+      String.contains?(event_type, "MEMBER") or String.contains?(event_type, "INVITATION") ->
+        has.(:manage_team)
+
+      # Org settings changes
+      String.contains?(event_type, "SETTINGS") ->
+        has.(:manage_settings)
+
+      # Unibox rows carry subject + preview snippets
+      String.contains?(event_type, "INBOX") or
+          event_type in ["EMAIL_RECEIVED", "EMAIL_UPDATED", "EMAIL_DELETED"] ->
+        has.(:access_unibox)
+
+      # Campaign activity: lifecycle, task progress, send/open/click/reply pulses
+      String.contains?(event_type, "CAMPAIGN") or String.contains?(event_type, "TASK_PROGRESS") or
+          event_type in [
+            "EMAIL_SENT",
+            "EMAIL_OPENED",
+            "EMAIL_CLICKED",
+            "EMAIL_REPLIED",
+            "EMAIL_BOUNCED"
+          ] ->
+        has.(:view_campaigns)
+
+      # Contact changes
+      String.contains?(event_type, "CONTACT") ->
+        has.(:view_contacts)
+
+      # Mailbox account + warmup health transitions
+      String.contains?(event_type, "ACCOUNT") or String.contains?(event_type, "WARMUP") ->
+        has.(:manage_emails)
+
+      # Developer "fire event" custom events: the org's own automation/campaign
+      # signals, with no per-app context on this socket. Allow to any subscriber
+      # on the org channel (the same join already verified org membership). An
+      # "intents" of "CUSTOM" filters these in: the substring match covers
+      # "CUSTOM_EVENT" since "CUSTOM" is a prefix of the normalized type.
+      event_type == "CUSTOM_EVENT" ->
+        true
+
+      # Default: allow (audit refresh signals, meetings, automations, ...).
+      # The corresponding list endpoints enforce their own permissions; these
+      # events only tell the dashboard to refetch.
+      true ->
         true
     end
+  end
+
+  # presence:update — merge the client's sanitized activity descriptor into its
+  # presence meta. Only tracked (JWT) members can update presence. Gated by the
+  # org privacy policy: if "show who's online" is off the member isn't tracked
+  # (nothing to update); if "show activity" is off we keep them online but strip
+  # the viewing/editing/page detail so teammates never see what they're doing.
+  defp handle_client_event("presence:update", payload, socket) do
+    if Map.get(socket.assigns, :auth_type) == :jwt and socket.assigns[:presence_show_online] do
+      patch =
+        if socket.assigns[:presence_show_activity] do
+          sanitize_presence(payload)
+        else
+          %{page: nil, resource: nil, action: nil, updated_at: System.system_time(:second)}
+        end
+
+      Presence.update(socket, socket.assigns.user_id, fn meta -> Map.merge(meta, patch) end)
+    end
+
+    {:noreply, socket}
   end
 
   defp handle_client_event(_event, _payload, socket) do
     # Default handler for unknown events
     {:noreply, socket}
   end
+
+  defp sanitize_presence(payload) when is_map(payload) do
+    action =
+      case payload["action"] do
+        a when a in @presence_actions -> a
+        _ -> nil
+      end
+
+    %{
+      page: presence_string(payload["page"]),
+      resource: presence_string(payload["resource"]),
+      action: action,
+      updated_at: System.system_time(:second)
+    }
+  end
+
+  defp sanitize_presence(_), do: %{page: nil, resource: nil, action: nil}
+
+  defp presence_string(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> String.slice(trimmed, 0, 160)
+    end
+  end
+
+  defp presence_string(_), do: nil
 end

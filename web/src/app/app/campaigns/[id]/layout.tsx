@@ -1,4 +1,5 @@
 import { useState } from "react";
+import PermissionButton from "@/components/ui/PermissionButton";
 import { Link, Outlet, useLocation, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -17,11 +18,13 @@ import useStopCampaign from "@/lib/api/hooks/app/campaigns/useStopCampaign";
 import { CampaignContext } from "@/hooks/context/campaign";
 import { useConfirm } from "@/hooks/context/confirm";
 import LaunchCampaignDialog from "@/components/app/campaigns/LaunchCampaignDialog";
+import ResourceViewers from "@/components/app/presence/ResourceViewers";
+import { usePresenceResource } from "@/hooks/PresenceProvider";
 
 const TABS = [
     { label: "Overview", path: "", Icon: BarChart3Icon },
     { label: "Leads", path: "/leads", Icon: UsersIcon },
-    { label: "Steps", path: "/sequences", Icon: ListChecksIcon },
+    { label: "Steps", path: "/steps", Icon: ListChecksIcon },
     { label: "Schedule", path: "/schedule", Icon: CalendarIcon },
     { label: "Settings", path: "/preferences", Icon: Settings2Icon },
 ] as const;
@@ -41,6 +44,10 @@ export default function CampaignLayout() {
     const startCampaign = useStartCampaign();
     const stopCampaign = useStopCampaign();
     const [launchOpen, setLaunchOpen] = useState(false);
+
+    // Collaboration: claim this campaign while it's open so teammates see
+    // who's already in here (header pill + the org-wide presence stack).
+    usePresenceResource(id ? `campaign:${id}` : null);
 
     if (campaignData.isLoading) {
         return (
@@ -106,13 +113,15 @@ export default function CampaignLayout() {
                             >
                                 {status}
                             </span>
+                            <ResourceViewers resource={`campaign:${campaign.id}`} className="shrink-0" />
                         </div>
                         <p className="text-[11px] text-slate-400 font-mono mt-1 truncate">{campaign.id}</p>
                     </div>
 
                     {canToggle && (
                         <div className="ml-auto shrink-0">
-                            <button
+                            <PermissionButton
+                                permission="SEND_CAMPAIGNS"
                                 type="button"
                                 onClick={onToggle}
                                 disabled={pending}
@@ -126,7 +135,7 @@ export default function CampaignLayout() {
                                     <PlayIcon className="w-3.5 h-3.5" />
                                 )}
                                 {isActive ? "Pause" : "Start"}
-                            </button>
+                            </PermissionButton>
                         </div>
                     )}
                 </div>

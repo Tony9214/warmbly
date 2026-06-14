@@ -40,6 +40,12 @@ func (h *Handler) GetUniboxIncoming(c *gin.Context) {
 		return
 	}
 
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+
 	// Check if organization can use unibox (active free trial or paid subscription)
 	if h.FeatureGateService != nil {
 		orgID := middleware.GetOrganizationID(c)
@@ -148,7 +154,7 @@ func (h *Handler) GetUniboxIncoming(c *gin.Context) {
 		}
 	}
 
-	resp, xerr := h.UniboxService.Search(c.Request.Context(), uid, params)
+	resp, xerr := h.UniboxService.Search(c.Request.Context(), *orgID, uid, params)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return
@@ -197,28 +203,28 @@ func (h *Handler) GetUniboxEmail(c *gin.Context) {
 }
 
 func (h *Handler) GetUniboxThread(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
+	// Org-scoped: the inbox list is org-wide, so the thread view must be too.
+	// Otherwise a non-owner member sees the conversation in the list but an
+	// empty thread when they open it — the messages are keyed to the mailbox
+	// owner's user_id, not theirs.
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
 		errx.Handle(c, errx.ErrUser)
 		return
 	}
 
 	// Check if organization can use unibox
 	if h.FeatureGateService != nil {
-		orgID := middleware.GetOrganizationID(c)
-		if orgID != nil {
-			canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
-			if !canUse {
-				errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires an active trial or paid subscription"))
-				return
-			}
+		canUse, _ := h.FeatureGateService.CanUseUnibox(c.Request.Context(), *orgID)
+		if !canUse {
+			errx.Handle(c, errx.New(errx.Forbidden, "Unibox requires an active trial or paid subscription"))
+			return
 		}
 	}
 
-	// email_id is optional. When omitted, the thread is read across
-	// every mailbox the user owns — the natural unified-inbox view
-	// where the caller only knows the thread.
+	// email_id is optional. When omitted, the thread is read across every
+	// mailbox in the organization — the natural unified-inbox view where the
+	// caller only knows the thread.
 	var eid uuid.UUID
 	emailID := c.Query("email")
 	if emailID == "" {
@@ -246,7 +252,7 @@ func (h *Handler) GetUniboxThread(c *gin.Context) {
 
 	resp, xerr := h.UniboxService.GetByThread(
 		c.Request.Context(),
-		uid, eid,
+		*orgID, eid,
 		threadID, limit, cursor,
 	)
 	if xerr != nil {
@@ -325,9 +331,10 @@ func (h *Handler) SetUniboxThreadLabels(c *gin.Context) {
 }
 
 func (h *Handler) UniboxMarkSeen(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
+	// Org-scoped: the inbox + unread count are org-wide, so marking read must be
+	// too, otherwise a non-owner member can never clear the shared unread badge.
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
 		errx.Handle(c, errx.ErrUser)
 		return
 	}
@@ -338,7 +345,7 @@ func (h *Handler) UniboxMarkSeen(c *gin.Context) {
 		return
 	}
 
-	resp, xerr := h.UniboxService.MarkSeenBulk(c.Request.Context(), uid, &data)
+	resp, xerr := h.UniboxService.MarkSeenBulk(c.Request.Context(), *orgID, &data)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return
@@ -350,10 +357,9 @@ func (h *Handler) UniboxMarkSeen(c *gin.Context) {
 // GetUnseenCount gets the count of unseen emails
 // GET /unibox/count
 func (h *Handler) GetUnseenCount(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		errx.Handle(c, errx.ErrUser)
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
 		return
 	}
 
@@ -365,7 +371,7 @@ func (h *Handler) GetUnseenCount(c *gin.Context) {
 		}
 	}
 
-	count, xerr := h.UniboxService.GetUnseenCount(c.Request.Context(), uid, emailAccountID)
+	count, xerr := h.UniboxService.GetUnseenCount(c.Request.Context(), *orgID, emailAccountID)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return
@@ -459,8 +465,13 @@ func (h *Handler) GetUniboxOverview(c *gin.Context) {
 		errx.Handle(c, errx.ErrUser)
 		return
 	}
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
 
-	resp, xerr := h.UniboxService.Overview(c.Request.Context(), uid)
+	resp, xerr := h.UniboxService.Overview(c.Request.Context(), *orgID, uid)
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return

@@ -11,8 +11,15 @@ import {
 } from './context/socket';
 
 // Constants
-const HEARTBEAT_INTERVAL = 30000; // 30 seconds
-const RECONNECT_MAX_DELAY = 30000; // 30 seconds max
+const HEARTBEAT_INTERVAL = 25000; // 25s — under typical 60s idle proxy timeouts
+const HEARTBEAT_TIMEOUT = 8000; // drop + reconnect if a heartbeat isn't answered in 8s
+
+// Reconnect backoff schedule (ms), modeled on the Phoenix JS client and
+// Socket.io: retry almost immediately first, then ramp. A slow 1s→2s→4s ramp is
+// what made reconnects "take a long time"; the first retry here is ~120ms so a
+// blip is invisible. Indexed by attempt; clamps at the last entry. Each delay
+// gets ±25% jitter so many clients don't reconnect in lockstep after an outage.
+const RECONNECT_SCHEDULE = [120, 350, 800, 1500, 3000, 5000, 10000];
 const PHOENIX_EVENTS = {
     JOIN: 'phx_join',
     LEAVE: 'phx_leave',
@@ -49,6 +56,20 @@ export default function SocketProvider({
     const refCounterRef = useRef(0);
     const channelsRef = useRef<Map<string, ChannelInternal>>(new Map());
     const pendingJoinsRef = useRef<Map<string, Record<string, unknown>>>(new Map());
+    // Topics the app currently wants joined (added by joinChannel, removed by
+    // leaveChannel). On reconnect we rejoin exactly these, independent of the
+    // per-channel live state — the close handler downgrades joined channels to
+    // 'closed', so a state-filtered rejoin skipped them all and the socket came
+    // back with zero subscriptions (no events, no presence) until a reload.
+    const desiredTopicsRef = useRef<Map<string, Record<string, unknown>>>(new Map());
+    // Distinguishes a close we caused (logout / unmount — don't reconnect) from
+    // every other close (server idle-close, channel crash, network drop — do
+    // reconnect). The old code only reconnected on `!wasClean`, so a clean
+    // server-initiated close stranded the client.
+    const intentionalCloseRef = useRef(false);
+    // Zombie detection: if a heartbeat goes unanswered this fires and force-
+    // closes the socket so onclose schedules a reconnect.
+    const heartbeatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Legacy handlers for backwards compatibility
     const legacyHandlersRef = useRef<Map<string, Set<(msg: unknown) => void>>>(new Map());
@@ -83,12 +104,24 @@ export default function SocketProvider({
     const sendHeartbeat = useCallback(() => {
         const ref = getRef();
         pendingPingRef.current.set(ref, performance.now());
-        sendRaw({
+        const ok = sendRaw({
             topic: 'phoenix',
             event: PHOENIX_EVENTS.HEARTBEAT,
             payload: {},
             ref,
         });
+        if (!ok) return;
+        // Arm a watchdog: a healthy connection answers within ~1s. If the
+        // socket has silently died (network dropped with no close frame), no
+        // reply lands and we close it ourselves to trigger a reconnect.
+        if (heartbeatTimeoutRef.current) clearTimeout(heartbeatTimeoutRef.current);
+        heartbeatTimeoutRef.current = setTimeout(() => {
+            try {
+                wsRef.current?.close();
+            } catch {
+                /* ignore */
+            }
+        }, HEARTBEAT_TIMEOUT);
     }, [sendRaw, getRef]);
 
     // Start heartbeat
@@ -121,6 +154,11 @@ export default function SocketProvider({
 
         // Heartbeat reply → compute roundtrip and publish latency.
         if (event === PHOENIX_EVENTS.REPLY && topic === 'phoenix' && ref) {
+            // The connection is alive — disarm the zombie watchdog.
+            if (heartbeatTimeoutRef.current) {
+                clearTimeout(heartbeatTimeoutRef.current);
+                heartbeatTimeoutRef.current = null;
+            }
             const sentAt = pendingPingRef.current.get(ref);
             if (sentAt != null) {
                 const dt = Math.round(performance.now() - sentAt);
@@ -146,8 +184,39 @@ export default function SocketProvider({
 
         if (event === PHOENIX_EVENTS.ERROR) {
             const channel = channelsRef.current.get(topic);
+            const wasJoined = channel?.state === 'joined';
             if (channel) {
                 channel.state = 'errored';
+            }
+            // A channel that was live crashed server-side while the socket stays
+            // open (e.g. an unhandled message in the channel process). Phoenix's
+            // own JS client auto-rejoins; ours must too, or this topic stays dead
+            // — no events, no presence — until a full socket reconnect. Only
+            // retry a channel that HAD joined, so a genuinely refused join
+            // (returns errored) doesn't spin in a loop.
+            if (wasJoined && desiredTopicsRef.current.has(topic)) {
+                setTimeout(() => {
+                    if (!desiredTopicsRef.current.has(topic)) return;
+                    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+                    const cur = channelsRef.current.get(topic);
+                    if (cur && (cur.state === 'joined' || cur.state === 'joining')) return;
+                    const params = desiredTopicsRef.current.get(topic) || {};
+                    const joinRef = getRef();
+                    channelsRef.current.set(topic, {
+                        topic,
+                        state: 'joining',
+                        joinRef,
+                        params,
+                        handlers: cur?.handlers || new Map(),
+                    });
+                    sendRaw({
+                        topic,
+                        event: PHOENIX_EVENTS.JOIN,
+                        payload: params,
+                        ref: joinRef,
+                        join_ref: joinRef,
+                    });
+                }, 1000);
             }
             return;
         }
@@ -201,10 +270,14 @@ export default function SocketProvider({
                 }
             });
         }
-    }, [setWsLatencyMs]);
+    }, [setWsLatencyMs, getRef, sendRaw]);
 
     // Join channel
     const joinChannel = useCallback((topic: string, params: Record<string, unknown> = {}) => {
+        // Remember the intent so a reconnect rejoins this topic even after its
+        // live state was reset to 'closed' by a drop.
+        desiredTopicsRef.current.set(topic, params);
+
         // Check if already joined or joining
         const existing = channelsRef.current.get(topic);
         if (existing && (existing.state === 'joined' || existing.state === 'joining')) {
@@ -238,6 +311,9 @@ export default function SocketProvider({
 
     // Leave channel
     const leaveChannel = useCallback((topic: string) => {
+        // No longer want this topic — don't let a reconnect rejoin it.
+        desiredTopicsRef.current.delete(topic);
+
         const channel = channelsRef.current.get(topic);
         if (!channel) return;
 
@@ -347,45 +423,51 @@ export default function SocketProvider({
         wsRef.current.send(raw);
     }, []);
 
-    // Rejoin all channels after reconnect
+    // Rejoin all channels after reconnect. We rejoin every topic the app wants
+    // joined (desiredTopicsRef), NOT just channels still flagged 'joined' — the
+    // close handler downgrades those to 'closed', so the old state filter
+    // skipped them all and the socket reconnected with no subscriptions.
+    // Handlers are preserved across the rejoin so existing subscribers keep
+    // receiving events without re-subscribing.
     const rejoinChannels = useCallback(() => {
-        channelsRef.current.forEach((channel, topic) => {
-            if (channel.state === 'joined' || channel.state === 'joining') {
-                const joinRef = getRef();
-                channel.joinRef = joinRef;
-                channel.state = 'joining';
-                sendRaw({
-                    topic,
-                    event: PHOENIX_EVENTS.JOIN,
-                    payload: channel.params,
-                    ref: joinRef,
-                    join_ref: joinRef,
-                });
-            }
-        });
-
-        // Also join any pending
-        pendingJoinsRef.current.forEach((params, topic) => {
-            const channel = channelsRef.current.get(topic);
-            if (channel) {
-                const joinRef = getRef();
-                channel.joinRef = joinRef;
-                channel.state = 'joining';
-                sendRaw({
-                    topic,
-                    event: PHOENIX_EVENTS.JOIN,
-                    payload: params,
-                    ref: joinRef,
-                    join_ref: joinRef,
-                });
-            }
+        desiredTopicsRef.current.forEach((params, topic) => {
+            const existing = channelsRef.current.get(topic);
+            const joinRef = getRef();
+            const channel: ChannelInternal = {
+                topic,
+                state: 'joining',
+                joinRef,
+                params,
+                handlers: existing?.handlers || new Map(),
+            };
+            channelsRef.current.set(topic, channel);
+            sendRaw({
+                topic,
+                event: PHOENIX_EVENTS.JOIN,
+                payload: params,
+                ref: joinRef,
+                join_ref: joinRef,
+            });
         });
         pendingJoinsRef.current.clear();
     }, [getRef, sendRaw]);
 
     // Connect to WebSocket
     const connect = useCallback(async () => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) return;
+        // Already connected or mid-handshake — don't open a second socket.
+        if (
+            wsRef.current &&
+            (wsRef.current.readyState === WebSocket.OPEN ||
+                wsRef.current.readyState === WebSocket.CONNECTING)
+        ) {
+            return;
+        }
+        // A manual connect (network back, tab focus) supersedes any pending
+        // backoff timer.
+        if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+        }
 
         try {
             const urlData = await getSocket();
@@ -415,6 +497,10 @@ export default function SocketProvider({
             wsRef.current.onclose = (ev) => {
                 setIsConnected(false);
                 stopHeartbeat();
+                if (heartbeatTimeoutRef.current) {
+                    clearTimeout(heartbeatTimeoutRef.current);
+                    heartbeatTimeoutRef.current = null;
+                }
                 // Latency only means anything while connected.
                 setWsLatencyMs(null);
                 pendingPingRef.current.clear();
@@ -427,9 +513,14 @@ export default function SocketProvider({
                     }
                 });
 
-                // Reconnect with exponential backoff
-                if (!ev.wasClean) {
-                    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), RECONNECT_MAX_DELAY);
+                // Reconnect with exponential backoff for EVERY close we didn't
+                // initiate — clean or not. A graceful server close (idle, channel
+                // crash, deploy) is exactly when we most need to come back.
+                if (!intentionalCloseRef.current) {
+                    const attempt = reconnectAttemptRef.current;
+                    const base = RECONNECT_SCHEDULE[Math.min(attempt, RECONNECT_SCHEDULE.length - 1)];
+                    // ±25% jitter so clients don't reconnect in lockstep after an outage.
+                    const delay = Math.round(base * (0.75 + Math.random() * 0.5));
                     reconnectTimerRef.current = setTimeout(() => {
                         setReconnectAttempt((a) => a + 1);
                         connect();
@@ -444,8 +535,17 @@ export default function SocketProvider({
         } catch (err) {
             const error = err as AppError;
             console.error('[WS] Init failed:', error);
-            // Retry after 15 seconds on init failure
-            setTimeout(connect, 15000);
+            // Token fetch / handshake failed — retry on the same fast backoff
+            // rather than a flat 15s wait.
+            if (!intentionalCloseRef.current) {
+                const attempt = reconnectAttemptRef.current;
+                const base = RECONNECT_SCHEDULE[Math.min(attempt, RECONNECT_SCHEDULE.length - 1)];
+                const delay = Math.round(base * (0.75 + Math.random() * 0.5));
+                reconnectTimerRef.current = setTimeout(() => {
+                    setReconnectAttempt((a) => a + 1);
+                    connect();
+                }, delay);
+            }
         }
     }, [
         onOpen,
@@ -460,10 +560,62 @@ export default function SocketProvider({
 
     // Mount effect
     useEffect(() => {
+        intentionalCloseRef.current = false;
         connect();
-        return () => {
+
+        // Proactively reconnect when the network returns or the tab is
+        // refocused — don't wait out a backoff timer if we're already idle.
+        const wake = () => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) return;
+            // Safari (and other browsers) suspend background tabs: the socket can
+            // be stuck CONNECTING with no close event ever firing. connect() skips
+            // a CONNECTING socket, so clear the zombie first (detach its handlers
+            // so its eventual close doesn't trigger our reconnect path) and open
+            // a fresh one immediately.
+            const stale = wsRef.current;
+            if (stale && stale.readyState !== WebSocket.CLOSED) {
+                stale.onclose = null;
+                stale.onerror = null;
+                try {
+                    stale.close();
+                } catch {
+                    /* ignore */
+                }
+            }
+            wsRef.current = null;
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
+            }
+            // Force the disconnected→connected transition. A zombie socket (a
+            // Safari background tab) dies with no close event, so `isConnected`
+            // was never flipped to false. Without this, the new socket's onopen
+            // sets it to `true` again — a no-op — and every isConnected-gated
+            // effect (channel rejoin, catch-up invalidation, presence
+            // re-subscribe and re-push) never re-runs. The passive tab would
+            // then silently stop receiving events and stale data until a full
+            // reload. Flipping to false guarantees those effects fire on reopen.
+            setIsConnected(false);
+            reconnectAttemptRef.current = 0;
+            setReconnectAttempt(0);
+            connect();
+        };
+        const onVisible = () => {
+            if (document.visibilityState === 'visible') wake();
+        };
+        window.addEventListener('online', wake);
+        document.addEventListener('visibilitychange', onVisible);
+
+        return () => {
+            // We're tearing down on purpose — suppress the reconnect.
+            intentionalCloseRef.current = true;
+            window.removeEventListener('online', wake);
+            document.removeEventListener('visibilitychange', onVisible);
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current);
+            }
+            if (heartbeatTimeoutRef.current) {
+                clearTimeout(heartbeatTimeoutRef.current);
             }
             stopHeartbeat();
             wsRef.current?.close();

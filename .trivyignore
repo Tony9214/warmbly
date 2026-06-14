@@ -11,3 +11,13 @@
 # fetched at startup over the public CA chain; the affected code
 # path (CRL parsing) is not reachable in our usage.
 GHSA-82j2-j2ch-gfr8
+
+# esbuild < 0.28.1 — missing binary integrity check in the Deno module
+# install path enables RCE (GHSA-gv7w-rqvm-qjhr). Pulled in transitively
+# by vite / vitest / astro / tsx across admin/, docs/, site/, web/. The
+# affected path is the deno.land/x/esbuild installer; we install esbuild
+# only via pnpm/npm on Node, where the platform binary packages are
+# integrity-pinned in the lockfile, so that path is never used. esbuild
+# is a build-time dev dependency and ships in no runtime artifact.
+# Re-evaluate when vite/astro bump esbuild to >= 0.28.1.
+GHSA-gv7w-rqvm-qjhr

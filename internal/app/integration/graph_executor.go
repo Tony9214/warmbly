@@ -87,15 +87,39 @@ func (s *service) executeAutomationGraph(ctx context.Context, a models.Automatio
 		case models.AutomationNodeAction:
 			label, aerr := s.runGraphAction(ctx, a, n, eventType, data)
 			nr := models.AutomationNodeResult{NodeID: id, Type: "action", Action: string(n.Action), Label: label, Status: "success"}
+			// Capture what the action actually did (rendered fields + any output it
+			// wrote) so run history shows the result, not just success/failure.
+			nr.Preview = actionRunOutput(n, data)
 			if aerr != nil {
 				nr.Status = "error"
 				nr.Error = truncate(aerr.Error(), 300)
-				anyError = true
+				// try/catch: if the node has an "on error" branch, route the failure
+				// there and treat it as handled (the run is not marked failed, the
+				// normal path is skipped). With no error branch, fall back to the old
+				// best-effort behavior: mark the run errored and continue downstream.
+				handled := false
+				for _, e := range outEdges[id] {
+					if e.When == "error" {
+						queue = append(queue, e.Target)
+						handled = true
+					}
+				}
+				if !handled {
+					anyError = true
+					for _, e := range outEdges[id] {
+						if e.When != "error" {
+							queue = append(queue, e.Target)
+						}
+					}
+				}
+			} else {
+				for _, e := range outEdges[id] {
+					if e.When != "error" {
+						queue = append(queue, e.Target)
+					}
+				}
 			}
 			results = append(results, nr)
-			for _, e := range outEdges[id] {
-				queue = append(queue, e.Target)
-			}
 		default: // trigger / unknown: just follow outgoing edges
 			for _, e := range outEdges[id] {
 				queue = append(queue, e.Target)
@@ -203,12 +227,18 @@ func (s *service) DryRunAutomation(ctx context.Context, orgID, id uuid.UUID, req
 	if len(data) == 0 {
 		data = sampleEventData(a.TriggerEvent)
 	}
-	return &models.DryRunResponse{Trace: dryRunGraph(*a, data), Data: data}, nil
+	skip := make(map[string]bool, len(req.SkipNodeIDs))
+	for _, id := range req.SkipNodeIDs {
+		skip[id] = true
+	}
+	return &models.DryRunResponse{Trace: dryRunGraph(*a, data, skip), Data: data}, nil
 }
 
 // dryRunGraph mirrors executeAutomationGraph's walk but records a preview trace
 // instead of executing anything (conditions are pure, so they evaluate for real).
-func dryRunGraph(a models.Automation, data map[string]any) []models.AutomationNodeResult {
+// Action nodes in skip are recorded as "skipped" and not previewed, but the walk
+// still follows their normal edge so downstream steps are reflected.
+func dryRunGraph(a models.Automation, data map[string]any, skip map[string]bool) []models.AutomationNodeResult {
 	baseSeed := stringFromMap(data, "delivery_id", "id", "booking_id", "contact_email", "invitee_email", "email")
 	byID := make(map[string]models.AutomationNode, len(a.Graph.Nodes))
 	for _, n := range a.Graph.Nodes {
@@ -261,16 +291,31 @@ func dryRunGraph(a models.Automation, data map[string]any) []models.AutomationNo
 				}
 			}
 		case models.AutomationNodeAction:
-			trace = append(trace, models.AutomationNodeResult{
-				NodeID:  id,
-				Type:    "action",
-				Action:  string(n.Action),
-				Label:   string(n.Action),
-				Status:  "success",
-				Preview: actionPreview(n, data),
-			})
+			if skip[id] {
+				// Toggled off for this test: record as skipped, no preview.
+				trace = append(trace, models.AutomationNodeResult{
+					NodeID: id,
+					Type:   "action",
+					Action: string(n.Action),
+					Label:  string(n.Action),
+					Status: "skipped",
+				})
+			} else {
+				trace = append(trace, models.AutomationNodeResult{
+					NodeID:  id,
+					Type:    "action",
+					Action:  string(n.Action),
+					Label:   string(n.Action),
+					Status:  "success",
+					Preview: actionPreview(n, data),
+				})
+			}
+			// A dry run never fails an action, so it follows the normal path and
+			// not the "on error" branch (a skipped action still continues the walk).
 			for _, e := range outEdges[id] {
-				queue = append(queue, e.Target)
+				if e.When != "error" {
+					queue = append(queue, e.Target)
+				}
 			}
 		default:
 			for _, e := range outEdges[id] {
@@ -297,8 +342,49 @@ func actionPreview(n models.AutomationNode, data map[string]any) map[string]any 
 		if cfg.TaskTitle != "" {
 			p["task_title"] = renderTemplate(cfg.TaskTitle, data)
 		}
+		if n.Action == models.IntegrationActionFireEvent {
+			p["event"] = renderTemplate(cfg.EventName, data)
+			for _, f := range cfg.EventFields {
+				if k := strings.TrimSpace(f.Key); k != "" {
+					p[k] = renderTemplate(f.Value, data)
+				}
+			}
+		}
 	}
 	return p
+}
+
+// actionRunOutput captures, after an action node ran, a small summary of what it
+// did for run history: the rendered templatable fields (channel/url/message/deal/
+// task), plus node-specific output — an HTTP call's status/ok and the values a
+// set-variables node wrote. Returns nil when there is nothing to show. Kept
+// scalar + bounded so it stays cheap to store in the run's node_results jsonb.
+func actionRunOutput(n models.AutomationNode, data map[string]any) map[string]any {
+	out := actionPreview(n, data)
+	switch n.Action {
+	case models.IntegrationActionHTTPRequest:
+		if steps, ok := data["steps"].(map[string]any); ok {
+			if r, ok := steps[n.ID].(map[string]any); ok {
+				if v, ok := r["status"]; ok {
+					out["status"] = v
+				}
+				if v, ok := r["ok"]; ok {
+					out["ok"] = v
+				}
+			}
+		}
+	case models.IntegrationActionSetVariables:
+		cfg := parseNativeConfig(n.Config)
+		for _, v := range cfg.SetVars {
+			if k := strings.TrimSpace(v.Key); k != "" {
+				out[k] = truncate(valueString(data[k]), 200)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // sampleEventData builds a placeholder event payload for a trigger so a dry-run

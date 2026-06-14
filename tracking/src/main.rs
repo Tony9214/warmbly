@@ -1,7 +1,9 @@
+mod abuse;
 mod aws;
 mod config;
 mod handlers;
 mod kafka;
+mod links;
 mod observability;
 
 use axum::{routing::get, Router};
@@ -49,13 +51,13 @@ async fn main() {
         }
     };
 
-    let state = AppState::new(kafka);
+    let state = AppState::new(kafka, &config);
 
     // Build router
     let app = Router::new()
         .route("/health", get(health))
         .route("/t/o/:task_id", get(track_open))
-        .route("/t/c/:task_id", get(track_click))
+        .route("/c/:link_id", get(track_click))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)

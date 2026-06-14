@@ -40,7 +40,7 @@ func (s *JobsService) HandleNewEmail(ctx context.Context, e *models.JobEventNewE
 		return err
 	}
 	if s.StreamingPublisher != nil && e.Message != nil {
-		s.StreamingPublisher.PublishEmailReceived(ctx, emailInboxEvent(e.UserID, e.Message))
+		s.StreamingPublisher.PublishEmailReceived(ctx, s.emailInboxEvent(ctx, e.UserID, e.Message))
 	}
 
 	// Advanced reply-intent automation is best-effort and should not block inbox
@@ -59,12 +59,19 @@ func (s *JobsService) publishEmailUpdated(ctx context.Context, userID uuid.UUID,
 	if s.StreamingPublisher == nil || message == nil {
 		return
 	}
-	s.StreamingPublisher.PublishEmailUpdated(ctx, emailInboxEvent(userID, message))
+	s.StreamingPublisher.PublishEmailUpdated(ctx, s.emailInboxEvent(ctx, userID, message))
 }
 
-func emailInboxEvent(userID uuid.UUID, message *models.EmailMessageStoreData) *pubsub.EmailInboxEvent {
+// emailInboxEvent builds the realtime inbox payload. Org-scoped (best-effort)
+// so every teammate's unibox updates live, not just the mailbox owner's.
+func (s *JobsService) emailInboxEvent(ctx context.Context, userID uuid.UUID, message *models.EmailMessageStoreData) *pubsub.EmailInboxEvent {
+	var orgID string
+	if account, err := s.EmailRepository.GetByID(ctx, message.EmailID); err == nil && account != nil && account.OrganizationID != nil {
+		orgID = account.OrganizationID.String()
+	}
 	return &pubsub.EmailInboxEvent{
 		BaseEvent:      pubsub.BaseEvent{UserID: userID.String()},
+		OrgID:          orgID,
 		EmailAccountID: message.EmailID.String(),
 		MessageID:      message.ID.String(),
 		ThreadID:       message.ThreadID,

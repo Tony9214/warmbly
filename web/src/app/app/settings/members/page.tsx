@@ -9,7 +9,6 @@
 import React from "react";
 import {
     CheckIcon,
-    ChevronDownIcon,
     CopyIcon,
     Loader2Icon,
     MailIcon,
@@ -20,11 +19,6 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { Label } from "@/components/ui/field";
-import {
-    PopoverMenu,
-    PopoverMenuContent,
-    PopoverMenuTrigger,
-} from "@/components/ui/popover-menu";
 import { useConfirm } from "@/hooks/context/confirm";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
 import useMembers from "@/lib/api/hooks/app/organizations/useMembers";
@@ -33,10 +27,13 @@ import useInviteMember from "@/lib/api/hooks/app/organizations/useInviteMember";
 import useRemoveMember from "@/lib/api/hooks/app/organizations/useRemoveMember";
 import useCancelInvitation from "@/lib/api/hooks/app/organizations/useCancelInvitation";
 import useUpdateMemberRole from "@/lib/api/hooks/app/organizations/useUpdateMemberRole";
+import useRoles from "@/lib/api/hooks/app/organizations/useRoles";
+import type OrganizationRole from "@/lib/api/models/app/organizations/OrganizationRole";
 import { useAppStore } from "@/stores";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
-import { ROLE_CATALOG, getRoleDef } from "@/lib/permissions";
+import getInvitationLink from "@/lib/api/client/app/organizations/getInvitationLink";
+import RoleMultiSelect, { RoleChips } from "../_components/RoleMultiSelect";
 import {
     RolePill,
     Section,
@@ -59,6 +56,7 @@ export default function MembersSettingsPage() {
     const removeMember = useRemoveMember();
     const cancelInvite = useCancelInvitation();
     const updateRole = useUpdateMemberRole();
+    const customRoles = useRoles();
     const currentUserId = useAppStore((s) => s.user?.id);
     const currentOrg = useAppStore((s) => s.currentOrganization);
 
@@ -91,32 +89,29 @@ export default function MembersSettingsPage() {
             }
         });
     }
-    function copyInviteLink(invitationId: string) {
-        const url = `${window.location.origin}/select-org?invitation=${invitationId}`;
-        navigator.clipboard.writeText(url).then(
-            () => toast.success("Invite link copied"),
-            () => toast.error("Couldn't copy"),
-        );
+    async function copyInviteLink(invitationId: string) {
+        try {
+            const { token } = await getInvitationLink(invitationId);
+            const url = `${window.location.origin}/invite?token=${encodeURIComponent(token)}`;
+            await navigator.clipboard.writeText(url);
+            toast.success("Invite link copied");
+        } catch (e) {
+            toast.error(buildError(e as AppError));
+        }
     }
-    function changeRole(memberId: string, nextRole: string, email: string) {
-        const def = getRoleDef(nextRole);
-        confirm?.show(`Change ${email}'s role to ${def.label}?`, async () => {
-            try {
-                await toast.promise(
-                    updateRole.mutateAsync({
-                        id: memberId,
-                        data: { role: nextRole },
-                    }),
-                    {
-                        loading: "Saving…",
-                        success: `Role updated to ${def.label}`,
-                        error: (e: AppError) => buildError(e),
-                    },
-                );
-            } catch {
-                /* surfaced */
-            }
-        });
+    async function changeRoles(memberId: string, roleIds: string[]) {
+        try {
+            await toast.promise(
+                updateRole.mutateAsync({ id: memberId, data: { role_ids: roleIds } }),
+                {
+                    loading: "Saving…",
+                    success: "Roles updated",
+                    error: (e: AppError) => buildError(e),
+                },
+            );
+        } catch {
+            /* surfaced */
+        }
     }
 
     return (
@@ -124,19 +119,20 @@ export default function MembersSettingsPage() {
             title="Members"
             description={`Everyone with access to ${currentOrg?.name ?? "this workspace"}.`}
         >
-            {access.isOwner && (
+            {access.canManage && (
                 <Section
                     eyebrow="Invite teammates"
                     description="Paste any number of emails — we'll separate them automatically. Pick a role; you can change it later."
                 >
                     <InviteFlow
                         pending={invite.isPending}
-                        onSubmit={async (emails, role) => {
+                        customRoles={customRoles.data ?? []}
+                        onSubmit={async (emails, roleIds) => {
                             let ok = 0;
                             let failed = 0;
                             for (const e of emails) {
                                 try {
-                                    await invite.mutateAsync({ email: e, role });
+                                    await invite.mutateAsync({ email: e, role_ids: roleIds });
                                     ok++;
                                 } catch {
                                     failed++;
@@ -203,10 +199,11 @@ export default function MembersSettingsPage() {
                                                 </div>
                                             </td>
                                             <td className="px-3">
-                                                {access.isOwner && !isOwner ? (
-                                                    <InlineRolePicker
-                                                        value={m.role}
-                                                        onChange={(next) => changeRole(m.user_id, next, email)}
+                                                {access.canManage && !isOwner ? (
+                                                    <RoleMultiSelect
+                                                        roles={customRoles.data ?? []}
+                                                        value={(m.roles ?? []).map((r) => r.id)}
+                                                        onChange={(ids) => changeRoles(m.user_id, ids)}
                                                         pending={updateRole.isPending}
                                                     />
                                                 ) : isOwner ? (
@@ -215,7 +212,7 @@ export default function MembersSettingsPage() {
                                                         Owner
                                                     </span>
                                                 ) : (
-                                                    <RolePill role={m.role} />
+                                                    <RoleChips roles={m.roles ?? []} />
                                                 )}
                                             </td>
                                             <td className="px-3 font-mono text-[11px] text-slate-500 tabular-nums hidden md:table-cell">
@@ -224,7 +221,7 @@ export default function MembersSettingsPage() {
                                                     : "—"}
                                             </td>
                                             <td className="px-3">
-                                                {access.isOwner && !isOwner && !isSelf && (
+                                                {access.canManage && !isOwner && !isSelf && (
                                                     <button
                                                         type="button"
                                                         onClick={() => doRemove(m.user_id, email)}
@@ -280,13 +277,13 @@ export default function MembersSettingsPage() {
                                             </div>
                                         </td>
                                         <td className="px-3">
-                                            <RolePill role={inv.role} />
+                                            {(inv.roles?.length ?? 0) > 0 ? <RoleChips roles={inv.roles!} /> : <RolePill role={inv.role} color={(customRoles.data ?? []).find((r) => r.id === inv.role_id)?.color} />}
                                         </td>
                                         <td className="px-3 font-mono text-[11px] text-slate-500 tabular-nums hidden md:table-cell">
                                             {new Date(inv.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                                         </td>
                                         <td className="px-3">
-                                            {access.isOwner && (
+                                            {access.canManage && (
                                                 <div className="flex items-center gap-0.5 justify-end opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                                     <button
                                                         type="button"
@@ -331,83 +328,6 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
     );
 }
 
-const ACCENT_PILL: Record<string, string> = {
-    sky:     "bg-sky-50 text-sky-700 border-sky-100",
-    violet:  "bg-violet-50 text-violet-700 border-violet-100",
-    emerald: "bg-emerald-50 text-emerald-700 border-emerald-100",
-    slate:   "bg-slate-50 text-slate-700 border-slate-200",
-    amber:   "bg-amber-50 text-amber-700 border-amber-100",
-};
-const ACCENT_DOT: Record<string, string> = {
-    sky:     "bg-sky-500",
-    violet:  "bg-violet-500",
-    emerald: "bg-emerald-500",
-    slate:   "bg-slate-400",
-    amber:   "bg-amber-500",
-};
-
-function InlineRolePicker({
-    value,
-    onChange,
-    pending,
-}: {
-    value: string;
-    onChange: (next: string) => void;
-    pending: boolean;
-}) {
-    const [open, setOpen] = React.useState(false);
-    const cur = getRoleDef(value);
-    const assignable = ROLE_CATALOG.filter((r) => r.assignable && r.id !== "member");
-
-    return (
-        <PopoverMenu open={open} onOpenChange={setOpen} align="start">
-            <PopoverMenuTrigger asChild>
-                <button
-                    type="button"
-                    disabled={pending}
-                    className={`h-6 px-1.5 rounded text-[10px] uppercase tracking-[0.08em] font-semibold inline-flex items-center gap-1 border transition-colors ${ACCENT_PILL[cur.accent] ?? ACCENT_PILL.slate} hover:opacity-80 disabled:opacity-60`}
-                >
-                    {pending ? (
-                        <Loader2Icon className="w-2.5 h-2.5 animate-spin" />
-                    ) : (
-                        <span className={`size-1.5 rounded-full ${ACCENT_DOT[cur.accent] ?? ACCENT_DOT.slate}`} />
-                    )}
-                    {cur.label}
-                    <ChevronDownIcon className="w-2.5 h-2.5 opacity-60" />
-                </button>
-            </PopoverMenuTrigger>
-            <PopoverMenuContent minWidth={288} className="max-w-[calc(100vw-2rem)]">
-                {assignable.map((r) => {
-                    const selected = r.id === value;
-                    return (
-                        <button
-                            key={r.id}
-                            type="button"
-                            onClick={() => {
-                                setOpen(false);
-                                onChange(r.id);
-                            }}
-                            className={`w-full px-2.5 py-1.5 text-left hover:bg-slate-100 transition-colors ${
-                                selected ? "bg-slate-50" : ""
-                            }`}
-                        >
-                            <div className="flex items-center gap-2">
-                                <span className={`size-1.5 rounded-full ${ACCENT_DOT[r.accent] ?? ACCENT_DOT.slate}`} />
-                                <span className="text-[12px] font-medium text-slate-900">
-                                    {r.label}
-                                </span>
-                                {selected && <CheckIcon className="ml-auto w-3 h-3 text-slate-500" />}
-                            </div>
-                            <p className="text-[11px] text-slate-500 leading-tight mt-0.5">
-                                {r.description}
-                            </p>
-                        </button>
-                    );
-                })}
-            </PopoverMenuContent>
-        </PopoverMenu>
-    );
-}
 
 /**
  * Multi-email invite flow. Email chips + role selector + send button,
@@ -417,13 +337,19 @@ function InlineRolePicker({
 function InviteFlow({
     onSubmit,
     pending,
+    customRoles,
 }: {
-    onSubmit: (emails: string[], role: string) => Promise<void>;
+    onSubmit: (emails: string[], roleIds: string[]) => Promise<void>;
     pending: boolean;
+    customRoles: OrganizationRole[];
 }) {
     const [chips, setChips] = React.useState<{ email: string; valid: boolean }[]>([]);
     const [draft, setDraft] = React.useState("");
-    const [role, setRole] = React.useState<string>("manager");
+    const [roleIds, setRoleIds] = React.useState<string[]>([]);
+    // Default to the seeded Viewer (least privilege), else the first role.
+    const defaultRole = customRoles.find((r) => r.name === "Viewer") ?? customRoles[0];
+    const effectiveRoleIds = roleIds.length > 0 ? roleIds : defaultRole ? [defaultRole.id] : [];
+    const selectedRoles = customRoles.filter((r) => effectiveRoleIds.includes(r.id));
     const SEPARATOR_RE = /[\s,;]+/;
 
     function commitDrafts(value: string) {
@@ -481,14 +407,26 @@ function InviteFlow({
                 icon: "⚠️",
             });
         }
-        await onSubmit(valid, role);
+        if (effectiveRoleIds.length === 0) {
+            toast.error("Create a role first (Settings → Roles & access)");
+            return;
+        }
+        await onSubmit(valid, effectiveRoleIds);
         setChips([]);
         setDraft("");
     }
 
     const totalCount = chips.length + (draft.trim() ? draft.trim().split(SEPARATOR_RE).filter(Boolean).length : 0);
-    const assignable = ROLE_CATALOG.filter((r) => r.assignable && r.id !== "member");
-    const activeRole = getRoleDef(role);
+    const activeLabel =
+        selectedRoles.length === 0
+            ? "No roles yet"
+            : selectedRoles.map((r) => r.name).join(", ");
+    const activeDescription =
+        selectedRoles.length === 0
+            ? "Create a role under Settings → Roles & access before inviting members."
+            : selectedRoles.length === 1
+                ? (selectedRoles[0].description || "This role's permissions apply to the invitee.")
+                : "The invitee gets the combined permissions of every selected role.";
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
@@ -551,23 +489,12 @@ function InviteFlow({
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <Label className="!mb-0 w-16">Role</Label>
-                    <div className="inline-flex items-center rounded-md border border-slate-200 bg-white p-0.5 shrink-0 flex-wrap">
-                        {assignable.map((r) => (
-                            <button
-                                key={r.id}
-                                type="button"
-                                onClick={() => setRole(r.id)}
-                                className={`h-6 px-2.5 rounded text-[11.5px] font-medium transition-colors ${
-                                    role === r.id
-                                        ? "bg-slate-900 text-white"
-                                        : "text-slate-500 hover:text-slate-900"
-                                }`}
-                            >
-                                {r.label}
-                            </button>
-                        ))}
-                    </div>
+                    <Label className="!mb-0 w-16">Roles</Label>
+                    <RoleMultiSelect
+                        roles={customRoles}
+                        value={effectiveRoleIds}
+                        onChange={setRoleIds}
+                    />
                 </div>
 
                 <div className="flex items-center gap-2 pt-1">
@@ -591,10 +518,10 @@ function InviteFlow({
             <div className="rounded-md border border-slate-200 bg-slate-50/40 p-3">
                 <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium mb-1.5 flex items-center gap-1.5">
                     <CheckIcon className="w-3 h-3 text-slate-400" />
-                    {activeRole.label}
+                    {activeLabel}
                 </div>
                 <p className="text-[12px] text-slate-700 leading-relaxed">
-                    {activeRole.description}
+                    {activeDescription}
                 </p>
             </div>
         </div>

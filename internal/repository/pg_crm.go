@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 type CRMRepository interface {
@@ -143,11 +144,11 @@ func (r *crmRepository) ListNotes(ctx context.Context, orgID, contactID uuid.UUI
 		notes = append(notes, note)
 	}
 
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	hasMore := false
 	if len(notes) > limit {
 		hasMore = true
-		nextCursor = &notes[limit].ID
+		nextCursor = paging.EncodeUUID(notes[limit].ID)
 		notes = notes[:limit]
 	}
 
@@ -235,11 +236,11 @@ func (r *crmRepository) ListActivities(ctx context.Context, orgID, contactID uui
 		activities = append(activities, a)
 	}
 
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	hasMore := false
 	if len(activities) > limit {
 		hasMore = true
-		nextCursor = &activities[limit].ID
+		nextCursor = paging.EncodeUUID(activities[limit].ID)
 		activities = activities[:limit]
 	}
 
@@ -654,11 +655,11 @@ func (r *crmRepository) ListDeals(ctx context.Context, orgID uuid.UUID, pipeline
 		deals = append(deals, deal)
 	}
 
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	hasMore := false
 	if len(deals) > limit {
 		hasMore = true
-		nextCursor = &deals[limit].ID
+		nextCursor = paging.EncodeUUID(deals[limit].ID)
 		deals = deals[:limit]
 	}
 
@@ -982,21 +983,14 @@ func (r *crmRepository) SearchDeals(ctx context.Context, orgID uuid.UUID, filter
 	}
 
 	hasMore := int64(offset+len(deals)) < total
-	var nextOffset *int
+	pag := models.Pagination{Total: &total, HasMore: hasMore}
 	if hasMore {
-		n := offset + limit
-		nextOffset = &n
+		pag.NextCursor = paging.EncodeOffset(offset + limit)
 	}
 
 	return &models.DealsSearchResult{
-		Data: deals,
-		Pagination: models.DealsSearchPagination{
-			Total:      total,
-			Limit:      limit,
-			Offset:     offset,
-			HasMore:    hasMore,
-			NextOffset: nextOffset,
-		},
+		Data:       deals,
+		Pagination: pag,
 	}, nil
 }
 
@@ -1177,11 +1171,11 @@ func (r *crmRepository) ListCRMTasks(ctx context.Context, orgID uuid.UUID, conta
 		tasks = append(tasks, task)
 	}
 
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	hasMore := false
 	if len(tasks) > limit {
 		hasMore = true
-		nextCursor = &tasks[limit].ID
+		nextCursor = paging.EncodeUUID(tasks[limit].ID)
 		tasks = tasks[:limit]
 	}
 
@@ -1345,21 +1339,14 @@ func (r *crmRepository) SearchCRMTasks(ctx context.Context, orgID uuid.UUID, fil
 	}
 
 	hasMore := int64(offset+len(tasks)) < total
-	var nextOffset *int
+	pag := models.Pagination{Total: &total, HasMore: hasMore}
 	if hasMore {
-		n := offset + limit
-		nextOffset = &n
+		pag.NextCursor = paging.EncodeOffset(offset + limit)
 	}
 
 	return &models.TasksSearchResult{
-		Data: tasks,
-		Pagination: models.TasksSearchPagination{
-			Total:      total,
-			Limit:      limit,
-			Offset:     offset,
-			HasMore:    hasMore,
-			NextOffset: nextOffset,
-		},
+		Data:       tasks,
+		Pagination: pag,
 	}, nil
 }
 

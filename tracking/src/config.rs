@@ -31,6 +31,15 @@ pub struct Config {
     pub schema_registry_url: String,
     pub schema_registry_key: Option<String>,
     pub schema_registry_secret: Option<String>,
+    /// Backend base URL for resolving click tickets (required), e.g.
+    /// http://backend:8080 — the service calls
+    /// GET {url}/api/v1/internal/tracked-links/:id at click time.
+    pub backend_internal_url: String,
+    /// Shared bearer token for the backend internal API (required; same
+    /// INTERNAL_API_TOKEN the workers use).
+    pub internal_api_token: String,
+    /// Per-source request budget for both tracking endpoints (default 300/min).
+    pub rate_limit_per_min: u32,
 }
 
 impl Config {
@@ -119,6 +128,23 @@ impl Config {
             info!("Schema Registry authentication enabled");
         }
 
+        // Click-ticket resolver wiring (required): backend internal API base
+        // URL + the shared internal bearer token.
+        let backend_internal_url =
+            Self::get_required("BACKEND_INTERNAL_URL", "backend/internal_url", &params).await?;
+        let internal_api_token =
+            Self::get_secret_optional("INTERNAL_API_TOKEN", "backend/internal_api_token", &secrets)
+                .await
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| ConfigError::Missing("INTERNAL_API_TOKEN".to_string()))?;
+        info!("Click-ticket resolver: {}", backend_internal_url);
+
+        let rate_limit_per_min: u32 = env::var("TRACKING_RATE_LIMIT_PER_MIN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(300);
+        info!("Per-source rate limit: {}/min", rate_limit_per_min);
+
         Ok(Self {
             env: env_name,
             host,
@@ -130,6 +156,9 @@ impl Config {
             schema_registry_url,
             schema_registry_key,
             schema_registry_secret,
+            backend_internal_url,
+            internal_api_token,
+            rate_limit_per_min,
         })
     }
 
@@ -179,6 +208,13 @@ impl Config {
             info!("Schema Registry authentication enabled");
         }
 
+        let backend_internal_url = params.get("backend/internal_url").await?;
+        let internal_api_token = secrets
+            .get_optional("backend/internal_api_token")
+            .await
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| ConfigError::Missing("backend/internal_api_token".to_string()))?;
+
         Ok(Self {
             env: env.to_string(),
             host,
@@ -190,6 +226,9 @@ impl Config {
             schema_registry_url,
             schema_registry_key,
             schema_registry_secret,
+            backend_internal_url,
+            internal_api_token,
+            rate_limit_per_min: 300,
         })
     }
 

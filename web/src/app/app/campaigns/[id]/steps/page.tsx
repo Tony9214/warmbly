@@ -3,25 +3,26 @@ import { LayersIcon, Loader2Icon, PlusIcon } from "lucide-react";
 import toast from "react-hot-toast";
 import { useCampaign } from "@/hooks/context/campaign";
 import CampaignFlow from "@/components/app/campaigns/sequences/CampaignFlow";
+import PermissionButton from "@/components/ui/PermissionButton";
 import useSequences from "@/lib/api/hooks/app/campaigns/sequences/useSequences";
 import useCreateSequence from "@/lib/api/hooks/app/campaigns/sequences/useCreateSequence";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 
-export default function CampaignSequences() {
+export default function CampaignSteps() {
     const campaign = useCampaign();
     if (!campaign) {
-        throw new Error("CampaignSequences cannot be rendered without a campaign");
+        throw new Error("CampaignSteps cannot be rendered without a campaign");
     }
 
     return (
-        <React.Suspense fallback={<SequencesSkeleton />}>
-            <SequencesBuilder campaignId={campaign.id} />
+        <React.Suspense fallback={<StepsSkeleton />}>
+            <StepsBuilder campaignId={campaign.id} />
         </React.Suspense>
     );
 }
 
-function SequencesBuilder({ campaignId }: { campaignId: string }) {
+function StepsBuilder({ campaignId }: { campaignId: string }) {
     const { data: sequences } = useSequences(campaignId);
     const createSequence = useCreateSequence(campaignId);
     const [creating, setCreating] = React.useState(false);
@@ -52,7 +53,8 @@ function SequencesBuilder({ campaignId }: { campaignId: string }) {
                     replies. The first email sends immediately; later steps wait and thread as
                     follow-ups.
                 </p>
-                <button
+                <PermissionButton
+                    permission="MANAGE_SEQUENCES"
                     type="button"
                     onClick={create}
                     disabled={creating}
@@ -64,7 +66,7 @@ function SequencesBuilder({ campaignId }: { campaignId: string }) {
                         <PlusIcon className="w-3.5 h-3.5" />
                     )}
                     Add your first step
-                </button>
+                </PermissionButton>
             </div>
         );
     }
@@ -72,6 +74,6 @@ function SequencesBuilder({ campaignId }: { campaignId: string }) {
     return <CampaignFlow campaignId={campaignId} />;
 }
 
-function SequencesSkeleton() {
+function StepsSkeleton() {
     return <div className="h-[74dvh] w-full animate-pulse rounded-md border border-slate-200 bg-slate-100/60" />;
 }

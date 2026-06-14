@@ -52,6 +52,7 @@ import {
     TopbarAction,
 } from "@/components/layout/Page";
 import { Label, SearchInput, TextInput } from "@/components/ui/field";
+import { DatePicker } from "@/components/ui/DatePicker";
 import DueInDays from "@/components/app/crm/DueInDays";
 import { dueInDaysToISO, isoToDueInDays } from "@/lib/helper/dueDate";
 import {
@@ -1170,18 +1171,18 @@ function FilterPopover({
                     <div>
                         <Label>Due date</Label>
                         <div className="flex items-center gap-1.5">
-                            <TextInput
+                            <DatePicker
                                 value={filters.due_after ? String(filters.due_after).split("T")[0] : ""}
                                 onChange={(v) => setDate("due_after", v)}
-                                type="date"
-                                className="w-full"
+                                placeholder="From"
+                                className="flex-1"
                             />
                             <span className="text-slate-300">–</span>
-                            <TextInput
+                            <DatePicker
                                 value={filters.due_before ? String(filters.due_before).split("T")[0] : ""}
                                 onChange={(v) => setDate("due_before", v)}
-                                type="date"
-                                className="w-full"
+                                placeholder="To"
+                                className="flex-1"
                             />
                         </div>
                     </div>

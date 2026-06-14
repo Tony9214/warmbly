@@ -3,6 +3,13 @@ export default interface Organization {
     name: string
     avatar?: string
     plan?: string
-    role: 'owner' | 'admin' | 'member'
+    // Built-in role id or a custom role's name.
+    role: string
+    // Caller's effective permission bitmask in this org (custom-role aware).
+    permissions?: number
     created_at: Date
+    // Org-wide team presence privacy (admin-controlled). When false, the
+    // realtime service stops broadcasting that signal to teammates.
+    presence_show_online?: boolean
+    presence_show_activity?: boolean
 }

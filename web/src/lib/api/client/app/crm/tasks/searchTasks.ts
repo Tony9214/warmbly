@@ -4,11 +4,11 @@ import Request from "../../../Request";
 
 export default async function searchTasks(
     filters: SearchTasks,
-    offset = 0,
+    cursor?: string | null,
     limit = 50,
 ): Promise<TasksSearchResult> {
     const qs = new URLSearchParams();
-    if (offset) qs.set("offset", String(offset));
+    if (cursor) qs.set("cursor", cursor);
     if (limit) qs.set("limit", String(limit));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
 

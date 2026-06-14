@@ -1,8 +1,10 @@
 import React, { useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSocket } from './context/socket'
 import { useAppStore } from '@/stores'
 import { useUserProfile } from './context/user'
 import { useRealtimeEvents } from './useRealtimeEvents'
+import { PresenceProvider } from './PresenceProvider'
 import useUnseenCount from '@/lib/api/hooks/app/unibox/useUnseenCount'
 
 export function RealtimeManager({ children }: { children: React.ReactNode }) {
@@ -16,9 +18,24 @@ export function RealtimeManager({ children }: { children: React.ReactNode }) {
   const removeJoinedChannel = useAppStore((s) => s.removeJoinedChannel)
   const setUnseenCount = useAppStore((s) => s.setUnseenCount)
 
+  const queryClient = useQueryClient()
   const prevOrgIdRef = useRef<string | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastHeartbeatRef = useRef<number>(Date.now())
+  const hadConnectionRef = useRef(false)
+
+  // Catch-up on reconnect: events are fire-and-forget, so anything emitted
+  // while the socket was down (laptop sleep, network blip) is gone forever.
+  // Rather than trusting caches that may have silently diverged, mark every
+  // query stale on RE-connect (not the initial connect) — active views
+  // refetch immediately, background ones on next focus.
+  useEffect(() => {
+    if (!isConnected) return
+    if (hadConnectionRef.current) {
+      void queryClient.invalidateQueries()
+    }
+    hadConnectionRef.current = true
+  }, [isConnected, queryClient])
 
   // Sync connection status to store
   useEffect(() => {
@@ -120,5 +137,6 @@ export function RealtimeManager({ children }: { children: React.ReactNode }) {
   // Set up event-to-store routing
   useRealtimeEvents()
 
-  return <>{children}</>
+  // Presence rides the same org channel: who's online, who's viewing what.
+  return <PresenceProvider>{children}</PresenceProvider>
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/warmbly/warmbly/internal/api/middleware"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
@@ -52,7 +53,7 @@ func (h *Handler) GetAuditLogs(c *gin.Context) {
 		return
 	}
 
-	cursor, xerr := validate.Uuid(c.Query("cursor"))
+	cursor, xerr := paging.DecodeCursor(c.Query("cursor"))
 	if xerr != nil {
 		errx.Handle(c, xerr)
 		return

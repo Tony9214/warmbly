@@ -45,7 +45,7 @@ type CampaignAnalytics struct {
 	Status     string               `json:"status"`
 	DateRange  DateRange            `json:"date_range"`
 	Summary    CampaignSummary      `json:"summary"`
-	Sequences  []SequenceStats      `json:"sequences"`
+	Sequences  []SequenceStats      `json:"steps"`
 	DailyStats []CampaignDailyStats `json:"daily_stats,omitempty"`
 }
 
@@ -54,10 +54,13 @@ type CampaignSummary struct {
 	EmailsSent    int `json:"emails_sent"`
 	EmailsPending int `json:"emails_pending"`
 	UniqueOpens   int `json:"unique_opens"`
-	UniqueClicks  int `json:"unique_clicks"`
-	Replies       int `json:"replies"`
-	Bounces       int `json:"bounces"`
-	Unsubscribes  int `json:"unsubscribes"`
+	// MachineOpens is the subset of UniqueOpens from automated fetchers
+	// (Apple MPP prefetch, UA-less clients). Human opens = unique - machine.
+	MachineOpens int `json:"machine_opens"`
+	UniqueClicks int `json:"unique_clicks"`
+	Replies      int `json:"replies"`
+	Bounces      int `json:"bounces"`
+	Unsubscribes int `json:"unsubscribes"`
 
 	OpenRate   float64 `json:"open_rate"`   // percentage
 	ClickRate  float64 `json:"click_rate"`  // percentage
@@ -66,7 +69,7 @@ type CampaignSummary struct {
 }
 
 type SequenceStats struct {
-	SequenceID uuid.UUID `json:"sequence_id"`
+	SequenceID uuid.UUID `json:"step_id"`
 	Name       string    `json:"name"`
 	Position   int       `json:"position"`
 	EmailsSent int       `json:"emails_sent"`
@@ -209,8 +212,10 @@ type DashboardAnalytics struct {
 
 // DashboardOverallStats contains aggregate statistics for the dashboard
 type DashboardOverallStats struct {
-	TotalEmailsSent int     `json:"total_emails_sent"`
-	TotalOpens      int     `json:"total_opens"`
+	TotalEmailsSent int `json:"total_emails_sent"`
+	TotalOpens      int `json:"total_opens"`
+	// MachineOpens is the subset of TotalOpens from automated fetchers.
+	MachineOpens    int     `json:"machine_opens"`
 	TotalClicks     int     `json:"total_clicks"`
 	TotalReplies    int     `json:"total_replies"`
 	TotalBounces    int     `json:"total_bounces"`

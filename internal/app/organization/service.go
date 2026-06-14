@@ -13,6 +13,7 @@ import (
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/pkg/crypt"
 	"github.com/warmbly/warmbly/internal/repository"
 )
 
@@ -42,7 +43,16 @@ type OrganizationService interface {
 	GetMembership(ctx context.Context, orgID, userID uuid.UUID) (*models.OrganizationMember, *errx.Error)
 	InviteMember(ctx context.Context, orgID uuid.UUID, inviterID uuid.UUID, req *models.InviteMemberRequest) (*models.OrganizationInvitation, *errx.Error)
 	AcceptInvitation(ctx context.Context, token string, userID uuid.UUID, email string) (*models.OrganizationMember, *errx.Error)
-	UpdateMemberRole(ctx context.Context, orgID, memberUserID uuid.UUID, req *models.UpdateMemberRequest) (*models.OrganizationMember, *errx.Error)
+	AcceptInvitationByID(ctx context.Context, invitationID, userID uuid.UUID, email string) (*models.OrganizationMember, *errx.Error)
+	PreviewInvitation(ctx context.Context, token string) (*models.InvitationPreview, *errx.Error)
+	GetInvitationToken(ctx context.Context, orgID, invitationID uuid.UUID) (string, *errx.Error)
+
+	// Custom roles
+	ListRoles(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationRole, *errx.Error)
+	CreateRole(ctx context.Context, orgID, actorID uuid.UUID, req *models.CreateOrganizationRoleRequest) (*models.OrganizationRole, *errx.Error)
+	UpdateRole(ctx context.Context, orgID, actorID, roleID uuid.UUID, req *models.UpdateOrganizationRoleRequest) (*models.OrganizationRole, *errx.Error)
+	DeleteRole(ctx context.Context, orgID, actorID, roleID uuid.UUID) *errx.Error
+	UpdateMemberRole(ctx context.Context, orgID, actorID, memberUserID uuid.UUID, req *models.UpdateMemberRequest) (*models.OrganizationMember, *errx.Error)
 	RemoveMember(ctx context.Context, orgID, memberUserID uuid.UUID) *errx.Error
 
 	// Invitations
@@ -205,6 +215,22 @@ func (s *organizationService) Create(ctx context.Context, userID uuid.UUID, name
 		return nil, errx.New(errx.Internal, "failed to add owner member")
 	}
 
+	// Seed the default roles (Admin/Manager/Viewer). Ordinary rows from here
+	// on: the owner can rename, reshape, or delete them. Best-effort — a
+	// failure leaves a usable org where roles can be created manually.
+	for _, seed := range models.DefaultSeedRoles() {
+		if err := s.orgRepo.CreateRole(ctx, &models.OrganizationRole{
+			ID:             uuid.New(),
+			OrganizationID: org.ID,
+			Name:           seed.Name,
+			Description:    seed.Description,
+			Color:          seed.Color,
+			Permissions:    seed.Permissions,
+		}); err != nil {
+			sentry.CaptureException(err)
+		}
+	}
+
 	return org, nil
 }
 
@@ -256,6 +282,12 @@ func (s *organizationService) Update(ctx context.Context, orgID uuid.UUID, req *
 		}
 		org.Slug = req.Slug
 	}
+	if req.PresenceShowOnline != nil {
+		org.PresenceShowOnline = *req.PresenceShowOnline
+	}
+	if req.PresenceShowActivity != nil {
+		org.PresenceShowActivity = *req.PresenceShowActivity
+	}
 
 	org.UpdatedAt = time.Now()
 
@@ -303,6 +335,9 @@ func (s *organizationService) GetMembers(ctx context.Context, orgID uuid.UUID) (
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to get members")
 	}
+	if err := s.orgRepo.HydrateMemberRoles(ctx, orgID, members); err != nil {
+		sentry.CaptureException(err)
+	}
 	return members, nil
 }
 
@@ -331,23 +366,25 @@ func (s *organizationService) InviteMember(ctx context.Context, orgID uuid.UUID,
 	// First, we need to check if there's already a user with this email
 	// For now, we'll just create the invitation
 
-	// Determine role and permissions
-	role := string(models.RoleViewer)
-	if req.Role != "" && models.IsValidRole(req.Role) {
-		role = req.Role
+	// Roles are data rows: every invite lands in one or more, snapshotting
+	// the effective (OR) permissions + primary name onto the invitation.
+	roleIDs, roles, permissions, xerr := s.resolveRoleSet(ctx, orgID, req.Resolved())
+	if xerr != nil {
+		return nil, xerr
+	}
+	// Assignment is an escalation surface: the inviter must hold every
+	// permission the role set grants (the owner's full mask passes trivially).
+	if xerr := s.validateActorHoldsPermissions(ctx, orgID, inviterID, permissions); xerr != nil {
+		return nil, xerr
 	}
 
-	var permissions models.OrganizationPermission
-	if req.Permissions != nil {
-		permissions = models.OrganizationPermission(*req.Permissions)
-	} else {
-		permissions = models.GetRolePermissions(models.Role(role))
-	}
+	role := roles[0].Name
+	roleID := &roles[0].ID
 
 	// Generate invitation token
-	token, xerr := generateInvitationToken()
-	if xerr != nil {
-		sentry.CaptureException(xerr)
+	token, tokErr := generateInvitationToken()
+	if tokErr != nil {
+		sentry.CaptureException(tokErr)
 		return nil, errx.New(errx.Internal, "failed to generate invitation token")
 	}
 
@@ -356,6 +393,7 @@ func (s *organizationService) InviteMember(ctx context.Context, orgID uuid.UUID,
 		OrganizationID: orgID,
 		Email:          strings.ToLower(req.Email),
 		Role:           role,
+		RoleID:         roleID,
 		Permissions:    permissions,
 		InvitedBy:      inviterID,
 		Token:          token,
@@ -367,8 +405,45 @@ func (s *organizationService) InviteMember(ctx context.Context, orgID uuid.UUID,
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to create invitation")
 	}
+	if err := s.orgRepo.SetInvitationRoles(ctx, inv.ID, roleIDs); err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to attach roles")
+	}
+	inv.Roles = toMemberRoles(roles)
 
 	return inv, nil
+}
+
+// resolveRoleSet loads + validates a set of org role ids, returning the
+// deduped ids, the role rows, and the effective (OR) permission mask. At
+// least one valid role is required.
+func (s *organizationService) resolveRoleSet(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, []models.OrganizationRole, models.OrganizationPermission, *errx.Error) {
+	if len(ids) == 0 {
+		return nil, nil, 0, errx.New(errx.BadRequest, "at least one role is required")
+	}
+	var roles []models.OrganizationRole
+	var perms models.OrganizationPermission
+	for _, id := range ids {
+		role, err := s.orgRepo.GetRoleByID(ctx, orgID, id)
+		if err != nil {
+			sentry.CaptureException(err)
+			return nil, nil, 0, errx.New(errx.Internal, "failed to load role")
+		}
+		if role == nil {
+			return nil, nil, 0, errx.New(errx.BadRequest, "role not found")
+		}
+		roles = append(roles, *role)
+		perms |= role.Permissions
+	}
+	return ids, roles, perms, nil
+}
+
+func toMemberRoles(roles []models.OrganizationRole) []models.MemberRole {
+	out := make([]models.MemberRole, 0, len(roles))
+	for _, r := range roles {
+		out = append(out, models.MemberRole{ID: r.ID, Name: r.Name, Color: r.Color})
+	}
+	return out
 }
 
 // AcceptInvitation accepts an invitation and adds the user as a member
@@ -381,6 +456,69 @@ func (s *organizationService) AcceptInvitation(ctx context.Context, token string
 	if inv == nil {
 		return nil, errx.New(errx.NotFound, "invitation not found")
 	}
+	return s.acceptResolved(ctx, inv, userID, email)
+}
+
+// AcceptInvitationByID accepts an invitation the logged-in user found in their
+// own pending list (no token needed; the email-match check still gates it).
+func (s *organizationService) AcceptInvitationByID(ctx context.Context, invitationID, userID uuid.UUID, email string) (*models.OrganizationMember, *errx.Error) {
+	inv, err := s.orgRepo.GetInvitationByID(ctx, invitationID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to get invitation")
+	}
+	if inv == nil {
+		return nil, errx.New(errx.NotFound, "invitation not found")
+	}
+	return s.acceptResolved(ctx, inv, userID, email)
+}
+
+// PreviewInvitation returns the safe public view for the /invite landing page.
+func (s *organizationService) PreviewInvitation(ctx context.Context, token string) (*models.InvitationPreview, *errx.Error) {
+	inv, err := s.orgRepo.GetInvitationByToken(ctx, token)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to get invitation")
+	}
+	if inv == nil {
+		return nil, errx.New(errx.NotFound, "invitation not found")
+	}
+	preview := &models.InvitationPreview{
+		Email:   inv.Email,
+		Expired: inv.IsExpired(),
+	}
+	if inv.Organization != nil {
+		preview.OrganizationName = inv.Organization.Name
+		if inv.Organization.AvatarURL != nil {
+			preview.OrganizationAvatar = *inv.Organization.AvatarURL
+		}
+	}
+	if inviter, _ := s.userRepo.GetUser(ctx, inv.InvitedBy); inviter != nil {
+		preview.InviterName = strings.TrimSpace(inviter.FirstName + " " + inviter.LastName)
+	}
+	list := []models.OrganizationInvitation{*inv}
+	if err := s.orgRepo.HydrateInvitationRoles(ctx, list); err == nil {
+		preview.Roles = list[0].Roles
+	}
+	return preview, nil
+}
+
+// GetInvitationToken returns the secure token for one of the org's pending
+// invitations, so a team manager can copy a shareable /invite link.
+func (s *organizationService) GetInvitationToken(ctx context.Context, orgID, invitationID uuid.UUID) (string, *errx.Error) {
+	inv, err := s.orgRepo.GetInvitationByID(ctx, invitationID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return "", errx.New(errx.Internal, "failed to get invitation")
+	}
+	if inv == nil || inv.OrganizationID != orgID {
+		return "", errx.New(errx.NotFound, "invitation not found")
+	}
+	return inv.Token, nil
+}
+
+// acceptResolved performs the actual join given an already-loaded invitation.
+func (s *organizationService) acceptResolved(ctx context.Context, inv *models.OrganizationInvitation, userID uuid.UUID, email string) (*models.OrganizationMember, *errx.Error) {
 
 	// Verify email matches
 	if strings.ToLower(email) != strings.ToLower(inv.Email) {
@@ -401,20 +539,50 @@ func (s *organizationService) AcceptInvitation(ctx context.Context, token string
 		return existing, nil
 	}
 
-	// Add member
+	// Re-resolve the invitation's role set at accept time: snapshots may be
+	// stale (edited) or dangling (deleted) since the invite was sent. Roles
+	// deleted in the meantime are dropped; at least one must survive.
+	invRoleIDs, ierr := s.orgRepo.GetInvitationRoles(ctx, inv.ID)
+	if ierr != nil {
+		sentry.CaptureException(ierr)
+		return nil, errx.New(errx.Internal, "failed to load invitation roles")
+	}
+	var liveRoleIDs []uuid.UUID
+	var primary *models.OrganizationRole
+	for _, id := range invRoleIDs {
+		role, rerr := s.orgRepo.GetRoleByID(ctx, inv.OrganizationID, id)
+		if rerr != nil {
+			sentry.CaptureException(rerr)
+			return nil, errx.New(errx.Internal, "failed to load role")
+		}
+		if role == nil {
+			continue
+		}
+		if primary == nil {
+			primary = role
+		}
+		liveRoleIDs = append(liveRoleIDs, id)
+	}
+	if len(liveRoleIDs) == 0 {
+		_ = s.orgRepo.DeleteInvitation(ctx, inv.ID)
+		return nil, errx.New(errx.BadRequest, "the roles for this invitation no longer exist — ask for a new invite")
+	}
+
+	// Add the membership row, then assign the full role set (which recomputes
+	// the effective permission snapshot).
 	now := time.Now()
 	member := &models.OrganizationMember{
 		ID:             uuid.New(),
 		OrganizationID: inv.OrganizationID,
 		UserID:         userID,
-		Role:           inv.Role,
-		Permissions:    inv.Permissions,
+		Role:           primary.Name,
+		RoleID:         &primary.ID,
+		Permissions:    primary.Permissions,
 		InvitedBy:      &inv.InvitedBy,
 		InvitedAt:      inv.CreatedAt,
 		AcceptedAt:     &now,
 	}
-
-	if err := s.orgRepo.AddMember(ctx, member); err != nil {
+	if err := s.orgRepo.AddMemberWithRoles(ctx, member, liveRoleIDs); err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to add member")
 	}
@@ -422,11 +590,14 @@ func (s *organizationService) AcceptInvitation(ctx context.Context, token string
 	// Delete the invitation
 	_ = s.orgRepo.DeleteInvitation(ctx, inv.ID)
 
+	if updated, _ := s.orgRepo.GetMember(ctx, inv.OrganizationID, userID); updated != nil {
+		member = updated
+	}
 	return member, nil
 }
 
 // UpdateMemberRole updates a member's role and permissions
-func (s *organizationService) UpdateMemberRole(ctx context.Context, orgID, memberUserID uuid.UUID, req *models.UpdateMemberRequest) (*models.OrganizationMember, *errx.Error) {
+func (s *organizationService) UpdateMemberRole(ctx context.Context, orgID, actorID, memberUserID uuid.UUID, req *models.UpdateMemberRequest) (*models.OrganizationMember, *errx.Error) {
 	member, err := s.orgRepo.GetMember(ctx, orgID, memberUserID)
 	if err != nil {
 		sentry.CaptureException(err)
@@ -441,31 +612,33 @@ func (s *organizationService) UpdateMemberRole(ctx context.Context, orgID, membe
 		return nil, errx.New(errx.Forbidden, "cannot modify owner role")
 	}
 
-	if req.Role != nil {
-		if !models.IsValidRole(*req.Role) {
-			return nil, errx.New(errx.BadRequest, "invalid role")
-		}
-		// Cannot promote to owner
-		if *req.Role == string(models.RoleOwner) {
-			return nil, errx.New(errx.Forbidden, "cannot promote to owner, use transfer ownership")
-		}
-		member.Role = *req.Role
-		// Update permissions to match new role unless custom permissions provided
-		if req.Permissions == nil {
-			member.Permissions = models.GetRolePermissions(models.Role(*req.Role))
-		}
+	roleIDs, _, permissions, xerr := s.resolveRoleSet(ctx, orgID, req.Resolved())
+	if xerr != nil {
+		return nil, xerr
+	}
+	// Assignment is an escalation surface: the actor must hold every
+	// permission the new role set grants, and may not re-role themselves.
+	if actorID == memberUserID {
+		return nil, errx.New(errx.Forbidden, "you cannot change your own roles")
+	}
+	if xerr := s.validateActorHoldsPermissions(ctx, orgID, actorID, permissions); xerr != nil {
+		return nil, xerr
 	}
 
-	if req.Permissions != nil {
-		member.Permissions = models.OrganizationPermission(*req.Permissions)
-	}
-
-	if err := s.orgRepo.UpdateMember(ctx, member); err != nil {
+	if err := s.orgRepo.SetMemberRoles(ctx, orgID, memberUserID, roleIDs); err != nil {
 		sentry.CaptureException(err)
-		return nil, errx.New(errx.Internal, "failed to update member")
+		return nil, errx.New(errx.Internal, "failed to update roles")
 	}
 
-	return member, nil
+	updated, gerr := s.orgRepo.GetMember(ctx, orgID, memberUserID)
+	if gerr != nil {
+		sentry.CaptureException(gerr)
+		return nil, errx.New(errx.Internal, "failed to load member")
+	}
+	if updated != nil {
+		updated.Roles, _ = s.orgRepo.GetMemberRoles(ctx, orgID, memberUserID)
+	}
+	return updated, nil
 }
 
 // RemoveMember removes a member from the organization
@@ -498,6 +671,9 @@ func (s *organizationService) GetPendingInvitations(ctx context.Context, orgID u
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to get invitations")
+	}
+	if err := s.orgRepo.HydrateInvitationRoles(ctx, invitations); err != nil {
+		sentry.CaptureException(err)
 	}
 	return invitations, nil
 }
@@ -1118,4 +1294,164 @@ func (s *organizationService) RejectLimitRequest(ctx context.Context, id, review
 	lr.ReviewedBy = &reviewerID
 	lr.ReviewNotes = notes
 	return lr, nil
+}
+
+// MaxCustomRolesPerOrg caps role sprawl per workspace.
+const MaxCustomRolesPerOrg = 25
+
+// validateRolePermissions enforces the two safety rules for custom roles:
+// transfer-ownership can never be delegated through a role, and an actor can
+// only put permissions into a role that they hold themselves (no privilege
+// escalation by minting a stronger role and self-assigning a teammate).
+func (s *organizationService) validateRolePermissions(ctx context.Context, orgID, actorID uuid.UUID, perms models.OrganizationPermission) *errx.Error {
+	if perms&models.PermTransferOwnership != 0 {
+		return errx.New(errx.BadRequest, "custom roles cannot include ownership transfer")
+	}
+	return s.validateActorHoldsPermissions(ctx, orgID, actorID, perms)
+}
+
+// validateActorHoldsPermissions rejects granting (via role create/edit OR
+// assignment) any permission the actor does not hold themselves.
+func (s *organizationService) validateActorHoldsPermissions(ctx context.Context, orgID, actorID uuid.UUID, perms models.OrganizationPermission) *errx.Error {
+	actor, err := s.orgRepo.GetMember(ctx, orgID, actorID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return errx.New(errx.Internal, "failed to load member")
+	}
+	if actor == nil {
+		return errx.New(errx.Forbidden, "not a member")
+	}
+	if perms&^actor.Permissions != 0 {
+		return errx.New(errx.Forbidden, "you cannot grant permissions you do not hold")
+	}
+	return nil
+}
+
+func validateRoleName(name string) (string, *errx.Error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 50 {
+		return "", errx.New(errx.BadRequest, "role name must be 1-50 characters")
+	}
+	if models.IsReservedRoleName(name) {
+		return "", errx.New(errx.BadRequest, "that name is reserved for a built-in role")
+	}
+	return name, nil
+}
+
+func (s *organizationService) ListRoles(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationRole, *errx.Error) {
+	roles, err := s.orgRepo.ListRoles(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to list roles")
+	}
+	if roles == nil {
+		roles = []models.OrganizationRole{}
+	}
+	return roles, nil
+}
+
+func (s *organizationService) CreateRole(ctx context.Context, orgID, actorID uuid.UUID, req *models.CreateOrganizationRoleRequest) (*models.OrganizationRole, *errx.Error) {
+	name, xerr := validateRoleName(req.Name)
+	if xerr != nil {
+		return nil, xerr
+	}
+	perms := models.OrganizationPermission(req.Permissions)
+	if xerr := s.validateRolePermissions(ctx, orgID, actorID, perms); xerr != nil {
+		return nil, xerr
+	}
+
+	count, err := s.orgRepo.CountRoles(ctx, orgID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to count roles")
+	}
+	if count >= MaxCustomRolesPerOrg {
+		return nil, errx.New(errx.Forbidden, "custom role limit reached")
+	}
+
+	color := strings.TrimSpace(req.Color)
+	if color != "" && !crypt.IsValidHexColor(color) {
+		return nil, errx.New(errx.BadRequest, "color must be a hex value like #0ea5e9")
+	}
+
+	role := &models.OrganizationRole{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		Name:           name,
+		Description:    strings.TrimSpace(req.Description),
+		Color:          color,
+		Permissions:    perms,
+	}
+	if err := s.orgRepo.CreateRole(ctx, role); err != nil {
+		// Unique (org, name) violation is the only expected failure here.
+		return nil, errx.New(errx.BadRequest, "a role with that name already exists")
+	}
+	return role, nil
+}
+
+func (s *organizationService) UpdateRole(ctx context.Context, orgID, actorID, roleID uuid.UUID, req *models.UpdateOrganizationRoleRequest) (*models.OrganizationRole, *errx.Error) {
+	role, err := s.orgRepo.GetRoleByID(ctx, orgID, roleID)
+	if err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to load role")
+	}
+	if role == nil {
+		return nil, errx.New(errx.NotFound, "role not found")
+	}
+
+	if req.Name != nil {
+		name, xerr := validateRoleName(*req.Name)
+		if xerr != nil {
+			return nil, xerr
+		}
+		role.Name = name
+	}
+	if req.Description != nil {
+		role.Description = strings.TrimSpace(*req.Description)
+	}
+	if req.Color != nil {
+		color := strings.TrimSpace(*req.Color)
+		if color != "" && !crypt.IsValidHexColor(color) {
+			return nil, errx.New(errx.BadRequest, "color must be a hex value like #0ea5e9")
+		}
+		role.Color = color
+	}
+	if req.Permissions != nil {
+		perms := models.OrganizationPermission(*req.Permissions)
+		if xerr := s.validateRolePermissions(ctx, orgID, actorID, perms); xerr != nil {
+			return nil, xerr
+		}
+		role.Permissions = perms
+	}
+
+	// Write-through: assigned members pick up the new name + permissions
+	// atomically (their effective access changes live via the audit spine).
+	if err := s.orgRepo.UpdateRole(ctx, role); err != nil {
+		sentry.CaptureException(err)
+		return nil, errx.New(errx.Internal, "failed to update role")
+	}
+	return role, nil
+}
+
+func (s *organizationService) DeleteRole(ctx context.Context, orgID, actorID, roleID uuid.UUID) *errx.Error {
+	// Deleting a role strips its permissions from everyone holding it, so the
+	// actor must hold those permissions themselves (symmetry with the grant
+	// paths — otherwise a team-manager could de-privilege admins by deleting
+	// the Admin role).
+	role, rerr := s.orgRepo.GetRoleByID(ctx, orgID, roleID)
+	if rerr != nil {
+		sentry.CaptureException(rerr)
+		return errx.New(errx.Internal, "failed to load role")
+	}
+	if role == nil {
+		return nil // already gone — idempotent
+	}
+	if xerr := s.validateActorHoldsPermissions(ctx, orgID, actorID, role.Permissions); xerr != nil {
+		return xerr
+	}
+	if err := s.orgRepo.DeleteRole(ctx, orgID, roleID); err != nil {
+		sentry.CaptureException(err)
+		return errx.New(errx.Internal, "failed to delete role")
+	}
+	return nil
 }

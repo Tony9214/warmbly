@@ -8,6 +8,7 @@ import { Loader2Icon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { Label, NumberInput, TextInput } from "@/components/ui/field";
+import { DateTimePicker } from "@/components/ui/DateTimePicker";
 import useCreateMeeting from "@/lib/api/hooks/app/meetings/useCreateMeeting";
 
 export interface MeetingPrefill {
@@ -136,12 +137,7 @@ export default function NewMeetingDialog({
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <Label>When</Label>
-                                    <input
-                                        type="datetime-local"
-                                        value={when}
-                                        onChange={(e) => setWhen(e.target.value)}
-                                        className="w-full h-7 px-2 rounded-md border border-slate-200 text-[12.5px] text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 tabular-nums"
-                                    />
+                                    <DateTimePicker value={when} onChange={setWhen} stepMinutes={15} className="w-full" />
                                 </div>
                                 <div>
                                     <Label>Duration</Label>

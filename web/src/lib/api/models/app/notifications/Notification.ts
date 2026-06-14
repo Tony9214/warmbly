@@ -2,7 +2,8 @@
 
 export interface ChannelPrefs {
     in_app: boolean;
-    email: boolean; // reserved; not delivered yet
+    email: boolean;
+    slack: boolean;
 }
 
 export interface CategoryPref {
@@ -16,6 +17,7 @@ export interface NotificationPreferences {
     health_bounce: CategoryPref;
     health_complaint: CategoryPref;
     health_worker_downtime: CategoryPref;
+    security_new_signin: CategoryPref;
 }
 
 export type NotificationCategoryKey = keyof NotificationPreferences;

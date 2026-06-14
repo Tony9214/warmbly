@@ -14,6 +14,8 @@
 // - Nothing connects automatically; a step with no outgoing path ends in STOP.
 
 import React from "react";
+import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import {
     ArrowRightLeftIcon,
     BellOffIcon,
@@ -32,6 +34,7 @@ import {
     PlusIcon,
     SendIcon,
     TagIcon,
+    TagsIcon,
     Trash2Icon,
     UnlinkIcon,
     XIcon,
@@ -71,13 +74,14 @@ import useCampaign from "@/lib/api/hooks/app/campaigns/useCampaign";
 import useUpdateCampaign from "@/lib/api/hooks/app/campaigns/useUpdateCampaign";
 import { useConfirm } from "@/hooks/context/confirm";
 import useClickOutside from "@/hooks/useClickOutside";
+import { usePermission, showPermissionDenied } from "@/hooks/usePermission";
+import { LockIcon } from "lucide-react";
 import { NumberInput, Label, TextInput } from "@/components/ui/field";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
 import { PopoverMenu, PopoverMenuContent, PopoverMenuTrigger } from "@/components/ui/popover-menu";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
-import SequenceView from "./SequenceView";
-import StepVariants from "./StepVariants";
+import StepEmailArms from "./StepEmailArms";
 import CategoryPicker from "@/components/app/contacts/CategoryPicker";
 import type { ActionKV, SequenceAction, SequenceActionType } from "@/lib/api/models/app/campaigns/sequences/Action";
 import { useAutomations } from "@/lib/api/hooks/app/automations/useAutomations";
@@ -154,7 +158,7 @@ function conditionText(b: SequenceBranch): string {
 function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: "TB", nodesep: 220, ranksep: 120, marginx: 32, marginy: 32, edgesep: 120 });
+    g.setGraph({ rankdir: "TB", nodesep: 180, ranksep: 130, marginx: 32, marginy: 32, edgesep: 100 });
     nodes.forEach((n) => {
         let w = NODE_W;
         let h = NODE_H;
@@ -227,7 +231,7 @@ function stackComponents(nodes: Node[], edges: Edge[]): Node[] {
         box.set(k, b);
     }
     const baseX = Math.min(...[...box.values()].map((b) => b.minX));
-    const GAP = 140;
+    const GAP = 130;
     let cursorY = 0;
     const offset = new Map<number, { dx: number; dy: number }>();
     for (const k of [...box.keys()].sort((a, b) => a - b)) {
@@ -316,8 +320,7 @@ function StepNode({ data, selected }: NodeProps) {
                 <ZapIcon className="w-3 h-3" />
                 On reply
             </button>
-            {/* Right dot = start an "if" branch; bottom dot = plain "go there". */}
-            <Handle type="source" id="if" position={Position.Right} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-amber-400" />
+            {/* One output dot: drag it out to add the next step, action, or condition. */}
             <Handle type="source" id="s" position={Position.Bottom} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-sky-500" />
         </div>
     );
@@ -388,12 +391,14 @@ function StopNode() {
 const ACTION_META: Record<string, { label: string; Icon: typeof ClockIcon; tint: string }> = {
     add_tag: { label: "Add tag", Icon: TagIcon, tint: "text-emerald-600" },
     remove_tag: { label: "Remove tag", Icon: TagIcon, tint: "text-amber-600" },
+    label_email: { label: "Label email", Icon: TagsIcon, tint: "text-fuchsia-600" },
     create_task: { label: "Create task", Icon: CheckSquareIcon, tint: "text-violet-600" },
     create_deal: { label: "Create deal", Icon: HandshakeIcon, tint: "text-emerald-600" },
     move_deal_stage: { label: "Move deal stage", Icon: ArrowRightLeftIcon, tint: "text-sky-600" },
     unsubscribe: { label: "Unsubscribe", Icon: BellOffIcon, tint: "text-rose-600" },
-    notify: { label: "Notify", Icon: SendIcon, tint: "text-sky-600" },
     run_automation: { label: "Run automation", Icon: ZapIcon, tint: "text-indigo-600" },
+    http_request: { label: "HTTP request", Icon: BracesIcon, tint: "text-teal-600" },
+    fire_event: { label: "Fire event", Icon: SendIcon, tint: "text-sky-600" },
 };
 
 // actionSummary is the one-line subtitle shown on an action node.
@@ -404,16 +409,20 @@ function actionSummary(a?: SequenceAction | null): string {
             return a.category_id ? "Add a tag" : "Pick a tag…";
         case "remove_tag":
             return a.category_id ? "Remove a tag" : "Pick a tag…";
+        case "label_email":
+            return a.label_ids && a.label_ids.length ? "Label the conversation" : "Pick a label…";
         case "create_deal":
             return a.deal_pipeline_id && a.deal_stage_id ? "Create a CRM deal" : "Pick a pipeline and stage…";
         case "move_deal_stage":
             return a.deal_pipeline_id && a.deal_stage_id ? "Move the deal forward" : "Pick a pipeline and stage…";
         case "unsubscribe":
             return "Unsubscribe the contact";
-        case "notify":
-            return "Send a notification";
         case "run_automation":
             return a.automation_id ? "Launch an automation" : "Pick an automation…";
+        case "http_request":
+            return a.http_url ? "Send an HTTP request" : "Set a URL…";
+        case "fire_event":
+            return a.event_name ? `Fire "${a.event_name}"` : "Name the event…";
         default:
             return "Action";
     }
@@ -471,14 +480,55 @@ function ActionNode({ data, selected }: NodeProps) {
                     Ends here
                 </div>
             ) : null}
-            {/* Same handles as a step: right = "if" branch, bottom = "go there". */}
-            <Handle type="source" id="if" position={Position.Right} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-amber-400" />
+            {/* One output dot: drag it out to add the next step, action, or condition. */}
             <Handle type="source" id="s" position={Position.Bottom} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-sky-500" />
         </div>
     );
 }
 
-const nodeTypes = { step: StepNode, ifcond: IfNode, stop: StopNode, action: ActionNode };
+type ConditionNodeData = { label: string; endsHere: boolean; orphan: boolean; onDelete: () => void };
+
+// A Condition node is a pure router (no email, no action): it just branches.
+// Drag from it to add conditional paths, and chain Condition nodes to build
+// nested decision trees. Persisted as a no-op step (kind "wait").
+function ConditionNode({ data, selected }: NodeProps) {
+    const d = data as ConditionNodeData;
+    return (
+        <div
+            className={`w-[200px] rounded-xl border bg-white shadow-sm transition-shadow duration-200 hover:shadow-md ${
+                d.orphan ? "border-dashed border-amber-300" : "border-amber-200"
+            } ${selected ? "border-sky-400 ring-2 ring-sky-100" : ""}`}
+        >
+            <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-2 !border-white !bg-slate-300" />
+            <div className="flex items-center gap-2 rounded-t-xl border-b border-amber-200/60 bg-gradient-to-r from-amber-50/80 to-white px-2.5 py-1.5">
+                <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-600 ring-1 ring-amber-200/70">
+                    <GitBranchIcon className="w-3 h-3" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-slate-800">
+                    {d.label || "Condition"}
+                </span>
+                <button
+                    type="button"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        d.onDelete();
+                    }}
+                    title="Delete condition"
+                    className="nodrag inline-flex size-5 shrink-0 items-center justify-center rounded text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                >
+                    <Trash2Icon className="w-3 h-3" />
+                </button>
+            </div>
+            <div className="px-2.5 py-1.5 text-[10.5px] text-slate-400">
+                {d.endsHere ? "Drag out to add an if branch" : "Routes by your conditions"}
+            </div>
+            {/* One output dot: drag out to add each conditional path. */}
+            <Handle type="source" id="s" position={Position.Bottom} className="!h-3 !w-3 pointer-coarse:!h-5 pointer-coarse:!w-5 !border-2 !border-white !bg-sky-500" />
+        </div>
+    );
+}
+
+const nodeTypes = { step: StepNode, ifcond: IfNode, stop: StopNode, action: ActionNode, condition: ConditionNode };
 
 // Convergent edge.
 // Several branches can route to the same next step (many in -> one node). They
@@ -560,9 +610,23 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
     const [selectedEdge, setSelectedEdge] = React.useState<{ sourceId: string; branchId: string } | null>(null);
     const [editStepId, setEditStepId] = React.useState<string | null>(null);
     const [adding, setAdding] = React.useState(false);
+    // When you drag a node's dot out to empty canvas, we open a create menu at
+    // the drop point instead of immediately making an email step.
+    const [dragCreate, setDragCreate] = React.useState<{
+        x: number;
+        y: number;
+        sourceId: string;
+        // The drag started on a Condition node, so the new node becomes a
+        // conditional ("if") path rather than an unconditional one.
+        conditional?: boolean;
+        ifSource?: { sourceId: string; branchId: string; handle: string };
+    } | null>(null);
+    const connectStartRef = React.useRef<string | null>(null);
     // While dragging a node, kill the position transition so the drag is 1:1.
     const [dragging, setDragging] = React.useState(false);
-    const structureSig = React.useRef("");
+    // Editing the sequence flow (add a step, drag a node, draw a branch) needs
+    // the manage-sequences permission. View-only members can pan/zoom/inspect.
+    const canEditFlow = usePermission("MANAGE_SEQUENCES");
     const ifMetaRef = React.useRef<Record<string, IfMeta>>({});
 
     const seqById = React.useMemo(() => {
@@ -615,7 +679,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             while (queue.length) {
                 const id = queue.shift()!;
                 for (const b of seqById.get(id)?.conditions?.branches ?? []) {
-                    const t = b.target_sequence_id;
+                    const t = b.target_step_id;
                     if (t && !set.has(t)) {
                         set.add(t);
                         queue.push(t);
@@ -667,7 +731,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             if (!src) return;
             saveBranches(sourceId, [
                 ...(src.conditions?.branches ?? []),
-                { branch_id: newBranchId(), target_sequence_id: target, conditions: [] },
+                { branch_id: newBranchId(), target_step_id: target, conditions: [] },
             ]);
         },
         [seqById, saveBranches],
@@ -678,7 +742,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             if (!src) return;
             const branch: SequenceBranch = {
                 branch_id: newBranchId(),
-                target_sequence_id: target,
+                target_step_id: target,
                 conditions: [{ field: "opened", operator: "within_days", value: 3 }],
             };
             // Drop a default ("else") line that already points to the same step
@@ -686,7 +750,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             // auto-created a duplicate else to the same step. The else stays
             // something you add and connect yourself.
             const existing = (src.conditions?.branches ?? []).filter(
-                (b) => !(!isCond(b) && b.target_sequence_id === target),
+                (b) => !(!isCond(b) && b.target_step_id === target),
             );
             saveBranches(sourceId, [...existing, branch]);
             openCondition(sourceId, branch.branch_id);
@@ -700,7 +764,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             saveBranches(
                 sourceId,
                 (src.conditions?.branches ?? []).map((b) =>
-                    b.branch_id === branchId ? { ...b, target_sequence_id: target } : b,
+                    b.branch_id === branchId ? { ...b, target_step_id: target } : b,
                 ),
             );
         },
@@ -782,7 +846,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                 const created = (await createSequence.mutateAsync()) as Sequence;
                 await saveBranches(sourceId, [
                     ...(src?.conditions?.branches ?? []),
-                    { branch_id: newBranchId(), target_sequence_id: created.id, conditions: [] },
+                    { branch_id: newBranchId(), target_step_id: created.id, conditions: [] },
                 ]);
             } catch {
                 toast.error("Couldn't add the step");
@@ -792,28 +856,49 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         },
         [adding, sequences.length, seqById, createSequence, saveBranches],
     );
-    // Drag from an IF block's side to empty -> new step + new if-branch.
-    const addIfToNew = React.useCallback(
-        async (sourceId: string) => {
+    // Drag out -> new action step of the chosen type, connected unconditionally.
+    const dragOutAction = React.useCallback(
+        async (sourceId: string, type: SequenceActionType) => {
             if (adding || sequences.length >= MAX_STEPS) return;
             const src = seqById.get(sourceId);
             setAdding(true);
             try {
                 const created = (await createSequence.mutateAsync()) as Sequence;
-                const branch: SequenceBranch = {
-                    branch_id: newBranchId(),
-                    target_sequence_id: created.id,
-                    conditions: [{ field: "opened", operator: "within_days", value: 3 }],
-                };
-                await saveBranches(sourceId, [...(src?.conditions?.branches ?? []), branch]);
-                openCondition(sourceId, branch.branch_id);
+                await updateSequence(campaignId, created.id, { kind: "action", action: defaultActionFor(type) });
+                await saveBranches(sourceId, [
+                    ...(src?.conditions?.branches ?? []),
+                    { branch_id: newBranchId(), target_step_id: created.id, conditions: [] },
+                ]);
             } catch {
-                toast.error("Couldn't add the step");
+                toast.error("Couldn't add the action");
             } finally {
                 setAdding(false);
             }
         },
-        [adding, sequences.length, seqById, createSequence, saveBranches, openCondition],
+        [adding, sequences.length, seqById, createSequence, campaignId, saveBranches],
+    );
+    // Create a step of the chosen type and return its id (used by the menu when
+    // dragging out of an IF block, which then points the branch at the new node).
+    const createTypedStep = React.useCallback(
+        async (choice: CreateChoice): Promise<string | null> => {
+            if (adding || sequences.length >= MAX_STEPS) return null;
+            setAdding(true);
+            try {
+                const created = (await createSequence.mutateAsync()) as Sequence;
+                if (choice === "condition") {
+                    await updateSequence(campaignId, created.id, { kind: "wait", name: "Condition" });
+                } else if (choice !== "email") {
+                    await updateSequence(campaignId, created.id, { kind: "action", action: defaultActionFor(choice) });
+                }
+                return created.id;
+            } catch {
+                toast.error("Couldn't add the step");
+                return null;
+            } finally {
+                setAdding(false);
+            }
+        },
+        [adding, sequences.length, createSequence, campaignId],
     );
     // "On reply" on a step: create a new action step + a reply branch that fires
     // it the moment the contact replies, then open the branch so you can pick the
@@ -832,7 +917,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                 });
                 const branch: SequenceBranch = {
                     branch_id: newBranchId(),
-                    target_sequence_id: created.id,
+                    target_step_id: created.id,
                     conditions: [{ field: "reply_positive", operator: "ever" }],
                 };
                 await saveBranches(sourceId, [...(src?.conditions?.branches ?? []), branch]);
@@ -848,28 +933,12 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         [adding, sequences.length, seqById, createSequence, campaignId, saveBranches, openCondition, invalidate],
     );
 
-    // Drag an IF block's bottom dot to empty -> new step the if leads to.
-    const retargetToNew = React.useCallback(
-        async (sourceId: string, branchId: string) => {
-            if (adding || sequences.length >= MAX_STEPS) return;
-            setAdding(true);
-            try {
-                const created = (await createSequence.mutateAsync()) as Sequence;
-                retargetBranch(sourceId, branchId, created.id);
-            } catch {
-                toast.error("Couldn't add the step");
-            } finally {
-                setAdding(false);
-            }
-        },
-        [adding, sequences.length, createSequence, retargetBranch],
-    );
 
     const deleteStep = React.useCallback(
         (id: string) => {
             const label = stepName(seqById.get(id));
             const referencing = sequences.filter(
-                (s) => s.id !== id && (s.conditions?.branches ?? []).some((b) => b.target_sequence_id === id),
+                (s) => s.id !== id && (s.conditions?.branches ?? []).some((b) => b.target_step_id === id),
             );
             const extra = referencing.length
                 ? ` ${referencing.length} connection${referencing.length === 1 ? "" : "s"} into it will be removed too.`
@@ -880,7 +949,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         referencing.map((s) =>
                             updateSequence(campaignId, s.id, {
                                 conditions: {
-                                    branches: (s.conditions?.branches ?? []).filter((b) => b.target_sequence_id !== id),
+                                    branches: (s.conditions?.branches ?? []).filter((b) => b.target_step_id !== id),
                                 },
                             }),
                         ),
@@ -926,7 +995,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             while (queue.length) {
                 const id = queue.shift()!;
                 for (const b of seqById.get(id)?.conditions?.branches ?? []) {
-                    const t = b.target_sequence_id;
+                    const t = b.target_step_id;
                     if (t && !reachable.has(t)) {
                         reachable.add(t);
                         queue.push(t);
@@ -939,6 +1008,20 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         const allNodes: Node[] = sequences.map((s, i) => {
             const branches = s.conditions?.branches ?? [];
             const isAction = s.kind !== "email";
+            if (s.kind === "wait") {
+                // Pure router: a Condition node that only branches.
+                return {
+                    id: s.id,
+                    type: "condition",
+                    position: { x: 0, y: 0 },
+                    data: {
+                        label: s.name?.trim() || "Condition",
+                        endsHere: branches.length === 0,
+                        orphan: !reachable.has(s.id),
+                        onDelete: () => deleteStepRef.current(s.id),
+                    } satisfies ConditionNodeData,
+                };
+            }
             if (isAction) {
                 const at = s.action?.type ?? "add_tag";
                 const fallback = ACTION_META[at]?.label ?? "Action";
@@ -1037,26 +1120,30 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         : "instant"
                     : withinDays
                       ? `within ${withinDays}d`
-                      : waitTag(b.target_sequence_id);
-                flowEdges.push({
-                    id: `then-${b.branch_id}`,
-                    source: nid,
-                    sourceHandle: "out",
-                    target: b.target_sequence_id ?? STOP_ID,
-                    label: wt || undefined,
-                    reconnectable: true,
-                    style: edgeStyle(true),
-                    labelStyle: { fill: "#0369a1", fontSize: 10 },
-                    labelBgStyle: { fill: "#fff", stroke: "#bae6fd" },
-                    labelBgPadding: [5, 3],
-                    labelBgBorderRadius: 5,
-                    data: { sourceId: s.id, branchId: b.branch_id },
-                });
+                      : waitTag(b.target_step_id);
+                // A condition with no THEN target yet leaves its right dot OPEN to
+                // drag to the next step, rather than auto-wiring it to STOP.
+                if (b.target_step_id) {
+                    flowEdges.push({
+                        id: `then-${b.branch_id}`,
+                        source: nid,
+                        sourceHandle: "out",
+                        target: b.target_step_id,
+                        label: wt || undefined,
+                        reconnectable: true,
+                        style: edgeStyle(true),
+                        labelStyle: { fill: "#0369a1", fontSize: 10 },
+                        labelBgStyle: { fill: "#fff", stroke: "#bae6fd" },
+                        labelBgPadding: [5, 3],
+                        labelBgBorderRadius: 5,
+                        data: { sourceId: s.id, branchId: b.branch_id },
+                    });
+                }
             });
 
             if (uncond) {
-                const wt = waitTag(uncond.target_sequence_id);
-                const target = uncond.target_sequence_id ?? STOP_ID;
+                const wt = waitTag(uncond.target_step_id);
+                const target = uncond.target_step_id ?? STOP_ID;
                 if (conds.length > 0) {
                     // The final ELSE hangs off the LAST condition's else.
                     flowEdges.push({
@@ -1094,7 +1181,9 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         });
         ifMetaRef.current = ifMeta;
 
-        const anyStop = sequences.some((s) => (s.conditions?.branches ?? []).some((b) => b.target_sequence_id === null));
+        // Show STOP only when an edge actually routes there (a deliberate
+        // "otherwise → end"), never for a condition whose THEN is still open.
+        const anyStop = flowEdges.some((e) => e.target === STOP_ID);
         if (anyStop) allNodes.push({ id: STOP_ID, type: "stop", position: { x: 0, y: 0 }, data: {} });
 
         // Convergence: more than one branch can route to the SAME next step, so
@@ -1133,16 +1222,35 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
         });
 
         const laid = stackComponents(layoutGraph(allNodes, smoothEdges), smoothEdges);
-        const sig =
-            allNodes.map((n) => n.id).sort().join(",") +
-            "|" +
-            smoothEdges.map((e) => `${e.source}>${e.target}`).sort().join(",");
-        const changed = sig !== structureSig.current;
-        structureSig.current = sig;
         setNodes((cur) => {
-            if (changed) return laid;
+            // Smoothness: never re-arrange the whole canvas on a connect/disconnect.
+            // Keep every existing node exactly where the user left it; only a NEW
+            // node gets a position — dropped just below the node it was dragged
+            // from (or the computed layout position on first load / unknown source).
+            // The "Tidy up" button is the one explicit full re-layout.
             const pos = new Map(cur.map((n) => [n.id, n.position]));
-            return laid.map((n) => (pos.has(n.id) ? { ...n, position: pos.get(n.id)! } : n));
+            if (pos.size === 0) return laid; // first load: use the computed layout
+            const sourceOf = new Map<string, { source: string; handle?: string | null }>();
+            smoothEdges.forEach((e) => {
+                if (!sourceOf.has(e.target)) sourceOf.set(e.target, { source: e.source, handle: e.sourceHandle });
+            });
+            const laidPos = new Map(laid.map((n) => [n.id, n.position]));
+            return laid.map((n) => {
+                if (pos.has(n.id)) return { ...n, position: pos.get(n.id)! };
+                const inc = sourceOf.get(n.id);
+                const srcPos = inc ? pos.get(inc.source) : undefined;
+                if (srcPos) {
+                    // A node hung off an IF box's THEN (right "out" dot) gets its
+                    // own space to the RIGHT, so the yes-line flows cleanly
+                    // rightward instead of curving back under the condition. The
+                    // ELSE (bottom dot) keeps flowing straight down.
+                    if (inc && isIfId(inc.source) && inc.handle === "out") {
+                        return { ...n, position: { x: srcPos.x + 300, y: srcPos.y + 36 } };
+                    }
+                    return { ...n, position: { x: srcPos.x, y: srcPos.y + 170 } };
+                }
+                return { ...n, position: laidPos.get(n.id) ?? n.position };
+            });
         });
         setEdges(smoothEdges);
     }, [sequences, seqById, setNodes, setEdges]);
@@ -1155,7 +1263,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             const br = seqById
                 .get(selectedEdge.sourceId)
                 ?.conditions?.branches?.find((b) => b.branch_id === selectedEdge.branchId);
-            root = br?.target_sequence_id ?? selectedEdge.sourceId;
+            root = br?.target_step_id ?? selectedEdge.sourceId;
         }
         const hl = root ? reachableFrom(root) : null;
         const stepIn = (id: string) => {
@@ -1192,11 +1300,16 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                 else addUnconditional(m.sourceId, target);
             } else if (c.sourceHandle === "if") {
                 addIfTo(c.source, target);
+            } else if (seqById.get(c.source)?.kind === "wait") {
+                // A Condition node is a branch point: every path out of it is a
+                // condition ("if X, go here"), chained as if / else-if. The final
+                // catch-all is the else dot on the last IF box.
+                addIfTo(c.source, target);
             } else {
                 addUnconditional(c.source, target);
             }
         },
-        [retargetBranch, addIfTo, addUnconditional],
+        [seqById, retargetBranch, addIfTo, addUnconditional],
     );
 
     const selected = React.useMemo(() => {
@@ -1226,32 +1339,85 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onNodeDragStart={() => setDragging(true)}
+                onNodesChange={(changes) => {
+                    if (!canEditFlow) {
+                        // Block structural edits (drag-move, delete); keep
+                        // select/dimension so the canvas still renders for viewing.
+                        onNodesChange(
+                            changes.filter((c) => c.type !== "position" && c.type !== "remove"),
+                        );
+                        return;
+                    }
+                    onNodesChange(changes);
+                }}
+                onEdgesChange={(changes) => {
+                    if (!canEditFlow) {
+                        onEdgesChange(changes.filter((c) => c.type !== "remove"));
+                        return;
+                    }
+                    onEdgesChange(changes);
+                }}
+                onNodeDragStart={() => {
+                    if (!canEditFlow) {
+                        showPermissionDenied("MANAGE_SEQUENCES");
+                        return;
+                    }
+                    setDragging(true);
+                }}
                 onNodeDragStop={() => setDragging(false)}
-                onConnect={onConnect}
+                onConnect={(c) => {
+                    if (!canEditFlow) {
+                        showPermissionDenied("MANAGE_SEQUENCES");
+                        return;
+                    }
+                    onConnect(c);
+                }}
+                onConnectStart={(_, params) => {
+                    connectStartRef.current = params.nodeId ?? null;
+                }}
+                nodesConnectable={canEditFlow}
                 nodesDraggable={!isCoarse}
                 zoomOnScroll={false}
                 panOnScroll={false}
                 preventScrolling={false}
                 minZoom={0.2}
                 maxZoom={1.75}
-                onConnectEnd={(_, state) => {
-                    const from = state.fromNode;
-                    if (!from || state.toNode) return;
-                    const handle = state.fromHandle?.id;
-                    if (isIfId(from.id)) {
-                        const m = ifMetaRef.current[from.id];
+                onConnectEnd={(event, state) => {
+                    const fromId = state?.fromNode?.id ?? connectStartRef.current;
+                    connectStartRef.current = null;
+                    // Only when the line is dropped on EMPTY canvas (the pane). A
+                    // drop on a node/handle is a real connection that onConnect
+                    // already handled. The pane class is the reliable v12 signal.
+                    const onPane = (event.target as Element | null)?.classList?.contains("react-flow__pane");
+                    if (!fromId || !onPane) return;
+                    if (!canEditFlow) {
+                        showPermissionDenied("MANAGE_SEQUENCES");
+                        return;
+                    }
+                    const pt =
+                        "changedTouches" in event && event.changedTouches.length
+                            ? event.changedTouches[0]
+                            : (event as MouseEvent);
+                    if (isIfId(fromId)) {
+                        // Dragging out of an IF block: the menu lets the then/else
+                        // path lead to an email, action, or another condition (so
+                        // you can chain IF -> condition -> IF into nested trees).
+                        const m = ifMetaRef.current[fromId];
                         if (!m) return;
-                        // "out" = new then-step; "else" (bottom gray dot) = a new
-                        // step reached unconditionally ("always / just go there").
-                        if (handle === "out") retargetToNew(m.sourceId, m.branchId);
-                        else dragOutStep(m.sourceId);
-                    } else if (handle === "if") {
-                        addIfToNew(from.id);
+                        const handle = state?.fromHandle?.id ?? "out";
+                        setDragCreate({
+                            x: pt.clientX,
+                            y: pt.clientY,
+                            sourceId: fromId,
+                            ifSource: { sourceId: m.sourceId, branchId: m.branchId, handle },
+                        });
                     } else {
-                        dragOutStep(from.id);
+                        setDragCreate({
+                            x: pt.clientX,
+                            y: pt.clientY,
+                            sourceId: fromId,
+                            conditional: seqById.get(fromId)?.kind === "wait",
+                        });
                     }
                 }}
                 onReconnect={(oldEdge, conn) => {
@@ -1291,10 +1457,17 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                     <div className="flex max-w-[calc(100vw-1.5rem)] flex-col gap-1.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                             <AddNodeMenu
-                                onAddEmail={addStep}
-                                onAddAction={addAction}
+                                onAddEmail={
+                                    canEditFlow ? addStep : () => showPermissionDenied("MANAGE_SEQUENCES")
+                                }
+                                onAddAction={
+                                    canEditFlow
+                                        ? addAction
+                                        : () => showPermissionDenied("MANAGE_SEQUENCES")
+                                }
                                 disabled={adding || atMax}
                                 busy={adding}
+                                locked={!canEditFlow}
                             />
                             <button
                                 type="button"
@@ -1320,11 +1493,51 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         canvas (touch users remove edges via the editor's Disconnect). */}
                     <div className="hidden md:flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/95 px-3 py-1.5 text-[11px] text-slate-500 shadow-sm">
                         <span className="text-slate-400">
-                            step: bottom dot = go there, right (amber) dot = add an “if” · IF block: right dot = then, bottom (gray) dot = else / just go there · click a line then press Delete to remove it · no match = stop
+                            drag a node’s bottom dot onto another node to connect, or onto empty space to pick what to add (email, action, or a condition) · click a line to set its condition · add Condition nodes to branch, and chain them for nested trees · click a line then press Delete to remove it · no match = stop
                         </span>
                     </div>
                 </Panel>
             </ReactFlow>
+
+            {dragCreate && (
+                <DragCreateMenu
+                    x={dragCreate.x}
+                    y={dragCreate.y}
+                    onClose={() => setDragCreate(null)}
+                    onPick={async (choice) => {
+                        const dc = dragCreate;
+                        if (dc.ifSource) {
+                            // From an IF block: create the node, then point this
+                            // branch's then/else path at it.
+                            const id = await createTypedStep(choice);
+                            if (id) {
+                                if (dc.ifSource.handle === "out") {
+                                    retargetBranch(dc.ifSource.sourceId, dc.ifSource.branchId, id);
+                                } else {
+                                    addUnconditional(dc.ifSource.sourceId, id);
+                                }
+                            }
+                        } else if (dc.conditional) {
+                            // Dragging out of a Condition node: create the node,
+                            // then attach it as a conditional ("if") branch so the
+                            // router actually branches (and open the condition
+                            // editor). Drag again for the next if / else-if.
+                            const id = await createTypedStep(choice);
+                            if (id) addIfTo(dc.sourceId, id);
+                        } else if (choice === "email") {
+                            dragOutStep(dc.sourceId);
+                        } else if (choice === "condition") {
+                            // "Condition" IS the if-branch: add it straight onto
+                            // the source (the IF box has its own then/else), rather
+                            // than a separate router node you'd drag from. Opens the
+                            // condition editor; connect then/else to the next steps.
+                            addIfTo(dc.sourceId, null);
+                        } else {
+                            dragOutAction(dc.sourceId, choice);
+                        }
+                    }}
+                />
+            )}
 
             {selected && (
                 <ConnectionEditor
@@ -1336,10 +1549,10 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         .findIndex((b) => b.branch_id === selected.branch.branch_id)}
                     condCount={(selected.source.conditions?.branches ?? []).filter(isCond).length}
                     onMove={(dir) => moveBranch(selected.source.id, selected.branch.branch_id, dir)}
-                    waitDays={seqById.get(selected.branch.target_sequence_id ?? "")?.wait_after ?? 0}
+                    waitDays={seqById.get(selected.branch.target_step_id ?? "")?.wait_after ?? 0}
                     onClose={() => setSelectedEdge(null)}
                     onSetWait={(days) => {
-                        if (selected.branch.target_sequence_id) saveWait(selected.branch.target_sequence_id, days);
+                        if (selected.branch.target_step_id) saveWait(selected.branch.target_step_id, days);
                     }}
                     onSave={(updated) => {
                         saveBranches(
@@ -1383,15 +1596,7 @@ export default function CampaignFlow({ campaignId }: { campaignId: string }) {
                         {editStep.kind !== "email" ? (
                             <ActionEditor campaignId={campaignId} sequence={editStep} onSaved={invalidate} />
                         ) : (
-                            <div className="space-y-4">
-                                <SequenceView campaignId={campaignId} sequence={editStep} index={editIndex} />
-                                <StepVariants
-                                    campaignId={campaignId}
-                                    sequenceId={editStep.id}
-                                    baseSubject={editStep.subject ?? ""}
-                                    baseBodyHtml={editStep.body_html ?? ""}
-                                />
-                            </div>
+                            <StepEmailArms campaignId={campaignId} sequence={editStep} index={editIndex} />
                         )}
                     </div>
                 </div>
@@ -1554,8 +1759,8 @@ function ConnectionEditor({
     const isInstantCapable = isInstantCapableField(field as BranchField);
     const instantVerb = field === "opened" ? "open" : field === "clicked" ? "click" : "reply";
     const isNegative = field === "not_opened" || field === "not_clicked" || field === "not_replied";
-    const target = steps.find((s) => s.id === branch.target_sequence_id);
-    const targetLabel = branch.target_sequence_id === null ? "Stop the sequence" : target ? `“${stepName(target)}”` : "—";
+    const target = steps.find((s) => s.id === branch.target_step_id);
+    const targetLabel = branch.target_step_id === null ? "Stop the sequence" : target ? `“${stepName(target)}”` : "—";
 
     const buildConditions = (): BranchCondition[] => {
         if (isAlways) return [];
@@ -1564,10 +1769,10 @@ function ConnectionEditor({
         if (isReply) return [{ field: field as BranchField, operator: "ever" }];
         return [{ field: field as BranchField, operator: "within_days", value }];
     };
-    const save = (target_sequence_id: string | null) =>
+    const save = (target_step_id: string | null) =>
         onSave({
             branch_id: branch.branch_id,
-            target_sequence_id,
+            target_step_id,
             conditions: buildConditions(),
             // Persist the instant opt-out for any instant-capable signal (reply
             // intent, opened, clicked). Other fields can't fire instantly.
@@ -1617,7 +1822,7 @@ function ConnectionEditor({
                 <div className="flex flex-wrap items-center gap-1.5">
                     <span>then go to</span>
                     <span className="font-medium text-slate-800">{targetLabel}</span>
-                    {branch.target_sequence_id !== null && (
+                    {branch.target_step_id !== null && (
                         <button
                             type="button"
                             onClick={() => save(null)}
@@ -1719,7 +1924,7 @@ function ConnectionEditor({
                     </p>
                 )}
 
-                {branch.target_sequence_id !== null && !(isInstantCapable && instant) && (
+                {branch.target_step_id !== null && !(isInstantCapable && instant) && (
                     <WaitRow value={waitDays} onCommit={onSetWait} />
                 )}
             </div>
@@ -1736,7 +1941,7 @@ function ConnectionEditor({
                 </button>
                 <button
                     type="button"
-                    onClick={() => save(branch.target_sequence_id)}
+                    onClick={() => save(branch.target_step_id)}
                     className="ml-auto h-7 rounded-md bg-sky-600 px-3 text-[12px] font-medium text-white hover:bg-sky-700"
                 >
                     Save
@@ -1753,24 +1958,119 @@ function ConnectionEditor({
 const ADD_ACTION_OPTIONS: { type: SequenceActionType; label: string }[] = [
     { type: "add_tag", label: "Add tag" },
     { type: "remove_tag", label: "Remove tag" },
+    { type: "label_email", label: "Label email" },
     { type: "create_task", label: "Create task" },
     { type: "create_deal", label: "Create deal" },
     { type: "move_deal_stage", label: "Move deal stage" },
     { type: "unsubscribe", label: "Unsubscribe" },
-    { type: "notify", label: "Notify (webhook)" },
     { type: "run_automation", label: "Run automation" },
+    { type: "http_request", label: "HTTP request" },
+    { type: "fire_event", label: "Fire event" },
 ];
+
+type CreateChoice = "email" | "condition" | SequenceActionType;
+
+// The menu that opens where you drop a dragged connection on empty canvas:
+// pick what the next node is (email, an action, or a condition router).
+function DragCreateMenu({
+    x,
+    y,
+    onPick,
+    onClose,
+}: {
+    x: number;
+    y: number;
+    onPick: (choice: CreateChoice) => void;
+    onClose: () => void;
+}) {
+    // Animate in/out like the app's other menus. The step is created the moment
+    // a row is clicked; the menu plays its exit independently, and onClose (which
+    // clears the parent state) only fires once that exit finishes.
+    const [open, setOpen] = React.useState(true);
+    const vw = typeof window !== "undefined" ? window.innerWidth : x + 240;
+    const vh = typeof window !== "undefined" ? window.innerHeight : y + 360;
+    const flipX = x > vw - 232;
+    const flipY = y > vh - 360;
+    const left = Math.max(8, Math.min(x, vw - 232));
+    const top = Math.max(8, Math.min(y, vh - 360));
+    const pick = (choice: CreateChoice) => {
+        onPick(choice);
+        setOpen(false);
+    };
+    return createPortal(
+        <>
+            {open && <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />}
+            <AnimatePresence onExitComplete={onClose}>
+                {open && (
+                    <motion.div
+                        key="drag-create-menu"
+                        className="fixed z-50 max-h-[340px] w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl"
+                        style={{
+                            left,
+                            top,
+                            transformOrigin: `${flipY ? "bottom" : "top"} ${flipX ? "right" : "left"}`,
+                            willChange: "transform, opacity",
+                        }}
+                        role="menu"
+                        initial={{ opacity: 0, scale: 0.95, y: flipY ? 4 : -4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.97, y: flipY ? 2 : -2 }}
+                        transition={{
+                            opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
+                            scale: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+                            y: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+                        }}
+                    >
+                        <div className="px-2 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Add</div>
+                        <CreateRow icon={<MailIcon className="w-3.5 h-3.5 text-sky-600" />} label="Email step" onClick={() => pick("email")} />
+                        <CreateRow icon={<GitBranchIcon className="w-3.5 h-3.5 text-amber-600" />} label="Condition (branch)" onClick={() => pick("condition")} />
+                        <div className="my-1 h-px bg-slate-100" />
+                        <div className="px-2 pt-0.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Actions</div>
+                        {ADD_ACTION_OPTIONS.map((o) => {
+                            const meta = ACTION_META[o.type];
+                            const Icon = meta?.Icon ?? ZapIcon;
+                            return (
+                                <CreateRow
+                                    key={o.type}
+                                    icon={<Icon className={`w-3.5 h-3.5 ${meta?.tint ?? "text-slate-500"}`} />}
+                                    label={o.label}
+                                    onClick={() => pick(o.type)}
+                                />
+                            );
+                        })}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </>,
+        document.body,
+    );
+}
+
+function CreateRow({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12.5px] text-slate-700 transition-colors hover:bg-slate-100"
+        >
+            {icon}
+            {label}
+        </button>
+    );
+}
 
 function AddNodeMenu({
     onAddEmail,
     onAddAction,
     disabled,
     busy,
+    locked,
 }: {
     onAddEmail: () => void;
     onAddAction: (t: SequenceActionType) => void;
     disabled: boolean;
     busy: boolean;
+    locked?: boolean;
 }) {
     const [open, setOpen] = React.useState(false);
     const ref = React.useRef<HTMLDivElement>(null);
@@ -1780,11 +2080,17 @@ function AddNodeMenu({
             {/* Primary click = add an email step (the default, common case). */}
             <button
                 type="button"
-                disabled={disabled}
+                disabled={locked ? false : disabled}
                 onClick={onAddEmail}
-                className="inline-flex h-8 items-center gap-1.5 rounded-l-md bg-sky-600 px-3 text-[12px] font-medium text-white shadow-sm transition-colors hover:bg-sky-700 disabled:opacity-60"
+                className={`inline-flex h-8 items-center gap-1.5 rounded-l-md bg-sky-600 px-3 text-[12px] font-medium text-white shadow-sm transition-colors hover:bg-sky-700 disabled:opacity-60 ${locked ? "opacity-60" : ""}`}
             >
-                {busy ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlusIcon className="w-3.5 h-3.5" />}
+                {locked ? (
+                    <LockIcon className="w-3.5 h-3.5" />
+                ) : busy ? (
+                    <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                    <PlusIcon className="w-3.5 h-3.5" />
+                )}
                 Add step
             </button>
             {/* Chevron = the full list of node types (email + actions). */}
@@ -1797,43 +2103,57 @@ function AddNodeMenu({
             >
                 <ChevronDownIcon className="w-3.5 h-3.5" />
             </button>
-            {open && (
-                <div className="absolute left-0 top-full z-30 mt-1 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            onAddEmail();
-                            setOpen(false);
+            <AnimatePresence>
+                {open && (
+                    <motion.div
+                        key="add-node-menu"
+                        className="absolute left-0 top-full z-30 mt-1 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)]"
+                        style={{ transformOrigin: "top left", willChange: "transform, opacity" }}
+                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.97, y: -2 }}
+                        transition={{
+                            opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
+                            scale: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+                            y: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
                         }}
-                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] font-medium text-slate-800 transition-colors hover:bg-slate-100"
                     >
-                        <MailIcon className="w-3.5 h-3.5 text-sky-600" />
-                        Send email
-                        <span className="ml-auto rounded bg-slate-100 px-1 py-px text-[9px] uppercase tracking-[0.1em] text-slate-400">
-                            default
-                        </span>
-                    </button>
-                    <div className="my-1 border-t border-slate-100" />
-                    {ADD_ACTION_OPTIONS.map((o) => {
-                        const meta = ACTION_META[o.type];
-                        const Icon = meta.Icon;
-                        return (
-                            <button
-                                key={o.type}
-                                type="button"
-                                onClick={() => {
-                                    onAddAction(o.type);
-                                    setOpen(false);
-                                }}
-                                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-slate-700 transition-colors hover:bg-slate-100"
-                            >
-                                <Icon className={`w-3.5 h-3.5 ${meta.tint}`} />
-                                {o.label}
-                            </button>
-                        );
-                    })}
-                </div>
-            )}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                onAddEmail();
+                                setOpen(false);
+                            }}
+                            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] font-medium text-slate-800 transition-colors hover:bg-slate-100"
+                        >
+                            <MailIcon className="w-3.5 h-3.5 text-sky-600" />
+                            Send email
+                            <span className="ml-auto rounded bg-slate-100 px-1 py-px text-[9px] uppercase tracking-[0.1em] text-slate-400">
+                                default
+                            </span>
+                        </button>
+                        <div className="my-1 border-t border-slate-100" />
+                        {ADD_ACTION_OPTIONS.map((o) => {
+                            const meta = ACTION_META[o.type];
+                            const Icon = meta.Icon;
+                            return (
+                                <button
+                                    key={o.type}
+                                    type="button"
+                                    onClick={() => {
+                                        onAddAction(o.type);
+                                        setOpen(false);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-slate-700 transition-colors hover:bg-slate-100"
+                                >
+                                    <Icon className={`w-3.5 h-3.5 ${meta.tint}`} />
+                                    {o.label}
+                                </button>
+                            );
+                        })}
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
@@ -1851,6 +2171,15 @@ function defaultActionFor(type: SequenceActionType): SequenceAction {
     }
     if (type === "run_automation") {
         return { type, automation_values: [] };
+    }
+    if (type === "http_request") {
+        return { type, http_method: "POST", http_headers: {} };
+    }
+    if (type === "fire_event") {
+        return { type, event_fields: [] };
+    }
+    if (type === "label_email") {
+        return { type, label_ids: [] };
     }
     return { type };
 }
@@ -1994,17 +2323,26 @@ function ActionEditor({
                 </div>
             )}
 
+            {action.type === "label_email" && (
+                <div>
+                    <Label>Labels to apply</Label>
+                    <CategoryPicker
+                        value={action.label_ids ?? []}
+                        onChange={(ids) => setAction((a) => ({ ...a, label_ids: ids }))}
+                        placeholder="Pick one or more labels…"
+                    />
+                    <p className="mt-1.5 rounded-md border border-fuchsia-200 bg-fuchsia-50/60 px-2.5 py-2 text-[11px] leading-relaxed text-fuchsia-700">
+                        Labels the conversation in your inbox (the same labels you set by hand in the unibox). Place this
+                        on a reply branch — it runs once the contact has replied, so there is a thread to label, and is a
+                        no-op otherwise.
+                    </p>
+                </div>
+            )}
+
             {action.type === "unsubscribe" && (
                 <p className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-600">
                     Suppresses this contact across your workspace — they won't receive further campaign emails, and a{" "}
                     <code className="font-mono">campaign.unsubscribed</code> event fires to your integrations.
-                </p>
-            )}
-
-            {action.type === "notify" && (
-                <p className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-600">
-                    Sends a <code className="font-mono">campaign.action</code> event to your connected webhooks and
-                    integrations (Slack, CRM…) with this contact's details. Configure where it goes in Integrations.
                 </p>
             )}
 
@@ -2143,6 +2481,8 @@ function ActionEditor({
             )}
 
             {action.type === "run_automation" && <RunAutomationFields action={action} setAction={setAction} />}
+            {action.type === "http_request" && <HttpRequestStepFields action={action} setAction={setAction} />}
+            {action.type === "fire_event" && <FireEventStepFields action={action} setAction={setAction} />}
 
             <div className="flex items-center justify-end pt-1">
                 <button
@@ -2256,6 +2596,178 @@ function RunAutomationFields({
                                     className="inline-flex size-6 shrink-0 items-center justify-center rounded text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
                                 >
                                     <Trash2Icon className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// HttpRequestStepFields — a configurable outbound call when the lead reaches this
+// step. URL/headers/body template against the contact and are SSRF-guarded server
+// side. Best-effort: a failure is logged and the campaign continues.
+function HttpRequestStepFields({
+    action,
+    setAction,
+}: {
+    action: SequenceAction;
+    setAction: React.Dispatch<React.SetStateAction<SequenceAction>>;
+}) {
+    const headers = action.http_headers ?? {};
+    const headerRows = Object.entries(headers);
+    const setHeaders = (next: Record<string, string>) => setAction((a) => ({ ...a, http_headers: next }));
+    const methodOpts: SelectOption[] = ["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => ({ value: m, label: m }));
+
+    return (
+        <div className="space-y-3">
+            <div className="flex items-end gap-2">
+                <div className="shrink-0">
+                    <Label>Method</Label>
+                    <SelectMenu
+                        value={action.http_method || "POST"}
+                        onChange={(v) => setAction((a) => ({ ...a, http_method: v }))}
+                        options={methodOpts}
+                        minWidth={110}
+                    />
+                </div>
+                <div className="flex-1 min-w-0">
+                    <Label>URL</Label>
+                    <TextInput
+                        value={action.http_url ?? ""}
+                        onChange={(v) => setAction((a) => ({ ...a, http_url: v }))}
+                        placeholder="https://api.yourapp.com/hook"
+                        className="w-full font-mono"
+                    />
+                </div>
+            </div>
+            <div>
+                <Label>Body</Label>
+                <textarea
+                    value={action.http_body ?? ""}
+                    onChange={(e) => setAction((a) => ({ ...a, http_body: e.target.value }))}
+                    rows={3}
+                    placeholder={'{"email": "{{.Email}}", "company": "{{.Company}}"}'}
+                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-mono text-slate-900 placeholder:text-slate-400 outline-none resize-y focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                />
+            </div>
+            <div>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <Label className="mb-0">Headers (optional)</Label>
+                    <button
+                        type="button"
+                        onClick={() => setHeaders({ ...headers, "": "" })}
+                        className="inline-flex h-6 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11.5px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900"
+                    >
+                        <PlusIcon className="w-3 h-3" /> Add header
+                    </button>
+                </div>
+                {headerRows.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">Content-Type defaults to application/json when a body is set.</p>
+                ) : (
+                    <div className="space-y-1.5">
+                        {headerRows.map(([k, v], i) => (
+                            <div key={i} className="flex items-center gap-1.5">
+                                <TextInput
+                                    value={k}
+                                    onChange={(nk) => {
+                                        const next: Record<string, string> = {};
+                                        headerRows.forEach(([hk, hv], idx) => {
+                                            next[idx === i ? nk : hk] = hv;
+                                        });
+                                        setHeaders(next);
+                                    }}
+                                    placeholder="Authorization"
+                                    className="w-36 shrink-0 font-mono"
+                                />
+                                <span className="text-slate-300">:</span>
+                                <TextInput
+                                    value={v}
+                                    onChange={(nv) => setHeaders({ ...headers, [k]: nv })}
+                                    placeholder="Bearer …"
+                                    className="flex-1 min-w-0 font-mono"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const next = { ...headers };
+                                        delete next[k];
+                                        setHeaders(next);
+                                    }}
+                                    title="Remove"
+                                    className="inline-flex size-6 shrink-0 items-center justify-center rounded text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                                >
+                                    <XIcon className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+                URL, headers, and body are templated per contact ({"{{.Email}}"}, {"{{.FirstName}}"}). Only public https URLs are allowed.
+            </p>
+        </div>
+    );
+}
+
+// FireEventStepFields — publish a custom event to the realtime gateway when the
+// lead reaches this step. The developer's app subscribes over the API websocket
+// (API key + REALTIME_SUBSCRIBE) and receives { name, payload } — no public URL.
+function FireEventStepFields({
+    action,
+    setAction,
+}: {
+    action: SequenceAction;
+    setAction: React.Dispatch<React.SetStateAction<SequenceAction>>;
+}) {
+    const fields = action.event_fields ?? [];
+    const setFields = (next: ActionKV[]) => setAction((a) => ({ ...a, event_fields: next }));
+    const updateRow = (i: number, patch: Partial<ActionKV>) => setFields(fields.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    const addRow = () => setFields([...fields, { key: "", value: "" }]);
+    const removeRow = (i: number) => setFields(fields.filter((_, idx) => idx !== i));
+
+    return (
+        <div className="space-y-3">
+            <div>
+                <Label>Event name</Label>
+                <TextInput
+                    value={action.event_name ?? ""}
+                    onChange={(v) => setAction((a) => ({ ...a, event_name: v }))}
+                    placeholder="lead.reached_step"
+                    className="w-full font-mono"
+                />
+                <p className="mt-1 text-[11px] text-slate-400">What your app subscribes to over the realtime websocket.</p>
+            </div>
+            <div>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <Label className="mb-0">Payload (optional)</Label>
+                    <button
+                        type="button"
+                        onClick={addRow}
+                        className="inline-flex h-6 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11.5px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900"
+                    >
+                        <PlusIcon className="w-3 h-3" /> Add field
+                    </button>
+                </div>
+                {fields.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">Add key/value fields. Values support {"{{.FirstName}}"} / {"{{.Company}}"}.</p>
+                ) : (
+                    <div className="space-y-1.5">
+                        {fields.map((row, i) => (
+                            <div key={i} className="flex items-center gap-1.5">
+                                <TextInput value={row.key} onChange={(v) => updateRow(i, { key: v })} placeholder="field" className="w-28 shrink-0 font-mono" />
+                                <span className="text-slate-300">=</span>
+                                <TextInput value={row.value} onChange={(v) => updateRow(i, { value: v })} placeholder="{{.Email}}" className="flex-1 min-w-0 font-mono" />
+                                <button
+                                    type="button"
+                                    onClick={() => removeRow(i)}
+                                    title="Remove"
+                                    className="inline-flex size-6 shrink-0 items-center justify-center rounded text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                                >
+                                    <XIcon className="w-3.5 h-3.5" />
                                 </button>
                             </div>
                         ))}

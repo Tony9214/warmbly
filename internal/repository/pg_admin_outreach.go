@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // AdminOutreachRepository is the persistence layer for the
@@ -199,7 +200,7 @@ func (r *adminOutreachRepository) Search(ctx context.Context, search *models.Adm
 	if len(items) > limit {
 		result.Data = items[:limit]
 		last := items[limit-1].ID
-		result.Pagination.NextCursor = &last
+		result.Pagination.NextCursor = paging.UUIDString(last)
 	}
 
 	countQuery := `SELECT COUNT(*) FROM admin_outreach_messages m JOIN users s ON s.id = m.sent_by LEFT JOIN users u ON u.id = m.to_user_id ` + where

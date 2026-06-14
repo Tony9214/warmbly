@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // ConnectionWrite is the full upsert payload for an integration connection.
@@ -78,6 +79,9 @@ type IntegrationRepository interface {
 	ListAutomations(ctx context.Context, orgID uuid.UUID) ([]models.Automation, error)
 	ListEnabledAutomationsForEvent(ctx context.Context, orgID uuid.UUID, eventType string) ([]models.Automation, error)
 	GetAutomation(ctx context.Context, orgID, id uuid.UUID) (*models.Automation, error)
+	// GetAutomationByInboundToken resolves the automation an inbound-webhook URL
+	// token points at, across orgs (the token is the credential). nil = no match.
+	GetAutomationByInboundToken(ctx context.Context, token string) (*models.Automation, error)
 	UpdateAutomation(ctx context.Context, a *models.Automation) error
 	DeleteAutomation(ctx context.Context, orgID, id uuid.UUID) error
 	// CampaignsUsingAutomation returns the names of campaigns whose sequence has a
@@ -443,11 +447,11 @@ func (r *integrationRepository) DeleteEventSubscription(ctx context.Context, org
 // the automation id + its trigger event + enabled flag (so the dispatcher runs
 // them). Caller has already merged the automation filter into each step Config.
 // automationCols is the shared projection for an automation row.
-const automationCols = `id, organization_id, name, enabled, trigger_event, filter, graph, created_at, updated_at`
+const automationCols = `id, organization_id, name, enabled, trigger_event, filter, graph, created_at, updated_at, COALESCE(inbound_token, '')`
 
 func scanAutomation(row pgx.Row, a *models.Automation) error {
 	var graph []byte
-	if err := row.Scan(&a.ID, &a.OrganizationID, &a.Name, &a.Enabled, &a.TriggerEvent, &a.Filter, &graph, &a.CreatedAt, &a.UpdatedAt); err != nil {
+	if err := row.Scan(&a.ID, &a.OrganizationID, &a.Name, &a.Enabled, &a.TriggerEvent, &a.Filter, &graph, &a.CreatedAt, &a.UpdatedAt, &a.InboundToken); err != nil {
 		return err
 	}
 	a.Graph = models.AutomationGraph{Nodes: []models.AutomationNode{}, Edges: []models.AutomationEdge{}}
@@ -476,9 +480,9 @@ func (r *integrationRepository) CreateAutomation(ctx context.Context, a *models.
 	}
 	graph, _ := json.Marshal(a.Graph)
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO automations (id, organization_id, name, enabled, trigger_event, filter, graph, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
-		a.ID, a.OrganizationID, a.Name, a.Enabled, a.TriggerEvent, filter, graph, now)
+		INSERT INTO automations (id, organization_id, name, enabled, trigger_event, filter, graph, created_at, updated_at, inbound_token)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, NULLIF($9, ''))`,
+		a.ID, a.OrganizationID, a.Name, a.Enabled, a.TriggerEvent, filter, graph, now, a.InboundToken)
 	return err
 }
 
@@ -491,9 +495,9 @@ func (r *integrationRepository) UpdateAutomation(ctx context.Context, a *models.
 	}
 	graph, _ := json.Marshal(a.Graph)
 	tag, err := r.db.Exec(ctx, `
-		UPDATE automations SET name = $3, enabled = $4, trigger_event = $5, filter = $6, graph = $7, updated_at = $8
+		UPDATE automations SET name = $3, enabled = $4, trigger_event = $5, filter = $6, graph = $7, updated_at = $8, inbound_token = NULLIF($9, '')
 		WHERE id = $1 AND organization_id = $2`,
-		a.ID, a.OrganizationID, a.Name, a.Enabled, a.TriggerEvent, filter, graph, now)
+		a.ID, a.OrganizationID, a.Name, a.Enabled, a.TriggerEvent, filter, graph, now, a.InboundToken)
 	if err != nil {
 		return err
 	}
@@ -536,6 +540,21 @@ func (r *integrationRepository) CampaignsUsingAutomation(ctx context.Context, or
 func (r *integrationRepository) GetAutomation(ctx context.Context, orgID, id uuid.UUID) (*models.Automation, error) {
 	var a models.Automation
 	row := r.db.QueryRow(ctx, `SELECT `+automationCols+` FROM automations WHERE id = $1 AND organization_id = $2`, id, orgID)
+	if err := scanAutomation(row, &a); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (r *integrationRepository) GetAutomationByInboundToken(ctx context.Context, token string) (*models.Automation, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, nil
+	}
+	var a models.Automation
+	row := r.db.QueryRow(ctx, `SELECT `+automationCols+` FROM automations WHERE inbound_token = $1`, token)
 	if err := scanAutomation(row, &a); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -1057,18 +1076,13 @@ func (r *integrationRepository) SearchMeetingBookings(ctx context.Context, orgID
 	}
 
 	hasMore := offset+len(data) < total
+	total64 := int64(total)
 	page := &models.MeetingBookingPage{
-		Data: data,
-		Pagination: models.MeetingBookingPagination{
-			Total:   int64(total),
-			Limit:   limit,
-			Offset:  offset,
-			HasMore: hasMore,
-		},
+		Data:       data,
+		Pagination: models.Pagination{Total: &total64, HasMore: hasMore},
 	}
 	if hasMore {
-		next := offset + limit
-		page.Pagination.NextOffset = &next
+		page.Pagination.NextCursor = paging.EncodeOffset(offset + limit)
 	}
 	return page, nil
 }

@@ -31,7 +31,9 @@ export interface AutomationEdge {
     id: string;
     source: string;
     target: string;
-    when?: "" | "true" | "false";
+    // "" plain/then, "true"/"false" a condition's branches, "error" an action's
+    // on-error branch.
+    when?: "" | "true" | "false" | "error";
 }
 
 export interface AutomationGraph {
@@ -49,6 +51,9 @@ export interface Automation {
     graph: AutomationGraph;
     created_at: string;
     updated_at: string;
+    // Public POST path that fires this automation, set only when its trigger is
+    // the inbound webhook. Append to the API origin for the full URL.
+    inbound_url?: string;
 }
 
 export interface AutomationWrite {

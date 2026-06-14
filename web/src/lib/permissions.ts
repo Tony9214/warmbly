@@ -39,11 +39,11 @@ export interface PermissionDef {
 
 export const PERMISSION_CATALOG: PermissionDef[] = [
     // Data
-    { key: "VIEW_CAMPAIGNS",     bit: PERMISSION_BITS.VIEW_CAMPAIGNS,     label: "View campaigns",    description: "Read campaign settings, sequences, and analytics.",      category: "data" },
+    { key: "VIEW_CAMPAIGNS",     bit: PERMISSION_BITS.VIEW_CAMPAIGNS,     label: "View campaigns",    description: "Read campaign settings, steps, and analytics.",      category: "data" },
     { key: "MANAGE_CAMPAIGNS",   bit: PERMISSION_BITS.MANAGE_CAMPAIGNS,   label: "Manage campaigns",  description: "Create, edit and archive campaigns.",                     category: "data" },
     { key: "VIEW_CONTACTS",      bit: PERMISSION_BITS.VIEW_CONTACTS,      label: "View contacts",     description: "Read contacts, segments and tags.",                       category: "data" },
     { key: "MANAGE_CONTACTS",    bit: PERMISSION_BITS.MANAGE_CONTACTS,    label: "Manage contacts",   description: "Create, edit and delete contacts.",                       category: "data" },
-    { key: "MANAGE_SEQUENCES",   bit: PERMISSION_BITS.MANAGE_SEQUENCES,   label: "Manage sequences",  description: "Edit step content + spacing inside a campaign.",          category: "data" },
+    { key: "MANAGE_SEQUENCES",   bit: PERMISSION_BITS.MANAGE_SEQUENCES,   label: "Manage steps",  description: "Edit step content + spacing inside a campaign.",          category: "data" },
     { key: "VIEW_ANALYTICS",     bit: PERMISSION_BITS.VIEW_ANALYTICS,     label: "View analytics",    description: "See deliverability + engagement reports.",                category: "data" },
     { key: "USE_INTEGRATIONS",   bit: PERMISSION_BITS.USE_INTEGRATIONS,   label: "Use integrations",  description: "Push contacts and deals to connected CRMs and tools.",    category: "data" },
     // People
@@ -66,103 +66,43 @@ export const CATEGORY_LABEL = {
     admin:  { label: "Workspace",    description: "Settings, billing, API." },
 } as const;
 
-export interface RoleDef {
-    id: "owner" | "admin" | "manager" | "member" | "viewer";
-    label: string;
-    description: string;
-    permissions: number; // bitmask
-    builtIn: true;
-    /** Some roles can't be assigned via UI (owner is set by ownership transfer). */
-    assignable: boolean;
-    accent: string; // tailwind color hint
-}
+// Roles are workspace data (see /organization/roles). The only hardcoded
+// concept left is the OWNER membership status and the permission templates
+// the role editor can start from.
+export const OWNER_DEF = {
+    label: "Owner",
+    description: "Full control of the workspace. There is exactly one owner; transfer it from workspace settings.",
+    color: "#0ea5e9",
+    permissions: ALL_PERMISSIONS,
+} as const;
 
-// Manager bundle — campaign-y stuff without team/billing/settings.
-const MANAGER_PERMS =
-    PERMISSION_BITS.MANAGE_CAMPAIGNS |
-    PERMISSION_BITS.MANAGE_CONTACTS |
-    PERMISSION_BITS.MANAGE_EMAILS |
-    PERMISSION_BITS.SEND_CAMPAIGNS |
-    PERMISSION_BITS.MANAGE_SEQUENCES |
-    PERMISSION_BITS.VIEW_ANALYTICS |
-    PERMISSION_BITS.VIEW_CAMPAIGNS |
-    PERMISSION_BITS.VIEW_CONTACTS |
-    PERMISSION_BITS.ACCESS_UNIBOX |
-    PERMISSION_BITS.USE_INTEGRATIONS;
+const ALL_DEFINED = PERMISSION_CATALOG.reduce((m, p) => m | p.bit, 0);
 
-// Viewer bundle — read-only.
-const VIEWER_PERMS =
-    PERMISSION_BITS.VIEW_CAMPAIGNS |
-    PERMISSION_BITS.VIEW_CONTACTS |
-    PERMISSION_BITS.VIEW_ANALYTICS;
-
-// Backwards-compat "member" role from the older 3-role world — treat
-// it as Manager-equivalent so existing rows resolve cleanly.
-const MEMBER_PERMS = MANAGER_PERMS;
-
-export const ROLE_CATALOG: RoleDef[] = [
-    {
-        id: "owner",
-        label: "Owner",
-        description: "Full control. There can only be one owner per workspace.",
-        permissions: ALL_PERMISSIONS,
-        builtIn: true,
-        assignable: false,
-        accent: "sky",
-    },
-    {
-        id: "admin",
-        label: "Admin",
-        description: "Everything except transferring ownership.",
-        permissions: ALL_PERMISSIONS & ~PERMISSION_BITS.TRANSFER_OWNERSHIP,
-        builtIn: true,
-        assignable: true,
-        accent: "violet",
-    },
+export const ROLE_TEMPLATES = [
+    { id: "admin", label: "Admin", color: "#8b5cf6", permissions: ALL_DEFINED & ~PERMISSION_BITS.TRANSFER_OWNERSHIP },
     {
         id: "manager",
         label: "Manager",
-        description: "Day-to-day operator. Can run campaigns, no team or billing access.",
-        permissions: MANAGER_PERMS,
-        builtIn: true,
-        assignable: true,
-        accent: "emerald",
-    },
-    {
-        id: "member",
-        label: "Member",
-        description: "Legacy alias for Manager — kept for backwards compatibility.",
-        permissions: MEMBER_PERMS,
-        builtIn: true,
-        assignable: true,
-        accent: "slate",
+        color: "#10b981",
+        permissions:
+            PERMISSION_BITS.MANAGE_CAMPAIGNS | PERMISSION_BITS.MANAGE_CONTACTS | PERMISSION_BITS.MANAGE_EMAILS |
+            PERMISSION_BITS.SEND_CAMPAIGNS | PERMISSION_BITS.MANAGE_SEQUENCES | PERMISSION_BITS.VIEW_ANALYTICS |
+            PERMISSION_BITS.VIEW_CAMPAIGNS | PERMISSION_BITS.VIEW_CONTACTS | PERMISSION_BITS.ACCESS_UNIBOX |
+            PERMISSION_BITS.USE_INTEGRATIONS,
     },
     {
         id: "viewer",
         label: "Viewer",
-        description: "Read-only. Sees reports and lists but can't change anything.",
-        permissions: VIEWER_PERMS,
-        builtIn: true,
-        assignable: true,
-        accent: "amber",
+        color: "#f59e0b",
+        permissions: PERMISSION_BITS.VIEW_CAMPAIGNS | PERMISSION_BITS.VIEW_CONTACTS | PERMISSION_BITS.VIEW_ANALYTICS,
     },
-];
+] as const;
 
 export function hasPermission(mask: number | undefined, bit: number): boolean {
     if (mask === undefined) return false;
     return (mask & bit) === bit;
 }
 
-export function getRoleDef(role: string): RoleDef {
-    return ROLE_CATALOG.find((r) => r.id === role) ?? ROLE_CATALOG[ROLE_CATALOG.length - 1];
-}
 
-/**
- * Effective permission mask for a member, accounting for the member's
- * per-row override and falling back to the role's default if the
- * override is missing.
- */
-export function effectivePermissions(role: string, permissions?: number): number {
-    if (typeof permissions === "number" && permissions > 0) return permissions;
-    return getRoleDef(role).permissions;
-}
+
+

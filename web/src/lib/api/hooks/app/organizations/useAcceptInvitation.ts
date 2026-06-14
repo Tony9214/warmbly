@@ -5,7 +5,7 @@ export default function useAcceptInvitation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (data: { invitation_id: string }) => acceptInvitation(data),
+        mutationFn: (data: { invitation_id?: string; token?: string }) => acceptInvitation(data),
         onSuccess: () => {
             queryClient.invalidateQueries({
                 queryKey: ["invitations", "mine"],

@@ -17,13 +17,15 @@ const (
 	NotifHealthBounce    NotificationCategory = "health_bounce"
 	NotifHealthComplaint NotificationCategory = "health_complaint"
 	NotifWorkerDowntime  NotificationCategory = "health_worker_downtime"
+	NotifSecuritySignIn  NotificationCategory = "security_new_signin"
 )
 
 // ChannelPrefs is the per-category delivery toggles. Only InApp is delivered
-// today; Email/Slack are modeled for forward-compat and rendered "coming soon".
+// today across in-app, email, and a connected Slack workspace.
 type ChannelPrefs struct {
 	InApp bool `json:"in_app"`
-	Email bool `json:"email"` // reserved; not enforced yet
+	Email bool `json:"email"`
+	Slack bool `json:"slack"`
 }
 
 // CategoryPref is the enable flag + channel toggles for one category.
@@ -40,6 +42,7 @@ type NotificationPreferences struct {
 	HealthBounce    CategoryPref `json:"health_bounce"`
 	HealthComplaint CategoryPref `json:"health_complaint"`
 	WorkerDowntime  CategoryPref `json:"health_worker_downtime"`
+	SecuritySignIn  CategoryPref `json:"security_new_signin"`
 }
 
 // DefaultNotificationPreferences is the merge base. Health categories default ON
@@ -54,6 +57,7 @@ func DefaultNotificationPreferences() NotificationPreferences {
 		HealthBounce:    on,
 		HealthComplaint: on,
 		WorkerDowntime:  on,
+		SecuritySignIn:  on,
 	}
 }
 
@@ -70,6 +74,8 @@ func (p NotificationPreferences) CategoryPref(c NotificationCategory) CategoryPr
 		return p.HealthComplaint
 	case NotifWorkerDowntime:
 		return p.WorkerDowntime
+	case NotifSecuritySignIn:
+		return p.SecuritySignIn
 	default:
 		return CategoryPref{}
 	}

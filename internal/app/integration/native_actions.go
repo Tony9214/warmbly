@@ -29,8 +29,43 @@ func validateNativeActionConfig(action models.IntegrationAction, raw json.RawMes
 		if strings.TrimSpace(cfg.AutomationID) == "" {
 			return fmt.Errorf("a run-automation action needs a target automation")
 		}
+	case models.IntegrationActionLabelEmail:
+		if len(parseUUIDList(cfg.LabelIDs)) == 0 {
+			return fmt.Errorf("a label action needs at least one label")
+		}
+	case models.IntegrationActionHTTPRequest:
+		if strings.TrimSpace(cfg.HTTPURL) == "" {
+			return fmt.Errorf("an HTTP request needs a URL")
+		}
+	case models.IntegrationActionSetVariables:
+		hasOne := false
+		for _, v := range cfg.SetVars {
+			if strings.TrimSpace(v.Key) != "" {
+				hasOne = true
+				break
+			}
+		}
+		if !hasOne {
+			return fmt.Errorf("set variables needs at least one named variable")
+		}
+	case models.IntegrationActionFireEvent:
+		if strings.TrimSpace(cfg.EventName) == "" {
+			return fmt.Errorf("a fire-event action needs an event name")
+		}
 	}
 	return nil
+}
+
+// parseUUIDList parses a slice of string ids into uuids, dropping any that don't
+// parse. Used by the label_email action's category list.
+func parseUUIDList(ids []string) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, s := range ids {
+		if id, err := uuid.Parse(strings.TrimSpace(s)); err == nil {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // NativeActions runs Warmbly-internal CRM/contact mutations for automation
@@ -50,6 +85,10 @@ type NativeActions interface {
 	CreateDeal(ctx context.Context, orgID, createdBy uuid.UUID, data *models.CreateDeal) error
 	MoveDealStage(ctx context.Context, orgID, contactID, pipelineID, stageID uuid.UUID) error
 	Unsubscribe(ctx context.Context, campaignID, contactID uuid.UUID) error
+	// LabelThread additively applies unibox conversation labels to a thread, on
+	// behalf of the mailbox-owner userID (categories are per user). Backs the
+	// "label_email" action; userID + threadID come from the reply event data.
+	LabelThread(ctx context.Context, userID uuid.UUID, threadID string, categoryIDs []uuid.UUID) error
 }
 
 // nativeActionConfig is the per-node config for native action nodes (mirrors the
@@ -69,6 +108,29 @@ type nativeActionConfig struct {
 	TaskAssignedTeamID string   `json:"task_assigned_team_id"`
 	// run_automation: the automation to launch.
 	AutomationID string `json:"automation_id"`
+	// label_email: the unibox conversation labels to apply (category-registry ids).
+	LabelIDs []string `json:"label_ids"`
+	// http_request: a configurable outbound call. Method/URL/headers/query/body
+	// are all Go-templated against the event + prior step output. The response is
+	// written back into the event data under HTTPOutputKey (default "response").
+	HTTPMethod    string            `json:"http_method"`
+	HTTPURL       string            `json:"http_url"`
+	HTTPHeaders   map[string]string `json:"http_headers"`
+	HTTPQuery     map[string]string `json:"http_query"`
+	HTTPBody      string            `json:"http_body"`
+	HTTPOutputKey string            `json:"http_output_key"`
+	// set_variables: named values computed from templates and written back into
+	// the event data for later nodes to reuse.
+	SetVars []setVar `json:"set_vars"`
+	// fire_event: a developer-defined custom event published to the realtime
+	// gateway. EventName + each field value are Go-templated against the event data.
+	EventName   string   `json:"event_name"`
+	EventFields []setVar `json:"event_fields"`
+}
+
+type setVar struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 func parseNativeConfig(raw json.RawMessage) nativeActionConfig {
@@ -99,6 +161,65 @@ func (s *service) execNativeAction(ctx context.Context, a models.Automation, n m
 			return fmt.Errorf("an automation cannot run itself")
 		}
 		return s.RunAutomationByID(ctx, a.OrganizationID, targetID, data)
+	}
+
+	// http_request makes a configurable outbound call and writes the response
+	// back into `data`. It needs no contact, so handle it before resolution.
+	if n.Action == models.IntegrationActionHTTPRequest {
+		if !s.allowOutbound(ctx, a.OrganizationID) {
+			return fmt.Errorf("daily outbound request limit reached (%d/day); contact support to raise it", outboundDailyQuota)
+		}
+		return runHTTPRequest(ctx, a.OrganizationID, a.ID, n, cfg, data)
+	}
+
+	// set_variables computes named values from templates and writes them back
+	// into the event data for later nodes. No contact, no external call.
+	if n.Action == models.IntegrationActionSetVariables {
+		for _, v := range cfg.SetVars {
+			key := strings.TrimSpace(v.Key)
+			if key == "" {
+				continue
+			}
+			data[key] = renderTemplate(v.Value, data)
+		}
+		return nil
+	}
+
+	// fire_event publishes a developer-defined custom event to the realtime
+	// gateway (org-scoped). Subscribers receive it over the websocket with no
+	// public URL. Name + each field value are templated against the event data.
+	if n.Action == models.IntegrationActionFireEvent {
+		name := strings.TrimSpace(renderTemplate(cfg.EventName, data))
+		if name == "" {
+			return fmt.Errorf("fire-event needs an event name")
+		}
+		payload := make(map[string]string, len(cfg.EventFields))
+		for _, f := range cfg.EventFields {
+			key := strings.TrimSpace(f.Key)
+			if key == "" {
+				continue
+			}
+			payload[key] = renderTemplate(f.Value, data)
+		}
+		if s.publisher != nil {
+			s.publisher.PublishCustomEvent(ctx, a.OrganizationID, uuid.Nil, name, payload, "automation", a.ID.String())
+		}
+		return nil
+	}
+
+	// label_email tags the conversation the event belongs to; it needs the
+	// thread + mailbox owner (carried by reply triggers), not a resolved contact.
+	if n.Action == models.IntegrationActionLabelEmail {
+		threadID := stringFromMap(data, "thread_id")
+		ownerID, perr := uuid.Parse(stringFromMap(data, "_user_id"))
+		if threadID == "" || perr != nil {
+			return fmt.Errorf("label-email needs a reply thread (use it on a reply trigger)")
+		}
+		catIDs := parseUUIDList(cfg.LabelIDs)
+		if len(catIDs) == 0 {
+			return fmt.Errorf("a label action needs at least one label")
+		}
+		return s.native.LabelThread(ctx, ownerID, threadID, catIDs)
 	}
 
 	contactID := stringFromMap(data, "contact_id")

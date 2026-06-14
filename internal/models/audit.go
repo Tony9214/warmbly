@@ -54,7 +54,7 @@ const (
 	AuditEntityContact        AuditEntityType = "contact"
 	AuditEntityEmailAccount   AuditEntityType = "email_account"
 	AuditEntityAPIKey         AuditEntityType = "api_key"
-	AuditEntitySequence       AuditEntityType = "sequence"
+	AuditEntitySequence       AuditEntityType = "step"
 	AuditEntityUser           AuditEntityType = "user"
 	AuditEntityOrganization   AuditEntityType = "organization"
 	AuditEntityWorker         AuditEntityType = "worker"
@@ -84,6 +84,13 @@ const (
 
 	// Inbox
 	AuditEntityUnibox AuditEntityType = "unibox"
+
+	// Collaboration / automation surfaces
+	AuditEntityTeam           AuditEntityType = "team"
+	AuditEntityAutomation     AuditEntityType = "automation"
+	AuditEntityLeadSyncSource AuditEntityType = "lead_sync_source"
+	AuditEntityMeeting        AuditEntityType = "meeting"
+	AuditEntityRole           AuditEntityType = "role"
 )
 
 // AuditActor is the minimal identity of the member who performed an action,

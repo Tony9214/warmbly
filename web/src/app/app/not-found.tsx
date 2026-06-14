@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 
 const dests = [
   { title: "Accounts", url: "/app/emails", icon: MailIcon, hint: "mailboxes & senders" },
-  { title: "Campaigns", url: "/app/campaigns", icon: MegaphoneIcon, hint: "sequences & sends" },
+  { title: "Campaigns", url: "/app/campaigns", icon: MegaphoneIcon, hint: "steps & sends" },
   { title: "Contacts", url: "/app/contacts", icon: UsersIcon, hint: "people & lists" },
   { title: "Analytics", url: "/app/analytics", icon: BarChart3Icon, hint: "opens, clicks, replies" },
 ];

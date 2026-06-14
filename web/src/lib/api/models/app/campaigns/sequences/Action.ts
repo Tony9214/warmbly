@@ -5,12 +5,14 @@
 export type SequenceActionType =
     | "add_tag"
     | "remove_tag"
+    | "label_email"
     | "unsubscribe"
-    | "notify"
     | "create_task"
     | "create_deal"
     | "move_deal_stage"
-    | "run_automation";
+    | "run_automation"
+    | "http_request"
+    | "fire_event";
 
 // One templated input passed to a launched automation (value supports the same
 // {{.FirstName}}/{{.Company}} contact templating campaign copy uses).
@@ -23,9 +25,10 @@ export interface SequenceAction {
     type: SequenceActionType;
     // add_tag / remove_tag — a contact category id
     category_id?: string | null;
-    // notify
-    notify_event?: string;
-    notify_data?: Record<string, unknown>;
+    // label_email — unibox conversation labels (same category registry as tags)
+    // applied to the thread the contact replied on. Reply-branch only; a no-op
+    // when the contact has not replied.
+    label_ids?: string[];
     // create_task — open a CRM task for the lead at this step
     task_title?: string;
     task_type?: string; // task type name (user-managed)
@@ -48,4 +51,15 @@ export interface SequenceAction {
     // passing templated key/value inputs as the automation's event data.
     automation_id?: string | null;
     automation_values?: ActionKV[];
+    // http_request — a configurable outbound call when the lead reaches this step.
+    // url/headers/body are templated against the contact and SSRF-guarded.
+    http_method?: string;
+    http_url?: string;
+    http_headers?: Record<string, string>;
+    http_body?: string;
+    // fire_event — publish a custom event to the realtime gateway; subscribers
+    // receive it over the API websocket (no public URL). event_name + each field
+    // value are templated against the contact; the fields become the payload.
+    event_name?: string;
+    event_fields?: ActionKV[];
 }

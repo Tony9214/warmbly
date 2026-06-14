@@ -22,10 +22,19 @@ defmodule Realtime.Connections do
   @table :realtime_connections
   @ip_table :realtime_ip_connections
 
-  # Default limits (can be overridden via config)
+  # Default limits (can be overridden via config). The cap is PER USER (not per
+  # org), so 10 covers many tabs and devices for one person. Dead connections
+  # are reaped (process-monitor plus the periodic sweep below), so the live
+  # count reflects real presence rather than leftover phantoms, and a normal
+  # user never trips the limit with stale sockets.
   @default_max_per_user 10
   @default_max_per_ip 50
   @default_max_global 100_000
+
+  # How often the tracker sweeps for connections whose owning process has died
+  # (e.g. a socket the transport closed after a missed heartbeat) and reconciles
+  # the counts, so a stale connection never holds a slot.
+  @sweep_interval 30_000
 
   # Redis key TTL for distributed counts (10 minutes)
   @redis_ttl 600
@@ -146,8 +155,11 @@ defmodule Realtime.Connections do
       "Connections tracker started (limits: user=#{max_per_user()}, ip=#{max_per_ip()}, global=#{max_global()})"
     )
 
-    # State: %{monitor_ref => {user_id, ip}} so DOWN messages can find
-    # the (user, ip) pair to decrement.
+    schedule_sweep()
+
+    # State: %{monitor_ref => {user_id, ip, pid}} so DOWN messages and the
+    # periodic sweep can find the (user, ip) pair to decrement and verify the
+    # owning process is still alive.
     {:ok, %{monitors: %{}}}
   end
 
@@ -156,7 +168,7 @@ defmodule Realtime.Connections do
     case do_track(user_id, ip, custom_max) do
       :ok ->
         ref = Process.monitor(pid)
-        monitors = Map.put(state.monitors, ref, {user_id, ip})
+        monitors = Map.put(state.monitors, ref, {user_id, ip, pid})
         {:reply, :ok, %{state | monitors: monitors}}
 
       error ->
@@ -176,14 +188,38 @@ defmodule Realtime.Connections do
       {nil, _} ->
         {:noreply, state}
 
-      {{user_id, ip}, monitors} ->
+      {{user_id, ip, _pid}, monitors} ->
         do_untrack(user_id, ip)
         {:noreply, %{state | monitors: monitors}}
     end
   end
 
+  # Periodic reconciliation: drop any tracked connection whose owning process is
+  # gone (a socket the transport closed after a missed heartbeat, or a :DOWN we
+  # somehow missed) so the live count always reflects real presence.
+  def handle_info(:sweep, state) do
+    {dead, alive} =
+      Enum.split_with(state.monitors, fn {_ref, {_uid, _ip, pid}} -> not Process.alive?(pid) end)
+
+    Enum.each(dead, fn {ref, {uid, ip, _pid}} ->
+      Process.demonitor(ref, [:flush])
+      do_untrack(uid, ip)
+    end)
+
+    if dead != [] do
+      Logger.debug("Connections sweep reaped #{length(dead)} stale connection(s)")
+    end
+
+    schedule_sweep()
+    {:noreply, %{state | monitors: Map.new(alive)}}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  defp schedule_sweep do
+    Process.send_after(self(), :sweep, @sweep_interval)
   end
 
   # Private functions

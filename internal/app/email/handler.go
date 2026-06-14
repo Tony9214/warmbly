@@ -10,11 +10,12 @@ import (
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
-func (s *emailService) Search(ctx context.Context, userID, search, cursor, tag, limit string, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error) {
-	cursorId, err := validate.Uuid(cursor)
+func (s *emailService) Search(ctx context.Context, orgID, search, cursor, tag, limit string, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error) {
+	cursorId, err := paging.DecodeCursor(cursor)
 	if err != nil {
 		return nil, err
 	}
@@ -32,11 +33,11 @@ func (s *emailService) Search(ctx context.Context, userID, search, cursor, tag, 
 		return nil, err
 	}
 
-	return s.emailRepository.Search(ctx, userID, search, cursorId, tagId, limitN, allowedAccountIDs)
+	return s.emailRepository.Search(ctx, orgID, search, cursorId, tagId, limitN, allowedAccountIDs)
 }
 
-func (s *emailService) Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error) {
-	return s.emailRepository.Get(ctx, userID, emailAccountID)
+func (s *emailService) Get(ctx context.Context, orgID, emailAccountID string) (*models.Email, *errx.Error) {
+	return s.emailRepository.Get(ctx, orgID, emailAccountID)
 }
 
 func (s *emailService) Update(ctx context.Context, userID, emailAccountID string, udata *models.UpdateEmail) (*models.Email, *errx.Error) {

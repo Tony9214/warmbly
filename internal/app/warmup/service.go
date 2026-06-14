@@ -19,11 +19,11 @@ type WebhookDispatcher interface {
 	Dispatch(ctx context.Context, orgID uuid.UUID, eventType models.WebhookEventType, data any) (uuid.UUID, error)
 }
 
-// HealthRealtimePublisher pushes a health transition to the owning user's
+// HealthRealtimePublisher pushes a health transition to the owning org's
 // realtime stream. Narrow + primitive-typed so the warmup package doesn't
 // import the pubsub event types. *pubsub.StreamingPublisher satisfies it.
 type HealthRealtimePublisher interface {
-	PublishAccountHealth(ctx context.Context, userID, accountID, email, prevState, newState, reason string)
+	PublishAccountHealth(ctx context.Context, orgID, userID, accountID, email, prevState, newState, reason string)
 }
 
 const (
@@ -152,7 +152,7 @@ func (s *service) dispatchHealthEvent(ctx context.Context, accountID uuid.UUID, 
 
 	// Realtime push to the dashboard (independent of webhooks).
 	if s.realtime != nil {
-		s.realtime.PublishAccountHealth(ctx, account.UserID, accountID.String(), account.Email, string(oldState), string(newState), reason)
+		s.realtime.PublishAccountHealth(ctx, account.OrganizationID.String(), account.UserID, accountID.String(), account.Email, string(oldState), string(newState), reason)
 	}
 
 	if s.webhooks == nil {

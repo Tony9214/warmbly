@@ -42,7 +42,7 @@ type Sequence struct {
 // ActionConfig is the persisted config for a non-email (action/wait) node. Type
 // is the switch the task executes on; the remaining fields are type-scoped.
 type ActionConfig struct {
-	Type string `json:"type"` // wait | add_tag | remove_tag | unsubscribe | notify | create_task | create_deal | move_deal_stage | end
+	Type string `json:"type"` // wait | add_tag | remove_tag | label_email | unsubscribe | notify | create_task | create_deal | move_deal_stage | run_automation | http_request | fire_event | end
 
 	// wait
 	WaitMinutes *int `json:"wait_minutes,omitempty"`
@@ -50,9 +50,10 @@ type ActionConfig struct {
 	// add_tag / remove_tag — a contact category id (product "tags" == categories)
 	CategoryID *uuid.UUID `json:"category_id,omitempty"`
 
-	// notify — webhook / integration fan-out
-	NotifyEvent string         `json:"notify_event,omitempty"`
-	NotifyData  map[string]any `json:"notify_data,omitempty"`
+	// label_email — apply unibox conversation labels to the contact's most recent
+	// thread. Labels are the same registry as contact tags (categories), but in
+	// the inbox they're "labels", so the field is label_ids. Reply-branch only.
+	LabelIDs []uuid.UUID `json:"label_ids,omitempty"`
 
 	// create_task — open a CRM task for the lead when they reach this step
 	// (e.g. a Call task). TaskAssignedTo is the teammate chosen on the step;
@@ -82,6 +83,21 @@ type ActionConfig struct {
 	// Values render against the contact ({{.FirstName}} / {{.Company}} etc.).
 	AutomationID     *uuid.UUID `json:"automation_id,omitempty"`
 	AutomationValues []ActionKV `json:"automation_values,omitempty"`
+
+	// http_request — a configurable outbound call when the contact reaches this
+	// step. URL/headers/body are templated against the contact and SSRF-guarded
+	// (https + no internal targets). Best-effort; failures are logged, not fatal.
+	HTTPMethod  string            `json:"http_method,omitempty"`
+	HTTPURL     string            `json:"http_url,omitempty"`
+	HTTPHeaders map[string]string `json:"http_headers,omitempty"`
+	HTTPBody    string            `json:"http_body,omitempty"`
+
+	// fire_event — publish a developer-defined custom event to the realtime
+	// gateway. Subscribers (an API key with REALTIME_SUBSCRIBE on the org
+	// websocket) receive it with no public URL. EventName + each field value are
+	// templated against the contact; the fields become the event payload.
+	EventName   string     `json:"event_name,omitempty"`
+	EventFields []ActionKV `json:"event_fields,omitempty"`
 }
 
 // ActionKV is one templated input passed to a launched automation.
@@ -133,7 +149,7 @@ type Branch struct {
 	// TargetSequenceID is the step to route to when this branch matches. nil
 	// means STOP (send the contact no further step). A target that no longer
 	// exists (a deleted step) is treated as STOP at schedule time.
-	TargetSequenceID *uuid.UUID `json:"target_sequence_id"`
+	TargetSequenceID *uuid.UUID `json:"target_step_id"`
 	// Conditions are ANDed together — every condition must hold for the branch
 	// to match. An empty list is an unconditional/catch-all branch ("otherwise").
 	Conditions []BranchCondition `json:"conditions,omitempty"`

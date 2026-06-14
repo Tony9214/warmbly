@@ -22,6 +22,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/integration"
 	"github.com/warmbly/warmbly/internal/app/leadsync"
 	"github.com/warmbly/warmbly/internal/app/notification"
+	"github.com/warmbly/warmbly/internal/app/oauth"
 	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/passkey"
 	"github.com/warmbly/warmbly/internal/app/placement"
@@ -151,6 +152,10 @@ type Handler struct {
 	IntegrationService integration.Service
 	ContactRepo        repository.ContactRepository
 
+	// OAuth 2.1 authorization server (third-party app registration + the
+	// authorization-code-with-PKCE flow + bearer-token validation).
+	OAuthService *oauth.Service
+
 	// Realtime publisher for handler paths that emit live dashboard events
 	// directly (inbound meeting webhooks have no service layer of their own).
 	// nil-safe: realtime is a nicety, not a requirement.
@@ -176,6 +181,10 @@ type Handler struct {
 	// /api/v1/internal/email-message-map for the same no-direct-Postgres reason
 	// as EncryptedKeys. Backed by Postgres in the backend.
 	EmailMessageMap repository.EmailMessageMapRepository
+
+	// Click-link store, served to the tracking service over HTTPS at
+	// /api/v1/internal/tracked-links/:id (same no-direct-Postgres rule).
+	TrackedLinks repository.TrackedLinkRepository
 
 	// Direct repositories used by handlers that don't yet have a
 	// service layer (avatars, etc.). Keep narrow and add a service

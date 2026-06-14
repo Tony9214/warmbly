@@ -1,3 +1,5 @@
+import { NoAccess } from "@/components/layout/NoAccess";
+import { usePermission } from "@/hooks/usePermission";
 import { useUserProfile } from "@/hooks/context/user";
 import useCampaigns from "@/lib/api/hooks/app/campaigns/useCampaigns";
 import useStartCampaign from "@/lib/api/hooks/app/campaigns/useStartCampaign";
@@ -252,6 +254,7 @@ function CampaignFolderMenu({ campaign, folders }: { campaign: Campaign; folders
 export default function CampaignsPage() {
     const p = useUserProfile();
     const confirm = useConfirm();
+    const canView = usePermission("VIEW_CAMPAIGNS");
     const startCampaign = useStartCampaign();
     const stopCampaign = useStopCampaign();
     const [folder, setFolder] = useState<string>("");
@@ -310,6 +313,8 @@ export default function CampaignsPage() {
         return stats;
     }, [campaigns]);
 
+    if (!canView) return <NoAccess feature="campaigns" permissionLabel="View campaigns" />;
+
     return (
         <Page>
             <PageTopbar
@@ -319,7 +324,7 @@ export default function CampaignsPage() {
                         ? "Loading…"
                         : campaignsData.isError
                             ? "Failed to load"
-                            : `${campaigns.length} ${campaigns.length === 1 ? "sequence" : "sequences"}`
+                            : `${campaigns.length} ${campaigns.length === 1 ? "campaign" : "campaigns"}`
                 }
             >
                 <TopbarAction

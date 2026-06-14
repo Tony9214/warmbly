@@ -22,6 +22,14 @@ type Organization struct {
 	DeletionScheduledAt  *time.Time `json:"deletion_scheduled_at,omitempty"`
 	DeletionScheduledFor *time.Time `json:"deletion_scheduled_for,omitempty"`
 
+	// Team presence privacy (org-wide, admin-controlled). When
+	// PresenceShowOnline is false the realtime service tracks no member, so
+	// nobody can see who is online. When PresenceShowActivity is false, online
+	// is still shown but the viewing/editing detail is stripped. The realtime
+	// service reads both on channel join.
+	PresenceShowOnline   bool `json:"presence_show_online"`
+	PresenceShowActivity bool `json:"presence_show_activity"`
+
 	// Joined data
 	Owner *User `json:"owner,omitempty"`
 }
@@ -34,14 +42,19 @@ func (o *Organization) IsPendingDeletion() bool {
 
 // OrganizationMember represents a user's membership in an organization
 type OrganizationMember struct {
-	ID             uuid.UUID              `json:"id"`
-	OrganizationID uuid.UUID              `json:"organization_id"`
-	UserID         uuid.UUID              `json:"user_id"`
-	Role           string                 `json:"role"`
-	Permissions    OrganizationPermission `json:"permissions"`
-	InvitedBy      *uuid.UUID             `json:"invited_by,omitempty"`
-	InvitedAt      time.Time              `json:"invited_at"`
-	AcceptedAt     *time.Time             `json:"accepted_at,omitempty"`
+	ID             uuid.UUID `json:"id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	Role           string    `json:"role"`
+	// RoleID is the member's primary role (first assigned), kept for legacy
+	// single-role consumers. Roles is the full assigned set; Permissions is
+	// the effective OR snapshot across all of them.
+	RoleID      *uuid.UUID             `json:"role_id,omitempty"`
+	Roles       []MemberRole           `json:"roles,omitempty"`
+	Permissions OrganizationPermission `json:"permissions"`
+	InvitedBy   *uuid.UUID             `json:"invited_by,omitempty"`
+	InvitedAt   time.Time              `json:"invited_at"`
+	AcceptedAt  *time.Time             `json:"accepted_at,omitempty"`
 
 	// Joined data
 	User         *User         `json:"user,omitempty"`
@@ -70,6 +83,8 @@ type OrganizationInvitation struct {
 	OrganizationID uuid.UUID              `json:"organization_id"`
 	Email          string                 `json:"email"`
 	Role           string                 `json:"role"`
+	RoleID         *uuid.UUID             `json:"role_id,omitempty"`
+	Roles          []MemberRole           `json:"roles,omitempty"`
 	Permissions    OrganizationPermission `json:"permissions"`
 	InvitedBy      uuid.UUID              `json:"invited_by"`
 	Token          string                 `json:"-"` // Never expose token in JSON
@@ -120,18 +135,100 @@ type CreateOrganizationRequest struct {
 type UpdateOrganizationRequest struct {
 	Name *string `json:"name,omitempty"`
 	Slug *string `json:"slug,omitempty"`
+	// Org-wide team presence privacy toggles (admin-controlled).
+	PresenceShowOnline   *bool `json:"presence_show_online,omitempty"`
+	PresenceShowActivity *bool `json:"presence_show_activity,omitempty"`
 }
 
 // InviteMemberRequest represents the request to invite a new member
 type InviteMemberRequest struct {
-	Email       string  `json:"email" binding:"required,email"`
-	Role        string  `json:"role,omitempty"`
-	Permissions *uint16 `json:"permissions,omitempty"`
+	Email string `json:"email" binding:"required,email"`
+	// RoleIDs are the workspace roles the invitee lands in (at least one).
+	// RoleID stays accepted as a single-role shorthand.
+	RoleIDs []uuid.UUID `json:"role_ids,omitempty"`
+	RoleID  *uuid.UUID  `json:"role_id,omitempty"`
+}
+
+// Resolved returns the requested role ids, merging the single-role shorthand.
+func (r *InviteMemberRequest) Resolved() []uuid.UUID {
+	ids := append([]uuid.UUID(nil), r.RoleIDs...)
+	if r.RoleID != nil {
+		ids = append(ids, *r.RoleID)
+	}
+	return dedupeUUIDs(ids)
 }
 
 // UpdateMemberRequest represents the request to update a member's role/permissions
 type UpdateMemberRequest struct {
-	Role        *string `json:"role,omitempty"`
+	// RoleIDs replaces the member's assigned role set (at least one). RoleID
+	// stays accepted as a single-role shorthand.
+	RoleIDs []uuid.UUID `json:"role_ids,omitempty"`
+	RoleID  *uuid.UUID  `json:"role_id,omitempty"`
+}
+
+// Resolved returns the requested role ids, merging the single-role shorthand.
+func (r *UpdateMemberRequest) Resolved() []uuid.UUID {
+	ids := append([]uuid.UUID(nil), r.RoleIDs...)
+	if r.RoleID != nil {
+		ids = append(ids, *r.RoleID)
+	}
+	return dedupeUUIDs(ids)
+}
+
+func dedupeUUIDs(ids []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if id == uuid.Nil {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// MemberRole is a lightweight role reference for rendering a member's
+// assigned roles (chips) without the full permission payload.
+type MemberRole struct {
+	ID    uuid.UUID `json:"id"`
+	Name  string    `json:"name"`
+	Color string    `json:"color"`
+}
+
+// OrganizationRole is an org-scoped custom role: a named permission set
+// members can be assigned to. Editing a role writes through to every
+// assigned member's permissions snapshot, so all permission readers stay
+// JOIN-free.
+type OrganizationRole struct {
+	ID             uuid.UUID              `json:"id"`
+	OrganizationID uuid.UUID              `json:"organization_id"`
+	Name           string                 `json:"name"`
+	Description    string                 `json:"description"`
+	Color          string                 `json:"color"`
+	Permissions    OrganizationPermission `json:"permissions"`
+	MemberCount    int                    `json:"member_count"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+}
+
+// CreateOrganizationRoleRequest creates a custom role.
+type CreateOrganizationRoleRequest struct {
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description,omitempty"`
+	Color       string `json:"color,omitempty"`
+	Permissions uint16 `json:"permissions"`
+}
+
+// UpdateOrganizationRoleRequest edits a custom role (edits propagate to
+// every member assigned to it).
+type UpdateOrganizationRoleRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Color       *string `json:"color,omitempty"`
 	Permissions *uint16 `json:"permissions,omitempty"`
 }
 
@@ -142,7 +239,22 @@ type TransferOwnershipRequest struct {
 
 // AcceptInvitationRequest represents the request to accept an invitation
 type AcceptInvitationRequest struct {
-	Token string `json:"token" binding:"required"`
+	// Either a secure token (public /invite link) or the invitation id (the
+	// logged-in user accepting from their own pending list).
+	Token        string     `json:"token,omitempty"`
+	InvitationID *uuid.UUID `json:"invitation_id,omitempty"`
+}
+
+// InvitationPreview is the safe, public view of an invitation rendered on the
+// /invite landing page. It deliberately omits the token, permissions bitmask,
+// and ids — only what a human needs to decide to accept.
+type InvitationPreview struct {
+	OrganizationName   string       `json:"organization_name"`
+	OrganizationAvatar string       `json:"organization_avatar,omitempty"`
+	InviterName        string       `json:"inviter_name,omitempty"`
+	Email              string       `json:"email"`
+	Roles              []MemberRole `json:"roles"`
+	Expired            bool         `json:"expired"`
 }
 
 // OrganizationCounts represents resource counts for an organization

@@ -11,14 +11,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/webhook"
 	"github.com/warmbly/warmbly/internal/errx"
+	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
 )
+
+// outboundDailyQuota caps per-org outbound HTTP-request automation actions per
+// day. It is an anti-abuse ceiling (relay / scanning), set well above any
+// legitimate flow, not a pricing tier — tune freely. Enforced only when a quota
+// cache is wired; fail-open otherwise so infra hiccups never break automations.
+const outboundDailyQuota = 1000
 
 // oauthStateTTL bounds how long a started OAuth handshake stays valid.
 const oauthStateTTL = 15 * time.Minute
@@ -80,10 +88,17 @@ type Service interface {
 	DryRunAutomation(ctx context.Context, orgID, id uuid.UUID, req models.DryRunRequest) (*models.DryRunResponse, error)
 	// ListAutomationRuns returns recent run history for an automation.
 	ListAutomationRuns(ctx context.Context, orgID, id uuid.UUID, limit int) ([]models.AutomationRun, error)
+	// TriggerInboundAutomation runs the automation whose inbound-webhook token is
+	// given, using body (JSON) as the event payload. Returns
+	// ErrInboundAutomationNotFound for an unknown/non-inbound token.
+	TriggerInboundAutomation(ctx context.Context, token string, body []byte) error
 	// SetNativeActions wires the native CRM/contact action executor + the realtime
 	// publisher post-construction (they depend on services built after this one).
 	SetNativeActions(n NativeActions)
 	SetPublisher(p *pubsub.StreamingPublisher)
+	// SetOutboundQuotaCache wires the Redis cache backing the per-org daily
+	// outbound-action quota (anti-abuse). Optional; nil disables the quota.
+	SetOutboundQuotaCache(c *cache.Cache)
 
 	// ListSyncRuns returns recent observability records for a connection.
 	ListSyncRuns(ctx context.Context, orgID, connID uuid.UUID, limit int) ([]models.IntegrationSyncRun, error)
@@ -139,16 +154,48 @@ type Service interface {
 	// Dispatch; struct payloads are ignored.
 	DispatchAny(ctx context.Context, orgID uuid.UUID, eventType models.WebhookEventType, data any)
 
+	// NotifySlack posts a plain message to the org's connected Slack on its
+	// configured default channel. No-op (nil) when no Slack is connected.
+	NotifySlack(ctx context.Context, orgID uuid.UUID, title, body string) error
+
 	// Repo exposes the underlying repository for the inbound webhook handlers.
 	Repo() repository.IntegrationRepository
 }
 
 type service struct {
-	repo      repository.IntegrationRepository
-	cipher    cipher.CipherService
-	oauth     *OAuthManager
-	native    NativeActions
-	publisher *pubsub.StreamingPublisher
+	repo       repository.IntegrationRepository
+	cipher     cipher.CipherService
+	oauth      *OAuthManager
+	native     NativeActions
+	publisher  *pubsub.StreamingPublisher
+	quotaCache *cache.Cache
+}
+
+// SetOutboundQuotaCache wires the Redis cache backing the per-org daily outbound
+// quota (post-construction, like the other setters). Both the backend and the
+// consumer run automations, so both wire it; nil leaves the quota disabled.
+func (s *service) SetOutboundQuotaCache(c *cache.Cache) { s.quotaCache = c }
+
+// allowOutbound increments and checks the per-org daily outbound-action counter.
+// Fail-open: a missing cache or a Redis error never blocks an automation.
+func (s *service) allowOutbound(ctx context.Context, orgID uuid.UUID) bool {
+	if s.quotaCache == nil {
+		return true
+	}
+	key := fmt.Sprintf("automation:outbound:%s:%s", orgID, time.Now().UTC().Format("20060102"))
+	n, err := s.quotaCache.Incr(ctx, key).Result()
+	if err != nil {
+		return true
+	}
+	if n == 1 {
+		_ = s.quotaCache.Expire(ctx, key, 26*time.Hour).Err()
+	}
+	if n > outboundDailyQuota {
+		log.Warn().Str("org_id", orgID.String()).Int64("count", n).
+			Msg("automation outbound daily quota exceeded")
+		return false
+	}
+	return true
 }
 
 // NewService builds the integration service. cipherSvc seals provider secrets
@@ -486,11 +533,23 @@ func (s *service) DeleteEventSubscription(ctx context.Context, orgID, id uuid.UU
 // --- Automations ------------------------------------------------------------
 
 func (s *service) ListAutomations(ctx context.Context, orgID uuid.UUID) ([]models.Automation, error) {
-	return s.repo.ListAutomations(ctx, orgID)
+	list, err := s.repo.ListAutomations(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		decorateAutomation(&list[i])
+	}
+	return list, nil
 }
 
 func (s *service) GetAutomation(ctx context.Context, orgID, id uuid.UUID) (*models.Automation, error) {
-	return s.repo.GetAutomation(ctx, orgID, id)
+	a, err := s.repo.GetAutomation(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	decorateAutomation(a)
+	return a, nil
 }
 
 func (s *service) CreateAutomation(ctx context.Context, orgID uuid.UUID, w models.AutomationWrite) (*models.Automation, error) {
@@ -498,10 +557,17 @@ func (s *service) CreateAutomation(ctx context.Context, orgID uuid.UUID, w model
 	if err != nil {
 		return nil, err
 	}
+	if isInboundTrigger(a.TriggerEvent) {
+		tok, terr := generateAutomationInboundToken()
+		if terr != nil {
+			return nil, terr
+		}
+		a.InboundToken = tok
+	}
 	if err := s.repo.CreateAutomation(ctx, a); err != nil {
 		return nil, err
 	}
-	return s.repo.GetAutomation(ctx, orgID, a.ID)
+	return s.GetAutomation(ctx, orgID, a.ID)
 }
 
 func (s *service) UpdateAutomation(ctx context.Context, orgID, id uuid.UUID, w models.AutomationWrite) (*models.Automation, error) {
@@ -510,10 +576,40 @@ func (s *service) UpdateAutomation(ctx context.Context, orgID, id uuid.UUID, w m
 		return nil, err
 	}
 	a.ID = id
+	// Preserve the inbound token across edits; mint one the first time a flow
+	// becomes inbound; clear it when the trigger changes away (so the old URL
+	// stops firing).
+	if isInboundTrigger(a.TriggerEvent) {
+		existing, _ := s.repo.GetAutomation(ctx, orgID, id)
+		switch {
+		case existing != nil && existing.InboundToken != "":
+			a.InboundToken = existing.InboundToken
+		default:
+			tok, terr := generateAutomationInboundToken()
+			if terr != nil {
+				return nil, terr
+			}
+			a.InboundToken = tok
+		}
+	}
 	if err := s.repo.UpdateAutomation(ctx, a); err != nil {
 		return nil, err
 	}
-	return s.repo.GetAutomation(ctx, orgID, id)
+	return s.GetAutomation(ctx, orgID, id)
+}
+
+// isInboundTrigger reports whether a trigger event is the inbound webhook.
+func isInboundTrigger(trigger string) bool {
+	return trigger == string(models.WebhookEventInboundWebhook)
+}
+
+// decorateAutomation fills the computed, non-stored fields on an automation
+// (today: the public InboundURL derived from its token).
+func decorateAutomation(a *models.Automation) {
+	if a == nil {
+		return
+	}
+	a.InboundURL = BuildInboundAutomationURL(a.InboundToken)
 }
 
 func (s *service) DeleteAutomation(ctx context.Context, orgID, id uuid.UUID) error {
@@ -666,14 +762,20 @@ func (s *service) validateAutomationGraph(ctx context.Context, orgID uuid.UUID, 
 		if e.Source == e.Target {
 			return errors.New("a node cannot connect to itself")
 		}
-		// Branch labels are only valid (and required) on edges out of a
-		// condition node; every other edge is an unconditional "then".
-		if src.Type == models.AutomationNodeCondition {
+		// Branch labels: a condition's edges are the yes/no paths; an action may
+		// have a plain "then" edge plus an optional "on error" branch; anything
+		// else is an unconditional "then".
+		switch {
+		case src.Type == models.AutomationNodeCondition:
 			if e.When != "true" && e.When != "false" {
 				return errors.New("a condition's branches must be a yes or no path")
 			}
-		} else if e.When != "" {
-			return errors.New("only conditions can have yes/no branches")
+		case src.Type == models.AutomationNodeAction:
+			if e.When != "" && e.When != "error" {
+				return errors.New("an action edge must be a plain path or an on-error branch")
+			}
+		case e.When != "":
+			return errors.New("only conditions and actions can have branch labels")
 		}
 		adj[e.Source] = append(adj[e.Source], e.Target)
 	}
@@ -1075,6 +1177,77 @@ func BuildInboundURL(provider models.IntegrationProvider, secret string) string 
 	return ""
 }
 
+// ErrInboundAutomationNotFound means no enabled inbound-webhook automation owns
+// the given token (unknown, or the automation's trigger is no longer inbound).
+var ErrInboundAutomationNotFound = errors.New("inbound automation not found")
+
+// generateAutomationInboundToken returns the high-entropy secret embedded in an
+// automation's inbound-webhook URL (192 bits of randomness, prefixed).
+func generateAutomationInboundToken() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return "wmauto_" + hex.EncodeToString(buf), nil
+}
+
+// BuildInboundAutomationURL is the public POST path that fires an inbound-webhook
+// automation. Empty token (non-inbound automation) yields an empty URL.
+func BuildInboundAutomationURL(token string) string {
+	if token == "" {
+		return ""
+	}
+	return "/api/v1/integrations/inbound/automation/" + token
+}
+
+// parseInboundPayload turns an inbound webhook body into the event data map. A
+// JSON object is used as-is (minus internal underscore keys a caller must not
+// set); anything else is exposed verbatim under "body" so a template/condition
+// can still read it.
+func parseInboundPayload(body []byte) map[string]any {
+	if len(body) > 0 {
+		var m map[string]any
+		if json.Unmarshal(body, &m) == nil && m != nil {
+			for k := range m {
+				if strings.HasPrefix(k, "_") {
+					delete(m, k)
+				}
+			}
+			return m
+		}
+	}
+	out := map[string]any{}
+	if len(body) > 0 {
+		out["body"] = string(body)
+	}
+	return out
+}
+
+// TriggerInboundAutomation resolves the automation an inbound-webhook token
+// points at and runs its graph (in the background) with the POSTed body as the
+// event payload. Unknown/non-inbound token -> ErrInboundAutomationNotFound; a
+// disabled automation is accepted as a no-op (it must not leak that it exists).
+func (s *service) TriggerInboundAutomation(ctx context.Context, token string, body []byte) error {
+	a, err := s.repo.GetAutomationByInboundToken(ctx, strings.TrimSpace(token))
+	if err != nil {
+		return err
+	}
+	if a == nil || !isInboundTrigger(a.TriggerEvent) {
+		return ErrInboundAutomationNotFound
+	}
+	if !a.Enabled {
+		return nil
+	}
+	data := parseInboundPayload(body)
+	data["trigger"] = "inbound"
+	go func(au models.Automation, d map[string]any) {
+		bg, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s.executeAutomationGraph(bg, au, string(models.WebhookEventInboundWebhook), d)
+	}(*a, data)
+	return nil
+}
+
 // buildDisplayFields extracts the public, non-secret bits of the config that
 // the dashboard surfaces next to a connection card.
 func buildDisplayFields(provider models.IntegrationProvider, config map[string]any) map[string]any {
@@ -1104,4 +1277,59 @@ func buildDisplayFields(provider models.IntegrationProvider, config map[string]a
 		// Outbound-via-Warmbly-API providers: minimal display fields.
 	}
 	return df
+}
+
+// slackChannelFor resolves the channel to post org notifications to. The
+// OAuth connect flow doesn't capture a default channel, so we look (in order)
+// at the connection's own config, then reuse whatever channel the org already
+// configured for a Slack automation/event subscription. Empty when none.
+func (s *service) slackChannelFor(ctx context.Context, orgID uuid.UUID, c models.IntegrationConnection) string {
+	if ch := configString(c.DisplayFields, "channel"); ch != "" {
+		return ch
+	}
+	if ch := configString(c.ConfigCapabilities, "channel"); ch != "" {
+		return ch
+	}
+	subs, err := s.repo.ListEventSubscriptions(ctx, orgID, c.ID)
+	if err != nil {
+		return ""
+	}
+	for _, sub := range subs {
+		if sub.Action == models.IntegrationActionSlackNotify {
+			if ch := configString(sub.Config, "channel"); ch != "" {
+				return ch
+			}
+		}
+	}
+	return ""
+}
+
+// NotifySlack posts a one-off message to the org's connected Slack workspace,
+// on the default channel chosen at connect time. Used by the notification
+// system's Slack delivery channel (distinct from event-subscription actions).
+// Best-effort: returns nil when no healthy Slack connection exists.
+func (s *service) NotifySlack(ctx context.Context, orgID uuid.UUID, title, body string) error {
+	conns, err := s.repo.ListConnections(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	for _, c := range conns {
+		if c.Provider != models.IntegrationSlack || c.Status != models.IntegrationStatusConnected {
+			continue
+		}
+		channel := s.slackChannelFor(ctx, orgID, c)
+		if channel == "" {
+			continue
+		}
+		sec, serr := s.repo.GetConnectionSecrets(ctx, c.ID)
+		if serr != nil {
+			continue
+		}
+		token, terr := s.accessTokenFor(ctx, sec)
+		if terr != nil {
+			continue
+		}
+		return slackPostMessage(ctx, token, channel, eventMessage{Title: title, Detail: body})
+	}
+	return nil
 }

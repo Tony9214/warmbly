@@ -15,7 +15,7 @@ import (
 // empty and the service returns up to ThreadLimitMax messages.
 func (s *uniboxService) GetByThread(
 	ctx context.Context,
-	userID, emailID uuid.UUID,
+	orgID, emailID uuid.UUID,
 	threadID, limit, cursor string,
 ) (*models.MailSearchResult, *errx.Error) {
 	l := DefaultThreadLimit
@@ -30,7 +30,7 @@ func (s *uniboxService) GetByThread(
 		l = parsed
 	}
 
-	resp, err := s.uniboxRepository.GetByThread(ctx, userID, emailID, threadID, l, cursor)
+	resp, err := s.uniboxRepository.GetByThread(ctx, orgID, emailID, threadID, l, cursor)
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.InternalError()

@@ -8,8 +8,8 @@ A Warmbly workspace can be shared with your whole team. You invite people by ema
 
 Everything here lives under **Settings**: the roster and invitations are on the **Members** page, and the roles and permission matrix are on the **Roles & access** page.
 
-<Callout type="info" title="Owner-only controls">
-Inviting members, changing someone's role, and removing members are reserved for the workspace **owner**. If you are not the owner, you can still see the Members page, but the invite box, the role pickers, and the remove buttons will not appear. The Roles & access page is owner-only and shows a "permission denied" notice to everyone else.
+<Callout type="info" title="Who can manage the team">
+Inviting members, changing roles, removing members, and managing roles all require the **Manage team** permission (the owner and the seeded Admin role have it; any custom role can carry it). Members without it see the roster read-only, and the Roles & access page shows a permission notice instead.
 </Callout>
 
 ## Inviting members
@@ -58,20 +58,20 @@ A few rules apply:
 
 ## Roles and the permission matrix
 
-Warmbly ships with a set of built-in roles. Each role is a fixed bundle of permissions. You pick the closest role for each person; custom permission bundles are not available yet.
+Roles in Warmbly are workspace data. Every new workspace starts with three seeded roles (Admin, Manager, and Viewer), and all of them are ordinary roles: rename them, recolor them, change their permissions, delete them, or add your own. Owner is not a role but a membership status; there is exactly one owner per workspace.
 
 The **Roles & access** page shows a card for each role with a short description and a live count of how many people currently hold it, followed by the full **permission matrix**.
 
-### The built-in roles
+### The seeded roles
 
-| Role | What it can do |
+| Role | What it starts with |
 | --- | --- |
-| **Owner** | Full control of the workspace. There is exactly one owner. Only the owner can transfer ownership. |
-| **Admin** | Everything the owner can do except transfer ownership. |
+| **Owner** (status, not a role) | Full control of the workspace, including ownership transfer. |
+| **Admin** | Everything except transferring ownership. |
 | **Manager** | The day-to-day operator. Can run campaigns, manage contacts and mailboxes, and use integrations, but has no team, billing, settings, or API-key access. |
 | **Viewer** | Read-only. Can see campaigns, contacts, and reports but cannot change anything. |
 
-There is also a legacy **Member** role kept only for backwards compatibility. It behaves the same as **Manager**. New members are not assigned Member; pick Manager instead.
+These are starting points, not fixed tiers. Any of them can be edited or deleted once the workspace exists.
 
 ### What each permission means
 
@@ -136,9 +136,24 @@ This is how the built-in roles map onto those capabilities. A check means the ro
 
 In short: **Admin** is the owner minus ownership transfer, **Manager** is everything operational without team, settings, billing, or API keys, and **Viewer** is read-only.
 
-<Callout type="info" title="Custom roles">
-Custom roles with bespoke permission bundles are planned but not available yet. For now the built-in roles cover the common patterns, so choose the one closest to what the person needs.
-</Callout>
+## Custom roles
+
+Anyone with team management access can create additional roles on the **Roles & access** settings page:
+
+1. Click **New role** and give it a name (up to 50 characters), a color for the role pickers, and an optional description. Only the name "owner" is reserved.
+2. Pick a template under **Start from** to copy a permission bundle as a starting point, then toggle individual permissions on or off.
+3. Save, then assign the role from the member roster's role picker or directly in the invite flow.
+
+A few rules keep custom roles safe:
+
+- **Editing a role updates everyone assigned to it, immediately.** The editor shows how many members will be affected before you save.
+- **You can only grant permissions you hold yourself.** A manager with team access cannot mint a role stronger than their own and assign it to someone.
+- **Ownership transfer can never be part of a custom role.** It stays exclusive to the owner.
+- **Members can hold several roles at once.** Their effective access is the combined (union) permissions of every role assigned to them.
+- **Deleting a role is always allowed.** It is removed from anyone holding it; their remaining roles still apply. A member left with no roles keeps their membership but has no permissions until reassigned.
+- Each workspace can have up to 25 roles in total (including the seeded ones).
+
+Custom roles apply everywhere permissions do: API access checks, dashboard visibility, and which realtime events a member's live dashboard receives.
 
 ## Removing members
 

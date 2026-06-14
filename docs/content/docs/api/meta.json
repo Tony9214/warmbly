@@ -6,8 +6,12 @@
   "pages": [
     "index",
     "authentication",
+    "oauth",
     "permissions",
     "endpoints",
+    "openapi",
+    "reference",
+    "realtime",
     "error-codes"
   ]
 }

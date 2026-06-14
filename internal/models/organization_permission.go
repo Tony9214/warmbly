@@ -1,6 +1,8 @@
 package models
 
 import (
+	"strings"
+
 	"database/sql/driver"
 	"fmt"
 )
@@ -97,6 +99,35 @@ var RolePermissions = map[Role]OrganizationPermission{
 		PermViewCampaigns | PermViewContacts | PermAccessUnibox |
 		PermUseIntegrations,
 	RoleViewer: PermViewCampaigns | PermViewContacts | PermViewAnalytics,
+}
+
+// IsReservedRoleName reports whether a role name collides with the owner
+// status (case-insensitive). Owner is a membership flag, never a role row.
+func IsReservedRoleName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), string(RoleOwner))
+}
+
+// SeedRole is one of the default roles minted for every new workspace.
+// They are ordinary rows afterwards: renameable, editable, deletable.
+type SeedRole struct {
+	Name        string
+	Description string
+	Color       string
+	Permissions OrganizationPermission
+}
+
+// DefaultSeedRoles returns the roles seeded at organization creation,
+// mirroring migration 000043 for orgs created after it ran.
+func DefaultSeedRoles() []SeedRole {
+	allDefined := PermManageTeam | PermManageBilling | PermManageCampaigns | PermManageContacts |
+		PermManageEmails | PermViewAnalytics | PermSendCampaigns | PermAccessUnibox |
+		PermManageSequences | PermManageSettings | PermViewCampaigns | PermViewContacts |
+		PermManageAPIKeys | PermUseIntegrations
+	return []SeedRole{
+		{Name: "Admin", Description: "Everything except transferring ownership.", Color: "#8b5cf6", Permissions: allDefined},
+		{Name: "Manager", Description: "Runs campaigns, contacts, mailboxes, and integrations. No team, billing, or settings access.", Color: "#10b981", Permissions: GetRolePermissions(RoleManager)},
+		{Name: "Viewer", Description: "Read-only access to campaigns, contacts, and reports.", Color: "#f59e0b", Permissions: GetRolePermissions(RoleViewer)},
+	}
 }
 
 // GetRolePermissions returns the default permissions for a role

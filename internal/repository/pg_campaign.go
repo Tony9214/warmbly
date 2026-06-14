@@ -16,6 +16,7 @@ import (
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/db"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
@@ -44,6 +45,10 @@ type CampaignRepository interface {
 	StopCampaign(ctx context.Context, campaignID uuid.UUID) error
 	ValidateCampaignReady(ctx context.Context, campaignID uuid.UUID) error
 	GetPendingCampaignTasks(ctx context.Context, campaignID uuid.UUID) ([]Task, error)
+	// ListCampaignScheduleCandidates returns active campaigns that have NO pending
+	// task — their self-perpetuating chain died and needs re-seeding. Used by the
+	// campaign reconciler.
+	ListCampaignScheduleCandidates(ctx context.Context, limit int) ([]uuid.UUID, error)
 	CountActiveForOrganization(ctx context.Context, orgID uuid.UUID) (int, error)
 	AccountHasActiveCampaign(ctx context.Context, accountID uuid.UUID) (bool, error)
 	// CountActiveCampaignsForAccount returns how many active campaigns send
@@ -563,7 +568,7 @@ func (r *campaignRepository) Create(ctx context.Context, userID string, orgID *u
 	return &campaign, nil
 }
 
-func (r *campaignRepository) Get(ctx context.Context, userID, id string) (*models.Campaign, error) {
+func (r *campaignRepository) Get(ctx context.Context, orgID, id string) (*models.Campaign, error) {
 	var campaign models.Campaign
 
 	query := fmt.Sprintf(
@@ -571,13 +576,13 @@ func (r *campaignRepository) Get(ctx context.Context, userID, id string) (*model
 		 FROM campaigns c
 		 LEFT JOIN campaign_email_tags cet ON cet.campaign_id = c.id
 		 LEFT JOIN campaign_folders cec ON cec.campaign_id = c.id
-		 WHERE c.user_id = $1 AND c.id = $2
+		 WHERE c.organization_id = $1 AND c.id = $2
 		 GROUP BY c.id`,
 		CAMPAIGN_SELECT_FULL,
 	)
 
 	params := []any{
-		userID,
+		orgID,
 		id,
 	}
 
@@ -598,7 +603,7 @@ func (r *campaignRepository) Get(ctx context.Context, userID, id string) (*model
 	return &campaign, nil
 }
 
-func (r *campaignRepository) Search(ctx context.Context, userID, query string, cursor, folder *string, limit int32) (*models.CampaignsResult, error) {
+func (r *campaignRepository) Search(ctx context.Context, orgID, query string, cursor, folder *string, limit int32) (*models.CampaignsResult, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		db.CaptureError(err, "", nil, "begin")
@@ -612,7 +617,7 @@ func (r *campaignRepository) Search(ctx context.Context, userID, query string, c
 		FROM campaigns c
 		LEFT JOIN campaign_email_tags cet ON cet.campaign_id = c.id
 		LEFT JOIN campaign_folders cec ON cec.campaign_id = c.id
-		WHERE user_id = $1
+		WHERE c.organization_id = $1
 		 AND ($2::uuid IS NULL OR (c.created_at, c.id) < (
 		  SELECT created_at, id
 		  FROM campaigns
@@ -634,7 +639,7 @@ func (r *campaignRepository) Search(ctx context.Context, userID, query string, c
 			SELECT COUNT(DISTINCT c.id)
 			FROM campaigns c
 			LEFT JOIN campaign_folders cec ON cec.campaign_id = c.id
-			WHERE user_id = $1
+			WHERE c.organization_id = $1
 			  AND ($2 = '' OR c.name ILIKE '%%' || $2 || '%%')
 			  AND ($3::uuid IS NULL OR EXISTS (
 				SELECT 1 FROM campaign_folders cf WHERE cf.campaign_id = c.id AND cf.folder_id = $3
@@ -643,7 +648,7 @@ func (r *campaignRepository) Search(ctx context.Context, userID, query string, c
 	}
 
 	params := []any{
-		userID,
+		orgID,
 		cursor,
 		query,
 		folder,
@@ -675,22 +680,22 @@ func (r *campaignRepository) Search(ctx context.Context, userID, query string, c
 	}
 
 	var total *int64
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	var hasMore bool
 	if len(campaigns) > int(limit) {
 		hasMore = true
-		nextCursor = &campaigns[limit].ID
+		nextCursor = paging.EncodeUUID(campaigns[limit].ID)
 		campaigns = campaigns[:limit]
 	}
 
 	if cursor == nil && countSQL != "" {
 		params := []any{
-			userID,
+			orgID,
 			query,
 			folder,
 		}
 		var tmp int64
-		err = tx.QueryRow(ctx, countSQL, userID, query, folder).Scan(&tmp)
+		err = tx.QueryRow(ctx, countSQL, orgID, query, folder).Scan(&tmp)
 		if err != nil {
 			db.CaptureError(err, countSQL, params, "queryrow")
 			return nil, err
@@ -1335,6 +1340,40 @@ func (r *campaignRepository) GetPendingCampaignTasks(ctx context.Context, campai
 	}
 
 	return tasks, rows.Err()
+}
+
+// ListCampaignScheduleCandidates returns active campaigns with no pending task,
+// i.e. chains that stalled (a swallowed enqueue or a crash between ticks left no
+// successor). The reconciler re-seeds each. createCampaignTask's advisory lock
+// makes a concurrent real-tick enqueue safe (one wins, the other no-ops).
+func (r *campaignRepository) ListCampaignScheduleCandidates(ctx context.Context, limit int) ([]uuid.UUID, error) {
+	query := `
+		SELECT c.id
+		FROM campaigns c
+		WHERE c.status = 'active'
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM campaign_tasks ct
+		    JOIN tasks t ON t.id = ct.task_id
+		    WHERE ct.campaign_id = c.id AND t.status = 'pending'
+		  )
+		LIMIT $1`
+
+	rows, err := r.DB.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *campaignRepository) CountActiveForOrganization(ctx context.Context, orgID uuid.UUID) (int, error) {

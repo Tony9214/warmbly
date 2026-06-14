@@ -2,10 +2,10 @@ import type CRMTask from "@/lib/api/models/app/crm/CRMTask";
 
 export interface TasksSearchPagination {
     total: number;
-    limit: number;
-    offset: number;
+    // Opaque cursor for the next page (offset-encoded under the hood), or null on
+    // the last page. Same shape as every other list.
+    next_cursor?: string | null;
     has_more: boolean;
-    next_offset?: number | null;
 }
 
 export default interface TasksSearchResult {

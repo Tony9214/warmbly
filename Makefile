@@ -440,6 +440,8 @@ tracking:
 	KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
 	KAFKA_TRACKING_TOPIC=tracking-events \
 	SCHEMA_REGISTRY_URL=http://localhost:8081 \
+	BACKEND_INTERNAL_URL=http://localhost:8080 \
+	INTERNAL_API_TOKEN=local-dev-internal-token \
 	cargo run
 
 # Websocket fanout service (Elixir/Phoenix) on :4000. MIX_ENV=dev skips
@@ -448,6 +450,7 @@ tracking:
 realtime:
 	cd realtime && \
 	export MIX_ENV=dev \
+	       JWT_SECRET=local-dev-auth-secret-minimum-32-characters-long \
 	       PORT=4000 \
 	       PHX_HOST=$(WEB_HOST) \
 	       DATABASE_HOST=localhost \

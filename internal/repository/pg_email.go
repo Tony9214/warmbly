@@ -16,6 +16,7 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/pkg/encrypt"
 	"github.com/warmbly/warmbly/internal/utils"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
@@ -403,7 +404,7 @@ func (r *emailRepository) NewSMTPIMAPAccount(ctx context.Context, userID string,
 	}, nil
 }
 
-func (r *emailRepository) Search(ctx context.Context, userID, search string, cursor, tag *string, limit int32, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error) {
+func (r *emailRepository) Search(ctx context.Context, orgID, search string, cursor, tag *string, limit int32, allowedAccountIDs []uuid.UUID) (*models.EmailsResult, *errx.Error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		db.CaptureError(err, "", nil, "begin")
@@ -427,7 +428,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 		 ) AS tags
 		FROM email_accounts ea
 		LEFT JOIN email_tags eat ON eat.email_id = ea.id
-		WHERE ea.user_id = $1
+		WHERE ea.organization_id = $1
 		 AND ($2::uuid IS NULL OR (ea.created_at, ea.id) < (
 		  SELECT created_at, id
 		  FROM email_accounts
@@ -448,7 +449,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 		allowedAccountParam = allowedAccountIDs
 	}
 	params := []any{
-		userID,
+		orgID,
 		cursor,
 		"%" + search + "%",
 		tag,
@@ -481,12 +482,12 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 	}
 
 	var total *int64
-	var nextCursor *uuid.UUID
+	var nextCursor *string
 	var hasMore bool
 
 	if len(inboxes) > int(limit) {
 		hasMore = true
-		nextCursor = &inboxes[limit].ID
+		nextCursor = paging.EncodeUUID(inboxes[limit].ID)
 		inboxes = inboxes[:limit]
 	}
 
@@ -495,7 +496,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 			SELECT COUNT(DISTINCT ea.id)
 			FROM email_accounts ea
 			LEFT JOIN email_tags et ON et.email_id = ea.id
-			WHERE ea.user_id = $1
+			WHERE ea.organization_id = $1
 			  AND (ea.name ILIKE $2 OR ea.email ILIKE $2)
 			  AND ($3::uuid IS NULL OR EXISTS (
 				SELECT 1 FROM email_tags cf WHERE cf.email_id = ea.id AND cf.tag_id = $3
@@ -504,7 +505,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 		`
 
 		params = []any{
-			userID,
+			orgID,
 			"%" + search + "%",
 			tag,
 			allowedAccountParam,
@@ -533,7 +534,7 @@ func (r *emailRepository) Search(ctx context.Context, userID, search string, cur
 	}, nil
 }
 
-func (r *emailRepository) Get(ctx context.Context, userID, emailAccountID string) (*models.Email, *errx.Error) {
+func (r *emailRepository) Get(ctx context.Context, orgID, emailAccountID string) (*models.Email, *errx.Error) {
 	query := `
 		SELECT
 		ea.id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
@@ -544,12 +545,12 @@ func (r *emailRepository) Get(ctx context.Context, userID, emailAccountID string
 		 COALESCE(array_agg(eat.tag_id) FILTER (WHERE eat.tag_id IS NOT NULL), '{}') AS tags
 		FROM email_accounts ea
 		LEFT JOIN email_tags eat ON eat.email_id = ea.id
-		WHERE ea.user_id = $1 AND ea.id = $2
+		WHERE ea.organization_id = $1 AND ea.id = $2
 		GROUP BY ea.id
 	`
 
 	params := []any{
-		userID,
+		orgID,
 		emailAccountID,
 	}
 

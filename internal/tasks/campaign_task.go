@@ -117,6 +117,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 		}
 		s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
 			BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+			OrgID:          campaignOrgID(campaign),
 			CampaignID:     campaign.ID.String(),
 			TaskID:         taskID.String(),
 			Status:         "active",
@@ -193,13 +194,20 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 			executionStatus = "completed"
 			return nil
 		}
-		if errors.Is(err, scheduler.ErrCampaignCompleted) {
+		// Terminal: all emails sent, OR the campaign passed its end date. Both end
+		// the campaign at the "completed" status (the status enum has no separate
+		// "ended"); the reason differs in the activity log.
+		if errors.Is(err, scheduler.ErrCampaignCompleted) || errors.Is(err, scheduler.ErrCampaignEnded) {
+			reason := "Campaign completed: all emails sent"
+			if errors.Is(err, scheduler.ErrCampaignEnded) {
+				reason = "Campaign ended: reached its end date"
+			}
 			s.campaignRepo.UpdateStatus(ctx, campaign.ID, "completed")
 			if s.campaignLogRepo != nil {
 				s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
 					CampaignID: campaign.ID,
 					EventType:  "completed",
-					Message:    "Campaign completed: all emails sent",
+					Message:    reason,
 				})
 			}
 			// Broadcast live so the dashboard (and the sidebar campaign counters)
@@ -210,15 +218,45 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 						EventType: pubsub.EventCampaignCompleted,
 						UserID:    campaign.UserID,
 					},
+					OrgID:      campaignOrgID(campaign),
 					CampaignID: campaign.ID.String(),
 					Name:       campaign.Name,
 					Status:     "completed",
 				})
 			}
+			s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
+			executionStatus = "completed"
+			return nil
 		}
-		s.taskRepo.UpdateTaskStatus(ctx, taskID, "completed")
-		executionStatus = "completed"
-		return nil
+		// Benign: the campaign was paused/deleted between ticks. Stop this chain
+		// cleanly; a resume re-seeds it.
+		if errors.Is(err, scheduler.ErrCampaignNotActive) {
+			s.taskRepo.UpdateTaskStatus(ctx, taskID, "cancelled")
+			executionStatus = "completed"
+			return nil
+		}
+		// Transient / unknown error (a DB blip bubbled up from the scheduler). Do
+		// NOT silently mark the task completed — that strands the campaign with no
+		// successor. Record the failure for dashboard review, reset the task to
+		// pending, and return 5xx so Cloud Tasks retries (with backoff). The
+		// campaign reconciler is the backstop if retries are ever exhausted.
+		sentry.CaptureException(err)
+		s.recordSchedulerFailure(ctx, campaign.ID, "scheduler_error", "Could not compute the next step; retrying", err)
+		// Pulse the dashboard so the failure appears live for the whole team. A
+		// CAMPAIGN_UPDATED with empty status invalidates the campaign logs query
+		// without flipping the campaign's status.
+		if s.streamingPublisher != nil {
+			s.streamingPublisher.PublishCampaignEvent(ctx, &pubsub.CampaignEvent{
+				BaseEvent:  pubsub.BaseEvent{EventType: pubsub.EventCampaignUpdated, UserID: campaign.UserID},
+				OrgID:      campaignOrgID(campaign),
+				CampaignID: campaign.ID.String(),
+			})
+		}
+		if rerr := s.taskRepo.UpdateTaskStatus(ctx, taskID, "pending"); rerr != nil {
+			sentry.CaptureException(rerr)
+		}
+		executionStatus = "failed"
+		return errx.InternalError()
 	}
 
 	// STEP 7: Load contact and sequence
@@ -425,7 +463,16 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 	}
 
 	if campaign.LinkTracking && bodyHTML != "" {
-		bodyHTML = WrapLinksForTracking(bodyHTML, taskID, trackingDomain)
+		wrapped, links := WrapLinksForTracking(bodyHTML, taskID, campaign.ID, trackingDomain)
+		if len(links) == 0 {
+			bodyHTML = wrapped
+		} else if err := s.trackedLinkRepo.CreateBatch(ctx, links); err != nil {
+			// Tracking is a nicety: ship the original working links rather
+			// than tickets that would 404 at the tracking service.
+			log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", taskID.String()).Msg("Failed to store tracked links; sending untracked")
+		} else {
+			bodyHTML = wrapped
+		}
 	}
 
 	// STEP 12: Add signature
@@ -518,6 +565,7 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 			}
 			s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
 				BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+				OrgID:          campaignOrgID(campaign),
 				CampaignID:     campaign.ID.String(),
 				TaskID:         taskID.String(),
 				Status:         "failed",
@@ -622,8 +670,11 @@ func (s *tasksService) HandleCampaignTask(task *proto.ProcessTask) *errx.Error {
 				break
 			}
 		}
-		s.streamingPublisher.PublishTaskProgress(ctx, &pubsub.TaskProgressEvent{
+		// EMAIL_SENT (org-scoped): the whole team sees the send + which
+		// lead/step fired, live in the campaign view.
+		s.streamingPublisher.PublishEmailSent(ctx, &pubsub.TaskProgressEvent{
 			BaseEvent:      pubsub.BaseEvent{UserID: campaign.UserID},
+			OrgID:          campaignOrgID(campaign),
 			CampaignID:     campaign.ID.String(),
 			TaskID:         taskID.String(),
 			Status:         "completed",
@@ -701,28 +752,24 @@ func (s *tasksService) executeActionNode(ctx context.Context, campaign *models.C
 			return xerr
 		}
 		return nil
+	case "label_email":
+		// Apply unibox labels to the contact's most recent conversation. A no-op
+		// when the contact has no thread yet (returns "" thread, nil error).
+		if len(cfg.LabelIDs) == 0 {
+			return nil
+		}
+		owner, perr := uuid.Parse(campaign.UserID)
+		if perr != nil {
+			return nil
+		}
+		if _, xerr := s.advanced.LabelLatestThreadForContact(ctx, owner, contact.Email, cfg.LabelIDs); xerr != nil {
+			return xerr
+		}
+		return nil
 	case "unsubscribe":
 		if xerr := s.advanced.Unsubscribe(ctx, campaign.ID, contact.ID); xerr != nil {
 			return xerr
 		}
-		return nil
-	case "notify":
-		if s.advanced == nil || campaign.OrganizationID == nil {
-			return nil
-		}
-		event := models.WebhookEventCampaignAction
-		if cfg.NotifyEvent != "" {
-			event = models.WebhookEventType(cfg.NotifyEvent)
-		}
-		data := map[string]any{
-			"campaign_id":   campaign.ID.String(),
-			"contact_id":    contact.ID.String(),
-			"contact_email": contact.Email,
-		}
-		for k, v := range cfg.NotifyData {
-			data[k] = v
-		}
-		s.advanced.EmitCampaignEvent(ctx, *campaign.OrganizationID, event, data)
 		return nil
 	case "create_task":
 		if s.advanced == nil || campaign.OrganizationID == nil {
@@ -860,6 +907,17 @@ func (s *tasksService) executeActionNode(ctx context.Context, campaign *models.C
 			data[key] = RenderTemplate(kv.Value, *contact)
 		}
 		return s.automationRunner.RunAutomationByID(ctx, *campaign.OrganizationID, *cfg.AutomationID, data)
+	case "fire_event":
+		if s.advanced == nil || campaign.OrganizationID == nil {
+			return nil
+		}
+		s.advanced.FireCampaignEvent(ctx, *campaign.OrganizationID, campaign.ID.String(), cfg.EventName, cfg.EventFields, contact)
+		return nil
+	case "http_request":
+		if s.advanced == nil || campaign.OrganizationID == nil {
+			return nil
+		}
+		return s.advanced.RunCampaignHTTPRequest(ctx, *campaign.OrganizationID, cfg, contact)
 	default:
 		return nil
 	}
@@ -924,4 +982,38 @@ func (s *tasksService) publishEmailSentEvent(
 	if err := s.eventsPublisher.PublishEmailSent(ctx, task, account, campaign, contact, sequence); err != nil {
 		log.Warn().Err(err).Str("campaign_id", campaign.ID.String()).Str("task_id", task.ID.String()).Msg("Failed to publish email sent event")
 	}
+}
+
+// campaignOrgID returns the campaign's organization id for org-scoped
+// realtime events, or "" for legacy orgless rows.
+func campaignOrgID(campaign *Campaign) string {
+	if campaign == nil || campaign.OrganizationID == nil {
+		return ""
+	}
+	return campaign.OrganizationID.String()
+}
+
+// recordSchedulerFailure writes a campaign-scoped, reviewable failure to the
+// activity log so a stalled or retrying step is VISIBLE in the dashboard
+// instead of failing silently. metadata.level="error" tints it red in the
+// campaign detail (TaskPreview) and the log feed is already realtime-invalidated
+// for every teammate. Best-effort and nil-safe — recording a failure must never
+// itself break the tick.
+func (s *tasksService) recordSchedulerFailure(ctx context.Context, campaignID uuid.UUID, code, message string, cause error) {
+	if s.campaignLogRepo == nil {
+		return
+	}
+	meta := map[string]interface{}{
+		"level": "error",
+		"code":  code,
+	}
+	if cause != nil {
+		meta["error"] = cause.Error()
+	}
+	_ = s.campaignLogRepo.CreateLog(ctx, &repository.CampaignLogEntry{
+		CampaignID: campaignID,
+		EventType:  "scheduler_failed",
+		Message:    message,
+		Metadata:   meta,
+	})
 }

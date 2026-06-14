@@ -147,8 +147,8 @@ type ContactSentEmail struct {
 	// Campaign + sequence context
 	CampaignID   *uuid.UUID `json:"campaign_id,omitempty"`
 	CampaignName *string    `json:"campaign_name,omitempty"`
-	SequenceID   *uuid.UUID `json:"sequence_id,omitempty"`
-	SequenceName *string    `json:"sequence_name,omitempty"`
+	SequenceID   *uuid.UUID `json:"step_id,omitempty"`
+	SequenceName *string    `json:"step_name,omitempty"`
 
 	// Engagement (from campaign_contact_progress, may be nil).
 	OpenedAt  *time.Time `json:"opened_at,omitempty"`
@@ -201,8 +201,8 @@ type ContactTimelineEvent struct {
 	// and out-of-campaign reply intents don't always have one.
 	CampaignID   *uuid.UUID `json:"campaign_id,omitempty"`
 	CampaignName *string    `json:"campaign_name,omitempty"`
-	SequenceID   *uuid.UUID `json:"sequence_id,omitempty"`
-	SequenceName *string    `json:"sequence_name,omitempty"`
+	SequenceID   *uuid.UUID `json:"step_id,omitempty"`
+	SequenceName *string    `json:"step_name,omitempty"`
 
 	// Task linkage for engagement events.
 	TaskID  *uuid.UUID `json:"task_id,omitempty"`
@@ -285,7 +285,6 @@ type SearchContacts struct {
 	UpdatedBefore      *time.Time             `json:"updated_before"`       // Contacts updated before this date
 	SortBy             string                 `json:"sort_by"`              // e.g., "first_name ASC", "campaign_count DESC"
 	Reverse            bool                   `json:"reverse"`              // ASC or DESC
-	Offset             int                    `json:"offset"`               // Pagination
 }
 
 type BulkEditContactsFieldType string

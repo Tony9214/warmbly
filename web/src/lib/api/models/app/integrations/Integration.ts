@@ -240,10 +240,10 @@ export interface MeetingsPage {
     data: MeetingBooking[];
     pagination: {
         total: number;
-        limit: number;
-        offset: number;
+        // Opaque cursor for the next page (offset-encoded under the hood), or null
+        // on the last page. Same shape as every other list.
+        next_cursor?: string | null;
         has_more: boolean;
-        next_offset?: number;
     };
 }
 
@@ -305,6 +305,7 @@ export const EVENT_LABELS: Record<string, string> = {
     "meeting.rescheduled": "Meeting rescheduled",
     "meeting.canceled": "Meeting canceled",
     "campaign.action": "Launched by a campaign step",
+    "inbound.webhook": "Inbound webhook",
 };
 
 // Which action a provider performs for an event subscription.

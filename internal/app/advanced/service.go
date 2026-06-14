@@ -73,16 +73,37 @@ type Service interface {
 	// just because a deal hasn't been created yet.
 	MoveContactDealStage(ctx context.Context, orgID, contactID, pipelineID, stageID uuid.UUID) (*models.Deal, *errx.Error)
 
+	// LabelThread additively applies unibox conversation labels (categories owned
+	// by userID) to a thread, for the "label_email" automation action. No-op on
+	// empty input; categories not owned by userID are silently ignored.
+	LabelThread(ctx context.Context, userID uuid.UUID, threadID string, categoryIDs []uuid.UUID) error
+	// LabelLatestThreadForContact finds the contact's most recent conversation in
+	// userID's unibox and labels it, for the "label_email" campaign step action
+	// (which knows the contact but not the thread id). Returns the labeled thread
+	// id, or "" when the contact has no conversation yet.
+	LabelLatestThreadForContact(ctx context.Context, userID uuid.UUID, contactEmail string, categoryIDs []uuid.UUID) (string, error)
+
 	// WireDispatcher attaches the event dispatcher that fans classified
 	// replies + deliverability events out to customer webhooks and third-party
 	// integration actions (Slack ping, CRM upsert).
 	WireDispatcher(d EventDispatcher)
 	// WireNotifier attaches the in-app notification gate (reply/bounce/complaint).
 	WireNotifier(n Notifier)
+	// WireRealtime attaches the org-scoped EMAIL_REPLIED realtime pulse.
+	WireRealtime(p ReplyRealtimePublisher)
+	// WireAutomationRunner attaches the automation runner so instant
+	// "run_automation" action nodes (reply/open/click branches) can launch a flow.
+	WireAutomationRunner(r AutomationRunner)
 
 	// EmitCampaignEvent dispatches a campaign event (e.g. from a sequence
 	// "notify" action node) to customer webhooks and wired integrations.
 	EmitCampaignEvent(ctx context.Context, orgID uuid.UUID, eventType models.WebhookEventType, data map[string]any)
+
+	// FireCampaignEvent publishes a developer-defined "fire event" to the realtime
+	// gateway from a campaign step (subscribers receive it over the API websocket).
+	FireCampaignEvent(ctx context.Context, orgID uuid.UUID, sourceID, name string, fields []models.ActionKV, contact *models.Contact)
+	// RunCampaignHTTPRequest runs a campaign "HTTP request" step (SSRF-guarded).
+	RunCampaignHTTPRequest(ctx context.Context, orgID uuid.UUID, cfg *models.ActionConfig, contact *models.Contact) error
 
 	// FireInstantActions runs the matched INSTANT branch's action chain for a
 	// contact the moment an engagement signal lands for them, instead of waiting
@@ -108,10 +129,13 @@ type service struct {
 	contactRepo          repository.ContactRepository
 	campaignProgressRepo repository.CampaignProgressRepository
 	crmRepo              repository.CRMRepository
+	uniboxRepo           repository.UniboxRepository
 	tasksClient          *gtasks.Client
 	warmupService        warmupapp.Service
 	dispatcher           EventDispatcher
 	notifier             Notifier
+	realtime             ReplyRealtimePublisher
+	automationRunner     AutomationRunner
 }
 
 func NewService(
@@ -122,6 +146,7 @@ func NewService(
 	contactRepo repository.ContactRepository,
 	campaignProgressRepo repository.CampaignProgressRepository,
 	crmRepo repository.CRMRepository,
+	uniboxRepo repository.UniboxRepository,
 	tasksClient *gtasks.Client,
 	warmupService warmupapp.Service,
 ) Service {
@@ -133,6 +158,7 @@ func NewService(
 		contactRepo:          contactRepo,
 		campaignProgressRepo: campaignProgressRepo,
 		crmRepo:              crmRepo,
+		uniboxRepo:           uniboxRepo,
 		tasksClient:          tasksClient,
 		warmupService:        warmupService,
 	}
@@ -448,6 +474,11 @@ func pickVariantWeightedRandom(variants []models.CampaignABVariant) *models.Camp
 	return &variants[len(variants)-1]
 }
 
+// abControlWeight is the implicit weight of a step's original content (the
+// control arm) in a step-scoped A/B split, matching the default variant weight
+// so one variant yields an even 50/50 split with the original.
+const abControlWeight = 100
+
 // pickVariantDeterministic does a weighted draw seeded by a stable string, so
 // the same seed always picks the same variant (used for per-step assignment).
 func pickVariantDeterministic(variants []models.CampaignABVariant, seed string) *models.CampaignABVariant {
@@ -504,9 +535,15 @@ func (s *service) SelectVariant(ctx context.Context, organizationID, campaignID,
 
 	var selected *models.CampaignABVariant
 	if len(stepVariants) > 0 {
-		// Step-scoped: deterministic per (contact, step), so the same contact
-		// always gets the same variant for this step without an assignment row.
-		selected = pickVariantDeterministic(stepVariants, contactID.String()+":"+sequenceID.String())
+		// Step-scoped: the step's own content is the control arm, so contacts are
+		// split across the original PLUS the active variants by weight,
+		// deterministically per (contact, step). The control arm carries the zero
+		// id; if it wins we send the step's original content.
+		pool := append([]models.CampaignABVariant{{Weight: abControlWeight}}, stepVariants...)
+		selected = pickVariantDeterministic(pool, contactID.String()+":"+sequenceID.String())
+		if selected != nil && selected.ID == uuid.Nil {
+			return &models.VariantSelection{Subject: subject, BodyHTML: bodyHTML, BodyPlain: bodyPlain}, nil
+		}
 	} else if len(campaignVariants) > 0 {
 		// Campaign-level (legacy): keep the assignment-based selection so a
 		// contact stays on one variant across the whole campaign.
@@ -788,6 +825,12 @@ func (s *service) ProcessIncomingReply(ctx context.Context, emailAccountID uuid.
 		if !replyclassify.IsAutomated(replyResult.Class) {
 			_ = s.campaignProgressRepo.RecordEmailReplied(ctx, cID, ctID, sID)
 			_ = s.repo.MarkVariantEvent(ctx, cID, ctID, string(models.DeliverabilityEventReply))
+
+			// Live org-wide pulse: the team sees the reply land on the
+			// campaign without a refresh.
+			if s.realtime != nil && account.OrganizationID != nil {
+				s.realtime.PublishEmailReplied(ctx, account.OrganizationID.String(), account.UserID, cID.String(), ctID.String(), sender, sID.String())
+			}
 		}
 
 		// INSTANT reply trigger: if the contact's CURRENT step has a reply_* intent
@@ -871,6 +914,13 @@ func (s *service) ProcessIncomingReply(ctx context.Context, emailAccountID uuid.
 		"snippet":       msg.Snippet,
 		"action_taken":  actionTaken,
 		"trigger":       "campaign_reply",
+		// thread_id lets a "label email" automation action tag the conversation
+		// this reply belongs to. _user_id is the mailbox owner (categories are per
+		// user); the leading underscore keeps it out of outbound customer webhook
+		// bodies (publicEventData strips _-prefixed keys) while staying available
+		// to native actions, which read the raw event data.
+		"thread_id": msg.ThreadID,
+		"_user_id":  account.UserID,
 	}
 	if campaignID != nil {
 		payload["campaign_id"] = campaignID.String()

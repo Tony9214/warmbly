@@ -8,6 +8,7 @@
 "use client";
 
 import React from "react";
+import { createPortal } from "react-dom";
 import {
     ReactFlow,
     Background,
@@ -37,7 +38,9 @@ import {
     CheckCircle2Icon,
     CheckIcon,
     CheckSquareIcon,
+    CopyIcon,
     GitBranchIcon,
+    GlobeIcon,
     HistoryIcon,
     Link2Icon,
     Loader2Icon,
@@ -46,6 +49,7 @@ import {
     PlusIcon,
     SendIcon,
     TagIcon,
+    TagsIcon,
     TriangleAlertIcon,
     Trash2Icon,
     UserMinusIcon,
@@ -55,6 +59,9 @@ import {
     ZapIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import PermissionButton from "@/components/ui/PermissionButton";
+import { usePermission } from "@/hooks/usePermission";
+import type { AppError } from "@/lib/api/client/normalizeError";
 import { Label, NumberInput, TextInput } from "@/components/ui/field";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
 import { useConfirm } from "@/hooks/context/confirm";
@@ -94,8 +101,12 @@ import {
     NATIVE_ACTIONS,
     isNativeAction,
     nativeActionNeeds,
+    triggerCarriesThread,
+    triggerIsInboundWebhook,
+    sampleEventData,
     type TriggerFieldDef,
 } from "@/lib/api/models/app/automations/meta";
+import { API_URL } from "@/lib/information";
 import CategoryPicker from "@/components/app/contacts/CategoryPicker";
 import { ExpressionReference } from "@/components/app/automations/ExpressionReference";
 import DealStagePicker from "@/components/app/crm/DealStagePicker";
@@ -103,6 +114,9 @@ import TaskTypePicker from "@/components/app/crm/TaskTypePicker";
 import AssigneeTeamPicker, { type AssigneeValue } from "@/components/app/crm/AssigneeTeamPicker";
 import { useAutomations } from "@/lib/api/hooks/app/automations/useAutomations";
 import ProviderGlyph from "@/app/app/integrations/_components/ProviderGlyph";
+import ResourceViewers from "@/components/app/presence/ResourceViewers";
+import { usePresenceResource } from "@/hooks/PresenceProvider";
+import { isSelfMutation } from "@/lib/realtime/selfActivity";
 import { cn } from "@/lib/utils";
 
 const NODE_W = 248;
@@ -120,7 +134,7 @@ const uid = () => {
 function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: "TB", nodesep: 140, ranksep: 96, marginx: 32, marginy: 32, edgesep: 80 });
+    g.setGraph({ rankdir: "TB", nodesep: 180, ranksep: 130, marginx: 32, marginy: 32, edgesep: 100 });
     nodes.forEach((n) => {
         let w = NODE_W;
         let h = NODE_H;
@@ -180,7 +194,7 @@ function stackComponents(nodes: Node[], edges: Edge[]): Node[] {
         box.set(k, b);
     }
     const baseX = Math.min(...[...box.values()].map((b) => b.minX));
-    const GAP = 120;
+    const GAP = 130;
     let cursorY = 0;
     const offset = new Map<number, { dx: number; dy: number }>();
     for (const k of [...box.keys()].sort((a, b) => a - b)) {
@@ -295,6 +309,8 @@ function ActionNode({ data, selected }: NodeProps) {
                 <div className="mt-0.5 truncate text-[11.5px] text-slate-500">{d.sub || "Pick an integration…"}</div>
             </div>
             <Handle type="source" id="s" position={Position.Bottom} className="!h-4 !w-4 md:!h-3 md:!w-3 !border-2 !border-white !bg-sky-500" />
+            {/* "On error" branch: drag from here to route a failed action down a recovery path. */}
+            <Handle type="source" id="err" position={Position.Right} title="On error" className="!h-3.5 !w-3.5 md:!h-2.5 md:!w-2.5 !border-2 !border-white !bg-rose-500" />
         </div>
     );
 }
@@ -372,17 +388,18 @@ function ConvergeEdge({
 
 const edgeTypes = { converge: ConvergeEdge };
 
-type When = "" | "true" | "false";
+type When = "" | "true" | "false" | "error";
 
 function handleToWhen(h?: string | null): When {
-    return h === "out" ? "true" : h === "else" ? "false" : "";
+    return h === "out" ? "true" : h === "else" ? "false" : h === "err" ? "error" : "";
 }
 function whenToHandle(w?: string): string {
-    return w === "true" ? "out" : w === "false" ? "else" : "s";
+    return w === "true" ? "out" : w === "false" ? "else" : w === "error" ? "err" : "s";
 }
 
 function styledEdge(id: string, source: string, target: string, sourceHandle: string, when: When): Edge {
-    const color = when === "true" ? "#0ea5e9" : when === "false" ? "#94a3b8" : "#cbd5e1";
+    const color =
+        when === "true" ? "#0ea5e9" : when === "false" ? "#94a3b8" : when === "error" ? "#f43f5e" : "#cbd5e1";
     return {
         id,
         source,
@@ -390,7 +407,7 @@ function styledEdge(id: string, source: string, target: string, sourceHandle: st
         sourceHandle,
         type: "converge",
         data: { when },
-        label: when === "true" ? "yes" : when === "false" ? "no" : undefined,
+        label: when === "true" ? "yes" : when === "false" ? "no" : when === "error" ? "error" : undefined,
         markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
         style: { stroke: color, strokeWidth: 1.5 },
         labelStyle: { fill: color },
@@ -412,6 +429,12 @@ export default function AutomationFlow({
     const update = useUpdateAutomation();
     const test = useTestAutomation();
 
+    // Collaboration: claim this automation while the builder is open so a
+    // teammate sees who's here. Editors show as "editing"; members without the
+    // integration permission (view-only) show as "viewing".
+    const canEditAutomation = usePermission("USE_INTEGRATIONS");
+    usePresenceResource(`automation:${automation.id}`, canEditAutomation ? "editing" : "viewing");
+
     const [name, setName] = React.useState(automation.name);
     const [enabled, setEnabled] = React.useState(automation.enabled);
     const [trigger, setTrigger] = React.useState(automation.trigger_event);
@@ -419,10 +442,19 @@ export default function AutomationFlow({
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const [selectedId, setSelectedId] = React.useState<string | null>("trigger");
+    // Drag a node's dot to empty canvas -> a menu opens at the drop point to pick
+    // what comes next (action / built-in action / condition), mirroring the
+    // campaign steps canvas. `when` carries the source handle (yes/no for a
+    // condition block) so the new edge keeps its branch label.
+    const [dragCreate, setDragCreate] = React.useState<{ x: number; y: number; sourceId: string; when: When } | null>(null);
+    const connectStartRef = React.useRef<string | null>(null);
+    const connectHandleRef = React.useRef<string | null>(null);
     // Right-side insights panel: dry-run trace ("test") or run history ("history").
     const [panel, setPanel] = React.useState<"test" | "history" | null>(null);
     const [testResult, setTestResult] = React.useState<DryRunResponse | null>(null);
     const seeded = React.useRef(false);
+    // A teammate saved while we have unsaved edits — offer to load their version.
+    const [remoteUpdate, setRemoteUpdate] = React.useState<Automation | null>(null);
 
     const confirm = useConfirm();
 
@@ -534,27 +566,92 @@ export default function AutomationFlow({
         [automation.trigger_event, connLabel, providerOf, deleteNode],
     );
 
-    // Seed the canvas once from the saved graph.
+    // Lay a server automation onto the canvas (used on first mount AND when a
+    // teammate's save arrives over realtime). Also resets the dirty baseline.
+    const seedFrom = React.useCallback(
+        (a: Automation) => {
+            setName(a.name);
+            setEnabled(a.enabled);
+            setTrigger(a.trigger_event);
+            let g = a.graph?.nodes?.length
+                ? a.graph
+                : ({ nodes: [{ id: "trigger", type: "trigger", x: 0, y: 0 }], edges: [] } as AutomationGraph);
+            if (!g.nodes.some((n) => n.type === "trigger")) {
+                g = { nodes: [{ id: "trigger", type: "trigger", x: 0, y: 0 }, ...g.nodes], edges: g.edges };
+            }
+            let rfNodes = g.nodes.map(toRFNode);
+            const rfEdges = (g.edges ?? []).map((e: GEdge) =>
+                styledEdge(e.id || uid(), e.source, e.target, whenToHandle(e.when), (e.when ?? "") as When),
+            );
+            const noPositions = g.nodes.length > 1 && g.nodes.every((n) => (n.x ?? 0) === 0 && (n.y ?? 0) === 0);
+            if (noPositions) rfNodes = stackComponents(layoutGraph(rfNodes, rfEdges), rfEdges);
+            setNodes(rfNodes);
+            setEdges(rfEdges);
+            baselineRef.current = flowSig(a.name, a.enabled, a.trigger_event, rfNodes, rfEdges);
+        },
+        [toRFNode, setNodes, setEdges, flowSig],
+    );
+
+    // A monotonic version token for the SERVER automation, used to tell a
+    // teammate's save apart from our own. `updated_at` is bumped on every write
+    // and our own save's response carries the new value, so comparing it is
+    // exact — unlike a deep content signature, which can read back subtly
+    // different (key order, defaults) and make the editor falsely think a
+    // teammate changed it. Falls back to a content hash only if a record somehow
+    // has no timestamp.
+    const serverVersion = React.useCallback((a: Automation) => {
+        // The API client revives ISO date strings into Date objects, so
+        // `updated_at` is a Date here, not a string. Normalize to a primitive:
+        // comparing Date instances with === is by reference, so two reads of the
+        // same timestamp would never match and the editor would flag its OWN
+        // save as a teammate change.
+        const u = a.updated_at as unknown;
+        if (u instanceof Date) return `t:${u.getTime()}`;
+        if (typeof u === "string" && u) return `t:${u}`;
+        return JSON.stringify({ name: (a.name || "").trim(), enabled: a.enabled, trigger: a.trigger_event, graph: a.graph ?? null });
+    }, []);
+    const serverVersionRef = React.useRef("");
+    // Our own save broadcasts an AUDIT_CREATED event that invalidates and
+    // refetches this automation; that refetch can land before the save's HTTP
+    // response updates serverVersionRef, which would mis-read our own write as a
+    // teammate's. While this window is open, treat an incoming change as ours.
+    const selfSaveUntil = React.useRef(0);
+
+    // Seed once on mount.
     React.useEffect(() => {
         if (seeded.current) return;
         seeded.current = true;
-        let g = automation.graph?.nodes?.length
-            ? automation.graph
-            : ({ nodes: [{ id: "trigger", type: "trigger", x: 0, y: 0 }], edges: [] } as AutomationGraph);
-        if (!g.nodes.some((n) => n.type === "trigger")) {
-            g = { nodes: [{ id: "trigger", type: "trigger", x: 0, y: 0 }, ...g.nodes], edges: g.edges };
+        seedFrom(automation);
+        serverVersionRef.current = serverVersion(automation);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Live collaboration: when the automation changes on the server (a teammate
+    // saved), reflect it. If we have no unsaved edits, apply it instantly; if we
+    // do, surface a non-destructive banner so we never clobber local work.
+    React.useEffect(() => {
+        if (!seeded.current) return;
+        const incoming = serverVersion(automation);
+        if (incoming === serverVersionRef.current) return; // unchanged / our own save
+        // Our own change — either an in-editor save whose realtime refetch raced
+        // the HTTP response, OR a change WE made elsewhere (the list "Turn on"
+        // toggle, another tab) that round-tripped back. Either way it is not a
+        // teammate: sync silently, never toast.
+        if (Date.now() < selfSaveUntil.current || isSelfMutation("automation", automation.id)) {
+            serverVersionRef.current = incoming;
+            if (!dirty) seedFrom(automation);
+            return;
         }
-        let rfNodes = g.nodes.map(toRFNode);
-        const rfEdges = (g.edges ?? []).map((e: GEdge) =>
-            styledEdge(e.id || uid(), e.source, e.target, whenToHandle(e.when), (e.when ?? "") as When),
-        );
-        const noPositions = g.nodes.length > 1 && g.nodes.every((n) => (n.x ?? 0) === 0 && (n.y ?? 0) === 0);
-        if (noPositions) rfNodes = stackComponents(layoutGraph(rfNodes, rfEdges), rfEdges);
-        setNodes(rfNodes);
-        setEdges(rfEdges);
-        // Baseline for dirty detection, captured from the exact seeded canvas.
-        baselineRef.current = flowSig(automation.name, automation.enabled, automation.trigger_event, rfNodes, rfEdges);
-    }, [automation.graph, automation.name, automation.enabled, automation.trigger_event, toRFNode, setNodes, setEdges, flowSig]);
+        if (!dirty) {
+            seedFrom(automation);
+            serverVersionRef.current = incoming;
+            toast.success("Updated by a teammate", { id: "automation-remote" });
+        } else {
+            serverVersionRef.current = incoming; // mark seen so we don't re-prompt
+            setRemoteUpdate(automation);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [automation, dirty]);
 
     const updateNodeData = React.useCallback(
         (id: string, patch: Record<string, unknown>) =>
@@ -580,11 +677,12 @@ export default function AutomationFlow({
     );
 
     const addNode = React.useCallback(
-        (type: "action" | "condition", at?: { x: number; y: number }) => {
+        (type: "action" | "condition", at?: { x: number; y: number }, presetAction?: string) => {
             const id = uid();
             const maxY = nodes.reduce((m, n) => Math.max(m, n.position.y), 0);
             const position = at ?? { x: 0, y: maxY + 140 };
             const defCond = defaultConditionForTrigger(trigger);
+            const native = !!presetAction && isNativeAction(presetAction);
             const node: Node =
                 type === "condition"
                     ? {
@@ -597,13 +695,44 @@ export default function AutomationFlow({
                           id,
                           type: "action",
                           position,
-                          data: { action: "", connection_id: undefined, config: {}, title: "Choose an action", sub: "Pick an integration…", provider: "", onDelete: () => deleteNode(id) },
+                          data: presetAction
+                              ? {
+                                    action: presetAction,
+                                    connection_id: undefined,
+                                    config: {},
+                                    title: actionLabel(presetAction),
+                                    sub: native ? "Built-in action" : "Pick an integration…",
+                                    provider: "",
+                                    native,
+                                    onDelete: () => deleteNode(id),
+                                }
+                              : { action: "", connection_id: undefined, config: {}, title: "Choose an action", sub: "Pick an integration…", provider: "", onDelete: () => deleteNode(id) },
                       };
             setNodes((ns) => [...ns, node]);
             setSelectedId(id);
             return id;
         },
         [nodes, setNodes, deleteNode, trigger],
+    );
+
+    // Create a node from the drag-create menu and wire the source's dot to it.
+    // The new node is dropped just below its source so the canvas stays tidy
+    // without a full re-layout. A condition's yes/no edge is one-per-handle, so
+    // re-dragging the same branch replaces it.
+    const createConnectedNode = React.useCallback(
+        (choice: string, sourceId: string, when: When) => {
+            const src = nodes.find((n) => n.id === sourceId);
+            const base = src?.position ?? { x: 0, y: 0 };
+            const at = { x: base.x, y: base.y + 140 };
+            const newId =
+                choice === "condition" ? addNode("condition", at) : addNode("action", at, choice === "action" ? undefined : choice);
+            setEdges((es) => {
+                const filtered =
+                    when === "" ? es : es.filter((e) => !(e.source === sourceId && (e.data as { when?: string })?.when === when));
+                return [...filtered, styledEdge(uid(), sourceId, newId, whenToHandle(when), when)];
+            });
+        },
+        [nodes, addNode, setEdges],
     );
 
     const onReconnect = React.useCallback(
@@ -630,6 +759,16 @@ export default function AutomationFlow({
                     setSelectedId(n.id);
                     return false;
                 }
+                if (need === "label" && !(Array.isArray(d.config?.label_ids) && d.config.label_ids.length > 0)) {
+                    toast.error("A label action needs at least one label");
+                    setSelectedId(n.id);
+                    return false;
+                }
+                if (need === "label" && !triggerCarriesThread(trigger)) {
+                    toast.error("Label email only runs on a “Reply received” automation");
+                    setSelectedId(n.id);
+                    return false;
+                }
                 if (need === "deal" && (!String(d.config?.deal_pipeline_id ?? "").trim() || !String(d.config?.deal_stage_id ?? "").trim())) {
                     toast.error("A deal action needs a pipeline and stage");
                     setSelectedId(n.id);
@@ -637,6 +776,25 @@ export default function AutomationFlow({
                 }
                 if (need === "automation" && !String(d.config?.automation_id ?? "").trim()) {
                     toast.error("A run-automation action needs a target automation");
+                    setSelectedId(n.id);
+                    return false;
+                }
+                if (need === "http" && !String(d.config?.http_url ?? "").trim()) {
+                    toast.error("An HTTP request action needs a URL");
+                    setSelectedId(n.id);
+                    return false;
+                }
+                if (
+                    need === "vars" &&
+                    !(Array.isArray(d.config?.set_vars) &&
+                        (d.config.set_vars as { key?: string }[]).some((v) => String(v?.key ?? "").trim()))
+                ) {
+                    toast.error("A set-variables action needs at least one named variable");
+                    setSelectedId(n.id);
+                    return false;
+                }
+                if (need === "event" && !String(d.config?.event_name ?? "").trim()) {
+                    toast.error("A fire-event action needs an event name");
                     setSelectedId(n.id);
                     return false;
                 }
@@ -677,33 +835,58 @@ export default function AutomationFlow({
                 id: e.id,
                 source: e.source,
                 target: e.target,
-                when: ((e.data as { when?: string })?.when ?? "") as "" | "true" | "false",
+                when: ((e.data as { when?: string })?.when ?? "") as "" | "true" | "false" | "error",
             })),
         };
+        // Open the self-save window NOW so a realtime refetch racing the HTTP
+        // response is recognized as our own write, not a teammate's.
+        selfSaveUntil.current = Date.now() + 8000;
         try {
-            await update.mutateAsync({ id: automation.id, w: { name: name.trim() || "Automation", enabled, trigger_event: trigger, filter, graph } });
+            const res = await update.mutateAsync({ id: automation.id, w: { name: name.trim() || "Automation", enabled, trigger_event: trigger, filter, graph } });
             // Re-baseline so the canvas is no longer "dirty" after a successful save.
             baselineRef.current = flowSig(name, enabled, trigger, nodes, edges);
+            // Mark this as the known server version so our own refetch doesn't
+            // read back as a "teammate changed it" event.
+            if (res?.automation) serverVersionRef.current = serverVersion(res.automation);
+            selfSaveUntil.current = Date.now() + 8000;
+            setRemoteUpdate(null);
             toast.success("Automation saved");
             return true;
-        } catch {
-            toast.error("Could not save automation");
+        } catch (e) {
+            // Show the backend's reason (e.g. "an action node has no integration
+            // selected", a permission denial, or the paid-plan gate) instead of a
+            // generic message, so a failed save is actually actionable.
+            const msg = (e as AppError)?.message;
+            toast.error(msg ? `Could not save automation: ${msg}` : "Could not save automation");
             return false;
         }
     };
 
-    // Test = save the current canvas, then dry-run it (no side effects).
-    const runTest = async () => {
-        if (!(await save())) return;
+    // Dry-run (no side effects) against the given sample event, skipping the
+    // action steps the user toggled off. Persists the canvas first only when there
+    // are unsaved edits, so we test what's on screen.
+    const runTest = async (data?: Record<string, unknown>, skipNodeIds?: string[]) => {
+        if (dirty && !(await save())) return;
         try {
-            const res = await test.mutateAsync({ id: automation.id });
+            const res = await test.mutateAsync({ id: automation.id, data, skipNodeIds });
             setTestResult(res);
-            setSelectedId(null);
             setPanel("test");
         } catch {
             toast.error("Could not run the test");
         }
     };
+
+    // The action steps (in canvas order) the test panel lists with on/off toggles.
+    const actionSteps = React.useMemo(
+        () =>
+            nodes
+                .filter((n) => n.type === "action")
+                .map((n) => {
+                    const a = (n.data as { action?: string }).action;
+                    return { id: n.id, label: a ? actionLabel(String(a)) : "Unconfigured action" };
+                }),
+        [nodes],
+    );
 
     const selectedNode = nodes.find((n) => n.id === selectedId) ?? null;
 
@@ -734,6 +917,7 @@ export default function AutomationFlow({
                     placeholder="Automation name"
                     className="h-7 px-2 w-56 max-w-[30vw] md:max-w-[36vw] rounded-md text-[13px] font-medium text-slate-900 outline-none hover:bg-slate-50 focus:bg-white focus:border-sky-400 focus:ring-2 focus:ring-sky-100 border border-transparent"
                 />
+                <ResourceViewers resource={`automation:${automation.id}`} className="shrink-0" />
                 <button
                     type="button"
                     role="switch"
@@ -778,12 +962,19 @@ export default function AutomationFlow({
                     </button>
                     <button
                         type="button"
-                        onClick={runTest}
-                        disabled={test.isPending || update.isPending}
+                        onClick={() => {
+                            setSelectedId(null);
+                            setPanel((p) => (p === "test" ? null : "test"));
+                        }}
                         aria-label="Test"
-                        className="h-7 px-2.5 rounded-md border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 text-[12px] inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                        className={cn(
+                            "h-7 px-2.5 rounded-md border text-[12px] inline-flex items-center gap-1.5 transition-colors",
+                            panel === "test"
+                                ? "border-sky-300 bg-sky-50 text-sky-700"
+                                : "border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900",
+                        )}
                     >
-                        {test.isPending ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlayIcon className="w-3.5 h-3.5" />}
+                        <PlayIcon className="w-3.5 h-3.5" />
                         <span className="hidden md:inline">Test</span>
                     </button>
                     <button
@@ -795,7 +986,8 @@ export default function AutomationFlow({
                         <WandSparklesIcon className="w-3.5 h-3.5 md:hidden" />
                         <span className="hidden md:inline">Tidy up</span>
                     </button>
-                    <button
+                    <PermissionButton
+                        permission="USE_INTEGRATIONS"
                         type="button"
                         onClick={save}
                         disabled={!dirty || update.isPending}
@@ -816,7 +1008,7 @@ export default function AutomationFlow({
                             <CheckIcon className="w-3.5 h-3.5 text-slate-300" />
                         )}
                         <span className="hidden md:inline">{dirty ? "Save" : "Saved"}</span>
-                    </button>
+                    </PermissionButton>
                 </div>
             </header>
 
@@ -827,13 +1019,25 @@ export default function AutomationFlow({
                     onNodesChange={onNodesChange}
                     onEdgesChange={onEdgesChange}
                     onConnect={onConnect}
-                    onConnectEnd={(_, state) => {
-                        const from = state.fromNode;
-                        if (!from || state.toNode) return;
-                        const pos = from.position ?? { x: 0, y: 0 };
-                        const when = handleToWhen(state.fromHandle?.id);
-                        const newId = addNode("action", { x: pos.x, y: pos.y + 140 });
-                        setEdges((es) => [...es, styledEdge(uid(), from.id, newId, whenToHandle(when), when)]);
+                    onConnectStart={(_, params) => {
+                        connectStartRef.current = params.nodeId ?? null;
+                        connectHandleRef.current = params.handleId ?? null;
+                    }}
+                    onConnectEnd={(event, state) => {
+                        const fromId = state?.fromNode?.id ?? connectStartRef.current;
+                        const fromHandle = state?.fromHandle?.id ?? connectHandleRef.current;
+                        connectStartRef.current = null;
+                        connectHandleRef.current = null;
+                        // Only when the line is dropped on EMPTY canvas (the pane). A
+                        // drop on a node/handle is a real connection onConnect handled.
+                        // The pane class is the reliable v12 signal (toNode is not).
+                        const onPane = (event.target as Element | null)?.classList?.contains("react-flow__pane");
+                        if (!fromId || !onPane || !canEditAutomation) return;
+                        const pt =
+                            "changedTouches" in event && event.changedTouches.length
+                                ? event.changedTouches[0]
+                                : (event as MouseEvent);
+                        setDragCreate({ x: pt.clientX, y: pt.clientY, sourceId: fromId, when: handleToWhen(fromHandle) });
                     }}
                     onReconnect={onReconnect}
                     deleteKeyCode={["Backspace", "Delete"]}
@@ -854,6 +1058,32 @@ export default function AutomationFlow({
                 >
                     <Background color="#e9eef5" gap={24} size={1} />
                     <Controls showInteractive={false} />
+                    {remoteUpdate && (
+                        <Panel position="top-center">
+                            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 shadow-sm">
+                                <span className="text-[12px] font-medium text-amber-800">
+                                    A teammate changed this automation.
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        seedFrom(remoteUpdate);
+                                        setRemoteUpdate(null);
+                                    }}
+                                    className="h-6 px-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-[11.5px] font-medium transition-colors"
+                                >
+                                    Load their version
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setRemoteUpdate(null)}
+                                    className="h-6 px-2 rounded text-[11.5px] font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                                >
+                                    Keep mine
+                                </button>
+                            </div>
+                        </Panel>
+                    )}
                     <Panel position="top-left">
                         <div className="flex items-center gap-1.5">
                             <button
@@ -876,10 +1106,19 @@ export default function AutomationFlow({
                     </Panel>
                     <Panel position="bottom-center">
                         <div className="hidden md:block rounded-md bg-white/95 px-3 py-1.5 text-[11px] text-slate-500 shadow-sm">
-                            drag a node's dot to connect · IF block: right dot = yes, bottom dot = no · drag to empty canvas for a new action · click a line then Delete to remove
+                            drag a node's dot to connect · IF block: right dot = yes, bottom dot = no · drag to empty canvas to pick what comes next · click a line then Delete to remove
                         </div>
                     </Panel>
                 </ReactFlow>
+
+                {dragCreate && (
+                    <DragCreateMenu
+                        x={dragCreate.x}
+                        y={dragCreate.y}
+                        onClose={() => setDragCreate(null)}
+                        onPick={(choice) => createConnectedNode(choice, dragCreate.sourceId, dragCreate.when)}
+                    />
+                )}
 
                 <AnimatePresence>
                 {selectedNode && !panel && (
@@ -895,6 +1134,7 @@ export default function AutomationFlow({
                             setTrigger(ev);
                             updateNodeData("trigger", { label: triggerLabel(ev) });
                         }}
+                        inboundUrl={automation.inbound_url}
                         // condition
                         onCondition={(cond) => updateNodeData(selectedNode.id, { condition: cond, label: conditionLabel(cond) })}
                         // action
@@ -912,8 +1152,11 @@ export default function AutomationFlow({
                     <InsightsPanel
                         mode={panel}
                         automationId={automation.id}
+                        trigger={trigger}
+                        steps={actionSteps}
                         testResult={testResult}
                         testing={test.isPending}
+                        onRun={runTest}
                         onClose={() => setPanel(null)}
                     />
                     </SidePanel>
@@ -946,6 +1189,7 @@ function nodeStatusIcon(status: string) {
     if (status === "error") return <XCircleIcon className="w-3.5 h-3.5 text-rose-500" />;
     if (status === "branch_true") return <CheckCircle2Icon className="w-3.5 h-3.5 text-emerald-500" />;
     if (status === "branch_false") return <XCircleIcon className="w-3.5 h-3.5 text-slate-400" />;
+    if (status === "skipped") return <span className="inline-block w-3.5 h-3.5 rounded-full border border-slate-300" aria-hidden />;
     return <CheckCircle2Icon className="w-3.5 h-3.5 text-emerald-500" />;
 }
 
@@ -954,13 +1198,16 @@ function NodeResultRow({ r }: { r: AutomationNodeResult }) {
         <div className="rounded-md border border-slate-200 px-2.5 py-1.5">
             <div className="flex items-center gap-1.5">
                 {nodeStatusIcon(r.status)}
-                <span className="text-[11.5px] font-medium text-slate-700">
+                <span className={cn("text-[11.5px] font-medium", r.status === "skipped" ? "text-slate-400" : "text-slate-700")}>
                     {r.type === "condition" ? "IF" : r.type === "action" ? actionLabel(r.action ?? "") : r.type}
                 </span>
                 {r.type === "condition" && (
                     <span className="ml-auto text-[10.5px] font-medium text-slate-400">
                         {r.status === "branch_true" ? "→ yes" : "→ no"}
                     </span>
+                )}
+                {r.type === "action" && r.status === "skipped" && (
+                    <span className="ml-auto text-[10.5px] font-medium text-slate-400">skipped</span>
                 )}
             </div>
             {r.label && r.type === "condition" && <div className="mt-0.5 text-[11px] text-slate-400">{r.label}</div>}
@@ -981,17 +1228,61 @@ function NodeResultRow({ r }: { r: AutomationNodeResult }) {
 function InsightsPanel({
     mode,
     automationId,
+    trigger,
+    steps,
     testResult,
     testing,
+    onRun,
     onClose,
 }: {
     mode: "test" | "history";
     automationId: string;
+    trigger: string;
+    steps: { id: string; label: string }[];
     testResult: DryRunResponse | null;
     testing: boolean;
+    onRun: (data: Record<string, unknown>, skipNodeIds: string[]) => void;
     onClose: () => void;
 }) {
     const runs = useAutomationRuns(automationId, mode === "history");
+
+    // Editable sample event the dry-run evaluates against, seeded per trigger and
+    // re-seeded when the trigger changes (its payload shape changes with it).
+    const [sample, setSample] = React.useState<string>(() => JSON.stringify(sampleEventData(trigger), null, 2));
+    const [sampleErr, setSampleErr] = React.useState<string | null>(null);
+    // Action steps the user toggled OFF for this test (skipped in the dry-run).
+    const [disabled, setDisabled] = React.useState<Set<string>>(new Set());
+    React.useEffect(() => {
+        setSample(JSON.stringify(sampleEventData(trigger), null, 2));
+        setSampleErr(null);
+    }, [trigger]);
+    const resetSample = () => {
+        setSample(JSON.stringify(sampleEventData(trigger), null, 2));
+        setSampleErr(null);
+    };
+    const toggleStep = (id: string) =>
+        setDisabled((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    const runWithSample = () => {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(sample);
+        } catch (e) {
+            setSampleErr((e as Error).message || "Invalid JSON");
+            return;
+        }
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+            setSampleErr("Sample data must be a JSON object.");
+            return;
+        }
+        setSampleErr(null);
+        onRun(parsed as Record<string, unknown>, [...disabled]);
+    };
+
     return (
         <div className="flex h-full min-h-0 flex-col">
             <div className="h-11 px-3 flex items-center border-b border-slate-200 shrink-0">
@@ -1014,24 +1305,101 @@ function InsightsPanel({
                 className="flex-1 overflow-auto p-3 space-y-2"
             >
                 {mode === "test" ? (
-                    testing ? (
-                        <div className="flex items-center gap-2 text-[12px] text-slate-400">
-                            <Loader2Icon className="w-4 h-4 animate-spin" /> Running…
-                        </div>
-                    ) : testResult ? (
-                        <>
-                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                                Dry run against sample data — no messages sent, no records changed. Shows the path + what each action would send.
-                            </p>
-                            {testResult.trace.length === 0 ? (
-                                <p className="text-[12px] text-slate-500">No actions ran for this sample (check your conditions).</p>
+                    <div className="space-y-3">
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                            Dry run: no messages are sent and no records change. Edit the sample event your automation receives, then run to see the path it takes and what each action would send.
+                        </p>
+                        <div>
+                            <div className="mb-1 flex items-center justify-between">
+                                <span className="text-[11px] font-medium text-slate-600">Sample event data</span>
+                                <button
+                                    type="button"
+                                    onClick={resetSample}
+                                    className="text-[11px] text-sky-600 hover:text-sky-700"
+                                >
+                                    Reset to sample
+                                </button>
+                            </div>
+                            <textarea
+                                value={sample}
+                                onChange={(e) => setSample(e.target.value)}
+                                spellCheck={false}
+                                rows={8}
+                                className={cn(
+                                    "w-full rounded-md border bg-white px-2 py-1.5 text-[11.5px] font-mono text-slate-800 outline-none resize-y focus:ring-2",
+                                    sampleErr
+                                        ? "border-rose-300 focus:border-rose-400 focus:ring-rose-100"
+                                        : "border-slate-200 focus:border-sky-400 focus:ring-sky-100",
+                                )}
+                            />
+                            {sampleErr ? (
+                                <p className="mt-1 text-[10.5px] text-rose-600">{sampleErr}</p>
                             ) : (
-                                testResult.trace.map((r, i) => <NodeResultRow key={`${r.node_id}-${i}`} r={r} />)
+                                <p className="mt-1 text-[10.5px] text-slate-400">
+                                    Conditions branch on these fields, so editing them changes which actions run.
+                                </p>
                             )}
-                        </>
-                    ) : (
-                        <p className="text-[12px] text-slate-500">Press Test to dry-run this automation.</p>
-                    )
+                        </div>
+                        {steps.length > 0 && (
+                            <div>
+                                <div className="mb-1 text-[11px] font-medium text-slate-600">
+                                    Steps to run <span className="text-slate-400">({steps.length - disabled.size}/{steps.length})</span>
+                                </div>
+                                <div className="space-y-1">
+                                    {steps.map((s) => {
+                                        const on = !disabled.has(s.id);
+                                        return (
+                                            <button
+                                                key={s.id}
+                                                type="button"
+                                                onClick={() => toggleStep(s.id)}
+                                                className="w-full flex items-center gap-2 rounded-md border border-slate-200 px-2 py-1.5 text-left hover:border-slate-300"
+                                            >
+                                                <span
+                                                    className={cn(
+                                                        "flex h-4 w-4 shrink-0 items-center justify-center rounded",
+                                                        on ? "bg-sky-600 text-white" : "border border-slate-300",
+                                                    )}
+                                                >
+                                                    {on && <CheckIcon className="w-3 h-3" />}
+                                                </span>
+                                                <span className={cn("text-[12px]", on ? "text-slate-700" : "text-slate-400 line-through")}>
+                                                    {s.label}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <p className="mt-1 text-[10.5px] text-slate-400">
+                                    Turn a step off to skip it in this test. Conditions still decide which steps are reached.
+                                </p>
+                            </div>
+                        )}
+                        <button
+                            type="button"
+                            onClick={runWithSample}
+                            disabled={testing}
+                            className="h-8 w-full rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                        >
+                            {testing ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlayIcon className="w-3.5 h-3.5" />}
+                            {testing ? "Running…" : "Run test"}
+                        </button>
+                        <div className="border-t border-slate-200 pt-3 space-y-2">
+                            {testing ? (
+                                <div className="flex items-center gap-2 text-[12px] text-slate-400">
+                                    <Loader2Icon className="w-4 h-4 animate-spin" /> Running…
+                                </div>
+                            ) : testResult ? (
+                                testResult.trace.length === 0 ? (
+                                    <p className="text-[12px] text-slate-500">No actions ran for this sample (check your conditions).</p>
+                                ) : (
+                                    testResult.trace.map((r, i) => <NodeResultRow key={`${r.node_id}-${i}`} r={r} />)
+                                )
+                            ) : (
+                                <p className="text-[12px] text-slate-500">Edit the sample event, then Run test.</p>
+                            )}
+                        </div>
+                    </div>
                 ) : runs.isLoading ? (
                     <div className="flex items-center gap-2 text-[12px] text-slate-400">
                         <Loader2Icon className="w-4 h-4 animate-spin" /> Loading…
@@ -1051,20 +1419,82 @@ function InsightsPanel({
                                 <span className="ml-auto shrink-0 whitespace-nowrap tabular-nums text-[10.5px] text-slate-400">{new Date(run.started_at).toLocaleString()}</span>
                             </div>
                             {run.node_results?.filter((r) => r.type === "action").map((r, i) => (
-                                <div key={`${run.id}-${i}`} className="flex items-center gap-1.5 pl-1">
-                                    {r.status === "error" ? (
-                                        <XCircleIcon className="w-3 h-3 text-rose-400" />
-                                    ) : (
-                                        <CheckCircle2Icon className="w-3 h-3 text-emerald-400" />
+                                <div key={`${run.id}-${i}`} className="pl-1">
+                                    <div className="flex items-center gap-1.5">
+                                        {r.status === "error" ? (
+                                            <XCircleIcon className="w-3 h-3 text-rose-400" />
+                                        ) : (
+                                            <CheckCircle2Icon className="w-3 h-3 text-emerald-400" />
+                                        )}
+                                        <span className="text-[11px] text-slate-500">{actionLabel(r.action ?? "")}</span>
+                                        {r.error && <span className="text-[10.5px] text-rose-500 truncate">· {r.error}</span>}
+                                    </div>
+                                    {r.preview && Object.keys(r.preview).length > 0 && (
+                                        <div className="mt-0.5 pl-4 space-y-0.5">
+                                            {Object.entries(r.preview).map(([k, v]) => (
+                                                <div key={k} className="text-[10px] text-slate-400 truncate">
+                                                    <span className="text-slate-300">{k}:</span>{" "}
+                                                    <span className="font-mono">{String(v)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
                                     )}
-                                    <span className="text-[11px] text-slate-500">{actionLabel(r.action ?? "")}</span>
-                                    {r.error && <span className="text-[10.5px] text-rose-500 truncate">· {r.error}</span>}
                                 </div>
                             ))}
                         </div>
                     ))
                 )}
             </motion.div>
+        </div>
+    );
+}
+
+// InboundUrlField shows the automation's unique inbound-webhook URL (read-only)
+// with a copy button. The stored value is a path; we prefix the API origin so
+// the copied value is the full URL an external system POSTs to.
+function InboundUrlField({ inboundUrl }: { inboundUrl?: string }) {
+    const [copied, setCopied] = React.useState(false);
+    if (!inboundUrl) {
+        return (
+            <p className="text-[11.5px] text-slate-400 leading-relaxed">
+                Save this automation to generate its unique webhook URL. An external system POSTs JSON to that URL and
+                the body becomes the event payload (reference any field with <code>{"{{.field}}"}</code>).
+            </p>
+        );
+    }
+    const full = `${API_URL}${inboundUrl}`;
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(full);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        } catch {
+            /* clipboard blocked — the value is still selectable in the field */
+        }
+    };
+    return (
+        <div>
+            <Label>Your webhook URL</Label>
+            <div className="flex items-center gap-1.5">
+                <input
+                    readOnly
+                    value={full}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="flex-1 h-7 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11.5px] font-mono text-slate-700 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 focus:outline-none"
+                />
+                <button
+                    type="button"
+                    onClick={copy}
+                    className="h-7 px-2 rounded-md border border-slate-200 inline-flex items-center gap-1 text-[11.5px] text-slate-600 hover:bg-slate-50 shrink-0"
+                >
+                    {copied ? <CheckIcon className="w-3.5 h-3.5 text-emerald-600" /> : <CopyIcon className="w-3.5 h-3.5" />}
+                    {copied ? "Copied" : "Copy"}
+                </button>
+            </div>
+            <p className="text-[11.5px] text-slate-400 mt-1.5 leading-relaxed">
+                POST JSON here to run this automation. The body becomes the event payload, so reference its keys with{" "}
+                <code>{"{{.field}}"}</code> in actions and conditions.
+            </p>
         </div>
     );
 }
@@ -1076,6 +1506,7 @@ function NodeEditor({
     selfId,
     trigger,
     onTrigger,
+    inboundUrl,
     onCondition,
     targets,
     connLabel,
@@ -1088,6 +1519,7 @@ function NodeEditor({
     selfId: string;
     trigger: string;
     onTrigger: (ev: string) => void;
+    inboundUrl?: string;
     onCondition: (c: AutomationCondition) => void;
     targets: IntegrationConnection[];
     connLabel: (id?: string) => string;
@@ -1128,9 +1560,13 @@ function NodeEditor({
                             <Label>When this happens</Label>
                             <SelectMenu value={trigger} onChange={onTrigger} options={triggerOptions} className="w-full" />
                         </div>
-                        <p className="text-[11.5px] text-slate-400 leading-relaxed">
-                            Add a condition (IF) below the trigger to branch on the event — e.g. only positive replies, or by source.
-                        </p>
+                        {triggerIsInboundWebhook(trigger) ? (
+                            <InboundUrlField inboundUrl={inboundUrl} />
+                        ) : (
+                            <p className="text-[11.5px] text-slate-400 leading-relaxed">
+                                Add a condition (IF) below the trigger to branch on the event — e.g. only positive replies, or by source.
+                            </p>
+                        )}
                     </>
                 ) : isCondition ? (
                     <ConditionEditor
@@ -1301,6 +1737,10 @@ const ACTION_VISUAL: Record<string, { Icon: typeof TagIcon; tint: string; bg: st
     "warmbly.move_deal_stage": { Icon: BriefcaseIcon, tint: "text-sky-600", bg: "bg-sky-50", desc: "Move the contact's open deal to another stage." },
     "warmbly.unsubscribe": { Icon: UserMinusIcon, tint: "text-rose-600", bg: "bg-rose-50", desc: "Unsubscribe the contact from the campaign." },
     "warmbly.run_automation": { Icon: ZapIcon, tint: "text-indigo-600", bg: "bg-indigo-50", desc: "Launch another automation with this event's data." },
+    "warmbly.label_email": { Icon: TagsIcon, tint: "text-fuchsia-600", bg: "bg-fuchsia-50", desc: "Label the conversation the contact replied on." },
+    "warmbly.http_request": { Icon: GlobeIcon, tint: "text-teal-600", bg: "bg-teal-50", desc: "Call any URL / send a webhook, and use the response in later steps." },
+    "warmbly.set_variables": { Icon: WandSparklesIcon, tint: "text-amber-600", bg: "bg-amber-50", desc: "Compute named values from templates for later steps to reuse." },
+    "warmbly.fire_event": { Icon: SendIcon, tint: "text-sky-600", bg: "bg-sky-50", desc: "Publish a custom event to the realtime gateway — your app receives it over the API websocket, no public URL." },
     "slack.notify": { Icon: MessageSquareIcon, tint: "text-violet-600", bg: "bg-violet-50" },
     "discord.notify": { Icon: MessageSquareIcon, tint: "text-indigo-600", bg: "bg-indigo-50" },
     "webhook.ping": { Icon: SendIcon, tint: "text-sky-600", bg: "bg-sky-50" },
@@ -1315,6 +1755,87 @@ function actionGlyph(action: string): React.ReactNode {
     const v = ACTION_VISUAL[action];
     const Icon = v?.Icon ?? ZapIcon;
     return <Icon className={cn("w-3.5 h-3.5", v?.tint ?? "text-slate-400")} />;
+}
+
+// The menu that opens where you drop a dragged connection on empty canvas: pick
+// what the next node is — an integration action, a condition (IF) router, or one
+// of the built-in actions as a quick pick. Mirrors the campaign steps canvas.
+function DragCreateMenu({
+    x,
+    y,
+    onPick,
+    onClose,
+}: {
+    x: number;
+    y: number;
+    onPick: (choice: string) => void;
+    onClose: () => void;
+}) {
+    // Animate in/out like the app's other menus. The node is created the moment
+    // a row is clicked; the menu plays its exit independently, and onClose (which
+    // clears the parent state) only fires once that exit finishes.
+    const [open, setOpen] = React.useState(true);
+    const vw = typeof window !== "undefined" ? window.innerWidth : x + 240;
+    const vh = typeof window !== "undefined" ? window.innerHeight : y + 360;
+    const flipX = x > vw - 232;
+    const flipY = y > vh - 360;
+    const left = Math.max(8, Math.min(x, vw - 232));
+    const top = Math.max(8, Math.min(y, vh - 360));
+    const pick = (choice: string) => {
+        onPick(choice);
+        setOpen(false);
+    };
+    return createPortal(
+        <>
+            {open && <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />}
+            <AnimatePresence onExitComplete={onClose}>
+                {open && (
+                    <motion.div
+                        key="drag-create-menu"
+                        className="fixed z-50 max-h-[340px] w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl"
+                        style={{
+                            left,
+                            top,
+                            transformOrigin: `${flipY ? "bottom" : "top"} ${flipX ? "right" : "left"}`,
+                            willChange: "transform, opacity",
+                        }}
+                        role="menu"
+                        initial={{ opacity: 0, scale: 0.95, y: flipY ? 4 : -4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.97, y: flipY ? 2 : -2 }}
+                        transition={{
+                            opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
+                            scale: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+                            y: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+                        }}
+                    >
+                        <div className="px-2 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Add</div>
+                        <CreateRow icon={<ZapIcon className="w-3.5 h-3.5 text-sky-600" />} label="Action" onClick={() => pick("action")} />
+                        <CreateRow icon={<GitBranchIcon className="w-3.5 h-3.5 text-amber-600" />} label="Condition (branch)" onClick={() => pick("condition")} />
+                        <div className="my-1 h-px bg-slate-100" />
+                        <div className="px-2 pt-0.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Built-in actions</div>
+                        {NATIVE_ACTIONS.map((a) => (
+                            <CreateRow key={a} icon={actionGlyph(a)} label={actionLabel(a)} onClick={() => pick(a)} />
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </>,
+        document.body,
+    );
+}
+
+function CreateRow({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12.5px] text-slate-700 transition-colors hover:bg-slate-100"
+        >
+            {icon}
+            {label}
+        </button>
+    );
 }
 
 function ActionEditor({
@@ -1403,7 +1924,7 @@ function ActionEditor({
                 className="space-y-3"
             >
             {isNative ? (
-                <NativeActionConfig action={data.action ?? ""} config={config} patchConfig={patchConfig} selfId={selfId} />
+                <NativeActionConfig action={data.action ?? ""} trigger={trigger} config={config} patchConfig={patchConfig} selfId={selfId} />
             ) : (
                 <>
                     {actionNeedsChannel(data.action ?? "") && (
@@ -1469,11 +1990,13 @@ const NATIVE_CURRENCIES: SelectOption[] = ["USD", "EUR", "GBP", "CAD", "AUD"].ma
 // NativeActionConfig renders the right editor for a built-in (Warmbly) action.
 function NativeActionConfig({
     action,
+    trigger,
     config,
     patchConfig,
     selfId,
 }: {
     action: string;
+    trigger: string;
     config: Record<string, unknown>;
     patchConfig: (p: Record<string, unknown>) => void;
     selfId: string;
@@ -1489,6 +2012,30 @@ function NativeActionConfig({
                         onChange={(ids) => patchConfig({ category_id: ids.length ? ids[ids.length - 1] : "" })}
                         placeholder="Pick a tag…"
                     />
+                </div>
+            )}
+
+            {need === "label" && (
+                <div className="space-y-2">
+                    <div>
+                        <Label>Labels to apply</Label>
+                        <CategoryPicker
+                            value={Array.isArray(config.label_ids) ? (config.label_ids as string[]) : []}
+                            onChange={(ids) => patchConfig({ label_ids: ids })}
+                            placeholder="Pick one or more labels…"
+                        />
+                    </div>
+                    {triggerCarriesThread(trigger) ? (
+                        <p className="text-[11px] leading-relaxed text-slate-400">
+                            Labels the conversation the contact replied on (the same labels you set by hand in the unibox).
+                        </p>
+                    ) : (
+                        <p className="inline-flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-700">
+                            <TriangleAlertIcon className="mt-px w-3.5 h-3.5 shrink-0" /> This labels the email a contact
+                            replied on, so it only runs on a &quot;Reply received&quot; automation. This trigger has no
+                            inbox thread to label.
+                        </p>
+                    )}
                 </div>
             )}
 
@@ -1605,11 +2152,257 @@ function NativeActionConfig({
 
             {need === "automation" && <RunAnotherAutomationFields config={config} patchConfig={patchConfig} selfId={selfId} />}
 
+            {need === "event" && <FireEventFields config={config} patchConfig={patchConfig} />}
+            {need === "http" && <HttpRequestFields config={config} patchConfig={patchConfig} />}
+
+            {need === "vars" && <SetVariablesFields config={config} patchConfig={patchConfig} />}
+
             {need === "none" && (
                 <p className="text-[11px] text-slate-400 leading-relaxed">
                     Works when the event carries a campaign (reply / bounce / unsubscribe triggers).
                 </p>
             )}
+        </div>
+    );
+}
+
+const HTTP_METHODS: SelectOption[] = ["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => ({ value: m, label: m }));
+
+function headersToText(h: unknown): string {
+    if (!h || typeof h !== "object") return "";
+    return Object.entries(h as Record<string, string>)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("\n");
+}
+
+function textToHeaders(text: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const line of text.split("\n")) {
+        const i = line.indexOf(":");
+        if (i <= 0) continue;
+        const k = line.slice(0, i).trim();
+        if (k) out[k] = line.slice(i + 1).trim();
+    }
+    return out;
+}
+
+const HTTP_FIELD_CLASS =
+    "w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] font-mono text-slate-900 placeholder:text-slate-400 outline-none resize-y focus:border-sky-400 focus:ring-2 focus:ring-sky-100";
+
+// HttpRequestFields configures the generic HTTP request / webhook action: a
+// templated method/url/headers/body call whose response later steps can read.
+function HttpRequestFields({
+    config,
+    patchConfig,
+}: {
+    config: Record<string, unknown>;
+    patchConfig: (p: Record<string, unknown>) => void;
+}) {
+    const outputKey = String(config.http_output_key ?? "").trim() || "response";
+    return (
+        <div className="space-y-3">
+            <div className="flex items-end gap-2">
+                <div className="w-28 shrink-0">
+                    <Label>Method</Label>
+                    <SelectMenu
+                        value={String(config.http_method ?? "POST")}
+                        onChange={(m) => patchConfig({ http_method: m })}
+                        options={HTTP_METHODS}
+                        className="w-full"
+                        fullWidth
+                    />
+                </div>
+                <div className="flex-1 min-w-0">
+                    <Label>URL</Label>
+                    <TextInput
+                        value={String(config.http_url ?? "")}
+                        onChange={(v) => patchConfig({ http_url: v })}
+                        placeholder="https://api.example.com/contacts"
+                        className="w-full"
+                    />
+                </div>
+            </div>
+            <div>
+                <Label>Headers</Label>
+                <textarea
+                    value={headersToText(config.http_headers)}
+                    onChange={(e) => patchConfig({ http_headers: textToHeaders(e.target.value) })}
+                    placeholder={"Authorization: Bearer …\nContent-Type: application/json"}
+                    rows={3}
+                    className={HTTP_FIELD_CLASS}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                    One per line, <code>Key: Value</code>. Values are templated.
+                </p>
+            </div>
+            <div>
+                <Label>Body</Label>
+                <textarea
+                    value={String(config.http_body ?? "")}
+                    onChange={(e) => patchConfig({ http_body: e.target.value })}
+                    placeholder={'{ "email": "{{.contact_email}}", "name": "{{.first_name}}" }'}
+                    rows={4}
+                    className={HTTP_FIELD_CLASS}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                    Full Go template, sent as the request body (JSON by default).
+                </p>
+            </div>
+            <div>
+                <Label>Save response as</Label>
+                <TextInput
+                    value={String(config.http_output_key ?? "")}
+                    onChange={(v) => patchConfig({ http_output_key: v })}
+                    placeholder="response"
+                    className="w-full"
+                />
+                <p className="mt-1 text-[11px] text-slate-400 leading-relaxed">
+                    Later steps read it as <code>{`{{.${outputKey}.body…}}`}</code> and{" "}
+                    <code>{`{{.${outputKey}.status}}`}</code>; add a condition on{" "}
+                    <code>{`{{.${outputKey}.ok}}`}</code> to branch on success.
+                </p>
+            </div>
+        </div>
+    );
+}
+
+type SetVarRow = { key: string; value: string };
+
+// SetVariablesFields edits a list of named template values written back into the
+// event data for later steps to reuse (the safe "transform" node).
+function SetVariablesFields({
+    config,
+    patchConfig,
+}: {
+    config: Record<string, unknown>;
+    patchConfig: (p: Record<string, unknown>) => void;
+}) {
+    const rows: SetVarRow[] = Array.isArray(config.set_vars)
+        ? (config.set_vars as SetVarRow[]).map((v) => ({ key: String(v?.key ?? ""), value: String(v?.value ?? "") }))
+        : [];
+    const display = rows.length ? rows : [{ key: "", value: "" }];
+
+    // Keep blank rows while editing (filtering here would delete a just-added row
+    // before it can be typed in). Save-time validation requires one named var, and
+    // the backend ignores any row whose key is empty.
+    const update = (next: SetVarRow[]) => patchConfig({ set_vars: next });
+    const setRow = (i: number, patch: Partial<SetVarRow>) => update(display.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    const addRow = () => update([...display, { key: "", value: "" }]);
+    const removeRow = (i: number) => update(display.filter((_, idx) => idx !== i));
+
+    return (
+        <div className="space-y-2">
+            {display.map((row, i) => (
+                <div key={i} className="flex items-center gap-2">
+                    <TextInput
+                        value={row.key}
+                        onChange={(v) => setRow(i, { key: v })}
+                        placeholder="name"
+                        className="w-28 shrink-0 font-mono"
+                    />
+                    <span className="text-[12.5px] text-slate-400">=</span>
+                    <TextInput
+                        value={row.value}
+                        onChange={(v) => setRow(i, { value: v })}
+                        placeholder="{{.first_name}} at {{.company}}"
+                        className="flex-1 min-w-0 font-mono"
+                    />
+                    <button
+                        type="button"
+                        onClick={() => removeRow(i)}
+                        className="shrink-0 text-slate-400 hover:text-rose-500"
+                        aria-label="Remove variable"
+                    >
+                        <XIcon className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            ))}
+            <button
+                type="button"
+                onClick={addRow}
+                className="inline-flex items-center gap-1 text-[12px] text-sky-600 hover:text-sky-700"
+            >
+                <PlusIcon className="w-3.5 h-3.5" /> Add variable
+            </button>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+                Each value is a Go template. Later steps reference it as <code>{`{{.name}}`}</code>.
+            </p>
+        </div>
+    );
+}
+
+// FireEventFields configures a custom "fire event": an event name + a list of
+// templated key/value fields that become the event payload. The event is
+// published to the realtime gateway, so a developer's app receives it over the
+// API websocket (API key + REALTIME_SUBSCRIBE) without hosting a webhook URL.
+function FireEventFields({
+    config,
+    patchConfig,
+}: {
+    config: Record<string, unknown>;
+    patchConfig: (p: Record<string, unknown>) => void;
+}) {
+    const rows: SetVarRow[] = Array.isArray(config.event_fields)
+        ? (config.event_fields as SetVarRow[]).map((v) => ({ key: String(v?.key ?? ""), value: String(v?.value ?? "") }))
+        : [];
+    const display = rows.length ? rows : [{ key: "", value: "" }];
+    const update = (next: SetVarRow[]) => patchConfig({ event_fields: next });
+    const setRow = (i: number, patch: Partial<SetVarRow>) => update(display.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    const addRow = () => update([...display, { key: "", value: "" }]);
+    const removeRow = (i: number) => update(display.filter((_, idx) => idx !== i));
+
+    return (
+        <div className="space-y-3">
+            <div>
+                <Label>Event name</Label>
+                <TextInput
+                    value={String(config.event_name ?? "")}
+                    onChange={(v) => patchConfig({ event_name: v })}
+                    placeholder="lead.replied"
+                    className="w-full font-mono"
+                />
+                <p className="mt-1 text-[11px] text-slate-400">What your app subscribes to. Lowercase dotted names work well.</p>
+            </div>
+            <div>
+                <Label>Payload</Label>
+                <div className="space-y-2">
+                    {display.map((row, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                            <TextInput
+                                value={row.key}
+                                onChange={(v) => setRow(i, { key: v })}
+                                placeholder="field"
+                                className="w-28 shrink-0 font-mono"
+                            />
+                            <span className="text-[12.5px] text-slate-400">=</span>
+                            <TextInput
+                                value={row.value}
+                                onChange={(v) => setRow(i, { value: v })}
+                                placeholder="{{.contact_email}}"
+                                className="flex-1 min-w-0 font-mono"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => removeRow(i)}
+                                className="shrink-0 text-slate-400 hover:text-rose-500"
+                                aria-label="Remove field"
+                            >
+                                <XIcon className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+                <button
+                    type="button"
+                    onClick={addRow}
+                    className="mt-2 inline-flex items-center gap-1 text-[12px] text-sky-600 hover:text-sky-700"
+                >
+                    <PlusIcon className="w-3.5 h-3.5" /> Add field
+                </button>
+                <p className="mt-1 text-[11px] text-slate-400 leading-relaxed">
+                    Each value is a Go template against the event data. Your app receives <code>{`{ name, payload }`}</code> over the websocket.
+                </p>
+            </div>
         </div>
     );
 }

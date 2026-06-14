@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // OrganizationRepository defines the interface for organization data access
@@ -32,12 +33,30 @@ type OrganizationRepository interface {
 	GetMemberByID(ctx context.Context, memberID uuid.UUID) (*models.OrganizationMember, error)
 	AddMember(ctx context.Context, member *models.OrganizationMember) error
 	UpdateMember(ctx context.Context, member *models.OrganizationMember) error
+
+	// Custom roles (implemented in pg_organization_roles.go)
+	ListRoles(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationRole, error)
+	GetRoleByID(ctx context.Context, orgID, roleID uuid.UUID) (*models.OrganizationRole, error)
+	CountRoles(ctx context.Context, orgID uuid.UUID) (int, error)
+	CreateRole(ctx context.Context, role *models.OrganizationRole) error
+	UpdateRole(ctx context.Context, role *models.OrganizationRole) error
+	DeleteRole(ctx context.Context, orgID, roleID uuid.UUID) error
+
+	// Multi-role assignment (pg_member_roles.go)
+	AddMemberWithRoles(ctx context.Context, member *models.OrganizationMember, roleIDs []uuid.UUID) error
+	HydrateInvitationRoles(ctx context.Context, invitations []models.OrganizationInvitation) error
+	SetMemberRoles(ctx context.Context, orgID, userID uuid.UUID, roleIDs []uuid.UUID) error
+	GetMemberRoles(ctx context.Context, orgID, userID uuid.UUID) ([]models.MemberRole, error)
+	HydrateMemberRoles(ctx context.Context, orgID uuid.UUID, members []models.OrganizationMember) error
+	SetInvitationRoles(ctx context.Context, invitationID uuid.UUID, roleIDs []uuid.UUID) error
+	GetInvitationRoles(ctx context.Context, invitationID uuid.UUID) ([]uuid.UUID, error)
 	RemoveMember(ctx context.Context, orgID, userID uuid.UUID) error
 	GetMemberCount(ctx context.Context, orgID uuid.UUID) (int, error)
 
 	// Invitations
 	CreateInvitation(ctx context.Context, inv *models.OrganizationInvitation) error
 	GetInvitationByToken(ctx context.Context, token string) (*models.OrganizationInvitation, error)
+	GetInvitationByID(ctx context.Context, id uuid.UUID) (*models.OrganizationInvitation, error)
 	GetInvitationByEmail(ctx context.Context, orgID uuid.UUID, email string) (*models.OrganizationInvitation, error)
 	GetPendingInvitations(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationInvitation, error)
 	GetUserPendingInvitations(ctx context.Context, email string) ([]models.OrganizationInvitation, error)
@@ -122,7 +141,8 @@ func (r *organizationRepository) Create(ctx context.Context, org *models.Organiz
 func (r *organizationRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Organization, error) {
 	query := `
 		SELECT id, name, slug, avatar_url, owner_user_id, created_at, updated_at,
-		       deletion_scheduled_at, deletion_scheduled_for
+		       deletion_scheduled_at, deletion_scheduled_for,
+		       presence_show_online, presence_show_activity
 		FROM organizations WHERE id = $1
 	`
 	return r.scanOrganization(ctx, query, id)
@@ -132,7 +152,8 @@ func (r *organizationRepository) GetByID(ctx context.Context, id uuid.UUID) (*mo
 func (r *organizationRepository) GetBySlug(ctx context.Context, slug string) (*models.Organization, error) {
 	query := `
 		SELECT id, name, slug, avatar_url, owner_user_id, created_at, updated_at,
-		       deletion_scheduled_at, deletion_scheduled_for
+		       deletion_scheduled_at, deletion_scheduled_for,
+		       presence_show_online, presence_show_activity
 		FROM organizations WHERE slug = $1
 	`
 	return r.scanOrganization(ctx, query, slug)
@@ -141,7 +162,7 @@ func (r *organizationRepository) GetBySlug(ctx context.Context, slug string) (*m
 func (r *organizationRepository) scanOrganization(ctx context.Context, query string, args ...interface{}) (*models.Organization, error) {
 	row := r.db.QueryRow(ctx, query, args...)
 	var org models.Organization
-	err := row.Scan(&org.ID, &org.Name, &org.Slug, &org.AvatarURL, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt, &org.DeletionScheduledAt, &org.DeletionScheduledFor)
+	err := row.Scan(&org.ID, &org.Name, &org.Slug, &org.AvatarURL, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt, &org.DeletionScheduledAt, &org.DeletionScheduledFor, &org.PresenceShowOnline, &org.PresenceShowActivity)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -154,10 +175,12 @@ func (r *organizationRepository) scanOrganization(ctx context.Context, query str
 // Update updates an organization
 func (r *organizationRepository) Update(ctx context.Context, org *models.Organization) error {
 	query := `
-		UPDATE organizations SET name = $2, slug = $3, updated_at = $4
+		UPDATE organizations
+		SET name = $2, slug = $3, presence_show_online = $4,
+		    presence_show_activity = $5, updated_at = $6
 		WHERE id = $1
 	`
-	_, err := r.db.Exec(ctx, query, org.ID, org.Name, org.Slug, time.Now())
+	_, err := r.db.Exec(ctx, query, org.ID, org.Name, org.Slug, org.PresenceShowOnline, org.PresenceShowActivity, time.Now())
 	return err
 }
 
@@ -216,7 +239,8 @@ func (r *organizationRepository) GetUserOrganizations(ctx context.Context, userI
 func (r *organizationRepository) GetUserDefaultOrganization(ctx context.Context, userID uuid.UUID) (*models.Organization, error) {
 	query := `
 		SELECT id, name, slug, avatar_url, owner_user_id, created_at, updated_at,
-		       deletion_scheduled_at, deletion_scheduled_for
+		       deletion_scheduled_at, deletion_scheduled_for,
+		       presence_show_online, presence_show_activity
 		FROM organizations WHERE owner_user_id = $1
 		ORDER BY created_at ASC LIMIT 1
 	`
@@ -227,7 +251,7 @@ func (r *organizationRepository) GetUserDefaultOrganization(ctx context.Context,
 func (r *organizationRepository) GetMembers(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationMember, error) {
 	query := `
 		SELECT
-			om.id, om.organization_id, om.user_id, om.role, om.permissions,
+			om.id, om.organization_id, om.user_id, om.role, om.role_id, om.permissions,
 			om.invited_by, om.invited_at, om.accepted_at,
 			u.id, u.first_name, u.last_name, u.email, u.created_at, u.updated_at
 		FROM organization_members om
@@ -246,7 +270,7 @@ func (r *organizationRepository) GetMembers(ctx context.Context, orgID uuid.UUID
 		var m models.OrganizationMember
 		var u models.User
 		err := rows.Scan(
-			&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.Permissions,
+			&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.RoleID, &m.Permissions,
 			&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt,
 			&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.CreatedAt, &u.UpdatedAt,
 		)
@@ -264,13 +288,13 @@ func (r *organizationRepository) GetMembers(ctx context.Context, orgID uuid.UUID
 // GetMember retrieves a specific member of an organization
 func (r *organizationRepository) GetMember(ctx context.Context, orgID, userID uuid.UUID) (*models.OrganizationMember, error) {
 	query := `
-		SELECT id, organization_id, user_id, role, permissions, invited_by, invited_at, accepted_at
+		SELECT id, organization_id, user_id, role, role_id, permissions, invited_by, invited_at, accepted_at
 		FROM organization_members
 		WHERE organization_id = $1 AND user_id = $2
 	`
 	row := r.db.QueryRow(ctx, query, orgID, userID)
 	var m models.OrganizationMember
-	err := row.Scan(&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.Permissions, &m.InvitedBy, &m.InvitedAt, &m.AcceptedAt)
+	err := row.Scan(&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.RoleID, &m.Permissions, &m.InvitedBy, &m.InvitedAt, &m.AcceptedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -283,12 +307,12 @@ func (r *organizationRepository) GetMember(ctx context.Context, orgID, userID uu
 // GetMemberByID retrieves a member by their membership ID
 func (r *organizationRepository) GetMemberByID(ctx context.Context, memberID uuid.UUID) (*models.OrganizationMember, error) {
 	query := `
-		SELECT id, organization_id, user_id, role, permissions, invited_by, invited_at, accepted_at
+		SELECT id, organization_id, user_id, role, role_id, permissions, invited_by, invited_at, accepted_at
 		FROM organization_members WHERE id = $1
 	`
 	row := r.db.QueryRow(ctx, query, memberID)
 	var m models.OrganizationMember
-	err := row.Scan(&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.Permissions, &m.InvitedBy, &m.InvitedAt, &m.AcceptedAt)
+	err := row.Scan(&m.ID, &m.OrganizationID, &m.UserID, &m.Role, &m.RoleID, &m.Permissions, &m.InvitedBy, &m.InvitedAt, &m.AcceptedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -301,11 +325,11 @@ func (r *organizationRepository) GetMemberByID(ctx context.Context, memberID uui
 // AddMember adds a member to an organization
 func (r *organizationRepository) AddMember(ctx context.Context, member *models.OrganizationMember) error {
 	query := `
-		INSERT INTO organization_members (id, organization_id, user_id, role, permissions, invited_by, invited_at, accepted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO organization_members (id, organization_id, user_id, role, role_id, permissions, invited_by, invited_at, accepted_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 	_, err := r.db.Exec(ctx, query,
-		member.ID, member.OrganizationID, member.UserID, member.Role, member.Permissions,
+		member.ID, member.OrganizationID, member.UserID, member.Role, member.RoleID, member.Permissions,
 		member.InvitedBy, member.InvitedAt, member.AcceptedAt,
 	)
 	return err
@@ -314,10 +338,10 @@ func (r *organizationRepository) AddMember(ctx context.Context, member *models.O
 // UpdateMember updates a member's role and permissions
 func (r *organizationRepository) UpdateMember(ctx context.Context, member *models.OrganizationMember) error {
 	query := `
-		UPDATE organization_members SET role = $3, permissions = $4
+		UPDATE organization_members SET role = $3, role_id = $4, permissions = $5
 		WHERE organization_id = $1 AND user_id = $2
 	`
-	_, err := r.db.Exec(ctx, query, member.OrganizationID, member.UserID, member.Role, member.Permissions)
+	_, err := r.db.Exec(ctx, query, member.OrganizationID, member.UserID, member.Role, member.RoleID, member.Permissions)
 	return err
 }
 
@@ -337,17 +361,18 @@ func (r *organizationRepository) GetMemberCount(ctx context.Context, orgID uuid.
 // CreateInvitation creates a new invitation
 func (r *organizationRepository) CreateInvitation(ctx context.Context, inv *models.OrganizationInvitation) error {
 	query := `
-		INSERT INTO organization_invitations (id, organization_id, email, role, permissions, invited_by, token, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO organization_invitations (id, organization_id, email, role, role_id, permissions, invited_by, token, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (organization_id, email) DO UPDATE SET
 			role = EXCLUDED.role,
+			role_id = EXCLUDED.role_id,
 			permissions = EXCLUDED.permissions,
 			invited_by = EXCLUDED.invited_by,
 			token = EXCLUDED.token,
 			expires_at = EXCLUDED.expires_at
 	`
 	_, err := r.db.Exec(ctx, query,
-		inv.ID, inv.OrganizationID, inv.Email, inv.Role, inv.Permissions,
+		inv.ID, inv.OrganizationID, inv.Email, inv.Role, inv.RoleID, inv.Permissions,
 		inv.InvitedBy, inv.Token, inv.ExpiresAt, inv.CreatedAt,
 	)
 	return err
@@ -357,7 +382,7 @@ func (r *organizationRepository) CreateInvitation(ctx context.Context, inv *mode
 func (r *organizationRepository) GetInvitationByToken(ctx context.Context, token string) (*models.OrganizationInvitation, error) {
 	query := `
 		SELECT
-			i.id, i.organization_id, i.email, i.role, i.permissions, i.invited_by, i.token, i.expires_at, i.created_at,
+			i.id, i.organization_id, i.email, i.role, i.role_id, i.permissions, i.invited_by, i.token, i.expires_at, i.created_at,
 			o.id, o.name, o.slug, o.avatar_url, o.owner_user_id, o.created_at, o.updated_at,
 			o.deletion_scheduled_at, o.deletion_scheduled_for
 		FROM organization_invitations i
@@ -368,7 +393,37 @@ func (r *organizationRepository) GetInvitationByToken(ctx context.Context, token
 	var inv models.OrganizationInvitation
 	var org models.Organization
 	err := row.Scan(
-		&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.Permissions,
+		&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.RoleID, &inv.Permissions,
+		&inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt,
+		&org.ID, &org.Name, &org.Slug, &org.AvatarURL, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt,
+		&org.DeletionScheduledAt, &org.DeletionScheduledFor,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	inv.Organization = &org
+	return &inv, nil
+}
+
+// GetInvitationByID retrieves an invitation by its id, with org joined.
+func (r *organizationRepository) GetInvitationByID(ctx context.Context, id uuid.UUID) (*models.OrganizationInvitation, error) {
+	query := `
+		SELECT
+			i.id, i.organization_id, i.email, i.role, i.role_id, i.permissions, i.invited_by, i.token, i.expires_at, i.created_at,
+			o.id, o.name, o.slug, o.avatar_url, o.owner_user_id, o.created_at, o.updated_at,
+			o.deletion_scheduled_at, o.deletion_scheduled_for
+		FROM organization_invitations i
+		JOIN organizations o ON o.id = i.organization_id
+		WHERE i.id = $1
+	`
+	row := r.db.QueryRow(ctx, query, id)
+	var inv models.OrganizationInvitation
+	var org models.Organization
+	err := row.Scan(
+		&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.RoleID, &inv.Permissions,
 		&inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt,
 		&org.ID, &org.Name, &org.Slug, &org.AvatarURL, &org.OwnerUserID, &org.CreatedAt, &org.UpdatedAt,
 		&org.DeletionScheduledAt, &org.DeletionScheduledFor,
@@ -405,7 +460,7 @@ func (r *organizationRepository) GetInvitationByEmail(ctx context.Context, orgID
 // GetPendingInvitations retrieves all pending invitations for an organization
 func (r *organizationRepository) GetPendingInvitations(ctx context.Context, orgID uuid.UUID) ([]models.OrganizationInvitation, error) {
 	query := `
-		SELECT id, organization_id, email, role, permissions, invited_by, token, expires_at, created_at
+		SELECT id, organization_id, email, role, role_id, permissions, invited_by, token, expires_at, created_at
 		FROM organization_invitations
 		WHERE organization_id = $1 AND expires_at > NOW()
 		ORDER BY created_at DESC
@@ -419,7 +474,7 @@ func (r *organizationRepository) GetPendingInvitations(ctx context.Context, orgI
 	var invitations []models.OrganizationInvitation
 	for rows.Next() {
 		var inv models.OrganizationInvitation
-		err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.Permissions, &inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt)
+		err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.RoleID, &inv.Permissions, &inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -498,15 +553,24 @@ func (r *organizationRepository) TransferOwnership(ctx context.Context, orgID, n
 		return err
 	}
 
-	// Update old owner to admin
-	_, err = tx.Exec(ctx, `UPDATE organization_members SET role = 'admin', permissions = $3 WHERE organization_id = $1 AND user_id = $2`,
+	// Re-home the old owner onto the org's Admin role row when one exists
+	// (roles are data); otherwise fall back to a detached Admin-mask member.
+	_, err = tx.Exec(ctx, `
+		UPDATE organization_members om SET
+			role = COALESCE(r.name, 'Admin'),
+			role_id = r.id,
+			permissions = COALESCE(r.permissions, $3)
+		FROM (SELECT 1) one
+		LEFT JOIN organization_roles r ON r.organization_id = $1 AND r.name = 'Admin'
+		WHERE om.organization_id = $1 AND om.user_id = $2`,
 		orgID, currentOwnerID, models.RolePermissions[models.RoleAdmin])
 	if err != nil {
 		return err
 	}
 
-	// Update new owner to owner
-	_, err = tx.Exec(ctx, `UPDATE organization_members SET role = 'owner', permissions = $3 WHERE organization_id = $1 AND user_id = $2`,
+	// Owner is a membership status, not a role: role_id must be NULL so role
+	// edits can never write through onto the owner row.
+	_, err = tx.Exec(ctx, `UPDATE organization_members SET role = 'owner', role_id = NULL, permissions = $3 WHERE organization_id = $1 AND user_id = $2`,
 		orgID, newOwnerUserID, models.RolePermissions[models.RoleOwner])
 	if err != nil {
 		return err
@@ -861,7 +925,7 @@ func (r *organizationRepository) SearchOrganizationsForAdmin(ctx context.Context
 	if len(items) > limit {
 		result.Data = items[:limit]
 		last := items[limit-1].ID
-		result.Pagination.NextCursor = &last
+		result.Pagination.NextCursor = paging.UUIDString(last)
 	}
 
 	// Total count for the same filter — drop the trailing LIMIT arg.
@@ -1263,7 +1327,7 @@ func (r *organizationRepository) ListLimitRequestsForAdmin(ctx context.Context, 
 	if len(items) > limit {
 		result.Data = items[:limit]
 		last := items[limit-1].ID
-		result.Pagination.NextCursor = &last
+		result.Pagination.NextCursor = paging.UUIDString(last)
 	}
 
 	// Total count for the same filter — drop the trailing LIMIT arg.

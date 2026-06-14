@@ -21,6 +21,7 @@ type UniboxService interface {
 	) (*models.MailSearchResult, *errx.Error)
 	Search(
 		ctx context.Context,
+		orgID uuid.UUID,
 		userID uuid.UUID,
 		params *models.MailSearchParams,
 	) (*models.MailSearchResult, *errx.Error)
@@ -30,16 +31,16 @@ type UniboxService interface {
 	) (*models.EmailMessage, *errx.Error)
 	GetByThread(
 		ctx context.Context,
-		userID, emailID uuid.UUID,
+		orgID, emailID uuid.UUID,
 		threadID, limit, cursor string,
 	) (*models.MailSearchResult, *errx.Error)
 	GetUnseenCount(
 		ctx context.Context,
-		userID uuid.UUID,
+		orgID uuid.UUID,
 		emailAccountID *uuid.UUID,
 	) (int64, *errx.Error)
 	MarkSeen(ctx context.Context, userID, emailID uuid.UUID, seen bool) *errx.Error
-	MarkSeenBulk(ctx context.Context, userID uuid.UUID, data *models.MarkSeen) (*models.MarkSeen, *errx.Error)
+	MarkSeenBulk(ctx context.Context, orgID uuid.UUID, data *models.MarkSeen) (*models.MarkSeen, *errx.Error)
 
 	// Snooze hides a thread until `until`. Unsnooze drops the row.
 	Snooze(ctx context.Context, userID uuid.UUID, threadID string, until time.Time) (*models.UniboxSnooze, *errx.Error)
@@ -47,7 +48,7 @@ type UniboxService interface {
 	ListSnoozes(ctx context.Context, userID uuid.UUID) ([]models.UniboxSnooze, *errx.Error)
 
 	// Overview powers the scope rail + top metric strip in one call.
-	Overview(ctx context.Context, userID uuid.UUID) (*models.UniboxOverview, *errx.Error)
+	Overview(ctx context.Context, orgID, userID uuid.UUID) (*models.UniboxOverview, *errx.Error)
 
 	// Conversation labels. SetThreadLabels replaces a thread's full
 	// label set (idempotent); ListThreadLabels reads the current set.

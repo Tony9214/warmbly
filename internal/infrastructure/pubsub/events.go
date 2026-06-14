@@ -53,6 +53,9 @@ const (
 	EventEmailOpened  EventType = "EMAIL_OPENED"
 	EventEmailClicked EventType = "EMAIL_CLICKED"
 
+	// A human reply landed for a campaign contact (org-scoped pulse).
+	EventEmailReplied EventType = "EMAIL_REPLIED"
+
 	// Task progress events
 	EventTaskProgress EventType = "TASK_PROGRESS"
 
@@ -67,6 +70,11 @@ const (
 	EventAutomationDeleted EventType = "AUTOMATION_DELETED"
 	EventAutomationRun     EventType = "AUTOMATION_RUN"
 
+	// Developer "fire event": a custom, org-scoped event emitted from an
+	// automation action or campaign step, delivered over the realtime gateway so
+	// API-key subscribers receive it without hosting a public webhook URL.
+	EventCustomFired EventType = "CUSTOM_EVENT"
+
 	// In-app notification feed (user-scoped). The web client refreshes the bell
 	// feed + may toast on any event type containing "NOTIFICATION".
 	EventNotificationCreated EventType = "NOTIFICATION_CREATED"
@@ -76,6 +84,11 @@ const (
 	EventMeetingBooked      EventType = "MEETING_BOOKED"
 	EventMeetingRescheduled EventType = "MEETING_RESCHEDULED"
 	EventMeetingCanceled    EventType = "MEETING_CANCELED"
+
+	// Org-wide presence privacy policy changed. The realtime OrgChannel handles
+	// this internally (re-track / untrack / strip activity) to apply the new
+	// policy live; it is not forwarded to web clients.
+	EventPresencePolicyUpdated EventType = "PRESENCE_POLICY_UPDATED"
 )
 
 // BaseEvent contains common fields for all events
@@ -88,6 +101,7 @@ type BaseEvent struct {
 // EmailInboxEvent for new/updated emails
 type EmailInboxEvent struct {
 	BaseEvent
+	OrgID          string `json:"org_id,omitempty"`
 	EmailAccountID string `json:"email_account_id"`
 	MessageID      string `json:"message_id"`
 	ThreadID       string `json:"thread_id,omitempty"`
@@ -120,6 +134,7 @@ type BulkOperationEvent struct {
 // CampaignEvent for campaign changes
 type CampaignEvent struct {
 	BaseEvent
+	OrgID      string                `json:"org_id,omitempty"`
 	CampaignID string                `json:"campaign_id"`
 	Name       string                `json:"name,omitempty"`
 	Status     string                `json:"status,omitempty"`
@@ -139,6 +154,7 @@ type CampaignProgressData struct {
 // AccountEvent for email account status changes
 type AccountEvent struct {
 	BaseEvent
+	OrgID          string `json:"org_id,omitempty"`
 	EmailAccountID string `json:"email_account_id"`
 	Email          string `json:"email"`
 	Provider       string `json:"provider,omitempty"`
@@ -164,25 +180,30 @@ type WarmupStatsEvent struct {
 // TrackingEventPayload for email open/click tracking events
 type TrackingEventPayload struct {
 	BaseEvent
+	OrgID        string `json:"org_id,omitempty"`
 	CampaignID   string `json:"campaign_id"`
 	ContactID    string `json:"contact_id,omitempty"`
 	ContactEmail string `json:"contact_email,omitempty"`
-	SequenceID   string `json:"sequence_id,omitempty"`
+	SequenceID   string `json:"step_id,omitempty"`
 	OriginalURL  string `json:"original_url,omitempty"` // For click events
+	// Machine marks an automated open (Apple MPP prefetch, UA-less fetcher)
+	// so live views can badge it instead of presenting it as a human open.
+	Machine bool `json:"machine,omitempty"`
 }
 
 // TaskProgressEvent for detailed campaign task progress
 type TaskProgressEvent struct {
 	BaseEvent
+	OrgID          string `json:"org_id,omitempty"`
 	CampaignID     string `json:"campaign_id"`
 	TaskID         string `json:"task_id"`
 	Status         string `json:"status"` // pending, active, completed, failed
 	ContactID      string `json:"contact_id"`
 	ContactEmail   string `json:"contact_email"`
 	ContactName    string `json:"contact_name"`
-	SequenceID     string `json:"sequence_id"`
-	SequenceName   string `json:"sequence_name"`
-	SequenceIndex  int    `json:"sequence_index"`
+	SequenceID     string `json:"step_id"`
+	SequenceName   string `json:"step_name"`
+	SequenceIndex  int    `json:"step_index"`
 	Progress       int    `json:"progress"` // Percentage 0-100
 	TotalContacts  int    `json:"total_contacts"`
 	ProcessedCount int    `json:"processed_count"`
@@ -375,7 +396,7 @@ func (p *StreamingPublisher) PublishAccountEvent(ctx context.Context, event *Acc
 // owning user's realtime stream. The dashboard treats it as an ACCOUNT event
 // and refreshes account status live; the explicit state fields let consumers
 // react without a refetch.
-func (p *StreamingPublisher) PublishAccountHealth(ctx context.Context, userID, accountID, email, prevState, newState, reason string) {
+func (p *StreamingPublisher) PublishAccountHealth(ctx context.Context, orgID, userID, accountID, email, prevState, newState, reason string) {
 	if p == nil || p.client == nil {
 		return
 	}
@@ -384,6 +405,7 @@ func (p *StreamingPublisher) PublishAccountHealth(ctx context.Context, userID, a
 			EventType: EventAccountHealthChanged,
 			UserID:    userID,
 		},
+		OrgID:          orgID,
 		EmailAccountID: accountID,
 		Email:          email,
 		Status:         newState,
@@ -468,6 +490,83 @@ func (p *StreamingPublisher) PublishAutomationEvent(ctx context.Context, orgID, 
 		"user_id":    actorID.String(),
 		"org_id":     orgID.String(),
 		"event_type": string(eventType),
+	}
+	if err := p.client.Publish(ctx, TopicUserEvents, event, attrs); err != nil {
+		// Best-effort: realtime is a nicety, not a requirement.
+	}
+}
+
+// CustomEvent is a developer-defined "fire event" signal. Name is the
+// caller-chosen event name (what subscribers match on) and Payload is the
+// fully-customizable key/value data. Source/SourceID record where it was fired
+// from (an automation or a campaign step). Routed to org:<id> like any
+// org-scoped event; the gateway delivers it to API-key websocket subscribers.
+type CustomEvent struct {
+	BaseEvent
+	OrgID    string            `json:"org_id"`
+	Name     string            `json:"name"`
+	Payload  map[string]string `json:"payload,omitempty"`
+	Source   string            `json:"source,omitempty"`
+	SourceID string            `json:"source_id,omitempty"`
+}
+
+// PublishCustomEvent emits an org-scoped developer "fire event". actorID may be
+// uuid.Nil for system-fired events. Best-effort: a publish hiccup never blocks
+// the automation/campaign that fired it.
+func (p *StreamingPublisher) PublishCustomEvent(ctx context.Context, orgID, actorID uuid.UUID, name string, payload map[string]string, source, sourceID string) {
+	if p == nil || p.client == nil || orgID == uuid.Nil {
+		return
+	}
+	event := &CustomEvent{
+		BaseEvent: BaseEvent{
+			EventType: EventCustomFired,
+			UserID:    actorID.String(),
+			Timestamp: time.Now(),
+		},
+		OrgID:    orgID.String(),
+		Name:     name,
+		Payload:  payload,
+		Source:   source,
+		SourceID: sourceID,
+	}
+	attrs := map[string]string{
+		"user_id":    actorID.String(),
+		"org_id":     orgID.String(),
+		"event_type": string(EventCustomFired),
+	}
+	if err := p.client.Publish(ctx, TopicUserEvents, event, attrs); err != nil {
+		// Best-effort: realtime is a nicety, not a requirement.
+	}
+}
+
+// PresencePolicyEvent tells the realtime service to re-gate team presence for an
+// org live, so a privacy toggle applies without waiting for members to reconnect.
+// Handled inside the OrgChannel (not pushed to web clients).
+type PresencePolicyEvent struct {
+	BaseEvent
+	OrgID                string `json:"org_id"`
+	PresenceShowOnline   bool   `json:"presence_show_online"`
+	PresenceShowActivity bool   `json:"presence_show_activity"`
+}
+
+// PublishPresencePolicy emits an org-scoped presence policy change so connected
+// OrgChannels re-evaluate tracking immediately.
+func (p *StreamingPublisher) PublishPresencePolicy(ctx context.Context, orgID uuid.UUID, showOnline, showActivity bool) {
+	if p == nil || p.client == nil || orgID == uuid.Nil {
+		return
+	}
+	event := &PresencePolicyEvent{
+		BaseEvent: BaseEvent{
+			EventType: EventPresencePolicyUpdated,
+			Timestamp: time.Now(),
+		},
+		OrgID:                orgID.String(),
+		PresenceShowOnline:   showOnline,
+		PresenceShowActivity: showActivity,
+	}
+	attrs := map[string]string{
+		"org_id":     orgID.String(),
+		"event_type": string(EventPresencePolicyUpdated),
 	}
 	if err := p.client.Publish(ctx, TopicUserEvents, event, attrs); err != nil {
 		// Best-effort: realtime is a nicety, not a requirement.
@@ -561,6 +660,48 @@ func (p *StreamingPublisher) PublishTaskProgress(ctx context.Context, event *Tas
 
 	if err := p.client.Publish(ctx, TopicCampaignUpdate, event, attrs); err != nil {
 		// Log error but don't fail
+	}
+}
+
+// PublishEmailReplied emits an org-scoped EMAIL_REPLIED pulse when a human
+// reply lands for a campaign contact. Primitive-typed so app packages can wire
+// it through a narrow local interface.
+func (p *StreamingPublisher) PublishEmailReplied(ctx context.Context, orgID, userID, campaignID, contactID, contactEmail, sequenceID string) {
+	if p == nil || p.client == nil {
+		return
+	}
+	p.PublishTrackingEvent(ctx, &TrackingEventPayload{
+		BaseEvent: BaseEvent{
+			EventType: EventEmailReplied,
+			UserID:    userID,
+		},
+		OrgID:        orgID,
+		CampaignID:   campaignID,
+		ContactID:    contactID,
+		ContactEmail: contactEmail,
+		SequenceID:   sequenceID,
+	})
+}
+
+// PublishEmailSent emits an org-scoped EMAIL_SENT pulse when a campaign email
+// goes out, carrying the same rich payload as task progress so the dashboard
+// can show which contact/step just fired without a refetch.
+func (p *StreamingPublisher) PublishEmailSent(ctx context.Context, event *TaskProgressEvent) {
+	if p == nil || p.client == nil {
+		return
+	}
+
+	event.EventType = EventEmailSent
+	event.Timestamp = time.Now()
+
+	attrs := map[string]string{
+		"user_id":     event.UserID,
+		"campaign_id": event.CampaignID,
+		"event_type":  string(EventEmailSent),
+	}
+
+	if err := p.client.Publish(ctx, TopicCampaignUpdate, event, attrs); err != nil {
+		// Best-effort: realtime is a nicety, not a requirement.
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 )
 
 // AuditRepository persists and queries the organization-wide audit trail.
@@ -183,8 +184,7 @@ func (r *auditRepository) Search(ctx context.Context, params *models.AuditLogSea
 	}
 	if len(logs) > limit {
 		result.Data = logs[:limit]
-		next := logs[limit-1].ID.String()
-		result.Pagination.NextCursor = &next
+		result.Pagination.NextCursor = paging.EncodeUUID(logs[limit-1].ID)
 	}
 
 	return result, nil

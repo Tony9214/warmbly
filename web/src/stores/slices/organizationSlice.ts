@@ -6,7 +6,10 @@ export interface Organization {
   avatar?: string
   avatar_url?: string | null
   plan?: string
-  role: 'owner' | 'admin' | 'member'
+  // Built-in role id or a custom role's name.
+  role: string
+  // Caller's effective permission bitmask in this org (custom-role aware).
+  permissions?: number
 }
 
 export interface OrganizationSlice {
@@ -35,12 +38,14 @@ export const createOrganizationSlice: StateCreator<OrganizationSlice, [], [], Or
   // tab) so the gate can redirect cleanly.
   setOrganizations: (organizations) => {
     const current = get().currentOrganization
-    const stillMember = current
-      ? organizations.some((o) => o.id === current.id)
-      : false
+    // Adopt the FRESH row for the current org (role/permissions may have
+    // changed since the last fetch — e.g. a role edit propagated live).
+    const fresh = current
+      ? (organizations.find((o) => o.id === current.id) ?? null)
+      : null
     set({
       organizations,
-      currentOrganization: stillMember ? current : null,
+      currentOrganization: fresh,
     })
   },
 

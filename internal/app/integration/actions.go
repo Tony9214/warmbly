@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,13 +13,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 
 	"github.com/warmbly/warmbly/internal/app/webhook"
+	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/pkg/safehttp"
 )
 
-// actionHTTP is the shared client for outbound provider action calls. Short
-// timeout — a slow third party shouldn't pin a dispatch goroutine for long.
-var actionHTTP = &http.Client{Timeout: 15 * time.Second}
+// actionHTTP is the shared client for outbound provider action calls. It is
+// SSRF-hardened (resolves + blocks non-public hosts at dial time) because most of
+// these calls go to user-supplied URLs. Short timeout — a slow third party
+// shouldn't pin a dispatch goroutine for long.
+var actionHTTP = safehttp.Client(15 * time.Second)
 
 // automationEventPayload is the structured, versioned body delivered to generic
 // automation webhooks (Zapier / Make / n8n). The legacy flat fields
@@ -85,16 +91,211 @@ func automationDeliver(ctx context.Context, targetURL, secret, eventType string,
 // newDeliveryID returns a fresh idempotency / delivery id for a webhook event.
 func newDeliveryID() string { return uuid.New().String() }
 
+// httpResponseBodyLimit caps how much of a response we read + keep so a huge
+// response can't blow up memory (it lives in the run's in-memory event data).
+const httpResponseBodyLimit = 64 << 10 // 64 KiB
+
+// runHTTPRequest performs the configurable HTTP node: render method/URL/headers/
+// query/body against the event data, SSRF-guard the URL, call it with bounded
+// retry, and write the response back into `data` under the node's output key
+// (default "response") so downstream nodes can template {{.response.body...}}
+// and condition nodes can branch on {{.response.ok}}.
+func runHTTPRequest(ctx context.Context, orgID, automationID uuid.UUID, n models.AutomationNode, cfg nativeActionConfig, data map[string]any) error {
+	method := strings.ToUpper(strings.TrimSpace(cfg.HTTPMethod))
+	if method == "" {
+		method = http.MethodPost
+	}
+	rawURL := strings.TrimSpace(renderTemplate(cfg.HTTPURL, data))
+	if rawURL == "" {
+		return fmt.Errorf("http request needs a url")
+	}
+	// SSRF + HTTPS guard (same policy as outbound webhooks), re-checked here at
+	// execution time, not just at save time.
+	if err := webhook.ValidateOutboundURL(rawURL); err != nil {
+		return fmt.Errorf("http url rejected: %w", err)
+	}
+	if len(cfg.HTTPQuery) > 0 {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return fmt.Errorf("invalid http url: %w", err)
+		}
+		q := u.Query()
+		for k, v := range cfg.HTTPQuery {
+			q.Set(k, renderTemplate(v, data))
+		}
+		u.RawQuery = q.Encode()
+		rawURL = u.String()
+	}
+	body := renderTemplate(cfg.HTTPBody, data)
+
+	outKey := strings.TrimSpace(cfg.HTTPOutputKey)
+	if outKey == "" {
+		outKey = "response"
+	}
+
+	// Abuse trail: log every outbound HTTP-request action with org/automation
+	// attribution so a misuse pattern (scanning, relaying) is reviewable.
+	host := rawURL
+	if pu, perr := url.Parse(rawURL); perr == nil {
+		host = pu.Hostname()
+	}
+	log.Info().Str("org_id", orgID.String()).Str("automation_id", automationID.String()).
+		Str("method", method).Str("host", host).Msg("automation http_request outbound")
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 500 * time.Millisecond):
+			}
+		}
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, rawURL, reader)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Warmbly-Automations/1.0")
+		for k, v := range cfg.HTTPHeaders {
+			req.Header.Set(k, renderTemplate(v, data))
+		}
+
+		resp, err := actionHTTP.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		out := readHTTPOutput(resp)
+		_ = resp.Body.Close()
+		data[outKey] = out
+		recordStepOutput(n, data, out)
+
+		if ok, _ := out["ok"].(bool); ok {
+			return nil
+		}
+		status, _ := out["status"].(int)
+		lastErr = fmt.Errorf("http %s -> %d", method, status)
+		if status >= 400 && status < 500 {
+			return lastErr // client error: retrying won't help
+		}
+	}
+
+	// A blocked destination is an SSRF attempt worth flagging with attribution.
+	if errors.Is(lastErr, safehttp.ErrBlockedAddress) {
+		log.Warn().Str("org_id", orgID.String()).Str("automation_id", automationID.String()).
+			Str("host", host).Msg("automation http_request blocked: non-public destination")
+	}
+
+	// Network failure on every attempt — still record a failure response so a
+	// downstream condition on {{.response.ok}} can route to an error branch.
+	if _, ok := data[outKey]; !ok {
+		fail := map[string]any{"ok": false, "status": 0, "error": lastErr.Error()}
+		data[outKey] = fail
+		recordStepOutput(n, data, fail)
+	}
+	return lastErr
+}
+
+func readHTTPOutput(resp *http.Response) map[string]any {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, httpResponseBodyLimit))
+	out := map[string]any{
+		"status":  resp.StatusCode,
+		"ok":      resp.StatusCode >= 200 && resp.StatusCode < 300,
+		"text":    string(raw),
+		"headers": flattenHeaders(resp.Header),
+	}
+	// Parse JSON bodies so {{.response.body.field}} works downstream.
+	var parsed any
+	if json.Unmarshal(raw, &parsed) == nil {
+		out["body"] = parsed
+	}
+	return out
+}
+
+func flattenHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k := range h {
+		out[k] = h.Get(k)
+	}
+	return out
+}
+
+// recordStepOutput also stores the response under data["steps"][nodeID] so a
+// later node can reference a specific earlier call via {{index .steps "<id>"}}.
+func recordStepOutput(n models.AutomationNode, data map[string]any, out map[string]any) {
+	steps, ok := data["steps"].(map[string]any)
+	if !ok {
+		steps = map[string]any{}
+		data["steps"] = steps
+	}
+	steps[n.ID] = out
+}
+
+// Warmbly's sky accent (Tailwind sky-500, #0EA5E9) brands outbound notification
+// cards: an integer for Discord embeds, a hex string for Slack attachments.
+const (
+	notifyAccentInt = 0x0EA5E9
+	notifyAccentHex = "#0EA5E9"
+)
+
+// truncateRunes caps a string at max runes (provider embed/field limits), adding
+// an ellipsis when it trims so a long custom template can't get rejected.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 1 {
+		return string(r[:max])
+	}
+	return string(r[:max-1]) + "…"
+}
+
+// notifyFields turns the message's contact/subject into structured key-value
+// fields shared by the Slack and Discord cards (omitted when empty).
+func (m eventMessage) notifyFields() (contact, subject string) {
+	return m.Email, m.Subject
+}
+
 // slackPostMessage posts to a channel using a bot token from the OAuth connect.
-// Slack returns HTTP 200 with {ok:false,error:...} on failure, so we inspect
-// the body rather than the status code.
+// It renders a sky-accented attachment card (title + contact/subject fields)
+// rather than a bare line, with a plain-text fallback for the notification
+// preview. Slack returns HTTP 200 with {ok:false,error:...} on failure, so we
+// inspect the body rather than the status code.
 func slackPostMessage(ctx context.Context, token, channel string, msg eventMessage) error {
 	if channel == "" {
 		return fmt.Errorf("no slack channel configured")
 	}
+	attachment := map[string]any{
+		"color":    notifyAccentHex,
+		"fallback": msg.plainText(),
+		"title":    truncateRunes(msg.Title, 256),
+		"footer":   "Warmbly",
+		"ts":       time.Now().Unix(),
+	}
+	if msg.Custom != "" {
+		attachment["text"] = truncateRunes(msg.Custom, 3000)
+	}
+	contact, subject := msg.notifyFields()
+	var fields []map[string]any
+	if contact != "" {
+		fields = append(fields, map[string]any{"title": "Contact", "value": contact, "short": true})
+	}
+	if subject != "" {
+		fields = append(fields, map[string]any{"title": "Subject", "value": subject, "short": true})
+	}
+	if len(fields) > 0 {
+		attachment["fields"] = fields
+	}
 	body, _ := json.Marshal(map[string]any{
-		"channel": channel,
-		"text":    msg.plainText(),
+		"channel":     channel,
+		"text":        msg.Title,
+		"attachments": []map[string]any{attachment},
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://slack.com/api/chat.postMessage", bytes.NewReader(body))
 	if err != nil {
@@ -122,15 +323,37 @@ func slackPostMessage(ctx context.Context, token, channel string, msg eventMessa
 	return nil
 }
 
-// webhookPost delivers a Discord-compatible payload (and works for any generic
-// JSON webhook): Discord requires a top-level "content" string.
-func webhookPost(ctx context.Context, url string, msg eventMessage) error {
-	body, _ := json.Marshal(map[string]any{
-		"content": msg.plainText(),
-		"email":   msg.Email,
-		"subject": msg.Subject,
-		"title":   msg.Title,
-	})
+// discordEmbedPayload builds a Discord webhook body as a single rich embed in
+// Warmbly's sky theme (title + optional description + contact/subject fields +
+// footer/timestamp) rather than a plain content line, so notifications render as
+// branded cards. Discord ignores unknown top-level keys, so embeds are the body.
+func discordEmbedPayload(msg eventMessage) map[string]any {
+	embed := map[string]any{
+		"title":     truncateRunes(msg.Title, 256),
+		"color":     notifyAccentInt,
+		"footer":    map[string]any{"text": "Warmbly"},
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+	if msg.Custom != "" {
+		embed["description"] = truncateRunes(msg.Custom, 4096)
+	}
+	contact, subject := msg.notifyFields()
+	var fields []map[string]any
+	if contact != "" {
+		fields = append(fields, map[string]any{"name": "Contact", "value": truncateRunes(contact, 1024), "inline": true})
+	}
+	if subject != "" {
+		fields = append(fields, map[string]any{"name": "Subject", "value": truncateRunes(subject, 1024), "inline": true})
+	}
+	if len(fields) > 0 {
+		embed["fields"] = fields
+	}
+	return map[string]any{"embeds": []map[string]any{embed}}
+}
+
+// discordNotify delivers a sky-themed embed card to a Discord channel webhook.
+func discordNotify(ctx context.Context, url string, msg eventMessage) error {
+	body, _ := json.Marshal(discordEmbedPayload(msg))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err

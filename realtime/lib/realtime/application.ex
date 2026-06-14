@@ -12,25 +12,33 @@ defmodule Realtime.Application do
     # while named processes (like PubSub.Supervisor) survive, causing conflicts.
     {:ok, _} = Application.ensure_all_started(:postgrex)
 
-    children = [
-      # Database repository for API key lookups
-      Realtime.Repo,
+    children =
+      [
+        # Database repository for API key lookups
+        Realtime.Repo,
 
-      # Redis connection pool for rate limiting and distributed state
-      Realtime.Redis,
+        # Redis connection pool for rate limiting and distributed state
+        Realtime.Redis,
 
-      # Phoenix PubSub for internal message broadcasting
-      {Phoenix.PubSub, name: Realtime.PubSub},
+        # Phoenix PubSub for internal message broadcasting
+        {Phoenix.PubSub, name: Realtime.PubSub},
 
-      # Phoenix Endpoint (WebSocket server)
-      RealtimeWeb.Endpoint,
+        # Per-org sequencer pool: assigns the resumable sequence + buffers + and
+        # broadcasts org events in order. Must start before the event bridge.
+        Realtime.Sequencer,
 
-      # Connection tracker
-      {Realtime.Connections, []},
+        # Presence tracker for org-level collaboration (who's online / viewing what)
+        RealtimeWeb.Presence,
 
-      # Google Pub/Sub subscriber supervisor
-      {Realtime.CloudPubSub.Supervisor, []}
-    ]
+        # Phoenix Endpoint (WebSocket server)
+        RealtimeWeb.Endpoint,
+
+        # Connection tracker
+        {Realtime.Connections, []},
+
+        # Google Pub/Sub subscriber supervisor
+        {Realtime.CloudPubSub.Supervisor, []}
+      ] ++ event_bridge_children()
 
     opts = [strategy: :one_for_one, name: Realtime.Supervisor]
 
@@ -46,6 +54,18 @@ defmodule Realtime.Application do
     )
 
     Supervisor.start_link(children, opts)
+  end
+
+  # Bridge backend events over Redis whenever Google Pub/Sub is not the active
+  # transport (local dev and any non-GCP env). In Pub/Sub environments the
+  # Broadway subscriber handles fan-out, so this stays off and events are never
+  # delivered twice.
+  defp event_bridge_children do
+    if Application.get_env(:realtime, :pubsub_enabled, false) do
+      []
+    else
+      [Realtime.Redis.EventSubscriber]
+    end
   end
 
   @impl true

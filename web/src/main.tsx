@@ -18,7 +18,7 @@ import CampaignPreview from './app/app/campaigns/[id]/page';
 import CampaignLeads from './app/app/campaigns/[id]/leads/page';
 import CampaignPreferences from './app/app/campaigns/[id]/preferences/page';
 import CampaignSchedule from './app/app/campaigns/[id]/schedule/page';
-import CampaignSequences from './app/app/campaigns/[id]/sequences/page';
+import CampaignSteps from './app/app/campaigns/[id]/steps/page';
 import AnalyticsPage from './app/app/analytics/page';
 import DeliverabilityPage from './app/app/deliverability/page';
 import PipelinesPage from './app/app/crm/pipelines/page';
@@ -27,6 +27,9 @@ import TasksPage from './app/app/crm/tasks/page';
 import MeetingsPage from './app/app/crm/meetings/page';
 import TemplatesPage from './app/app/templates/page';
 import APIKeysPage from './app/app/api-keys/page';
+import OAuthAppsPage from './app/app/settings/oauth-apps/page';
+import OAuthLayout from './app/oauth/layout';
+import OAuthConsentPage from './app/oauth/authorize/page';
 import IntegrationsPage from './app/app/integrations/page';
 import AutomationsPage from './app/app/automations/page';
 import AutomationBuilderPage from './app/app/automations/[id]/page';
@@ -70,6 +73,7 @@ import ResetPasswordConfirmPage from './app/auth/reset-password/confirm/page';
 import OnboardingLayout from './app/onboarding/layout';
 import OnboardingPage from './app/onboarding/page';
 import SelectOrgPage from './app/select-org/page';
+import InviteAcceptPage from './app/invite/page';
 import AdminLayout from './app/app/admin/layout';
 import AdminPage from './app/app/admin/page';
 import AdminWorkersPage from './app/app/admin/workers/page';
@@ -181,6 +185,20 @@ const router = createBrowserRouter([
         element: <SelectOrgPage />,
       },
       {
+        path: "invite",
+        element: <InviteAcceptPage />,
+      },
+      {
+        path: "oauth",
+        element: <OAuthLayout />,
+        children: [
+          {
+            path: "authorize",
+            element: <OAuthConsentPage />,
+          },
+        ],
+      },
+      {
         path: "app",
         element: <RootAppLayout />,
         children: [
@@ -224,8 +242,8 @@ const router = createBrowserRouter([
                     element: <CampaignSchedule />,
                   },
                   {
-                    path: "sequences",
-                    element: <CampaignSequences />,
+                    path: "steps",
+                    element: <CampaignSteps />,
                   }
                 ]
               }
@@ -273,6 +291,11 @@ const router = createBrowserRouter([
             element: <APIKeysPage />,
           },
           {
+            // OAuth apps moved into Settings; keep the old path working.
+            path: "oauth-apps",
+            element: <Navigate to="/app/settings/oauth-apps" replace />,
+          },
+          {
             path: "integrations",
             element: <IntegrationsPage />,
           },
@@ -302,6 +325,7 @@ const router = createBrowserRouter([
               { path: "billing", element: <BillingSettingsPage /> },
               { path: "limits", element: <LimitsSettingsPage /> },
               { path: "roles", element: <RolesSettingsPage /> },
+              { path: "oauth-apps", element: <OAuthAppsPage /> },
               { path: "danger", element: <DangerSettingsPage /> },
             ],
           },

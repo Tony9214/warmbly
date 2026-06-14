@@ -3,7 +3,6 @@ package tasks
 import (
 	"fmt"
 	"math/rand"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/pkg/tmplfuncs"
 	"github.com/warmbly/warmbly/internal/pkg/warmpersona"
+	"github.com/warmbly/warmbly/internal/repository"
 )
 
 // Conversation represents a warmup conversation for AI generation
@@ -272,15 +272,21 @@ func AddOpenTrackingPixel(htmlBody string, taskID uuid.UUID, trackingDomain stri
 	return htmlBody + pixel
 }
 
-// WrapLinksForTracking wraps all links in HTML for click tracking
-// The tracking URL points to the Rust tracking service endpoint: /t/c/{taskID}?url={original_url}
-func WrapLinksForTracking(htmlBody string, taskID uuid.UUID, trackingDomain string) string {
+// WrapLinksForTracking rewrites every external link to an opaque
+// click-tracking ticket (https://<domain>/c/<id>) and returns the minted
+// rows. The destination never travels inside the link, so there is nothing
+// to forge: the tracking service resolves tickets via the backend internal
+// API and 404s anything it does not know. The caller MUST persist the
+// returned rows before using the rewritten body (and fall back to the
+// original body on failure) so an email can never ship dead tickets.
+func WrapLinksForTracking(htmlBody string, taskID, campaignID uuid.UUID, trackingDomain string) (string, []repository.TrackedLink) {
 	if trackingDomain == "" {
 		trackingDomain = "track.warmbly.com"
 	}
 
 	// Regex to find href attributes
 	linkRegex := regexp.MustCompile(`href="([^"]+)"`)
+	var links []repository.TrackedLink
 
 	result := linkRegex.ReplaceAllStringFunc(htmlBody, func(match string) string {
 		// Extract the original URL
@@ -300,17 +306,23 @@ func WrapLinksForTracking(htmlBody string, taskID uuid.UUID, trackingDomain stri
 			return match
 		}
 
-		// Use /t/c/ path to match Rust tracking service
-		// URL encode the original URL properly
-		trackingURL := fmt.Sprintf("https://%s/t/c/%s?url=%s",
-			trackingDomain,
-			taskID.String(),
-			url.QueryEscape(originalURL))
+		// Only http(s) destinations are storable redirect targets
+		if !strings.HasPrefix(originalURL, "http://") && !strings.HasPrefix(originalURL, "https://") {
+			return match
+		}
 
-		return fmt.Sprintf(`href="%s"`, trackingURL)
+		id := uuid.New()
+		links = append(links, repository.TrackedLink{
+			ID:          id,
+			TaskID:      taskID,
+			CampaignID:  campaignID,
+			Destination: originalURL,
+		})
+
+		return fmt.Sprintf(`href="https://%s/c/%s"`, trackingDomain, id.String())
 	})
 
-	return result
+	return result, links
 }
 
 // personaPick chooses from a mailbox's preferred subset of phrasing options so

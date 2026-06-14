@@ -14,6 +14,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	jobs "github.com/warmbly/warmbly/internal/app/consumer"
 	"github.com/warmbly/warmbly/internal/app/integration"
+	"github.com/warmbly/warmbly/internal/app/nativeactions"
 	"github.com/warmbly/warmbly/internal/app/notification"
 	warmupapp "github.com/warmbly/warmbly/internal/app/warmup"
 	"github.com/warmbly/warmbly/internal/app/webhook"
@@ -29,6 +30,7 @@ import (
 	"github.com/warmbly/warmbly/internal/infrastructure/kms"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
+	"github.com/warmbly/warmbly/internal/notify"
 	"github.com/warmbly/warmbly/internal/observability"
 	"github.com/warmbly/warmbly/internal/repository"
 )
@@ -150,17 +152,33 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Google Pub/Sub
-	gcpProjectID := os.Getenv("GCP_PROJECT_ID")
+	// Realtime event transport, chosen by PUBSUB_ENABLED — the SAME flag the
+	// backend and the Elixir realtime service read, so the three services can
+	// never split-brain. PUBSUB_ENABLED=true => Google Pub/Sub (prod); anything
+	// else => Redis bridge (local dev / non-GCP). Exactly one transport is active.
 	var streamingPublisher *pubsub.StreamingPublisher
-	if gcpProjectID != "" {
+	if os.Getenv("PUBSUB_ENABLED") == "true" {
+		gcpProjectID := os.Getenv("GCP_PROJECT_ID")
+		if gcpProjectID == "" {
+			log.Fatal("PUBSUB_ENABLED=true requires GCP_PROJECT_ID")
+		}
 		pubsubClient, err := pubsub.NewClient(ctx, gcpProjectID)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
 		}
 		defer pubsubClient.Close()
+		// Idempotently ensure the realtime topics + subscriptions exist (safe to
+		// run from both backend and consumer; AlreadyExists is treated as success).
+		if err := pubsubClient.EnsureRealtimeTopology(ctx); err != nil {
+			sentry.CaptureException(err)
+			log.Fatal("Failed to provision Pub/Sub topics/subscriptions: ", err)
+		}
 		streamingPublisher = pubsub.NewStreamingPublisher(pubsubClient)
+	}
+	if streamingPublisher == nil {
+		streamingPublisher = pubsub.NewStreamingPublisher(pubsub.NewRedisBus(redisCache.Client, ""))
+		log.Println("Realtime events bridged over Redis (Pub/Sub disabled)")
 	}
 
 	// Repositories
@@ -185,6 +203,7 @@ func main() {
 	contactRepo := repository.NewContactRepostory(primaryDB)
 	campaignProgressRepo := repository.NewCampaignProgressRepository(primaryDB.Pool)
 	crmRepo := repository.NewCRMRepository(primaryDB.Pool)
+	orgRepoConsumer := repository.NewOrganizationRepository(primaryDB.Pool)
 	advancedRepo := repository.NewAdvancedOutreachRepository(primaryDB.Pool)
 
 	// Reply → integration fan-out. The consumer is where inbound replies are
@@ -219,16 +238,49 @@ func main() {
 		contactRepo,
 		campaignProgressRepo,
 		crmRepo,
+		uniboxRepo,
 		nil, // tasksClient: the consumer does not schedule Cloud Tasks
 		warmupService,
 	)
 	advancedService.WireDispatcher(webhookService)
+	// Reply/open/click instant action chains run in THIS process (inbox ingest +
+	// tracking consumer), so a "run_automation" node on an instant branch must be
+	// able to launch the flow here too. Without this it would be stamped sent and
+	// never fire. Mirrors the scheduler's automationRunner wiring.
+	advancedService.WireAutomationRunner(integrationServiceC)
+	// Native (Warmbly-internal) automation actions run wherever the event is
+	// dispatched. Reply/bounce/warmup events dispatch in THIS process, so without
+	// wiring native actions here a reply-triggered automation's add_tag /
+	// create_deal / label_email node would fail with "native actions are not
+	// available". Mirrors the backend wiring.
+	integrationServiceC.SetNativeActions(nativeactions.Adapter{
+		Adv:      advancedService,
+		Contacts: contactRepo,
+		Orgs:     orgRepoConsumer,
+	})
+	// Per-org daily outbound-action quota (event-driven automations run here).
+	integrationServiceC.SetOutboundQuotaCache(redisCache)
 	// In-app notifications: the reply/bounce/complaint gate fires in THIS
 	// process (inbox ingest + deliverability ingest run in the consumer), so the
 	// notifier must be wired here. Missing this = notifications silently never
 	// created.
 	notificationService := notification.NewService(repository.NewNotificationRepository(primaryDB.Pool), streamingPublisher)
+	// Email + Slack delivery for notifications. Email is best-effort: the
+	// SES/SMTP service only constructs when email config is present (prod, or
+	// a dev env that sets it), so a bare dev consumer simply skips the email
+	// channel. Slack reuses the integration service (token decryption).
+	var notifEmail notification.EmailSender
+	if emailCfg, ecErr := cfg.LoadEmailConfig(ctx); ecErr == nil {
+		if smtpCfg := cfg.LoadSMTPConfig(ctx); smtpCfg != nil {
+			notifEmail = notify.NewSMTPEmailNotificationService(emailCfg.EmailName, emailCfg.EmailAddress, smtpCfg.Host, smtpCfg.Port)
+		} else if ses, sErr := notify.NewEmailNotficiationService(ctx, emailCfg.EmailName, emailCfg.EmailAddress); sErr == nil {
+			notifEmail = ses
+		}
+	}
+	notificationService.WireDelivery(notifEmail, integrationServiceC, repository.NewUserRepostory(primaryDB, kmsClient))
 	advancedService.WireNotifier(notificationService)
+	// Reply pulses fire in THIS process too (inbox ingest classifies replies).
+	advancedService.WireRealtime(streamingPublisher)
 
 	// Events publisher — wraps the existing Kafka producer in an EventBus,
 	// wraps Avrov2 in a Codec. Once EVENTBUS_PROVIDER=nats is exercised in

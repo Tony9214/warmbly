@@ -11,14 +11,18 @@ import (
 )
 
 func (h *Handler) EmailsSearch(c *gin.Context) {
-	userID := middleware.GetUserID(c)
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.Handle(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
 
 	query := c.Query("q")
 	cursor := c.Query("cursor")
 	tag := c.Query("tag")
 	limit := c.Query("limit")
 
-	resp, err := h.EmailService.Search(c.Request.Context(), userID, query, cursor, tag, limit, middleware.GetAPIKeyAllowedEmailAccounts(c))
+	resp, err := h.EmailService.Search(c.Request.Context(), orgID.String(), query, cursor, tag, limit, middleware.GetAPIKeyAllowedEmailAccounts(c))
 	if err != nil {
 		errx.Handle(c, err)
 		return

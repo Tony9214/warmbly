@@ -1,0 +1,150 @@
+---
+title: OAuth
+description: Let third-party apps act on behalf of a Warmbly workspace with the authorization-code flow.
+icon: LockKeyhole
+---
+
+API keys are for your own scripts. When you build an app that other people connect their Warmbly workspace to, use OAuth instead: the user grants your app scoped access on a consent screen, and you receive tokens that act on their behalf. You never see their password or API key.
+
+Warmbly implements the OAuth 2.0 authorization-code flow. Every app holds a client secret, with PKCE available as an optional extra layer. The implicit and password grants are not supported.
+
+## Register your app
+
+In the dashboard, open **Settings -> OAuth apps** and register an application. You provide:
+
+- a **name**, optional description, logo, and website (shown on the consent screen),
+- one or more **redirect URIs** (where users are sent back after they approve), matched exactly and required to be HTTPS, except loopback URLs for native apps,
+- the **scopes** your app may request.
+
+You receive a **client ID** and a **client secret**, shown only once. Every app has a secret: keep it server-side and use it to authenticate the token exchange. Browser and mobile apps that cannot safely hold a secret should add PKCE on top (see below) rather than embedding it.
+
+## Scopes
+
+OAuth scopes are the same permissions as API keys, lowercased (for example `read_campaigns`, `write_contacts`). A token can only ever carry scopes that the app was registered with. See the [permission reference](/api/permissions/) for the full list. The issued access token authenticates API calls with exactly those permissions, through the same gates as an API key.
+
+## The flow
+
+### 1. Send the user to the authorize page
+
+Redirect the user's browser to the consent page with the standard parameters. PKCE is optional but recommended: generate a `code_verifier` (a high-entropy random string) and send its S256 challenge.
+
+```
+code_challenge = base64url( sha256( code_verifier ) )
+```
+
+```
+https://app.warmbly.com/oauth/authorize
+  ?response_type=code
+  &client_id=wmcid_...
+  &redirect_uri=https://yourapp.com/oauth/callback
+  &scope=read_campaigns%20read_contacts
+  &state=<random-csrf-token>
+  &code_challenge=<challenge>
+  &code_challenge_method=S256
+```
+
+`state` is yours to verify on return (CSRF protection). The `code_challenge` and `code_challenge_method` are optional; if you include them, `code_challenge_method` must be `S256`.
+
+### 2. The user approves
+
+Warmbly shows the app, the scopes it wants, and an authorize or deny choice. On approval the browser is redirected back to your `redirect_uri` with a single-use code:
+
+```
+https://yourapp.com/oauth/callback?code=wmac_...&state=<your-state>
+```
+
+If the user denies, the redirect carries `?error=access_denied&state=...` instead.
+
+### 3. Exchange the code for tokens
+
+Verify `state` matches, then `POST` to the token endpoint. The request is `application/x-www-form-urlencoded`; send your `client_secret` (in the body or via HTTP Basic auth), plus the original `code_verifier` if you used PKCE.
+
+```bash
+curl -X POST "https://api.warmbly.com/v1/oauth/token" \
+  -d grant_type=authorization_code \
+  -d code=wmac_... \
+  -d redirect_uri=https://yourapp.com/oauth/callback \
+  -d client_id=wmcid_... \
+  -d client_secret=wmcs_... \
+  -d code_verifier=<the-original-verifier>
+```
+
+```json
+{
+  "access_token": "wmat_...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "wmrt_...",
+  "scope": "read_campaigns read_contacts"
+}
+```
+
+### 4. Call the API
+
+Use the access token exactly like an API key:
+
+```bash
+curl "https://api.warmbly.com/v1/campaigns" \
+  -H "Authorization: Bearer wmat_..."
+```
+
+### 5. Refresh when it expires
+
+Access tokens last one hour. Exchange the refresh token for a new pair before or after expiry. Refresh tokens **rotate**: the old one stops working the moment a new pair is issued, so always store the latest one.
+
+```bash
+curl -X POST "https://api.warmbly.com/v1/oauth/token" \
+  -d grant_type=refresh_token \
+  -d refresh_token=wmrt_... \
+  -d client_id=wmcid_... \
+  -d client_secret=wmcs_...
+```
+
+### Revoke
+
+Revoke an access or refresh token (and the grant behind it) when the user disconnects:
+
+```bash
+curl -X POST "https://api.warmbly.com/v1/oauth/revoke" \
+  -d token=wmat_... \
+  -d client_id=wmcid_... \
+  -d client_secret=wmcs_...
+```
+
+Users can also revoke your app themselves under **Settings -> OAuth apps -> Authorized apps**, which invalidates every token issued to it for that workspace.
+
+## Token lifetimes
+
+| Token | Lifetime | Notes |
+| --- | --- | --- |
+| Authorization code | 10 minutes | Single use, PKCE-bound |
+| Access token | 1 hour | Bearer, carries the granted scopes |
+| Refresh token | 90 days | Rotates on every use |
+
+## Discovery
+
+Endpoint URLs and capabilities are published per RFC 8414:
+
+```
+GET https://api.warmbly.com/.well-known/oauth-authorization-server
+```
+
+It lists the authorization, token, and revocation endpoints, the supported scopes, `code` as the only response type, `authorization_code` and `refresh_token` grants, and `S256` as the only PKCE method.
+
+## Security notes
+
+- Redirect URIs are matched exactly, so register every callback you use.
+- Always send and verify `state`.
+- PKCE is optional but recommended; when used, only `S256` is accepted.
+- Keep your client secret server-side. Browser and mobile apps should add PKCE rather than embedding the secret.
+
+## Related
+
+<Cards>
+  <Card title="Permissions" href="/api/permissions/">
+    The scopes an OAuth app can request, shared with API keys.
+  </Card>
+  <Card title="Authentication" href="/api/authentication/">
+    Using bearer tokens (API keys and OAuth) on the API.
+  </Card>
+</Cards>

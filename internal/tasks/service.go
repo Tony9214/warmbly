@@ -50,6 +50,11 @@ type TasksService interface {
 	// Warmup scheduling lifecycle
 	EnsureWarmupScheduled(ctx context.Context, accountID uuid.UUID) error
 	StartWarmupReconciler(ctx context.Context, interval time.Duration)
+
+	// StartCampaignReconciler re-seeds active campaigns whose self-perpetuating
+	// task chain died (swallowed enqueue / crash between ticks). Campaigns have
+	// no other bootstrap once started, so this is the stall backstop.
+	StartCampaignReconciler(ctx context.Context, interval time.Duration)
 }
 
 // AutomationRunner launches an automation graph by id. It's satisfied
@@ -86,6 +91,7 @@ type tasksService struct {
 	contactRepo          repository.ContactRepository
 	campaignLogRepo      repository.CampaignLogRepository
 	attachmentRepo       repository.AttachmentRepository
+	trackedLinkRepo      repository.TrackedLinkRepository
 
 	// automationRunner launches automations from a campaign "run_automation" step.
 	automationRunner AutomationRunner
@@ -124,6 +130,7 @@ func NewService(
 	campaignLogRepo repository.CampaignLogRepository,
 	advanced advanced.Service,
 	attachmentRepo repository.AttachmentRepository,
+	trackedLinkRepo repository.TrackedLinkRepository,
 	automationRunner AutomationRunner,
 ) TasksService {
 	return &tasksService{
@@ -148,6 +155,7 @@ func NewService(
 		contactRepo:          contactRepo,
 		campaignLogRepo:      campaignLogRepo,
 		attachmentRepo:       attachmentRepo,
+		trackedLinkRepo:      trackedLinkRepo,
 		automationRunner:     automationRunner,
 		warmupSettings:       &warmupSettingsCache{},
 	}

@@ -263,10 +263,34 @@ const (
 	IntegrationActionCreateDeal    IntegrationAction = "warmbly.create_deal"
 	IntegrationActionMoveDealStage IntegrationAction = "warmbly.move_deal_stage"
 	IntegrationActionUnsubscribe   IntegrationAction = "warmbly.unsubscribe"
+	// IntegrationActionLabelEmail applies unibox conversation labels (categories)
+	// to the thread the event belongs to. Reply triggers carry the thread_id +
+	// mailbox owner; on other triggers (no thread) it is a logged no-op.
+	IntegrationActionLabelEmail IntegrationAction = "warmbly.label_email"
 	// IntegrationActionRunAutomation launches another automation's flow, passing
 	// the current event data through. Bounded by the chain-depth guard so it
 	// cannot loop forever or fan out unbounded compute.
 	IntegrationActionRunAutomation IntegrationAction = "warmbly.run_automation"
+	// IntegrationActionHTTPRequest makes a configurable outbound HTTP call
+	// (method/url/headers/query/body, all templated from the event + prior step
+	// output) and writes the response back into the event data so downstream
+	// nodes can use it (e.g. {{.response.body.id}}) and condition nodes can
+	// branch on {{.response.ok}}. SSRF-guarded + bounded retry. This is the
+	// generic "send a webhook / call any API" node.
+	IntegrationActionHTTPRequest IntegrationAction = "warmbly.http_request"
+	// IntegrationActionSetVariables computes one or more named values from Go
+	// templates (against the event + prior step output) and writes them back into
+	// the event data, so later nodes can reuse a transformed/normalized value
+	// without recomputing it. The safe "transform" node — it runs the same
+	// sandboxed text/template engine as every other action value (no I/O, no
+	// arbitrary code), not a general code runtime.
+	IntegrationActionSetVariables IntegrationAction = "warmbly.set_variables"
+	// IntegrationActionFireEvent publishes a developer-defined custom event to the
+	// realtime gateway (org-scoped). The event name + a fully-custom key/value
+	// payload are Go-templated against the event data. Subscribers (an API key
+	// with REALTIME_SUBSCRIBE on the org websocket) receive it with no public URL,
+	// so it replaces an outbound webhook for "tell my system this happened".
+	IntegrationActionFireEvent IntegrationAction = "warmbly.fire_event"
 )
 
 // IsNativeAction reports whether an action is a Warmbly-internal CRM/contact
@@ -275,7 +299,8 @@ func IsNativeAction(a IntegrationAction) bool {
 	switch a {
 	case IntegrationActionAddTag, IntegrationActionRemoveTag, IntegrationActionCreateTask,
 		IntegrationActionCreateDeal, IntegrationActionMoveDealStage, IntegrationActionUnsubscribe,
-		IntegrationActionRunAutomation:
+		IntegrationActionRunAutomation, IntegrationActionLabelEmail, IntegrationActionHTTPRequest,
+		IntegrationActionSetVariables, IntegrationActionFireEvent:
 		return true
 	default:
 		return false
@@ -318,6 +343,13 @@ type Automation struct {
 	Graph     AutomationGraph `json:"graph"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
+	// InboundToken is the per-automation secret embedded in the inbound-webhook
+	// URL, set only when TriggerEvent is inbound.webhook. Server-only; the URL
+	// that carries it is surfaced to clients via InboundURL instead.
+	InboundToken string `json:"-"`
+	// InboundURL is the public POST path that fires this automation when its
+	// trigger is the inbound webhook. Computed from InboundToken, never stored.
+	InboundURL string `json:"inbound_url,omitempty"`
 }
 
 // AutomationGraph is the editable flow: nodes + the edges connecting them.
@@ -398,8 +430,11 @@ type AutomationNodeResult struct {
 
 // DryRunRequest tests an automation without side effects. Data is the sample
 // event payload; when empty the server builds a sample from the trigger.
+// SkipNodeIDs are action nodes the caller toggled off for this test: they are
+// recorded as "skipped" in the trace and never previewed.
 type DryRunRequest struct {
-	Data map[string]any `json:"data,omitempty"`
+	Data        map[string]any `json:"data,omitempty"`
+	SkipNodeIDs []string       `json:"skip_node_ids,omitempty"`
 }
 
 // DryRunResponse is the trace of a dry run.
@@ -499,17 +534,10 @@ type MeetingBookingSummary struct {
 	Canceled int `json:"canceled"`
 }
 
-// MeetingBookingPage is an offset-paginated meetings result (Total is exact so
-// the UI can show "N of M").
+// MeetingBookingPage is a meetings result. Offset pagination under the hood, but
+// it exposes the standard {total, next_cursor, has_more} envelope with an OPAQUE
+// cursor like every other list (Total is exact so the UI can show "N of M").
 type MeetingBookingPage struct {
-	Data       []MeetingBooking         `json:"data"`
-	Pagination MeetingBookingPagination `json:"pagination"`
-}
-
-type MeetingBookingPagination struct {
-	Total      int64 `json:"total"`
-	Limit      int   `json:"limit"`
-	Offset     int   `json:"offset"`
-	HasMore    bool  `json:"has_more"`
-	NextOffset *int  `json:"next_offset,omitempty"`
+	Data       []MeetingBooking `json:"data"`
+	Pagination Pagination       `json:"pagination"`
 }

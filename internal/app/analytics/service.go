@@ -414,7 +414,7 @@ func calculateTargetVolume(email *models.Email) int {
 
 // Dashboard Analytics implementations
 
-func (s *analyticsService) GetDashboardAnalytics(ctx context.Context, userID uuid.UUID, period string) (*models.DashboardAnalytics, *errx.Error) {
+func (s *analyticsService) GetDashboardAnalytics(ctx context.Context, orgID uuid.UUID, period string) (*models.DashboardAnalytics, *errx.Error) {
 	// Calculate date range from period
 	var from, to time.Time
 	to = time.Now()
@@ -432,31 +432,31 @@ func (s *analyticsService) GetDashboardAnalytics(ctx context.Context, userID uui
 	}
 
 	// Get overall stats
-	overallStats, xerr := s.analyticsRepo.GetDashboardOverallStats(ctx, userID, from, to)
+	overallStats, xerr := s.analyticsRepo.GetDashboardOverallStats(ctx, orgID, from, to)
 	if xerr != nil {
 		return nil, xerr
 	}
 
 	// Get recent activity
-	recentActivity, xerr := s.analyticsRepo.GetRecentActivity(ctx, userID, 20)
+	recentActivity, xerr := s.analyticsRepo.GetRecentActivity(ctx, orgID, 20)
 	if xerr != nil {
 		recentActivity = make([]models.RecentActivityItem, 0)
 	}
 
 	// Get top campaigns
-	topCampaigns, xerr := s.analyticsRepo.GetTopCampaigns(ctx, userID, from, to, 5, "emails_sent")
+	topCampaigns, xerr := s.analyticsRepo.GetTopCampaigns(ctx, orgID, from, to, 5, "emails_sent")
 	if xerr != nil {
 		topCampaigns = make([]models.TopCampaignStats, 0)
 	}
 
 	// Get account health summary
-	accountHealth, xerr := s.analyticsRepo.GetAccountHealthSummary(ctx, userID)
+	accountHealth, xerr := s.analyticsRepo.GetAccountHealthSummary(ctx, orgID)
 	if xerr != nil {
 		accountHealth = &models.AccountHealthSummary{}
 	}
 
 	// Get daily trend
-	dailyTrend, xerr := s.analyticsRepo.GetDashboardDailyTrend(ctx, userID, from, to)
+	dailyTrend, xerr := s.analyticsRepo.GetDashboardDailyTrend(ctx, orgID, from, to)
 	if xerr != nil {
 		dailyTrend = make([]models.DashboardDailyStats, 0)
 	}

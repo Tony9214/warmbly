@@ -42,7 +42,9 @@ import (
 	idempotencyapp "github.com/warmbly/warmbly/internal/app/idempotency"
 	"github.com/warmbly/warmbly/internal/app/integration"
 	"github.com/warmbly/warmbly/internal/app/leadsync"
+	"github.com/warmbly/warmbly/internal/app/nativeactions"
 	"github.com/warmbly/warmbly/internal/app/notification"
+	"github.com/warmbly/warmbly/internal/app/oauth"
 	"github.com/warmbly/warmbly/internal/app/organization"
 	"github.com/warmbly/warmbly/internal/app/passkey"
 	"github.com/warmbly/warmbly/internal/app/placement"
@@ -187,11 +189,13 @@ func main() {
 	// survive the config block where they're initialized.
 	var s3ForHandler *storage.Client
 	var emailMessageMapForHandler repository.EmailMessageMapRepository
+	var trackedLinkRepository repository.TrackedLinkRepository
 	var userRepoForHandler repository.UserRepository
 	var organizationRepoForHandler repository.OrganizationRepository
 	var warmupRoutingRepoForHandler repository.WarmupRoutingRepository
 	var webhookServiceForHandler webhook.Service
 	var integrationServiceForHandler integration.Service
+	var oauthService *oauth.Service
 	var notificationService notification.Service
 	var twofaService twofa.Service
 	var contactRepoForHandler repository.ContactRepository
@@ -312,16 +316,34 @@ func main() {
 			log.Fatal(err)
 		}
 
-		// Google Pub/Sub for realtime streaming (optional)
-		gcpProjectID := os.Getenv("GCP_PROJECT_ID")
-		if gcpProjectID != "" {
+		// Realtime event transport, chosen by PUBSUB_ENABLED — the SAME flag the
+		// Elixir realtime service reads — so the two sides can never split-brain
+		// (publisher on Pub/Sub while the subscriber listens on Redis = all events
+		// dropped). PUBSUB_ENABLED=true => Google Pub/Sub (prod); anything else =>
+		// Redis bridge (local dev / non-GCP). Exactly one transport is active, so
+		// events are never delivered twice.
+		if os.Getenv("PUBSUB_ENABLED") == "true" {
+			gcpProjectID := os.Getenv("GCP_PROJECT_ID")
+			if gcpProjectID == "" {
+				log.Fatal("PUBSUB_ENABLED=true requires GCP_PROJECT_ID")
+			}
 			pubsubClient, err := pubsub.NewClient(ctx, gcpProjectID)
 			if err != nil {
 				sentry.CaptureException(err)
-				log.Printf("Warning: Failed to initialize Pub/Sub client: %v", err)
-			} else {
-				streamingPublisher = pubsub.NewStreamingPublisher(pubsubClient)
+				log.Fatal("Failed to initialize Pub/Sub client: ", err)
 			}
+			// Create the realtime topics + "<topic>-sub" subscriptions if missing,
+			// so the Elixir Broadway consumers always have a subscription to read.
+			if err := pubsubClient.EnsureRealtimeTopology(ctx); err != nil {
+				sentry.CaptureException(err)
+				log.Fatal("Failed to provision Pub/Sub topics/subscriptions: ", err)
+			}
+			streamingPublisher = pubsub.NewStreamingPublisher(pubsubClient)
+			log.Println("Realtime events published to Google Pub/Sub")
+		}
+		if streamingPublisher == nil {
+			streamingPublisher = pubsub.NewStreamingPublisher(pubsub.NewRedisBus(cache.Client, ""))
+			log.Println("Realtime events bridged over Redis (Pub/Sub disabled)")
 		}
 
 		emailCfg, err := cfg.LoadEmailConfig(ctx)
@@ -465,6 +487,7 @@ func main() {
 			"postgres",
 		)
 		emailMessageMapForHandler = repository.NewEmailMessageMapRepository(primaryDB)
+		trackedLinkRepository = repository.NewTrackedLinkRepository(primaryDB.Pool)
 		if err != nil {
 			sentry.CaptureException(err)
 			log.Fatal(err)
@@ -526,6 +549,8 @@ func main() {
 		webhookServiceForHandler = webhookService
 
 		integrationRepository := repository.NewIntegrationRepository(primaryDB.Pool)
+		// OAuth 2.1 authorization server (third-party app registration + token flow).
+		oauthService = oauth.NewService(repository.NewOAuthRepository(primaryDB.Pool))
 		// integrationServiceForHandler is constructed after cipherService below —
 		// OAuth/secret sealing depends on the envelope-encryption service.
 		contactRepoForHandler = contactRepostory
@@ -849,26 +874,39 @@ func main() {
 			contactRepostory,
 			campaignProgressRepository,
 			crmRepository,
+			uniboxRepository,
 			tasksClient,
 			warmupService,
 		)
 		// Fan reply + bounce events from the advanced-outreach brain out to
 		// customer webhooks AND third-party integration actions (Slack / CRM).
 		advancedService.WireDispatcher(webhookService)
+		// Let instant action chains (reply/open/click branches) launch a
+		// "run_automation" node, the same flow the scheduler runs at a step
+		// boundary. Backend ingests deliverability + can process replies too.
+		advancedService.WireAutomationRunner(integrationServiceForHandler)
 		// Wire native (Warmbly-internal) automation actions + realtime now that
 		// the advanced/contact/org services exist (the integration service was
 		// constructed earlier).
-		integrationServiceForHandler.SetNativeActions(nativeActionsAdapter{
-			adv:      advancedService,
-			contacts: contactRepostory,
-			orgs:     organizationRepository,
+		integrationServiceForHandler.SetNativeActions(nativeactions.Adapter{
+			Adv:      advancedService,
+			Contacts: contactRepostory,
+			Orgs:     organizationRepository,
 		})
 		integrationServiceForHandler.SetPublisher(streamingPublisher)
+		// Per-org daily outbound-action quota (anti-abuse on the HTTP-request node).
+		integrationServiceForHandler.SetOutboundQuotaCache(cache)
 		// In-app notifications: API reads/writes happen here; also wire the gate
 		// onto the backend's advanced service (deliverability webhooks can ingest
 		// here too).
 		notificationService = notification.NewService(repository.NewNotificationRepository(primaryDB.Pool), streamingPublisher)
+		notificationService.WireDelivery(emailNotificationService, integrationServiceForHandler, userRepostory)
 		advancedService.WireNotifier(notificationService)
+		// New-device sign-in alerts: the token service fires this on session
+		// creation from an unrecognized device, delivered as a security
+		// notification (in-app + email per the user's channels).
+		tokenService.WireSignInAlerter(notification.NewSignInAlerter(notificationService))
+		advancedService.WireRealtime(streamingPublisher)
 		emailSender := tasks.NewEmailSender(emailRepostory, eventsPublisher)
 		tasksService = tasks.NewService(
 			tasksClient,
@@ -892,6 +930,7 @@ func main() {
 			campaignLogRepository,
 			advancedService,
 			attachmentRepoForHandler,
+			trackedLinkRepository,
 			integrationServiceForHandler, // AutomationRunner for campaign run_automation steps
 		)
 
@@ -919,6 +958,12 @@ func main() {
 		// the bootstrap — enabling warmup or starting a campaign doesn't itself
 		// enqueue the first warmup task.
 		go tasksService.StartWarmupReconciler(ctx, 10*time.Minute)
+
+		// Campaign reconciler: re-seed active campaigns whose self-perpetuating
+		// task chain died (a swallowed enqueue, a worker bounce mid-tick, or a
+		// crash between send and enqueue). Campaigns have no other bootstrap once
+		// started, so without this a stranded campaign stops sending forever.
+		go tasksService.StartCampaignReconciler(ctx, 5*time.Minute)
 
 		// Danger zone: schedule + execute delayed deletions (orgs, accounts).
 		dangerZoneRepository := repository.NewDangerZoneRepository(primaryDB.Pool)
@@ -1072,6 +1117,9 @@ func main() {
 		ContactRepo:        contactRepoForHandler,
 		StreamingPublisher: streamingPublisher,
 
+		// OAuth 2.1 authorization server
+		OAuthService: oauthService,
+
 		// On-demand Google Sheets -> leads sync
 		LeadSyncService: leadSyncServiceForHandler,
 
@@ -1082,6 +1130,7 @@ func main() {
 		Storage:                  s3ForHandler,
 		EncryptedKeys:            encryptedKeys,
 		EmailMessageMap:          emailMessageMapForHandler,
+		TrackedLinks:             trackedLinkRepository,
 		UserRepo:                 userRepoForHandler,
 		OrgRepo:                  organizationRepoForHandler,
 		AttachmentRepo:           attachmentRepoForHandler,
@@ -1105,6 +1154,7 @@ func main() {
 		APIKeyService:       apiKeyService,
 		IdempotencyService:  idempotencyService,
 		OrganizationService: organizationService,
+		OAuthService:        oauthService,
 	}
 
 	oidcH := &middleware.OidcHandler{

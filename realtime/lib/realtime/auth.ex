@@ -2,25 +2,28 @@ defmodule Realtime.Auth do
   @moduledoc """
   Token verification for WebSocket connections.
 
-  Supports both:
+  Supports:
   - JWT tokens issued by the Go backend
   - API keys prefixed with `wmbly_`
+  - OAuth2 access tokens prefixed with `wmat_`
   """
 
   require Logger
 
   alias Realtime.ApiKey
   alias Realtime.ErrorReporter
+  alias Realtime.OAuthToken
 
   @doc """
   Verifies a token (JWT or API key) and returns the user_id if valid.
 
   Detects token type by prefix:
+  - `wmat_` prefix = OAuth2 access token
   - `wmbly_` prefix = API key
   - Otherwise = JWT token
 
   Returns:
-  - {:ok, user_id, :jwt} or {:ok, user_id, :api_key} on success
+  - {:ok, user_id, :jwt}, {:ok, user_id, :api_key} or {:ok, user_id, :oauth} on success
   - {:error, reason} on failure
   """
   def verify_token(token, opts \\ [])
@@ -29,10 +32,15 @@ defmodule Realtime.Auth do
   def verify_token("", _opts), do: {:error, :missing_token}
 
   def verify_token(token, opts) do
-    if ApiKey.is_api_key?(token) do
-      verify_api_key(token, opts)
-    else
-      verify_jwt(token)
+    cond do
+      OAuthToken.is_oauth_token?(token) ->
+        verify_oauth_token(token, opts)
+
+      ApiKey.is_api_key?(token) ->
+        verify_api_key(token, opts)
+
+      true ->
+        verify_jwt(token)
     end
   end
 
@@ -78,6 +86,20 @@ defmodule Realtime.Auth do
   end
 
   @doc """
+  Verify an OAuth2 access token.
+  """
+  def verify_oauth_token(token, opts \\ []) do
+    case OAuthToken.validate(token, opts) do
+      {:ok, user_id} ->
+        {:ok, user_id, :oauth}
+
+      {:error, reason} ->
+        Logger.warning("OAuth token verification failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Map error reasons to Discord-style error codes.
   """
   def error_code(:missing_token), do: 4003
@@ -90,9 +112,12 @@ defmodule Realtime.Auth do
   def error_code(:invalid_key), do: 4004
   def error_code(:key_inactive), do: 4004
   def error_code(:key_expired), do: 4004
+  def error_code(:token_revoked), do: 4004
   def error_code(:database_error), do: 4004
   def error_code(:permission_denied), do: 4010
   def error_code(:ip_not_allowed), do: 4010
+  def error_code(:not_a_member), do: 4010
+  def error_code(:forbidden), do: 4010
   def error_code(:rate_limited), do: 4007
   def error_code(:limit_exceeded), do: 4009
   def error_code(_), do: 4004
@@ -110,6 +135,7 @@ defmodule Realtime.Auth do
   def error_message(:invalid_key), do: "Invalid API key"
   def error_message(:key_inactive), do: "API key inactive"
   def error_message(:key_expired), do: "API key expired"
+  def error_message(:token_revoked), do: "Access token revoked"
   def error_message(:database_error), do: "Authentication failed"
   def error_message(:permission_denied), do: "Permission denied"
   def error_message(:ip_not_allowed), do: "IP address not allowed"
@@ -129,20 +155,34 @@ defmodule Realtime.Auth do
   """
   def check_org_membership(user_id, org_id) do
     query = """
-    SELECT om.id, om.role, om.permissions
+    SELECT om.id, om.role, om.permissions,
+           o.presence_show_online, o.presence_show_activity
     FROM organization_members om
+    JOIN organizations o ON o.id = om.organization_id
     WHERE om.organization_id = $1 AND om.user_id = $2
     """
 
-    case Realtime.Repo.query(query, [org_id, user_id]) do
-      {:ok, %{rows: [[id, role, permissions] | _]}} ->
+    with {:ok, org_bin} <- dump_uuid(org_id),
+         {:ok, user_bin} <- dump_uuid(user_id) do
+      run_org_membership(query, org_bin, user_bin, org_id, user_id)
+    else
+      _ -> {:error, :not_a_member}
+    end
+  end
+
+  defp run_org_membership(query, org_bin, user_bin, org_id, user_id) do
+    case Realtime.Repo.query(query, [org_bin, user_bin]) do
+      {:ok, %{rows: [[id, role, permissions, show_online, show_activity] | _]}} ->
         {:ok,
          %{
            id: id,
            role: role,
            permissions: permissions,
            organization_id: org_id,
-           user_id: user_id
+           user_id: user_id,
+           # Org-wide presence privacy. Default to visible if somehow null.
+           presence_show_online: show_online != false,
+           presence_show_activity: show_activity != false
          }}
 
       {:ok, %{rows: []}} ->
@@ -150,6 +190,22 @@ defmodule Realtime.Auth do
 
       {:error, _reason} ->
         {:error, :database_error}
+    end
+  end
+
+  @doc """
+  Fetch a user's display profile (name + avatar) for presence metadata.
+  Best-effort: returns nil fields when the user can't be loaded, so a
+  DB hiccup degrades presence labels rather than blocking the join.
+  """
+  def get_user_profile(user_id) do
+    query = "SELECT first_name, last_name, avatar_url FROM users WHERE id = $1"
+
+    with {:ok, uuid} <- Ecto.UUID.dump(user_id),
+         {:ok, %{rows: [[first, last, avatar] | _]}} <- Realtime.Repo.query(query, [uuid]) do
+      %{name: String.trim("#{first} #{last}"), avatar: avatar}
+    else
+      _ -> %{name: nil, avatar: nil}
     end
   end
 
@@ -169,7 +225,7 @@ defmodule Realtime.Auth do
     WHERE c.id = $1
     """
 
-    case Realtime.Repo.query(org_query, [campaign_id]) do
+    case dump_and_query(org_query, [campaign_id]) do
       {:ok, %{rows: [[org_id] | _]}} when not is_nil(org_id) ->
         # Check if user is a member of the organization
         check_org_membership(user_id, org_id)
@@ -196,7 +252,7 @@ defmodule Realtime.Auth do
     WHERE c.id = $1 AND c.user_id = $2
     """
 
-    case Realtime.Repo.query(query, [campaign_id, user_id]) do
+    case dump_and_query(query, [campaign_id, user_id]) do
       {:ok, %{rows: [_ | _]}} ->
         # Full permissions for direct owner
         {:ok, %{permissions: 65535}}
@@ -219,7 +275,7 @@ defmodule Realtime.Auth do
     WHERE ea.id = $1
     """
 
-    case Realtime.Repo.query(org_query, [email_account_id]) do
+    case dump_and_query(org_query, [email_account_id]) do
       {:ok, %{rows: [[org_id] | _]}} when not is_nil(org_id) ->
         check_org_membership(user_id, org_id)
 
@@ -245,7 +301,7 @@ defmodule Realtime.Auth do
     WHERE ea.id = $1 AND ea.user_id = $2
     """
 
-    case Realtime.Repo.query(query, [email_account_id, user_id]) do
+    case dump_and_query(query, [email_account_id, user_id]) do
       {:ok, %{rows: [_ | _]}} ->
         {:ok, %{permissions: 65535}}
 
@@ -254,6 +310,29 @@ defmodule Realtime.Auth do
 
       {:error, _reason} ->
         {:error, :database_error}
+    end
+  end
+
+  # Postgrex encodes uuid params as 16-byte binaries; accept both the raw
+  # binary (from a prior query's row) and the canonical string form.
+  defp dump_uuid(<<_::128>> = bin), do: {:ok, bin}
+  defp dump_uuid(value) when is_binary(value), do: Ecto.UUID.dump(value)
+  defp dump_uuid(_), do: :error
+
+  # Run a query whose params are all uuids, dumping each first. An
+  # undumpable value behaves like an empty result, not a crash.
+  defp dump_and_query(query, params) do
+    dumped =
+      Enum.reduce_while(params, {:ok, []}, fn value, {:ok, acc} ->
+        case dump_uuid(value) do
+          {:ok, bin} -> {:cont, {:ok, [bin | acc]}}
+          _ -> {:halt, :error}
+        end
+      end)
+
+    case dumped do
+      {:ok, bins} -> Realtime.Repo.query(query, Enum.reverse(bins))
+      :error -> {:ok, %{rows: []}}
     end
   end
 

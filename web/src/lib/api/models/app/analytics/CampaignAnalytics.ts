@@ -14,6 +14,9 @@ export interface CampaignSummary {
     emails_sent: number
     emails_pending: number
     unique_opens: number
+    // Subset of unique_opens from automated fetchers (Apple MPP prefetch
+    // and UA-less clients). Human opens = unique_opens - machine_opens.
+    machine_opens: number
     unique_clicks: number
     replies: number
     bounces: number
@@ -25,7 +28,7 @@ export interface CampaignSummary {
 }
 
 export interface SequenceStats {
-    sequence_id: string
+    step_id: string
     name: string
     position: number
     emails_sent: number
@@ -41,6 +44,6 @@ export default interface CampaignAnalytics {
     status: string
     date_range: DateRange
     summary: CampaignSummary
-    sequences: SequenceStats[]
+    steps: SequenceStats[]
     daily_stats?: DailyStats[]
 }

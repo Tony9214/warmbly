@@ -55,6 +55,8 @@ func (h *Handler) CreateTeam(c *gin.Context) {
 		return
 	}
 
+	h.auditOrg(c, models.AuditActionCreate, models.AuditEntityTeam, &team.ID, nil, map[string]string{"name": team.Name})
+
 	c.JSON(http.StatusCreated, team)
 }
 
@@ -103,6 +105,8 @@ func (h *Handler) UpdateTeam(c *gin.Context) {
 		return
 	}
 
+	h.auditOrg(c, models.AuditActionUpdate, models.AuditEntityTeam, &teamID, nil, nil)
+
 	c.JSON(http.StatusOK, team)
 }
 
@@ -123,6 +127,8 @@ func (h *Handler) DeleteTeam(c *gin.Context) {
 		errx.Handle(c, xerr)
 		return
 	}
+
+	h.auditOrg(c, models.AuditActionDelete, models.AuditEntityTeam, &teamID, nil, nil)
 
 	c.Status(http.StatusNoContent)
 }
@@ -160,6 +166,8 @@ func (h *Handler) AddTeamMember(c *gin.Context) {
 		return
 	}
 
+	h.auditOrg(c, models.AuditActionAssign, models.AuditEntityTeam, &teamID, nil, map[string]string{"member_user_id": data.UserID.String()})
+
 	c.JSON(http.StatusOK, team)
 }
 
@@ -184,6 +192,8 @@ func (h *Handler) RemoveTeamMember(c *gin.Context) {
 		errx.Handle(c, xerr)
 		return
 	}
+
+	h.auditOrg(c, models.AuditActionRemove, models.AuditEntityTeam, &teamID, nil, map[string]string{"member_user_id": userID.String()})
 
 	c.Status(http.StatusNoContent)
 }

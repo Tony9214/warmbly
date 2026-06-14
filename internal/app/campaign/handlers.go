@@ -19,6 +19,7 @@ import (
 	"github.com/warmbly/warmbly/internal/scheduler"
 	"github.com/warmbly/warmbly/internal/tasks"
 	"github.com/warmbly/warmbly/internal/tasks/proto"
+	"github.com/warmbly/warmbly/internal/utils/paging"
 	"github.com/warmbly/warmbly/internal/utils/validate"
 )
 
@@ -51,6 +52,7 @@ func (s *campaignService) Create(ctx context.Context, userID string, orgID *uuid
 				EventType: pubsub.EventCampaignCreated,
 				UserID:    userID,
 			},
+			OrgID:      modelOrgID(orgID),
 			CampaignID: resp.ID.String(),
 			Name:       resp.Name,
 			Status:     resp.Status,
@@ -60,8 +62,8 @@ func (s *campaignService) Create(ctx context.Context, userID string, orgID *uuid
 	return resp, nil
 }
 
-func (s *campaignService) Get(ctx context.Context, userID, id string) (*models.Campaign, *errx.Error) {
-	resp, err := s.campaignRepository.Get(ctx, userID, id)
+func (s *campaignService) Get(ctx context.Context, orgID, id string) (*models.Campaign, *errx.Error) {
+	resp, err := s.campaignRepository.Get(ctx, orgID, id)
 	if err != nil {
 		if errors.Is(err, errx.ErrResourceNotFound) {
 			return nil, errx.ErrNotFound
@@ -73,8 +75,8 @@ func (s *campaignService) Get(ctx context.Context, userID, id string) (*models.C
 	return resp, nil
 }
 
-func (s *campaignService) Search(ctx context.Context, userID, query, cursor, folder, limit string) (*models.CampaignsResult, *errx.Error) {
-	cursorId, err := validate.Uuid(cursor)
+func (s *campaignService) Search(ctx context.Context, orgID, query, cursor, folder, limit string) (*models.CampaignsResult, *errx.Error) {
+	cursorId, err := paging.DecodeCursor(cursor)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +89,7 @@ func (s *campaignService) Search(ctx context.Context, userID, query, cursor, fol
 		return nil, err
 	}
 
-	resp, xerr := s.campaignRepository.Search(ctx, userID, query, cursorId, folderId, limitN)
+	resp, xerr := s.campaignRepository.Search(ctx, orgID, query, cursorId, folderId, limitN)
 	if xerr != nil {
 		return nil, errx.InternalError()
 	}
@@ -218,6 +220,7 @@ func (s *campaignService) StartCampaign(ctx context.Context, orgID uuid.UUID, ca
 				EventType: pubsub.EventCampaignStarted,
 				UserID:    campaign.UserID,
 			},
+			OrgID:      modelOrgID(campaign.OrganizationID),
 			CampaignID: cID.String(),
 			Name:       campaign.Name,
 			Status:     "active",
@@ -341,6 +344,7 @@ func (s *campaignService) StopCampaign(ctx context.Context, orgID uuid.UUID, cam
 				EventType: pubsub.EventCampaignPaused,
 				UserID:    campaign.UserID,
 			},
+			OrgID:      modelOrgID(campaign.OrganizationID),
 			CampaignID: cID.String(),
 			Name:       campaign.Name,
 			Status:     "paused",
@@ -464,4 +468,12 @@ func (s *campaignService) VerifyCampaignTrackingDomain(ctx context.Context, orgI
 		return nil, errx.InternalError()
 	}
 	return status, nil
+}
+
+// modelOrgID renders an optional org UUID for org-scoped realtime events.
+func modelOrgID(orgID *uuid.UUID) string {
+	if orgID == nil {
+		return ""
+	}
+	return orgID.String()
 }

@@ -1,6 +1,6 @@
 import Request from "../../Request";
 
-export default async function acceptInvitation(data: { invitation_id: string }): Promise<void> {
+export default async function acceptInvitation(data: { invitation_id?: string; token?: string }): Promise<void> {
     return await Request<void>({
         method: "POST",
         url: `/invitations/accept`,

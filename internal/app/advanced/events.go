@@ -43,6 +43,22 @@ func (s *service) EmitCampaignEvent(ctx context.Context, orgID uuid.UUID, eventT
 	s.emit(ctx, orgID, eventType, data)
 }
 
+// ReplyRealtimePublisher pushes an org-scoped EMAIL_REPLIED pulse to the live
+// dashboard. Satisfied by *pubsub.StreamingPublisher; primitive-typed local
+// interface so this package stays decoupled from the pubsub event types.
+type ReplyRealtimePublisher interface {
+	PublishEmailReplied(ctx context.Context, orgID, userID, campaignID, contactID, contactEmail, sequenceID string)
+	// PublishCustomEvent pushes a developer-defined "fire event" to the gateway so
+	// API-key websocket subscribers receive it (the campaign "fire event" step).
+	PublishCustomEvent(ctx context.Context, orgID, actorID uuid.UUID, name string, payload map[string]string, source, sourceID string)
+}
+
+// WireRealtime attaches the realtime publisher after construction. No-op if
+// never called: the emit site guards on nil.
+func (s *service) WireRealtime(p ReplyRealtimePublisher) {
+	s.realtime = p
+}
+
 // Notifier raises a per-user in-app notification (gated by the user's prefs).
 // Satisfied by *notification.Service. Local interface to avoid an import cycle;
 // wired post-construction in the consumer (where reply/bounce/complaint run).
@@ -53,6 +69,21 @@ type Notifier interface {
 // WireNotifier attaches the notification service after construction.
 func (s *service) WireNotifier(n Notifier) {
 	s.notifier = n
+}
+
+// AutomationRunner launches an automation graph by id, so an instant
+// "run_automation" action node (reply/open/click branch) can fire the same flow
+// the scheduler runs at a step boundary. Satisfied by *integration.Service;
+// kept as a local interface to avoid an import cycle (integration imports
+// advanced) and wired post-construction once the integration service exists.
+type AutomationRunner interface {
+	RunAutomationByID(ctx context.Context, orgID, automationID uuid.UUID, data map[string]any) error
+}
+
+// WireAutomationRunner attaches the automation runner after construction. No-op
+// if never called: the run_automation instant case guards on a nil runner.
+func (s *service) WireAutomationRunner(r AutomationRunner) {
+	s.automationRunner = r
 }
 
 // notify raises an in-app notification off the hot path. It detaches from the

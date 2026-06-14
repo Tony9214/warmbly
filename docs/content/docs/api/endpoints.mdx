@@ -12,6 +12,8 @@ This page is the source of truth for what an API key can and cannot reach. Every
 
 When an endpoint says "JWT permission: X / API permission: Y", the dual-auth middleware checks the relevant one based on which credential the caller used.
 
+All paths below are relative to the versioned base URL `https://api.warmbly.com/v1` (for example `/campaigns` is `https://api.warmbly.com/v1/campaigns`). See [versioning](/api/) for details.
+
 ## API key accepted
 
 ### Emails
@@ -46,7 +48,7 @@ When an endpoint says "JWT permission: X / API permission: Y", the dual-auth mid
 | POST | `/campaigns/:id/start` | `SEND_CAMPAIGNS` |
 | POST | `/campaigns/:id/stop` | `SEND_CAMPAIGNS` |
 | GET | `/campaigns/:id/logs` | `READ_CAMPAIGNS` |
-| GET/POST/PATCH/DELETE | `/campaigns/:id/sequences[/:sid]` | `READ_CAMPAIGNS` for GET, `WRITE_CAMPAIGNS` otherwise |
+| GET/POST/PATCH/DELETE | `/campaigns/:id/steps[/:sid]` | `READ_CAMPAIGNS` for GET, `WRITE_CAMPAIGNS` otherwise |
 
 ### Contacts
 
@@ -107,6 +109,19 @@ When an endpoint says "JWT permission: X / API permission: Y", the dual-auth mid
 | PATCH | `/api-keys/:id` | `API_KEYS` |
 | DELETE | `/api-keys/:id` | `API_KEYS` |
 
+### OAuth apps
+
+Registering and managing the OAuth apps your workspace owns. The flow itself (authorize, token, revoke) is listed under JWT only and Public below.
+
+| Method | Path | API Permission |
+|--------|------|----------------|
+| GET | `/oauth/applications` | `API_KEYS` |
+| POST | `/oauth/applications` | `API_KEYS` |
+| GET | `/oauth/applications/:id` | `API_KEYS` |
+| PATCH | `/oauth/applications/:id` | `API_KEYS` |
+| DELETE | `/oauth/applications/:id` | `API_KEYS` |
+| POST | `/oauth/applications/:id/rotate-secret` | `API_KEYS` |
+
 ### Operations
 
 | Method | Path | API Permission |
@@ -140,6 +155,8 @@ These never accept an API key. They depend on a human-bound session: billing flo
 - `POST /auth/logout`, `POST /auth/logout-all`, `GET /auth/me`, `PATCH /auth/me/onboarding`
 - `POST /auth/me/avatar`, `DELETE /auth/me/avatar`
 - `POST /emails/onboarding/oauth/start`, `POST /emails/onboarding/oauth/finish`, `POST /emails/onboarding/smtp-imap`
+- `GET /oauth/authorize/details`, `POST /oauth/authorize` (the consent flow: a human approves a third-party app)
+- `GET /oauth/authorized-apps`, `DELETE /oauth/authorized-apps/:id` (apps the user has authorized)
 - `POST /getaway` (websocket bootstrap)
 - `GET /realtime/info`
 - `GET /me/danger-zone`, `POST /me/danger-zone/delete`, `DELETE /me/danger-zone/delete`
@@ -155,6 +172,8 @@ These never accept an API key. They depend on a human-bound session: billing flo
 - `POST /webhook/stripe` (Stripe signature)
 - `POST /webhook/campaign`, `/webhook/email`, `/webhook/user-email` (Google OIDC token from Cloud Tasks)
 - `GET /addresses/google/callback`, `GET /addresses/outlook/callback` (OAuth bouncer pages)
+- `POST /oauth/token`, `POST /oauth/revoke` (OAuth token endpoints, authenticated by the client's id and secret)
+- `GET /.well-known/oauth-authorization-server` (OAuth discovery metadata)
 
 ## Notes
 

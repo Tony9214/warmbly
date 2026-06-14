@@ -147,6 +147,12 @@ func (h *Handler) UpdateOrganization(c *gin.Context) {
 
 	h.auditOrg(c, models.AuditActionUpdate, models.AuditEntityOrganization, orgID, nil, nil)
 
+	// A presence privacy change re-gates connected sockets live (re-track /
+	// untrack / strip activity) rather than waiting for members to reconnect.
+	if req.PresenceShowOnline != nil || req.PresenceShowActivity != nil {
+		h.StreamingPublisher.PublishPresencePolicy(c.Request.Context(), *orgID, org.PresenceShowOnline, org.PresenceShowActivity)
+	}
+
 	c.JSON(http.StatusOK, org)
 }
 
@@ -254,7 +260,13 @@ func (h *Handler) UpdateMemberRole(c *gin.Context) {
 		return
 	}
 
-	member, xerr := h.OrganizationService.UpdateMemberRole(c.Request.Context(), *orgID, memberUserID, &req)
+	actorID, uerr := middleware.GetUserUUID(c)
+	if uerr != nil {
+		errx.JSON(c, errx.New(errx.Unauthorized, "invalid user"))
+		return
+	}
+
+	member, xerr := h.OrganizationService.UpdateMemberRole(c.Request.Context(), *orgID, actorID, memberUserID, &req)
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return
@@ -350,6 +362,43 @@ func (h *Handler) CancelInvitation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "invitation cancelled"})
 }
 
+// PreviewInvitation is the public landing-page lookup for the /invite link.
+// No auth: anyone holding the secret token can see who invited them where.
+func (h *Handler) PreviewInvitation(c *gin.Context) {
+	token := c.Query("token")
+	if token == "" {
+		errx.JSON(c, errx.New(errx.BadRequest, "token is required"))
+		return
+	}
+	preview, xerr := h.OrganizationService.PreviewInvitation(c.Request.Context(), token)
+	if xerr != nil {
+		errx.JSON(c, xerr)
+		return
+	}
+	c.JSON(http.StatusOK, preview)
+}
+
+// GetInvitationLink returns the shareable /invite token for a pending
+// invitation so a team manager can copy a real accept link.
+func (h *Handler) GetInvitationLink(c *gin.Context) {
+	orgID := middleware.GetOrganizationID(c)
+	if orgID == nil {
+		errx.JSON(c, errx.New(errx.BadRequest, "no organization selected"))
+		return
+	}
+	invitationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		errx.JSON(c, errx.ErrUuid)
+		return
+	}
+	token, xerr := h.OrganizationService.GetInvitationToken(c.Request.Context(), *orgID, invitationID)
+	if xerr != nil {
+		errx.JSON(c, xerr)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
 // AcceptInvitation accepts an invitation (public endpoint - can be called before login or after)
 func (h *Handler) AcceptInvitation(c *gin.Context) {
 	userID, err := uuid.Parse(middleware.GetUserID(c))
@@ -371,7 +420,15 @@ func (h *Handler) AcceptInvitation(c *gin.Context) {
 		return
 	}
 
-	member, xerr := h.OrganizationService.AcceptInvitation(c.Request.Context(), req.Token, userID, user.Email)
+	var member *models.OrganizationMember
+	if req.Token != "" {
+		member, xerr = h.OrganizationService.AcceptInvitation(c.Request.Context(), req.Token, userID, user.Email)
+	} else if req.InvitationID != nil {
+		member, xerr = h.OrganizationService.AcceptInvitationByID(c.Request.Context(), *req.InvitationID, userID, user.Email)
+	} else {
+		errx.JSON(c, errx.New(errx.BadRequest, "token or invitation_id is required"))
+		return
+	}
 	if xerr != nil {
 		errx.JSON(c, xerr)
 		return

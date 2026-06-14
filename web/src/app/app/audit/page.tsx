@@ -14,7 +14,6 @@
 import React from "react";
 import {
     AlertCircleIcon,
-    CalendarIcon,
     ChevronDownIcon,
     ChevronRightIcon,
     FilterXIcon,
@@ -34,6 +33,7 @@ import {
     Stat,
     StatStrip,
 } from "@/components/layout/Page";
+import { DatePicker } from "@/components/ui/DatePicker";
 import useFeatureAccess from "@/hooks/useFeatureAccess";
 import useAuditLogs from "@/lib/api/hooks/app/audit/useAuditLogs";
 import {
@@ -54,7 +54,7 @@ const ACTIONS: AuditAction[] = [
 ];
 
 const ENTITY_TYPES: AuditEntityType[] = [
-    "campaign", "contact", "email_account", "sequence", "template",
+    "campaign", "contact", "email_account", "step", "template",
     "api_key", "webhook", "integration", "warmup_routing_rule",
     "organization", "organization_member", "invitation",
     "folder", "tag", "category", "subscription", "settings",
@@ -503,30 +503,7 @@ function FilterPopover({
 }
 
 function DatePill({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-    return (
-        <label className="h-7 px-2 rounded-md border border-slate-200 bg-white flex items-center gap-1.5 focus-within:border-sky-400 transition-colors cursor-pointer">
-            <CalendarIcon className="w-3 h-3 text-slate-400" />
-            <input
-                type="date"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                className="h-5 bg-transparent text-[12px] text-slate-900 outline-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute"
-            />
-            {value && (
-                <button
-                    type="button"
-                    onClick={(e) => {
-                        e.preventDefault();
-                        onChange("");
-                    }}
-                    aria-label="Clear date"
-                    className="text-slate-400 hover:text-slate-700"
-                >
-                    <XIcon className="w-3 h-3" />
-                </button>
-            )}
-        </label>
-    );
+    return <DatePicker value={value} onChange={onChange} placeholder="Any date" />;
 }
 
 void AlertCircleIcon;

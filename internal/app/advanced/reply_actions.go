@@ -265,28 +265,23 @@ func (s *service) executeInstantActionNode(ctx context.Context, campaign *models
 		}); xerr != nil {
 			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
+	case "label_email":
+		// Label the conversation the contact just replied on. The most recent
+		// thread for the contact in the campaign owner's unibox is that reply.
+		if len(cfg.LabelIDs) == 0 {
+			return
+		}
+		owner, perr := uuid.Parse(campaign.UserID)
+		if perr != nil {
+			return
+		}
+		if _, xerr := s.LabelLatestThreadForContact(ctx, owner, contact.Email, cfg.LabelIDs); xerr != nil {
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
+		}
 	case "unsubscribe":
 		if xerr := s.Unsubscribe(ctx, campaign.ID, contact.ID); xerr != nil {
 			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
-	case "notify":
-		if campaign.OrganizationID == nil {
-			return
-		}
-		event := models.WebhookEventCampaignAction
-		if cfg.NotifyEvent != "" {
-			event = models.WebhookEventType(cfg.NotifyEvent)
-		}
-		data := map[string]any{
-			"campaign_id":   campaign.ID.String(),
-			"contact_id":    contact.ID.String(),
-			"contact_email": contact.Email,
-			"trigger":       eventKind,
-		}
-		for k, v := range cfg.NotifyData {
-			data[k] = v
-		}
-		s.EmitCampaignEvent(ctx, *campaign.OrganizationID, event, data)
 	case "create_task":
 		if campaign.OrganizationID == nil {
 			return
@@ -360,6 +355,50 @@ func (s *service) executeInstantActionNode(ctx context.Context, campaign *models
 			return
 		}
 		if _, xerr := s.MoveContactDealStage(ctx, *campaign.OrganizationID, contact.ID, *cfg.DealPipelineID, *cfg.DealStageID); xerr != nil {
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
+		}
+	case "run_automation":
+		// Mirror tasks.executeActionNode's run_automation case so an automation
+		// placed directly on a reply/open/click branch fires NOW. Without this the
+		// walker would stamp the node sent (below) with the automation never run,
+		// and the scheduler's sentIDs guard would then skip it forever.
+		if s.automationRunner == nil || campaign.OrganizationID == nil || cfg.AutomationID == nil {
+			return
+		}
+		data := map[string]any{
+			"campaign_id":   campaign.ID.String(),
+			"campaign_name": campaign.Name,
+			"contact_id":    contact.ID.String(),
+			"contact_email": contact.Email,
+			"first_name":    contact.FirstName,
+			"last_name":     contact.LastName,
+			"company":       contact.Company,
+			"phone":         contact.Phone,
+			"trigger":       eventKind,
+			// Stable per-(campaign,contact,trigger) key so a duplicate instant
+			// delivery dedupes downstream (same contract as the scheduler path).
+			"idempotency_key": fmt.Sprintf("campaign:%s:%s:%s", campaign.ID, contact.ID, eventKind),
+		}
+		for _, kv := range cfg.AutomationValues {
+			key := strings.TrimSpace(kv.Key)
+			if key == "" {
+				continue
+			}
+			data[key] = renderContactTemplate(kv.Value, contact)
+		}
+		if xerr := s.automationRunner.RunAutomationByID(ctx, *campaign.OrganizationID, *cfg.AutomationID, data); xerr != nil {
+			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
+		}
+	case "fire_event":
+		if campaign.OrganizationID == nil {
+			return
+		}
+		s.FireCampaignEvent(ctx, *campaign.OrganizationID, campaign.ID.String(), cfg.EventName, cfg.EventFields, contact)
+	case "http_request":
+		if campaign.OrganizationID == nil {
+			return
+		}
+		if xerr := s.RunCampaignHTTPRequest(ctx, *campaign.OrganizationID, cfg, contact); xerr != nil {
 			s.logActionErr(campaign, contact, cfg.Type, eventKind, xerr)
 		}
 	default:

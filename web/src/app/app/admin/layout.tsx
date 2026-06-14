@@ -12,9 +12,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         "Workers": "/workers",
         "Credentials": "/credentials",
         "Audit": "/audit",
-        "Roles": "/roles",
-        "Users": "/users",
-        "Plans": "/plans",
     }
 
     return (
