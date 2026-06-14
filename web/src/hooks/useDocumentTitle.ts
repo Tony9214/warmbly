@@ -40,10 +40,13 @@ const ROUTE_TITLES: Record<string, string> = {
   "/app/contacts": "Contacts",
   "/app/campaigns": "Campaigns",
   "/app/analytics": "Analytics",
+  "/app/deliverability": "Deliverability",
   "/app/crm/pipelines": "Pipelines",
   "/app/crm/deals": "Deals",
   "/app/crm/tasks": "Tasks",
+  "/app/crm/meetings": "Meetings",
   "/app/templates": "Templates",
+  "/app/automations": "Automations",
   "/app/api-keys": "API keys",
   "/app/integrations": "Integrations",
   "/app/audit": "Audit log",
@@ -54,10 +57,12 @@ const ROUTE_TITLES: Record<string, string> = {
   "/app/settings/notifications": "Notifications",
   "/app/settings/security": "Security",
   "/app/settings/members": "Members",
+  "/app/settings/teams": "Teams",
   "/app/settings/workspace": "Workspace",
   "/app/settings/billing": "Billing",
   "/app/settings/limits": "Plan & limits",
   "/app/settings/roles": "Roles",
+  "/app/settings/oauth-apps": "OAuth apps",
   "/app/settings/danger": "Danger zone",
 
   // Admin
@@ -76,6 +81,8 @@ const PARAM_ROUTES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/app\/campaigns\/[^/]+\/schedule$/, "Campaign schedule"],
   [/^\/app\/campaigns\/[^/]+\/steps$/, "Campaign steps"],
   [/^\/app\/campaigns\/[^/]+$/, "Campaign"],
+  [/^\/app\/automations\/[^/]+$/, "Automation"],
+  [/^\/app\/unibox(\/.*)?$/, "Unibox"],
   [/^\/app\/admin\/workers\/[^/]+$/, "Worker"],
 ];
 

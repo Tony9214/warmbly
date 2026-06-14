@@ -170,7 +170,7 @@ export default function DeliverabilityPage() {
                     </div>
 
                     <SectionBar label="Mailboxes at risk" count={d?.by_mailbox?.length || undefined}>
-                        <Link to="/app/mailboxes" className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900 transition-colors">
+                        <Link to="/app/emails" className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900 transition-colors">
                             All mailboxes
                             <ArrowUpRightIcon className="w-3 h-3" />
                         </Link>
