@@ -28,6 +28,7 @@ import { useNavigate } from "react-router-dom";
 import useCreateCampaign from "@/lib/api/hooks/app/campaigns/useCreateCampaign";
 import { Label, NumberInput, TextInput } from "@/components/ui/field";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
+import { TimePicker } from "@/components/ui/TimePicker";
 import WeekdayBitmask from "@/components/app/campaigns/schedule/WeekdayBitmask";
 import TagSelector from "@/components/app/popup/select/TagSelector";
 import { useUserProfile } from "@/hooks/context/user";
@@ -506,21 +507,11 @@ function ScheduleStep({
             <div className="grid grid-cols-2 gap-3">
                 <div>
                     <Label>Start time</Label>
-                    <input
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="w-full h-7 px-2 rounded-md border border-slate-200 bg-white text-[12.5px] text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-                    />
+                    <TimePicker value={startTime} onChange={setStartTime} stepMinutes={30} fullWidth placeholder="Start" />
                 </div>
                 <div>
                     <Label>End time</Label>
-                    <input
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="w-full h-7 px-2 rounded-md border border-slate-200 bg-white text-[12.5px] text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-                    />
+                    <TimePicker value={endTime} onChange={setEndTime} stepMinutes={30} fullWidth placeholder="End" />
                 </div>
             </div>
         </div>

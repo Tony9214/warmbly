@@ -33,6 +33,7 @@ import {
     TopbarAction,
 } from "@/components/layout/Page";
 import { Label, TextInput } from "@/components/ui/field";
+import { DatePicker } from "@/components/ui/DatePicker";
 import {
     PopoverMenu,
     PopoverMenuTrigger,
@@ -744,7 +745,7 @@ function DealDialog({
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div>
                                     <Label>Expected close</Label>
-                                    <TextInput value={closeDate} onChange={setCloseDate} type="date" className="w-full" />
+                                    <DatePicker value={closeDate} onChange={setCloseDate} placeholder="Pick a date" className="w-full" />
                                 </div>
                                 <div>
                                     <Label>Contact (read-only)</Label>

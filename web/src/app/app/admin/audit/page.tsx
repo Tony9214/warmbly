@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { searchAdminAuditLogs } from "@/lib/api/client/app/admin/audit";
 import type { AdminAuditLog, AdminAuditLogSearch } from "@/lib/api/models/app/admin/Audit";
 import { SelectMenu, type SelectOption } from "@/components/ui/select-menu";
+import { DateTimePicker } from "@/components/ui/DateTimePicker";
 
 const LIMIT_OPTIONS: SelectOption[] = [25, 50, 100].map((n) => ({
     value: String(n),
@@ -176,19 +177,15 @@ export default function AdminAuditPage() {
                         />
                     </Field>
                     <Field label="From">
-                        <input
-                            type="datetime-local"
+                        <DateTimePicker
                             value={filters.start_date ?? ""}
-                            onChange={(e) => applyFilter({ start_date: e.target.value || undefined })}
-                            className={inp}
+                            onChange={(v) => applyFilter({ start_date: v || undefined })}
                         />
                     </Field>
                     <Field label="Until">
-                        <input
-                            type="datetime-local"
+                        <DateTimePicker
                             value={filters.end_date ?? ""}
-                            onChange={(e) => applyFilter({ end_date: e.target.value || undefined })}
-                            className={inp}
+                            onChange={(v) => applyFilter({ end_date: v || undefined })}
                         />
                     </Field>
                 </div>

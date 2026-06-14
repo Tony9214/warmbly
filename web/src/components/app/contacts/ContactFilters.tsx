@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { NumberInput, SearchInput, TextInput } from "@/components/ui/field";
+import { DatePicker } from "@/components/ui/DatePicker";
 import {
     PopoverMenu,
     PopoverMenuContent,
@@ -516,16 +517,16 @@ function DateRow({
                 {enabled && <CheckIcon className="w-2.5 h-2.5" />}
             </button>
             <span className="text-[12px] text-slate-700 w-28 shrink-0">{label}</span>
-            <input
-                type="date"
+            <DatePicker
                 value={dateStr}
-                onChange={(e) => {
-                    const v = e.target.value;
+                onChange={(v) => {
                     if (!v) onChange(undefined);
                     else onChange(new Date(v));
                 }}
                 disabled={!enabled}
-                className="flex-1 h-7 px-2.5 rounded-md border border-slate-200 bg-white text-[12.5px] text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:bg-slate-50 disabled:text-slate-400 tabular-nums"
+                clearable={false}
+                placeholder="Pick a date"
+                className="flex-1"
             />
         </div>
     );
