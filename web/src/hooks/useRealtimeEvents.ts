@@ -3,12 +3,14 @@ import { useQueryClient, type QueryKey } from '@tanstack/react-query'
 import { useSocket } from './context/socket'
 import { useAppStore } from '@/stores'
 import { useUserProfile } from './context/user'
+import { markSelfMutation } from '@/lib/realtime/selfActivity'
 
 // Bridges realtime socket events into both the zustand store and react-query
 // cache so list pages, detail panes, counters, and workflow states stay live.
 export function useRealtimeEvents() {
   const { isConnected, subscribeToChannel } = useSocket()
   const { user } = useUserProfile()
+  const myId = user?.id ?? null
   const queryClient = useQueryClient()
   const currentOrg = useAppStore((s) => s.currentOrganization)
 
@@ -219,6 +221,12 @@ export function useRealtimeEvents() {
         invalidate([['audit']])
         const entityType = getString('entity_type') ?? ''
         const entityId = getString('entity_id')
+        // When this mutation's actor is us, record it so collaborative editors
+        // don't flag the user's own change (made on a list row, another tab, or
+        // another device that round-trips back) as a teammate's edit.
+        if (entityId && getString('user_id') === myId) {
+          markSelfMutation(entityType, entityId)
+        }
         const spine: Record<string, QueryKey[]> = {
           contact: [['contacts']],
           campaign: [['campaigns'], ['analytics']],
@@ -276,6 +284,7 @@ export function useRealtimeEvents() {
       addUniboxEmail,
       incrementUnseenCount,
       invalidate,
+      myId,
       setSubscription,
       updateCampaign,
       updateDeal,
