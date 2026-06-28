@@ -21,7 +21,14 @@ import (
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/notify"
+	"github.com/warmbly/warmbly/internal/notify/templates"
 	"github.com/warmbly/warmbly/internal/repository"
+)
+
+// Front-end danger-zone paths the cancel links point at.
+const (
+	orgDangerZonePath  = "/organization/settings/danger-zone"
+	userDangerZonePath = "/account/danger-zone"
 )
 
 // Service is the public API for the danger zone subsystem.
@@ -407,7 +414,10 @@ func (s *service) sendOrgScheduledEmail(ctx context.Context, org *models.Organiz
 		return
 	}
 	subject := fmt.Sprintf("%s scheduled for deletion", org.Name)
-	body := orgScheduledHTML(org, d, s.frontendBaseURL)
+	body, err := templates.GenerateOrgDeletionScheduledHTML(org.Name, d.ExecuteAfter, d.GraceDays, s.frontendBaseURL+orgDangerZonePath)
+	if err != nil {
+		return
+	}
 	s.sendToEach(ctx, recipients, subject, body)
 }
 
@@ -420,7 +430,10 @@ func (s *service) sendOrgCancelledEmail(ctx context.Context, org *models.Organiz
 		return
 	}
 	subject := fmt.Sprintf("Deletion cancelled for %s", org.Name)
-	body := orgCancelledHTML(org, d)
+	body, err := templates.GenerateOrgDeletionCancelledHTML(org.Name, d.ExecuteAfter)
+	if err != nil {
+		return
+	}
 	s.sendToEach(ctx, recipients, subject, body)
 }
 
@@ -429,7 +442,10 @@ func (s *service) sendUserScheduledEmail(ctx context.Context, user *models.User,
 		return
 	}
 	subject := "Your Warmbly account is scheduled for deletion"
-	body := userScheduledHTML(user, d, s.frontendBaseURL)
+	body, err := templates.GenerateUserDeletionScheduledHTML(firstNameOrEmail(user), d.ExecuteAfter, d.GraceDays, s.frontendBaseURL+userDangerZonePath)
+	if err != nil {
+		return
+	}
 	if err := s.notifier.Send(ctx, []string{user.Email}, nil, nil, subject, body); err != nil {
 		sentry.CaptureException(err)
 	}
@@ -440,7 +456,10 @@ func (s *service) sendUserCancelledEmail(ctx context.Context, user *models.User,
 		return
 	}
 	subject := "Your account deletion was cancelled"
-	body := userCancelledHTML(user, d)
+	body, err := templates.GenerateUserDeletionCancelledHTML(firstNameOrEmail(user), d.ExecuteAfter)
+	if err != nil {
+		return
+	}
 	if err := s.notifier.Send(ctx, []string{user.Email}, nil, nil, subject, body); err != nil {
 		sentry.CaptureException(err)
 	}
@@ -492,7 +511,15 @@ func (s *service) buildReminder(ctx context.Context, d *models.ScheduledDeletion
 		subject = fmt.Sprintf("Deletion reminder for %s", resourceName)
 	}
 
-	body = reminderHTML(resourceName, d, s.frontendBaseURL)
+	dangerPath := userDangerZonePath
+	if d.ResourceType == models.DeletionResourceOrganization {
+		dangerPath = orgDangerZonePath
+	}
+	rendered, rerr := templates.GenerateDeletionReminderHTML(resourceName, d.ExecuteAfter, s.frontendBaseURL+dangerPath)
+	if rerr != nil {
+		return nil, "", ""
+	}
+	body = rendered
 	return recipients, subject, body
 }
 
@@ -518,7 +545,10 @@ func (s *service) sendCompletionEmail(ctx context.Context, d *models.ScheduledDe
 		return
 	}
 
-	body := completionHTML(d)
+	body, err := templates.GenerateDeletionCompletedHTML(d.ScheduledAt, time.Now())
+	if err != nil {
+		return
+	}
 	if err := s.notifier.Send(ctx, []string{requester.Email}, nil, nil, subject, body); err != nil {
 		sentry.CaptureException(err)
 	}
@@ -541,6 +571,15 @@ func displayName(u *models.User) string {
 	name := strings.TrimSpace(strings.TrimSpace(u.FirstName) + " " + strings.TrimSpace(u.LastName))
 	if name != "" {
 		return name
+	}
+	return u.Email
+}
+
+// firstNameOrEmail is the friendly greeting name for deletion emails:
+// the user's first name when set, otherwise their email address.
+func firstNameOrEmail(u *models.User) string {
+	if strings.TrimSpace(u.FirstName) != "" {
+		return u.FirstName
 	}
 	return u.Email
 }

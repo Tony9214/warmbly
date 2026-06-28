@@ -5,7 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// previewTime is a fixed timestamp so deletion previews/tests are
+// deterministic instead of depending on the wall clock.
+var previewTime = time.Date(2026, time.July, 1, 9, 0, 0, 0, time.UTC)
 
 // ─── Base template (shared chrome) ───────────────────────────────
 
@@ -269,6 +274,25 @@ func TestPreview(t *testing.T) {
 		{"reset-password.html", func() (string, error) {
 			return GenerateResetPasswordHTML("", "https://app.warmbly.com/reset?token=abc123def456")
 		}},
+		{"trial-expired.html", func() (string, error) { return GenerateTrialExpiredHTML() }},
+		{"invitation.html", func() (string, error) {
+			return GenerateInvitationHTML("Jane Doe", "Acme Inc", AppURL+"/invite?token=abc123")
+		}},
+		{"notification.html", func() (string, error) {
+			return GenerateNotificationHTML("New sign-in to your account", "Signed in from Chrome on macOS (London, GB).", AppURL+"/app/settings/security", "")
+		}},
+		{"deletion-org-scheduled.html", func() (string, error) {
+			return GenerateOrgDeletionScheduledHTML("Acme Inc", previewTime, 30, AppURL+"/organization/settings/danger-zone")
+		}},
+		{"deletion-user-scheduled.html", func() (string, error) {
+			return GenerateUserDeletionScheduledHTML("Jane", previewTime, 30, AppURL+"/account/danger-zone")
+		}},
+		{"deletion-reminder.html", func() (string, error) {
+			return GenerateDeletionReminderHTML("Acme Inc", previewTime, AppURL+"/organization/settings/danger-zone")
+		}},
+		{"deletion-completed.html", func() (string, error) {
+			return GenerateDeletionCompletedHTML(previewTime, previewTime)
+		}},
 	}
 
 	for _, tmpl := range templates {
@@ -284,6 +308,153 @@ func TestPreview(t *testing.T) {
 	}
 
 	t.Logf("Open all: open %s/*.html", dir)
+}
+
+// ─── Trial expired ──────────────────────────────────────────────
+
+func TestGenerateTrialExpiredHTML(t *testing.T) {
+	html, err := GenerateTrialExpiredHTML()
+	if err != nil {
+		t.Fatalf("GenerateTrialExpiredHTML returned error: %v", err)
+	}
+	checks := []string{
+		"<!DOCTYPE html>", // shared base shell
+		"#f5f6f8",         // branded cream wrapper
+		"Your free trial has ended",
+		"Choose a plan</a>",
+		AppURL + "/settings/billing", // billing CTA href
+		"<title>Your Warmbly trial has ended</title>",
+	}
+	for _, s := range checks {
+		if !strings.Contains(html, s) {
+			t.Errorf("trial expired: expected HTML to contain %q", s)
+		}
+	}
+}
+
+// ─── Invitation ─────────────────────────────────────────────────
+
+func TestGenerateInvitationHTML(t *testing.T) {
+	url := AppURL + "/invite?token=abc123"
+	html, err := GenerateInvitationHTML("Jane Doe", "Acme Inc", url)
+	if err != nil {
+		t.Fatalf("GenerateInvitationHTML returned error: %v", err)
+	}
+	checks := []string{
+		"#f5f6f8",
+		"Jane Doe",
+		"Acme Inc",
+		"Accept invitation</a>",
+		url,
+		"expires in 7 days",
+	}
+	for _, s := range checks {
+		if !strings.Contains(html, s) {
+			t.Errorf("invitation: expected HTML to contain %q", s)
+		}
+	}
+}
+
+func TestGenerateInvitationHTML_EscapesNames(t *testing.T) {
+	html, err := GenerateInvitationHTML("<script>evil()</script>", "Acme & Co", AppURL+"/invite?token=x")
+	if err != nil {
+		t.Fatalf("GenerateInvitationHTML returned error: %v", err)
+	}
+	if strings.Contains(html, "<script>evil()</script>") {
+		t.Error("invitation: inviter name must be HTML-escaped")
+	}
+	if !strings.Contains(html, "Acme &amp; Co") {
+		t.Error("invitation: org name ampersand must be HTML-escaped")
+	}
+}
+
+// ─── Notification ───────────────────────────────────────────────
+
+func TestGenerateNotificationHTML_WithCTA(t *testing.T) {
+	html, err := GenerateNotificationHTML("New sign-in", "Signed in from Chrome.", AppURL+"/app/settings/security", "")
+	if err != nil {
+		t.Fatalf("GenerateNotificationHTML returned error: %v", err)
+	}
+	checks := []string{
+		"#f5f6f8",
+		"New sign-in",
+		"Signed in from Chrome.",
+		"Open in Warmbly</a>", // default CTA label
+		AppURL + "/app/settings/security",
+		"<title>New sign-in</title>",
+	}
+	for _, s := range checks {
+		if !strings.Contains(html, s) {
+			t.Errorf("notification: expected HTML to contain %q", s)
+		}
+	}
+}
+
+func TestGenerateNotificationHTML_NoCTA(t *testing.T) {
+	html, err := GenerateNotificationHTML("Heads up", "Something happened.", "", "")
+	if err != nil {
+		t.Fatalf("GenerateNotificationHTML returned error: %v", err)
+	}
+	if strings.Contains(html, "Open in Warmbly") {
+		t.Error("notification: no button should render when ctaURL is empty")
+	}
+}
+
+// ─── Deletion (danger zone) ─────────────────────────────────────
+
+func TestGenerateDeletionEmails(t *testing.T) {
+	cancel := AppURL + "/account/danger-zone"
+	cases := []struct {
+		name    string
+		gen     func() (string, error)
+		wants   []string
+		notWant string
+	}{
+		{
+			name:  "org scheduled",
+			gen:   func() (string, error) { return GenerateOrgDeletionScheduledHTML("Acme Inc", previewTime, 30, cancel) },
+			wants: []string{"Organization scheduled for deletion", "Acme Inc", "Cancel deletion</a>", "Will be deleted on", "01 July 2026", cancel},
+		},
+		{
+			name:  "user scheduled",
+			gen:   func() (string, error) { return GenerateUserDeletionScheduledHTML("Jane", previewTime, 30, cancel) },
+			wants: []string{"Account scheduled for deletion", "Hi Jane", "Cancel deletion</a>", "30 days"},
+		},
+		{
+			name:  "org cancelled",
+			gen:   func() (string, error) { return GenerateOrgDeletionCancelledHTML("Acme Inc", previewTime) },
+			wants: []string{"Deletion cancelled", "scheduled deletion for", "Acme Inc", "Originally scheduled for:"},
+		},
+		{
+			name:  "user cancelled",
+			gen:   func() (string, error) { return GenerateUserDeletionCancelledHTML("Jane", previewTime) },
+			wants: []string{"Account deletion cancelled", "Hi Jane", "back to normal"},
+		},
+		{
+			name:  "reminder",
+			gen:   func() (string, error) { return GenerateDeletionReminderHTML("Acme Inc", previewTime, cancel) },
+			wants: []string{"Deletion in", "Acme Inc", "Cancel deletion</a>"},
+		},
+		{
+			name:  "completed",
+			gen:   func() (string, error) { return GenerateDeletionCompletedHTML(previewTime, previewTime) },
+			wants: []string{"Deletion completed", "Executed at:"},
+		},
+	}
+	for _, c := range cases {
+		html, err := c.gen()
+		if err != nil {
+			t.Fatalf("%s: returned error: %v", c.name, err)
+		}
+		if !strings.Contains(html, "<!DOCTYPE html>") {
+			t.Errorf("%s: expected shared base shell", c.name)
+		}
+		for _, w := range c.wants {
+			if !strings.Contains(html, w) {
+				t.Errorf("%s: expected HTML to contain %q", c.name, w)
+			}
+		}
+	}
 }
 
 // ─── Constants ──────────────────────────────────────────────────
