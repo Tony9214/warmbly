@@ -168,7 +168,7 @@ function SettingsLayoutInner() {
     const current = allItems.find((s) => s.path === currentPath) ?? allItems[0];
 
     return (
-        <Page>
+        <Page className="h-full min-h-0">
             <PageTopbar
                 eyebrow="Settings"
                 subtitle={current?.description ?? "Account and workspace"}
