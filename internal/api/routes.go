@@ -734,6 +734,11 @@ func Run(
 				teamsGroup.DELETE("/:id/members/:userId", m.RequireAccess(models.PermManageTeam, models.APIPermWriteCRM), h.RemoveTeamMember)
 			}
 
+			// Caller identity. No specific scope: any valid credential (API
+			// key, OAuth token, JWT) can resolve who it is and which org it
+			// acts on, so integrations can validate a connection and label it.
+			protected.GET("/me", h.GetIdentity)
+
 			// Plans and timezones are essentially public reference data — auth
 			// gates them only to avoid being scraped. Cheap to expose to keys.
 			protected.GET("/plans", h.ListPlans)
