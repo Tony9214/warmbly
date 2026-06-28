@@ -29,7 +29,7 @@ type DiscountService interface {
 	Create(ctx context.Context, adminID uuid.UUID, req *models.CreateDiscountCodeRequest, ipAddress, userAgent string) (*models.DiscountCode, *errx.Error)
 	Update(ctx context.Context, adminID, id uuid.UUID, req *models.UpdateDiscountCodeRequest, ipAddress, userAgent string) (*models.DiscountCode, *errx.Error)
 	Delete(ctx context.Context, adminID, id uuid.UUID, ipAddress, userAgent string) *errx.Error
-	ListRedemptions(ctx context.Context, codeID uuid.UUID, cursor *uuid.UUID, limit int) (*models.AdminDiscountRedemptionsResult, *errx.Error)
+	ListRedemptions(ctx context.Context, codeID uuid.UUID, offset, limit int) (*models.AdminDiscountRedemptionsResult, *errx.Error)
 
 	// ListOrganizationRedemptions returns an org's own redemption history for
 	// the customer billing page.
@@ -264,8 +264,8 @@ func (s *service) Delete(ctx context.Context, adminID, id uuid.UUID, ipAddress, 
 	return nil
 }
 
-func (s *service) ListRedemptions(ctx context.Context, codeID uuid.UUID, cursor *uuid.UUID, limit int) (*models.AdminDiscountRedemptionsResult, *errx.Error) {
-	result, err := s.redRepo.ListByCode(ctx, codeID, cursor, limit)
+func (s *service) ListRedemptions(ctx context.Context, codeID uuid.UUID, offset, limit int) (*models.AdminDiscountRedemptionsResult, *errx.Error) {
+	result, err := s.redRepo.ListByCode(ctx, codeID, offset, limit)
 	if err != nil {
 		sentry.CaptureException(err)
 		return nil, errx.New(errx.Internal, "failed to list redemptions")
