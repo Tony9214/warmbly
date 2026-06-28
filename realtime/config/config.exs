@@ -59,8 +59,10 @@ config :logger, :console,
 # Use Jason for JSON parsing
 config :phoenix, :json_library, Jason
 
-# Sentry configuration
+# Sentry configuration. Uses a Finch HTTP client instead of the default
+# hackney one (hackney was dropped to clear CVE-2026-47071).
 config :sentry,
+  client: Realtime.SentryFinchClient,
   environment_name: Mix.env(),
   enable_source_code_context: true,
   root_source_code_paths: [File.cwd!()]
