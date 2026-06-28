@@ -42,9 +42,10 @@ defmodule Realtime.MixProject do
       # Authentication
       {:jose, "~> 1.11"},
 
-      # Error tracking
+      # Error tracking. Finch is the HTTP client (already pulled in by goth and
+      # broadway_cloud_pub_sub); hackney was dropped to clear CVE-2026-47071.
       {:sentry, "~> 10.0"},
-      {:hackney, "~> 1.8"},
+      {:finch, "~> 0.21"},
 
       # Utilities
       {:uuid, "~> 1.1"}
