@@ -422,6 +422,9 @@ type DiscountRedemptionRepository interface {
 	CancelByID(ctx context.Context, redemptionID uuid.UUID) error
 	CountActiveByCodeAndOrg(ctx context.Context, codeID, orgID uuid.UUID) (int, error)
 	ListByCode(ctx context.Context, codeID uuid.UUID, cursor *uuid.UUID, limit int) (*models.AdminDiscountRedemptionsResult, error)
+	// ListByOrganization returns an org's redemptions (newest first), joined to
+	// the code string, for the customer billing page.
+	ListByOrganization(ctx context.Context, orgID uuid.UUID, limit int) ([]models.DiscountRedemption, error)
 }
 
 type discountRedemptionRepository struct {
@@ -592,6 +595,40 @@ func (r *discountRedemptionRepository) CountActiveByCodeAndOrg(ctx context.Conte
 		WHERE discount_code_id = $1 AND organization_id = $2 AND status IN ('pending', 'applied')
 	`, codeID, orgID).Scan(&count)
 	return count, err
+}
+
+func (r *discountRedemptionRepository) ListByOrganization(ctx context.Context, orgID uuid.UUID, limit int) ([]models.DiscountRedemption, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT dr.id, dr.discount_code_id, dr.organization_id, dr.redeemed_by, dr.subscription_id, dr.plan_id,
+			dr.stripe_coupon_id, dr.stripe_checkout_session_id, dr.type, dr.percent_off, dr.amount_off,
+			dr.currency, dr.trial_extension_days, dr.status, dr.redeemed_at, dr.applied_at, dc.code
+		FROM discount_redemptions dr
+		JOIN discount_codes dc ON dc.id = dr.discount_code_id
+		WHERE dr.organization_id = $1
+		ORDER BY dr.redeemed_at DESC
+		LIMIT $2
+	`, orgID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []models.DiscountRedemption{}
+	for rows.Next() {
+		var d models.DiscountRedemption
+		if err := rows.Scan(
+			&d.ID, &d.DiscountCodeID, &d.OrganizationID, &d.RedeemedBy, &d.SubscriptionID, &d.PlanID,
+			&d.StripeCouponID, &d.StripeCheckoutSessionID, &d.Type, &d.PercentOff, &d.AmountOff,
+			&d.Currency, &d.TrialExtensionDays, &d.Status, &d.RedeemedAt, &d.AppliedAt, &d.Code,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, d)
+	}
+	return items, rows.Err()
 }
 
 func (r *discountRedemptionRepository) ListByCode(ctx context.Context, codeID uuid.UUID, cursor *uuid.UUID, limit int) (*models.AdminDiscountRedemptionsResult, error) {
