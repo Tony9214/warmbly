@@ -164,8 +164,7 @@ API keys with the `REALTIME_SUBSCRIBE` permission (bit 11) can connect to the sa
 - `web/`: in-product frontend (dashboard)
 - `site/`: public marketing site (Astro 5 + Tailwind v4)
 - `deploy/`: production deploy manifests, infrastructure, and runtime config
-- `docs/`: engineering documentation and operational runbooks
-- `docs/development/`: architecture notes, deployment, and local-dev docs
+- `docs/`: documentation site (docs.warmbly.com); product guides, API reference, and self-hosting/engineering docs under `content/docs/development/`
 - `scripts/`: one-off tooling (codegen, migrations, local dev utilities)
 
 ## Worker Topology
@@ -731,7 +730,7 @@ If a new feature requires heavy joins, admin queries, billing checks, or complex
 These files are the fastest way to rebuild context:
 
 - `README.md`
-- `docs/development/architecture.md`
+- `docs/content/docs/development/architecture.mdx`
 - `cmd/worker/main.go`
 - `internal/app/worker/assignment.go`
 - `internal/tasks/email_task.go`

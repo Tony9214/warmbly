@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
-import { BookOpen, Braces, GraduationCap } from 'lucide-react';
+import { BookOpen, Braces, GraduationCap, Wrench } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -28,6 +28,12 @@ const sections = [
     title: 'API Reference',
     description: 'Authenticate and drive Warmbly programmatically.',
   },
+  {
+    href: '/development/architecture/',
+    icon: Wrench,
+    title: 'Development',
+    description: 'Self-host, deploy, and develop Warmbly.',
+  },
 ];
 
 export default function NotFound() {
@@ -45,7 +51,7 @@ export default function NotFound() {
           search (press <kbd className="rounded-md border border-fd-border bg-fd-muted px-1.5 py-0.5 font-mono text-xs">/</kbd>)
           or jump back into a section.
         </p>
-        <div className="mt-10 grid w-full max-w-2xl gap-3 sm:grid-cols-3">
+        <div className="mt-10 grid w-full max-w-4xl gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {sections.map((section) => (
             <Link
               key={section.href}

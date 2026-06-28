@@ -1,4 +1,8 @@
-# Event System
+---
+title: Event system
+description: The Kafka topics, event types, and Avro schemas that connect Warmbly's services.
+icon: Radio
+---
 
 Warmbly uses Apache Kafka for asynchronous event streaming between services, with Avro serialization and Confluent Schema Registry.
 
@@ -6,7 +10,7 @@ Warmbly uses Apache Kafka for asynchronous event streaming between services, wit
 
 Two producers write to Kafka and two consumers read from it: the tracking service publishes events that the consumer processes, and the backend publishes commands that the workers execute.
 
-## Kafka Topics
+## Kafka topics
 
 | Topic | Producer | Consumer | Description |
 |-------|----------|----------|-------------|
@@ -16,9 +20,9 @@ Two producers write to Kafka and two consumers read from it: the tracking servic
 | `email-events` | Worker | Consumer | Email sync, send results |
 | `campaign-events` | Backend/Worker | Consumer | Campaign progress updates |
 
-## Event Types
+## Event types
 
-### Tracking Events
+### Tracking events
 
 Produced by the Rust tracking service when tracking pixels are loaded or links are clicked.
 
@@ -33,7 +37,7 @@ Produced by the Rust tracking service when tracking pixels are loaded or links a
 }
 ```
 
-### Worker Events
+### Worker events
 
 Commands sent to workers for email operations.
 
@@ -46,7 +50,7 @@ Commands sent to workers for email operations.
 }
 ```
 
-### Job Events
+### Job events
 
 Responses from workers after completing operations.
 
@@ -60,7 +64,7 @@ Responses from workers after completing operations.
 }
 ```
 
-### Campaign Events
+### Campaign events
 
 Progress updates for email campaigns.
 
@@ -75,16 +79,16 @@ Progress updates for email campaigns.
 }
 ```
 
-## Avro Serialization
+## Avro serialization
 
 Events are serialized using Avro with schemas registered in Confluent Schema Registry.
 
 ### Schema Registry
 
-- Local: http://localhost:8081
+- Local: `http://localhost:8081`
 - Production: Confluent Cloud
 
-### Example Schema (TrackingEvent)
+### Example schema (TrackingEvent)
 
 ```json
 {
@@ -104,7 +108,7 @@ Events are serialized using Avro with schemas registered in Confluent Schema Reg
 
 ## Configuration
 
-### Environment Variables
+### Environment variables
 
 ```bash
 # Kafka
@@ -122,7 +126,7 @@ SCHEMA_REGISTRY_KEY=your-sr-key
 SCHEMA_REGISTRY_SECRET=your-sr-secret
 ```
 
-## Code References
+## Code references
 
 - Event schemas: `internal/events/schemas.go`
 - Kafka config: `internal/config/config_kafka.go`

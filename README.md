@@ -99,8 +99,8 @@ make web     # dashboard dev server
 The first admin account cannot be created from the UI. Sign up through the
 dashboard, then promote yourself from the host with
 `make grant-admin EMAIL=you@example.com` and open the admin app with `make admin`.
-Full local setup, seeding, and troubleshooting live in
-[docs/development/local-development.md](docs/development/local-development.md).
+Full local setup, seeding, and troubleshooting live in the
+[local development guide](https://docs.warmbly.com/development/local-development/).
 
 ## How it works
 
@@ -118,8 +118,8 @@ client, so outbound volume spreads across many IPs instead of piling up in a
 single runtime. Reputation is tracked per IP.
 
 Secrets use envelope encryption: a per-organization data key, wrapped by KMS, is
-what seals mailbox credentials and message content. The full write-up is in
-[docs/development/architecture.md](docs/development/architecture.md).
+what seals mailbox credentials and message content. The full write-up is in the
+[architecture docs](https://docs.warmbly.com/development/architecture/).
 
 ## Self-hosting
 
@@ -148,8 +148,8 @@ sudo ./scripts/install-worker.sh \
   --ips 5.6.7.11,5.6.7.12,5.6.7.13
 ```
 
-Production deployment, the full env reference, and day-2 operations are in
-[docs/development/deployment-guide.md](docs/development/deployment-guide.md).
+Production deployment, the full env reference, and day-2 operations are in the
+[deployment guide](https://docs.warmbly.com/development/deployment-guide/).
 
 ## Tech stack
 
@@ -170,10 +170,10 @@ Production deployment, the full env reference, and day-2 operations are in
 
 | Doc | What it covers |
 |-----|----------------|
-| [docs/development/architecture.md](docs/development/architecture.md) | Control plane vs execution plane, encryption model |
-| [docs/development/local-development.md](docs/development/local-development.md) | Make targets, native services, seeding |
-| [docs/development/deployment-guide.md](docs/development/deployment-guide.md) | Production control plane and worker fleet |
-| [docs/development/Events.md](docs/development/Events.md) | Event bus reference |
+| [Architecture](https://docs.warmbly.com/development/architecture/) | Control plane vs execution plane, encryption model |
+| [Local development](https://docs.warmbly.com/development/local-development/) | Make targets, native services, seeding |
+| [Deployment guide](https://docs.warmbly.com/development/deployment-guide/) | Production control plane and worker fleet |
+| [Event system](https://docs.warmbly.com/development/events/) | Kafka event bus reference |
 | [docs.warmbly.com](https://docs.warmbly.com) | Product guides and public API reference |
 
 ## Contributing

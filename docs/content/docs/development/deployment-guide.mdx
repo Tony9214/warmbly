@@ -1,4 +1,8 @@
-# Deployment Guide
+---
+title: Deployment guide
+description: Deploy the control plane and a distributed worker fleet to production.
+icon: Server
+---
 
 End-to-end guide for deploying Warmbly. The control plane runs on a container host (Railway in production); workers run on as many VPSes as you want and are managed from the admin dashboard.
 
@@ -6,7 +10,7 @@ End-to-end guide for deploying Warmbly. The control plane runs on a container ho
 
 | Plane | What runs | Where |
 |-------|-----------|-------|
-| Control | backend, consumer, tracking, realtime, web | One container host with stable region pinning (Railway, ECS Fargate, Fly, Kubernetes — any of them works). Postgres + Redis + Kafka + Schema Registry + S3 + KMS are external dependencies. |
+| Control | backend, consumer, tracking, realtime, web | One container host with stable region pinning (Railway, ECS Fargate, Fly, or Kubernetes). Postgres + Redis + Kafka + Schema Registry + S3 + KMS are external dependencies. |
 | Execution | worker | One process per VPS, anywhere in the world, supervised by systemd, configured from the admin dashboard over SSH. |
 
 The control plane never needs to scale beyond a few replicas; the worker fleet is what fans out for IP diversity.
@@ -15,7 +19,7 @@ The control plane never needs to scale beyond a few replicas; the worker fleet i
 
 **For the control plane**:
 
-- A Postgres 16 instance (RDS, Neon, Supabase, self-hosted — anything)
+- A Postgres 16 instance (RDS, Neon, Supabase, or self-hosted)
 - A Redis 7 instance
 - A Kafka broker with a Schema Registry (Confluent Cloud, Aiven, Redpanda, self-hosted)
 - An S3-compatible bucket
@@ -24,12 +28,12 @@ The control plane never needs to scale beyond a few replicas; the worker fleet i
 
 **For the workers**:
 
-- A VPS per worker (Hetzner / OVH / Vultr / DigitalOcean / Linode — anywhere with a public IPv4). Spread providers for IP diversity.
+- A VPS per worker (Hetzner / OVH / Vultr / DigitalOcean / Linode, anywhere with a public IPv4). Spread providers for IP diversity.
 - Root SSH access on the VPS at install time.
 
 ## Step 1: Provision the control-plane dependencies
 
-Whatever your stack, get the external services above running and collect the connection details. Local dev can substitute everything with `make sim` from the repo root (see [local-development.md](local-development.md)) — that runs LocalStack for KMS/S3 and includes everything else as containers.
+Whatever your stack, get the external services above running and collect the connection details. Local dev can substitute everything with `make sim` from the repo root (see [local development](/development/local-development/)). That runs LocalStack for KMS/S3 and includes everything else as containers.
 
 ## Step 2: Configure the backend
 
@@ -107,7 +111,7 @@ Pick one. The Dockerfiles in `deploy/docker/` are the deployment unit:
 
 The control plane needs database migration to be run before the backend starts. Backend runs migrations automatically on boot (`internal/infrastructure/db/migrate.go`), so no separate migration step is required.
 
-## Step 5: Set up the GitHub Release webhook
+## Step 5: Set up the GitHub release webhook
 
 If `RELEASES_ENABLED=true`:
 

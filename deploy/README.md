@@ -32,7 +32,7 @@ docker build -f deploy/docker/realtime.Dockerfile -t warmbly/realtime .
 docker build -f tracking/Dockerfile               -t warmbly/tracking tracking/
 ```
 
-GitHub Actions publishes these to GHCR automatically. See [../docs/development/deployment-guide.md](../docs/development/deployment-guide.md).
+GitHub Actions publishes these to GHCR automatically. See [the deployment guide](https://docs.warmbly.com/development/deployment-guide/).
 
 ## Local development
 
@@ -45,13 +45,13 @@ make tools  # kafka-ui at :18090
 make reset  # nuke volumes
 ```
 
-Full reference: [../docs/development/local-development.md](../docs/development/local-development.md).
+Full reference: [local development](https://docs.warmbly.com/development/local-development/).
 
 ## Deploying the control plane
 
 The Dockerfiles in `deploy/docker/` are the deployment unit. Production runs on Railway. Other valid targets: Fly.io, ECS Fargate, single-VPS systemd. Migrations run automatically on backend boot.
 
-Configuration is env-driven — see `deploy/config/env.example` for the full env reference, or [../docs/development/deployment-guide.md](../docs/development/deployment-guide.md) for a step-by-step.
+Configuration is env-driven — see `deploy/config/env.example` for the full env reference, or [the deployment guide](https://docs.warmbly.com/development/deployment-guide/) for a step-by-step.
 
 ### Realtime transport
 
@@ -119,7 +119,7 @@ The worker does **not** open a Postgres connection. Do not add one.
 
 ## Auto-update
 
-Each worker profile picks a release channel (`pinned` / `stable` / `dev`) and an `auto_update` toggle. When a GitHub release fires the webhook, the backend resolves the channel and (if `auto_update=true`) rolls every assigned worker. See [../docs/development/deployment-guide.md](../docs/development/deployment-guide.md).
+Each worker profile picks a release channel (`pinned` / `stable` / `dev`) and an `auto_update` toggle. When a GitHub release fires the webhook, the backend resolves the channel and (if `auto_update=true`) rolls every assigned worker. See [the deployment guide](https://docs.warmbly.com/development/deployment-guide/).
 
 ## Health checks
 
@@ -131,6 +131,6 @@ curl http://localhost:4000/health   # realtime
 
 ## Documentation
 
-- [Local Development](../docs/development/local-development.md)
-- [Deployment Guide](../docs/development/deployment-guide.md)
-- [Architecture](../docs/development/architecture.md)
+- [Local development](https://docs.warmbly.com/development/local-development/)
+- [Deployment guide](https://docs.warmbly.com/development/deployment-guide/)
+- [Architecture](https://docs.warmbly.com/development/architecture/)
