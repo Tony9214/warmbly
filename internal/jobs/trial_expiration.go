@@ -8,6 +8,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/warmbly/warmbly/internal/notify"
+	"github.com/warmbly/warmbly/internal/notify/templates"
 	"github.com/warmbly/warmbly/internal/repository"
 )
 
@@ -95,20 +96,11 @@ func (j *TrialExpirationJob) notifyTrialExpired(ctx context.Context, userID inte
 	}
 
 	subject := "Your Warmbly trial has expired"
-	body := `
-		<h2>Your trial has ended</h2>
-		<p>Thank you for trying Warmbly! Your free trial has now expired.</p>
-		<p>During your trial, your campaigns have been paused and warmup has been disabled to prevent any service interruptions.</p>
-		<h3>What happens now?</h3>
-		<ul>
-			<li>Your data is safe and will be preserved</li>
-			<li>Campaigns are paused but not deleted</li>
-			<li>Email accounts remain connected</li>
-		</ul>
-		<p>To resume your campaigns and continue using Warmbly, please upgrade to a paid plan:</p>
-		<p><a href="https://app.warmbly.com/settings/billing" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:white;text-decoration:none;border-radius:6px;">Choose a Plan</a></p>
-		<p>If you have any questions, our support team is here to help.</p>
-	`
+	body, err := templates.GenerateTrialExpiredHTML()
+	if err != nil {
+		// GenerateTrialExpiredHTML already reported to Sentry.
+		return
+	}
 
 	if err := j.emailNotificationService.Send(ctx, []string{userEmail}, nil, nil, subject, body); err != nil {
 		sentry.CaptureException(err)
