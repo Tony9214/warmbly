@@ -421,6 +421,16 @@ func TestGenerateDeletionEmails(t *testing.T) {
 			wants: []string{"Account scheduled for deletion", "Hi Jane", "Cancel deletion</a>", "30 days"},
 		},
 		{
+			name:  "org cancelled",
+			gen:   func() (string, error) { return GenerateOrgDeletionCancelledHTML("Acme Inc", previewTime) },
+			wants: []string{"Deletion cancelled", "scheduled deletion for", "Acme Inc", "Originally scheduled for:"},
+		},
+		{
+			name:  "user cancelled",
+			gen:   func() (string, error) { return GenerateUserDeletionCancelledHTML("Jane", previewTime) },
+			wants: []string{"Account deletion cancelled", "Hi Jane", "back to normal"},
+		},
+		{
 			name:  "reminder",
 			gen:   func() (string, error) { return GenerateDeletionReminderHTML("Acme Inc", previewTime, cancel) },
 			wants: []string{"Deletion in", "Acme Inc", "Cancel deletion</a>"},
