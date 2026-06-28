@@ -7,7 +7,6 @@ package notification
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/pubsub"
 	"github.com/warmbly/warmbly/internal/models"
+	"github.com/warmbly/warmbly/internal/notify/templates"
 	"github.com/warmbly/warmbly/internal/repository"
 )
 
@@ -151,7 +151,7 @@ func (s *service) Notify(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID
 
 	// Email: deliver to the user's account email (detached, best-effort).
 	if cat.Channels.Email && s.email != nil && s.users != nil {
-		go s.deliverEmail(userID, category, title, body, link)
+		go s.deliverEmail(userID, title, body, link)
 	}
 
 	// Slack: post to the org's connected workspace (detached, best-effort).
@@ -165,8 +165,10 @@ func (s *service) Notify(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID
 	}
 }
 
-// deliverEmail renders a minimal HTML notification and emails it to the user.
-func (s *service) deliverEmail(userID uuid.UUID, category models.NotificationCategory, title, body, link string) {
+// deliverEmail renders the notification on the shared transactional
+// shell and emails it to the user. Title/body are auto-escaped by the
+// template; a relative link is absolutized into the CTA button.
+func (s *service) deliverEmail(userID uuid.UUID, title, body, link string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -182,16 +184,9 @@ func (s *service) deliverEmail(userID uuid.UUID, category models.NotificationCat
 		}
 		href = base + href
 	}
-	cta := ""
-	if href != "" {
-		cta = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 20px;background:#0284c7;color:white;text-decoration:none;border-radius:6px;">Open in Warmbly</a></p>`, href)
+	html, gerr := templates.GenerateNotificationHTML(title, body, href, "")
+	if gerr != nil {
+		return
 	}
-	html := fmt.Sprintf(`<h2 style="margin:0 0 8px;">%s</h2><p style="color:#475569;">%s</p>%s<p style="color:#94a3b8;font-size:12px;margin-top:24px;">You're receiving this because email notifications are on for %s. Manage them in Settings &rarr; Notifications.</p>`,
-		htmlEscape(title), htmlEscape(body), cta, htmlEscape(string(category)))
 	_ = s.email.Send(ctx, []string{user.Email}, nil, nil, title, html)
-}
-
-func htmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
-	return r.Replace(s)
 }
