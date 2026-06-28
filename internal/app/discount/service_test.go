@@ -80,6 +80,9 @@ func (r *fakeRedRepo) CountActiveByCodeAndOrg(context.Context, uuid.UUID, uuid.U
 func (r *fakeRedRepo) ListByCode(context.Context, uuid.UUID, int, int) (*models.AdminDiscountRedemptionsResult, error) {
 	return &models.AdminDiscountRedemptionsResult{}, nil
 }
+func (r *fakeRedRepo) ListByOrganization(context.Context, uuid.UUID, int) ([]models.DiscountRedemption, error) {
+	return nil, nil
+}
 
 type fakePlanRepo struct{ plan *models.Plan }
 
