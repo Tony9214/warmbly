@@ -8,7 +8,7 @@ The customer-facing guide lives at [docs.warmbly.com/guides/zapier](https://docs
 
 - **Auth**: OAuth2 authorization-code with rotating refresh tokens. The connection test and label come from `GET /v1/me`.
 - **Triggers** (polling): New Contact, New or Updated Contact, New Email Received (Unibox), New Meeting Booked, New Deal, Deal Won, New CRM Task, New Campaign, Campaign Completed, New Mailbox Connected. Plus hidden list triggers that power campaign / mailbox / pipeline / stage / template dropdowns.
-- **Creates**: Create or Update Contact, Update Contact, Add Contact to Campaign, Create Contact Note, Send Email, Reply in Inbox, Create Deal, Update Deal, Create CRM Task, Create Campaign, Start Campaign, Stop Campaign, Create Reply Template, Verify Email Address.
+- **Creates** (26): contacts (create-or-update, update, delete, add-to-campaign, remove-from-campaign, note create/update/delete), email (send, reply, verify), CRM (deal create/update/delete, task create/update/delete), campaigns (create, update, delete, start, stop), templates (create, update, delete), and delete mailbox.
 - **Searches**: Find Contact, Find Campaign, Find Mailbox, Find Reply Template.
 
 ### Why triggers poll instead of using webhooks
@@ -38,7 +38,7 @@ The robust fix for all three is instant webhook triggers (see above). For typica
    ```
    (Zapier shows the exact value under your integration's Authentication settings.)
 2. Note the `client_id` (`wmcid_…`) and `client_secret` (`wmcs_…`, shown once).
-3. Request these scopes on the app: `read_emails send_campaigns read_campaigns write_campaigns read_contacts write_contacts read_unibox write_unibox read_crm write_crm read_templates write_templates`.
+3. Request these scopes on the app: `read_emails write_emails send_campaigns read_campaigns write_campaigns read_contacts write_contacts bulk_contacts read_unibox write_unibox read_crm write_crm read_templates write_templates` (`write_emails` backs Delete Mailbox; `bulk_contacts` backs Remove Contact from Campaign).
 
 ## Environment
 
@@ -46,8 +46,8 @@ Set these on the Zapier app (`zapier env:set <version> KEY=value`) or locally vi
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `CLIENT_ID` | OAuth client id | — |
-| `CLIENT_SECRET` | OAuth client secret | — |
+| `CLIENT_ID` | OAuth client id | _required_ |
+| `CLIENT_SECRET` | OAuth client secret | _required_ |
 | `WARMBLY_API_BASE` | API base URL | `https://api.warmbly.com/v1` |
 | `WARMBLY_APP_BASE` | Dashboard base URL (consent screen) | `https://app.warmbly.com` |
 
