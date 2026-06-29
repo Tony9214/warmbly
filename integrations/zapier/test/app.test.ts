@@ -46,15 +46,36 @@ describe('Warmbly Zapier app', () => {
       expect.arrayContaining([
         'createContact',
         'updateContact',
+        'deleteContact',
         'addContactToCampaign',
+        'removeContactFromCampaign',
         'sendEmail',
         'replyToEmail',
+        'markEmailSeen',
         'createDeal',
+        'updateCrmTask',
         'startCampaign',
+        'updateMailbox',
+        'startWarmup',
+        'stopWarmup',
+        'renderTemplate',
+        'createMeeting',
+        'createCategory',
+        'createTag',
+        'createFolder',
       ]),
     );
     expect(Object.keys(App.searches)).toEqual(
-      expect.arrayContaining(['findContact', 'findCampaign', 'findMailbox']),
+      expect.arrayContaining([
+        'findContact',
+        'findDeal',
+        'findCrmTask',
+        'findCampaign',
+        'findMailbox',
+        'findMeeting',
+        'findTemplate',
+        'getCampaignAnalytics',
+      ]),
     );
   });
 
