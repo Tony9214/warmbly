@@ -172,3 +172,112 @@ export const createCrmTask = {
     },
   },
 };
+
+export const updateCrmTask = {
+  key: 'updateCrmTask',
+  noun: 'Task',
+  display: {
+    label: 'Update CRM Task',
+    description: 'Updates a CRM task, for example to mark it complete or change status, priority, or due date.',
+  },
+  operation: {
+    inputFields: [
+      { key: 'task_id', label: 'Task ID', type: 'string', required: true },
+      { key: 'title', label: 'Title', type: 'string' },
+      { key: 'description', label: 'Description', type: 'text' },
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'string',
+        choices: {
+          pending: 'Pending',
+          in_progress: 'In progress',
+          completed: 'Completed',
+          cancelled: 'Cancelled',
+        },
+      },
+      {
+        key: 'priority',
+        label: 'Priority',
+        type: 'string',
+        choices: { low: 'Low', medium: 'Medium', high: 'High', urgent: 'Urgent' },
+      },
+      { key: 'due_date', label: 'Due date', type: 'datetime' },
+      { key: 'type', label: 'Type', type: 'string' },
+      { key: 'contact_id', label: 'Contact ID', type: 'string' },
+      { key: 'deal_id', label: 'Deal ID', type: 'string' },
+      { key: 'assigned_to', label: 'Assignee (user ID)', type: 'string' },
+    ],
+    perform: async (z: ZObject, bundle: Bundle) => {
+      const body = pruneEmpty({
+        title: bundle.inputData.title,
+        description: bundle.inputData.description,
+        status: bundle.inputData.status,
+        priority: bundle.inputData.priority,
+        due_date: bundle.inputData.due_date,
+        type: bundle.inputData.type,
+        contact_id: bundle.inputData.contact_id,
+        deal_id: bundle.inputData.deal_id,
+        assigned_to: bundle.inputData.assigned_to,
+      });
+      const response = await z.request({
+        url: api(`/crm/tasks/${bundle.inputData.task_id}`),
+        method: 'PATCH',
+        body,
+      });
+      return response.data;
+    },
+    sample: {
+      id: 'ta5b6c7d-0000-0000-0000-000000000000',
+      title: 'Call Example Co',
+      status: 'completed',
+      priority: 'medium',
+      type: 'Call',
+      created_at: '2026-06-28T12:00:00Z',
+    },
+  },
+};
+
+export const deleteDeal = {
+  key: 'deleteDeal',
+  noun: 'Deal',
+  display: {
+    label: 'Delete Deal',
+    description: 'Permanently deletes a CRM deal by ID.',
+  },
+  operation: {
+    inputFields: [
+      { key: 'deal_id', label: 'Deal ID', type: 'string', required: true },
+    ],
+    perform: async (z: ZObject, bundle: Bundle) => {
+      await z.request({
+        url: api(`/crm/deals/${bundle.inputData.deal_id}`),
+        method: 'DELETE',
+      });
+      return { id: bundle.inputData.deal_id, success: true };
+    },
+    sample: { id: 'd1a2b3c4-0000-0000-0000-000000000000', success: true },
+  },
+};
+
+export const deleteCrmTask = {
+  key: 'deleteCrmTask',
+  noun: 'Task',
+  display: {
+    label: 'Delete CRM Task',
+    description: 'Permanently deletes a CRM task by ID.',
+  },
+  operation: {
+    inputFields: [
+      { key: 'task_id', label: 'Task ID', type: 'string', required: true },
+    ],
+    perform: async (z: ZObject, bundle: Bundle) => {
+      await z.request({
+        url: api(`/crm/tasks/${bundle.inputData.task_id}`),
+        method: 'DELETE',
+      });
+      return { id: bundle.inputData.task_id, success: true };
+    },
+    sample: { id: 'ta5b6c7d-0000-0000-0000-000000000000', success: true },
+  },
+};
