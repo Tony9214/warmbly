@@ -1,117 +1,41 @@
 import authentication from './authentication';
 import { includeBearerToken, handleApiErrors } from './lib/client';
+import { dropdownTriggers } from './lib/dropdowns';
+import type { ResourceModule } from './lib/types';
 
-import {
-  campaignList,
-  mailboxList,
-  pipelineList,
-  stageList,
-  templateList,
-} from './triggers/dropdowns';
-import { newContact, newOrUpdatedContact } from './triggers/contacts';
-import { newDeal, dealWon, newCrmTask } from './triggers/crm';
-import { newMeeting } from './triggers/meetings';
-import { newInboundEmail } from './triggers/inbox';
-import { newCampaign, campaignCompleted } from './triggers/campaigns';
-import { newMailbox } from './triggers/mailboxes';
-
-import {
-  createContact,
-  updateContact,
-  addContactToCampaign,
-  removeContactFromCampaign,
-  createContactNote,
-  updateContactNote,
-  deleteContact,
-  deleteContactNote,
-} from './creates/contacts';
-import { sendEmail, replyToEmail, verifyEmail } from './creates/email';
-import {
-  createDeal,
-  updateDeal,
-  deleteDeal,
-  createCrmTask,
-  updateCrmTask,
-  deleteCrmTask,
-} from './creates/crm';
-import {
-  createCampaign,
-  updateCampaign,
-  deleteCampaign,
-  startCampaign,
-  stopCampaign,
-} from './creates/campaigns';
-import { createTemplate, updateTemplate, deleteTemplate } from './creates/templates';
-import { deleteMailbox } from './creates/mailboxes';
-
-import {
-  findContact,
-  findCampaign,
-  findMailbox,
-  findTemplate,
-} from './searches';
+import * as contacts from './resources/contacts';
+import * as deals from './resources/deals';
+import * as tasks from './resources/tasks';
+import * as campaigns from './resources/campaigns';
+import * as mailboxes from './resources/mailboxes';
+import * as inbox from './resources/inbox';
+import * as meetings from './resources/meetings';
+import * as templates from './resources/templates';
+import * as groups from './resources/groups';
+import * as analytics from './resources/analytics';
 
 // version + platformVersion are required by Zapier; read from package.json and
 // the installed core. require avoids pulling package.json into the TS rootDir.
 const packageJson = require('../package.json');
 const corePackageJson = require('zapier-platform-core');
 
-const triggers = [
-  // Hidden list triggers powering dynamic dropdowns.
-  campaignList,
-  mailboxList,
-  pipelineList,
-  stageList,
-  templateList,
-  // User-facing polling triggers.
-  newContact,
-  newOrUpdatedContact,
-  newDeal,
-  dealWon,
-  newCrmTask,
-  newMeeting,
-  newInboundEmail,
-  newCampaign,
-  campaignCompleted,
-  newMailbox,
+// Every feature lives in one resource module exporting triggers/creates/searches.
+// Add a feature by editing the matching resources/<name>.ts file.
+const resources: ResourceModule[] = [
+  contacts,
+  deals,
+  tasks,
+  campaigns,
+  mailboxes,
+  inbox,
+  meetings,
+  templates,
+  groups,
+  analytics,
 ];
 
-const creates = [
-  // Contacts
-  createContact,
-  updateContact,
-  deleteContact,
-  addContactToCampaign,
-  removeContactFromCampaign,
-  createContactNote,
-  updateContactNote,
-  deleteContactNote,
-  // Email
-  sendEmail,
-  replyToEmail,
-  verifyEmail,
-  // CRM
-  createDeal,
-  updateDeal,
-  deleteDeal,
-  createCrmTask,
-  updateCrmTask,
-  deleteCrmTask,
-  // Campaigns
-  createCampaign,
-  updateCampaign,
-  deleteCampaign,
-  startCampaign,
-  stopCampaign,
-  // Templates
-  createTemplate,
-  updateTemplate,
-  deleteTemplate,
-  // Mailboxes
-  deleteMailbox,
-];
-
-const searches = [findContact, findCampaign, findMailbox, findTemplate];
+const collect = (pick: (r: ResourceModule) => Array<{ key: string }> | undefined) =>
+  resources.flatMap((r) => pick(r) ?? []);
 
 const byKey = (items: Array<{ key: string }>): Record<string, any> =>
   items.reduce((acc: Record<string, any>, item) => {
@@ -125,7 +49,8 @@ export default {
   authentication,
   beforeRequest: [includeBearerToken],
   afterResponse: [handleApiErrors],
-  triggers: byKey(triggers),
-  creates: byKey(creates),
-  searches: byKey(searches),
+  // Hidden dropdown list-triggers come first, then each resource's triggers.
+  triggers: byKey([...dropdownTriggers, ...collect((r) => r.triggers)]),
+  creates: byKey(collect((r) => r.creates)),
+  searches: byKey(collect((r) => r.searches)),
 };
