@@ -98,3 +98,68 @@ export const stopCampaign = {
     sample: { campaign_id: CAMPAIGN_SAMPLE.id, status: 'stopped' },
   },
 };
+
+export const updateCampaign = {
+  key: 'updateCampaign',
+  noun: 'Campaign',
+  display: {
+    label: 'Update Campaign',
+    description: 'Updates campaign settings such as name, description, or daily send cap. Use Start/Stop Campaign to change its running state.',
+  },
+  operation: {
+    inputFields: [
+      {
+        key: 'campaign_id',
+        label: 'Campaign',
+        type: 'string',
+        required: true,
+        dynamic: 'campaignList.id.name',
+      },
+      { key: 'name', label: 'Name', type: 'string' },
+      { key: 'description', label: 'Description', type: 'text' },
+      { key: 'daily_limit', label: 'Daily send cap', type: 'integer' },
+    ],
+    perform: async (z: ZObject, bundle: Bundle) => {
+      const body = pruneEmpty({
+        name: bundle.inputData.name,
+        description: bundle.inputData.description,
+        daily_limit: bundle.inputData.daily_limit,
+      });
+      const response = await z.request({
+        url: api(`/campaigns/${bundle.inputData.campaign_id}`),
+        method: 'PATCH',
+        body,
+      });
+      return response.data;
+    },
+    sample: CAMPAIGN_SAMPLE,
+  },
+};
+
+export const deleteCampaign = {
+  key: 'deleteCampaign',
+  noun: 'Campaign',
+  display: {
+    label: 'Delete Campaign',
+    description: 'Permanently deletes a campaign by ID. This is irreversible.',
+  },
+  operation: {
+    inputFields: [
+      {
+        key: 'campaign_id',
+        label: 'Campaign',
+        type: 'string',
+        required: true,
+        dynamic: 'campaignList.id.name',
+      },
+    ],
+    perform: async (z: ZObject, bundle: Bundle) => {
+      await z.request({
+        url: api(`/campaigns/${bundle.inputData.campaign_id}`),
+        method: 'DELETE',
+      });
+      return { id: bundle.inputData.campaign_id, success: true };
+    },
+    sample: { id: CAMPAIGN_SAMPLE.id, success: true },
+  },
+};
