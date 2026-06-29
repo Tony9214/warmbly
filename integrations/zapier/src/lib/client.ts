@@ -15,11 +15,13 @@ export const api = (path: string): string => `${API_BASE}${path}`;
 // triggers/actions actually shipped (no webhooks/realtime: triggers poll).
 export const DEFAULT_SCOPES = [
   'read_emails',
+  'write_emails',
   'send_campaigns',
   'read_campaigns',
   'write_campaigns',
   'read_contacts',
   'write_contacts',
+  'bulk_contacts',
   'read_unibox',
   'write_unibox',
   'read_crm',
