@@ -43,7 +43,8 @@ export function useLivePatch(
         return subscribeToChannel(`org:${orgId}`, "LIVE_PATCH", (p) => {
             const by = typeof p.user_id === "string" ? p.user_id : "";
             if (!by || by === selfRef.current) return;
-            if (resourceRef.current && p.resource !== resourceRef.current) return;
+            // With no resource we match nothing (p.resource is always a string).
+            if (!resourceRef.current || p.resource !== resourceRef.current) return;
             const data = (p.data ?? {}) as LivePatchData;
             onPatchRef.current?.(data, by);
         });
