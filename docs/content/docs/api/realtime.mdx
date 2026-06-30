@@ -254,6 +254,31 @@ Presence is subject to the workspace's privacy settings. An admin can turn off "
 
 API-key connections receive presence events but are never tracked as presences themselves: machines are not teammates.
 
+## Live collaboration
+
+The dashboard streams ephemeral collaboration frames so teammates see each other in real time: live cursors everywhere, plus in-flight card drags on the builder canvases. These ride a separate fast path from the sequenced event stream above.
+
+Every frame is scoped by a `resource` string, and a client only renders frames for the resource it is currently on:
+
+- `page:<route>` for an ordinary dashboard page (cursors only). Coordinates are relative to the page's content area; on pages that scroll at the app level they track the content as either person scrolls, and otherwise they mark where the teammate's pointer is within the viewport.
+- `automation:<id>` and `campaign:<id>` for the automation and campaign-sequence builder canvases (cursors and card drags). Coordinates are canvas (flow) space, so a point lands in the same place for everyone regardless of pan or zoom.
+
+Clients push:
+
+- `live:cursor` with `{ "resource": "<resource>", "x": <number>, "y": <number> }` for a pointer move, or `{ "resource": "<resource>", "gone": true }` when the pointer leaves.
+- `live:node` with `{ "resource": "<canvas-resource>", "id": "<node-id>", "x": <number>, "y": <number>, "dragging": <bool> }` while a card is being moved (builder canvases only).
+
+They fan out to the other members on the same org channel as `LIVE_CURSOR` and `LIVE_NODE` events carrying the same fields plus `user_id`. Resolve the mover's name and avatar from presence.
+
+These frames are deliberately lightweight:
+
+- they are **not** sequenced and **not** resumable. A dropped frame is fine: the next one is milliseconds away, and a reconnecting client never replays them.
+- they follow the workspace privacy settings. A member whose activity is hidden ("show activity" off) emits no cursor or drag frames, the same gate as `presence:update`.
+- only human (JWT) members exchange them. API-key connections neither send nor receive live frames.
+- they are exempt from the per-minute client-event budget below (which they would exhaust instantly). Each socket is bounded by a small in-process burst limit instead, and clients should throttle pointer and drag frames to roughly 20 to 30 per second.
+
+Card positions are also persisted separately over REST, so an arrangement sticks across visits even with nobody else watching. The live stream is only the moment-to-moment motion.
+
 ## Rate limits and connection caps
 
 The realtime service protects itself against connection spam. All limits are per user (the key's owner) unless noted:
@@ -267,6 +292,8 @@ The realtime service protects itself against connection spam. All limits are per
 | Server-to-client messages | 120/minute |
 
 When a client-sent event is throttled you receive an error reply with `reason: "rate_limited"` and a `retry_after_ms` hint. When outbound delivery is throttled the channel pushes a `rate_limited` message instead of the event.
+
+Ephemeral [live-collaboration](#live-collaboration) frames (`live:cursor`, `live:node`) are exempt from the client-event budget above: they are bounded by a separate small per-socket burst limit, and over-budget frames are dropped silently rather than rejected.
 
 ## Connection rejections
 
