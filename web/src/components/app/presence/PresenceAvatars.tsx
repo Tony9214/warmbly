@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRightIcon, EyeIcon, PencilIcon, ReplyIcon } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -75,6 +75,7 @@ export default function PresenceAvatars() {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     const navigate = useNavigate();
+    const { pathname } = useLocation();
     useClickOutside(ref, () => setOpen(false));
 
     if (members.length === 0) return null;
@@ -147,7 +148,9 @@ export default function PresenceAvatars() {
                         {members.map((m) => {
                             const act = activityOf(m);
                             // Click a teammate to jump to the page they are on.
-                            const jumpable = !!m.page;
+                            // Presence pages are teammate-supplied strings, so
+                            // only in-app paths are navigable.
+                            const jumpable = !!m.page && m.page.startsWith("/app");
                             return (
                                 <button
                                     key={m.userId}
@@ -155,9 +158,9 @@ export default function PresenceAvatars() {
                                     disabled={!jumpable}
                                     title={jumpable ? "Go where they are" : undefined}
                                     onClick={() => {
-                                        if (!m.page) return;
                                         setOpen(false);
-                                        navigate(m.page);
+                                        if (!jumpable || m.page === pathname) return;
+                                        navigate(m.page!);
                                     }}
                                     className={cn(
                                         "group w-full px-3 py-1.5 flex items-center gap-2.5 text-left",
