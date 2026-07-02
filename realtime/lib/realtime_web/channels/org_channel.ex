@@ -619,8 +619,10 @@ defmodule RealtimeWeb.OrgChannel do
   defp build_live_event(_kind, _payload, _socket), do: nil
 
   # Keep a selection list small and string-only: ids capped in length and count.
+  # The hard cap comes first so an oversized payload is never fully traversed.
   defp sanitize_ids(list) when is_list(list) do
     list
+    |> Enum.take(150)
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.slice(&1, 0, 64))
     |> Enum.reject(&(&1 == ""))
