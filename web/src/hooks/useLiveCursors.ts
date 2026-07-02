@@ -248,11 +248,14 @@ export function useLiveCursors(resource: string | null, opts: { enabled: boolean
     // Chat travels on the cursor frames themselves, so the bubble is glued to
     // the pointer with zero extra transport. Setting/clearing emits a frame
     // immediately (at the last known position) so it never waits for movement.
+    // Deliberately not gated on cursorPresent: typing IS presence, so chat
+    // re-plants the cursor at its last spot even if the pointer wandered off
+    // the tracked surface (e.g. over the chat input's own portal).
     const setChat = React.useCallback(
         (text: string | null) => {
             chatRef.current = text && text.trim() ? text : null;
             const p = lastCursorPos.current;
-            if (activeRef.current && resourceRef.current && cursorPresent.current && p) sendCursor(p.x, p.y);
+            if (activeRef.current && resourceRef.current && p) sendCursor(p.x, p.y);
         },
         [sendCursor],
     );

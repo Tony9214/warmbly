@@ -80,7 +80,7 @@ export default function CursorChat({
             return;
         }
         const onKey = (e: KeyboardEvent) => {
-            if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+            if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
             if (openRef.current || isTypingTarget(e.target)) return;
             e.preventDefault();
             setPos(posRef.current ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 });
@@ -126,6 +126,8 @@ export default function CursorChat({
                         if (v) setSent(null);
                     }}
                     onKeyDown={(e) => {
+                        // Mid-IME-composition Enter/Escape belong to the IME.
+                        if (e.nativeEvent.isComposing) return;
                         if (e.key === "Escape") {
                             e.stopPropagation();
                             close();
@@ -143,7 +145,19 @@ export default function CursorChat({
                             }, SENT_LINGER_MS);
                         }
                     }}
-                    onBlur={close}
+                    onBlur={() => {
+                        // An incidental blur (clicking through to the page)
+                        // right after Enter must not cut the sent message
+                        // short: close the input but let the linger timer
+                        // clear the bubble for teammates on its own schedule.
+                        if (lingerTimer.current != null && !text.trim()) {
+                            setOpen(false);
+                            setText("");
+                            setSent(null);
+                        } else {
+                            close();
+                        }
+                    }}
                     className="w-[180px] bg-transparent text-[11.5px] leading-snug text-white outline-none placeholder:text-white/60"
                 />
             </div>

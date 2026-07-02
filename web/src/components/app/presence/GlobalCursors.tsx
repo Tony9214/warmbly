@@ -141,7 +141,10 @@ function GlobalCursorsOverlay({ scrollRef }: { scrollRef: React.RefObject<HTMLEl
                     ))}
                 </div>
             ) : null}
-            <CursorChat active={live.active} color={selfColor} setChat={live.setChat} />
+            {/* Keyed by resource: navigating remounts the chat, so an open
+                input (and its text) never follows you to the next page's
+                audience. */}
+            <CursorChat key={resource} active={live.active} color={selfColor} setChat={live.setChat} />
         </>
     );
 }
