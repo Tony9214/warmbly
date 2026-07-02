@@ -10,6 +10,8 @@ The Warmbly dashboard is live by default. Campaign sends, opens, clicks, replies
 
 The header shows an avatar stack of every workspace member who currently has the dashboard open. Hover it to see each person's name and where they are right now (for example "in unibox" or "editing"). The stack updates instantly as people come and go.
 
+Click a teammate in the list to jump straight to the page they are on. It is the fastest way to join someone: open the stack, click their name, and you are looking at the same screen, with their live cursor in view.
+
 ## Who is already on this?
 
 Anywhere a record can be opened, Warmbly shows you when a teammate already has it open:
@@ -40,9 +42,15 @@ Events are permission-aware: a member without inbox access never receives unibox
 
 Wherever two teammates are on the same page, you see each other's cursors move in real time, each tagged with the person's avatar and name so it is always clear who is who. This works across the dashboard: the contacts table, the deal board, the unibox, settings, and every other page. On pages that scroll at the app level the cursor tracks the content as either person scrolls; elsewhere it marks where the teammate's pointer is.
 
+### Cursor chat
+
+When a teammate is on the same page or canvas, press `/` to chat from your cursor. A small input opens at your pointer; whatever you type appears live in a colored bubble next to your cursor on your teammates' screens, exactly where you are pointing. Press Enter to send (the message lingers for a few seconds, then fades), Escape to dismiss. It is made for the quick, spatial remarks that do not deserve a message thread: "this one?", "typo here", "look at this step".
+
 ## Live on the builder canvases
 
 The [automation builder](/guides/automations/) and the campaign [sequence](/guides/sequences/) editor are shared canvases. When a teammate is in the same flow, you see their cursor and watch cards slide as they drag them. Everyone is looking at the same live layout, so you can arrange a flow together without narrating every move.
+
+You also see what each person has selected: the cards a teammate selects get an outline in their cursor color with their name on it, so "the step I have selected" is something everyone can see rather than describe. Selections update live as people click around, and cursor chat works here too.
 
 Card positions also stick. However you arrange the cards, that layout saves automatically and is exactly what you and your teammates see the next time the flow is opened. There is no separate "save layout" step, and moving a card never marks the flow as having unsaved changes. Only edits to the logic do.
 
