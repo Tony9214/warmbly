@@ -150,6 +150,21 @@ func main() {
 
 	workerTopic := kafka.GetWorkerTopic(workerID.String())
 
+	// Provider OAuth configs for local token refresh. Cfg is not shipped in the
+	// AddWorkerEmail payload (avro-excluded), so the worker rebuilds it from
+	// these (reads BOX_GOOGLE_* / BOX_OUTLOOK_* from the worker env). RedirectURL
+	// is unused for refresh, so the base URL is irrelevant here.
+	oauthInbox := config.LoadOauth2Inbox("")
+	// Token refresh needs the provider client credentials in the worker env.
+	// Warn loudly if they're missing: the initial token still works, but refresh
+	// fails silently once it expires (~1h), stalling the mailbox.
+	if oauthInbox.Outlook == nil || oauthInbox.Outlook.ClientID == "" || oauthInbox.Outlook.ClientSecret == "" {
+		log.Println("WARNING: BOX_OUTLOOK_CLIENT_ID/SECRET not set; Microsoft Graph mailbox token refresh will fail on expiry")
+	}
+	if oauthInbox.Google == nil || oauthInbox.Google.ClientID == "" || oauthInbox.Google.ClientSecret == "" {
+		log.Println("WARNING: BOX_GOOGLE_CLIENT_ID/SECRET not set; Gmail mailbox token refresh will fail on expiry")
+	}
+
 	// WorkerService
 	workerService := &worker.WorkerService{
 		ID:                        workerID.String(),
@@ -159,6 +174,7 @@ func main() {
 		Cache:                     redisCache,
 		Storage:                   s3Client,
 		EmailMessageMapRepository: emailMessageMapRepo,
+		OauthInbox:                &oauthInbox,
 	}
 
 	if err := workerService.Init(); err != nil {

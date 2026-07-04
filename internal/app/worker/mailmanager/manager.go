@@ -6,10 +6,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/worker/wmail"
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/repository"
+	"golang.org/x/oauth2"
 )
 
 type MailManager struct {
@@ -20,6 +22,7 @@ type MailManager struct {
 	storage                   storage.Store
 	emailMessageMapRepository repository.EmailMessageMapRepository
 	cipherService             cipher.CipherService
+	oauthInbox                *config.Oauth2Inbox
 }
 
 func NewMailManager(
@@ -28,6 +31,7 @@ func NewMailManager(
 	storage storage.Store,
 	emailMessageMapRepository repository.EmailMessageMapRepository,
 	cipherService cipher.CipherService,
+	oauthInbox *config.Oauth2Inbox,
 ) *MailManager {
 	return &MailManager{
 		Emails:                    make(map[uuid.UUID]*wmail.WMail),
@@ -36,7 +40,28 @@ func NewMailManager(
 		storage:                   storage,
 		emailMessageMapRepository: emailMessageMapRepository,
 		cipherService:             cipherService,
+		oauthInbox:                oauthInbox,
 	}
+}
+
+// cfgFor returns the OAuth config the worker uses to refresh a provider's
+// delegated token. Cfg is not carried in the AddWorkerEmail payload (avro
+// excludes it), so it is rebuilt here from the worker's local oauth config.
+func (m *MailManager) cfgFor(t models.InboxProvider) oauth2.Config {
+	if m.oauthInbox == nil {
+		return oauth2.Config{}
+	}
+	switch t {
+	case models.InboxProviderGoogle:
+		if m.oauthInbox.Google != nil {
+			return *m.oauthInbox.Google
+		}
+	case models.InboxProviderOutlook:
+		if m.oauthInbox.Outlook != nil {
+			return *m.oauthInbox.Outlook
+		}
+	}
+	return oauth2.Config{}
 }
 
 // Get returns a WMail by ID, or nil if not present
