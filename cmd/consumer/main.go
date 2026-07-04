@@ -186,6 +186,7 @@ func main() {
 	uniboxRepo := repository.NewUniboxRepository(primaryDB)
 	mailboxRepo := repository.NewMailboxRepository(primaryDB)
 	emailHistoryIDRepo := repository.NewEmailHistoryIDRepository(primaryDB)
+	emailGraphDeltaRepo := repository.NewEmailGraphDeltaRepository(primaryDB)
 	emailAccountErrorRepo := repository.NewEmailAccountErrorRepository(primaryDB)
 	warmupRepo := repository.NewWarmupRepository(primaryDB.Pool)
 	warmupService := warmupapp.NewService(warmupRepo)
@@ -298,6 +299,7 @@ func main() {
 		MailboxRepository:           mailboxRepo,
 		EmailRepository:             emailRepo,
 		EmailHistoryIDRepository:    emailHistoryIDRepo,
+		EmailGraphDeltaRepository:   emailGraphDeltaRepo,
 		EmailAccountErrorRepository: emailAccountErrorRepo,
 		WarmupRepo:                  warmupRepo,
 		WarmupContentRepo:           repository.NewWarmupContentRepository(primaryDB.Pool),
