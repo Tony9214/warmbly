@@ -16,6 +16,8 @@ Open the **Accounts** page in the dashboard and choose **Add account**. Warmbly 
 
 For Google (Gmail / Google Workspace) and Microsoft (Outlook / Microsoft 365), Warmbly uses OAuth. You authorize Warmbly directly with your provider, and we receive a token instead of your password.
 
+Both OAuth providers connect through the provider's native API rather than IMAP or SMTP: Gmail over the Gmail API, and Microsoft over the Microsoft Graph API. Sending and inbox sync both run over that API, so the consent screen asks to send mail and to read and organize your mailbox. Nothing goes over IMAP or SMTP for these accounts.
+
 The flow is:
 
 1. Pick the provider. The dashboard starts an OAuth round trip and sends you to your provider's consent screen.
@@ -53,7 +55,7 @@ If your provider requires an app password (common when two-factor authentication
 | Provider | Method | Notes |
 |----------|--------|-------|
 | Gmail / Google Workspace | OAuth (`gmail`) | Recommended. No password stored. |
-| Outlook / Microsoft 365 | OAuth (`outlook`) | Recommended. No password stored. |
+| Outlook / Microsoft 365 | OAuth (`outlook`) | Recommended. No password stored. Runs on Microsoft Graph. |
 | Any IMAP/SMTP server | IMAP + SMTP (`smtp_imap`) | Use for custom domains, self-hosted, or providers without OAuth. |
 
 ## How many mailboxes you can connect

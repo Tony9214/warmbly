@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/models"
 	"google.golang.org/api/gmail/v1"
 )
@@ -40,7 +41,9 @@ func getAddressList(headers []*gmail.MessagePartHeader, name string) []string {
 
 func getSingleHeader(headers []*gmail.MessagePartHeader, name string) string {
 	for _, h := range headers {
-		if h.Name == name {
+		// RFC 5322 header names are case-insensitive; match accordingly so the
+		// warmup token (and other headers) resolve regardless of provider casing.
+		if strings.EqualFold(h.Name, name) {
 			return h.Value
 		}
 	}
@@ -91,6 +94,18 @@ func GmailMessageToEmailData(msg *gmail.Message) *models.EmailMessageData {
 					flags = append(flags, "\\Important")
 				case "DRAFT":
 					flags = append(flags, "\\Draft")
+				}
+			}
+			// Surface the warmup verification token as a pseudo-flag so the
+			// consumer can categorize warmup mail into the Warmbly folder.
+			if tok := getSingleHeader(headers, config.WarmupVerifyHeader); tok != "" {
+				flags = append(flags, config.WarmupVerifyHeader+":"+tok)
+			}
+			// Surface machine-reply / DSN-bounce markers so the consumer's
+			// reply/bounce classifier can read them.
+			for _, name := range config.InboundClassificationHeaders {
+				if v := strings.TrimSpace(getSingleHeader(headers, name)); v != "" {
+					flags = append(flags, name+":"+v)
 				}
 			}
 			return flags

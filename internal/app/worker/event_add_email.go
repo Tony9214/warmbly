@@ -26,8 +26,9 @@ func (w *WorkerService) HandleAddEmail(ctx context.Context, e *models.AddWorkerE
 	// cancelled when the account is removed or terminates, so we don't leak goroutines.
 	mail := w.mailManager.Get(e.ID)
 	if mail != nil {
-		// Skip IMAP if not requested for SMTP/IMAP providers
-		if e.Type != models.InboxProviderGoogle && !e.ImapSync {
+		// Gmail (history) and Outlook/Graph (delta) always sync. Only generic
+		// SMTP/IMAP mailboxes are opt-in via ImapSync.
+		if e.Type == models.InboxProviderSMTPIMAP && !e.ImapSync {
 			log.Info().Str("email_id", e.ID.String()).Str("email", e.Email).Msg("email account added (no sync)")
 			return nil
 		}

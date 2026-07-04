@@ -6,6 +6,7 @@ import (
 
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/app/worker/mailmanager"
+	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/codec"
 	"github.com/warmbly/warmbly/internal/infrastructure/eventbus"
@@ -25,6 +26,11 @@ type WorkerService struct {
 	Cache                     *cache.Cache
 	Storage                   storage.Store
 	EmailMessageMapRepository repository.EmailMessageMapRepository
+
+	// OauthInbox supplies the provider OAuth configs (client id/secret +
+	// endpoint) the worker needs to refresh delegated tokens locally. Cfg is not
+	// serialized in the AddWorkerEmail payload, so the worker rebuilds it here.
+	OauthInbox *config.Oauth2Inbox
 
 	mailManager *mailmanager.MailManager
 
@@ -54,6 +60,7 @@ func (s *WorkerService) Init() error {
 		s.Storage,
 		s.EmailMessageMapRepository,
 		s.CipherService,
+		s.OauthInbox,
 	)
 
 	return nil

@@ -14,6 +14,10 @@ func (m *MailManager) AddWMail(
 	m.Lock()
 	defer m.Unlock()
 
+	// Cfg is avro-excluded from the payload, so rebuild it from the worker's
+	// local oauth config for token refresh (no-op for smtp_imap).
+	data.Cfg = m.cfgFor(data.Type)
+
 	newMail, err := wmail.NewWMail(
 		data,
 		m.OnEvent,

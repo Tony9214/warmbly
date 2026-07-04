@@ -2,11 +2,13 @@ package wmail
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/client/goog"
+	"github.com/warmbly/warmbly/internal/client/msgraph"
 	"github.com/warmbly/warmbly/internal/client/smtpimap/smtp"
 	"github.com/warmbly/warmbly/internal/config"
 	"github.com/warmbly/warmbly/internal/errx"
@@ -89,7 +91,9 @@ func (w *WMail) Send(ctx context.Context, req *SendRequest) *SendResult {
 		switch w.EmailType {
 		case models.InboxProviderGoogle:
 			result = w.sendViaGmail(ctx, req, bodyHTML)
-		case models.InboxProviderOutlook, models.InboxProviderSMTPIMAP:
+		case models.InboxProviderOutlook:
+			result = w.sendViaGraph(ctx, req, bodyHTML)
+		case models.InboxProviderSMTPIMAP:
 			result = w.sendViaSMTP(ctx, req, bodyHTML)
 		default:
 			result.Error = errx.MError(
@@ -197,6 +201,78 @@ func (w *WMail) sendViaGmail(ctx context.Context, req *SendRequest, bodyHTML str
 	return result
 }
 
+// sendViaGraph sends an email through Microsoft Graph (RAW MIME sendMail).
+// sendMail returns 202 with no provider id, so ProviderMsgID is the RFC
+// Message-ID we minted, mirroring the SMTP path.
+func (w *WMail) sendViaGraph(ctx context.Context, req *SendRequest, bodyHTML string) *SendResult {
+	result := &SendResult{
+		Success: false,
+		SentAt:  time.Now(),
+	}
+
+	if w.GraphData == nil || w.GraphData.Client == nil {
+		result.Error = errx.MError(
+			errx.MailErrorCritical,
+			errx.MailErrorCodeAuthenticationFailed,
+			"Microsoft Graph client not initialized",
+			errx.MailErrorResolveMethodReload,
+		)
+		return result
+	}
+
+	// Build parent reference for replies. Warmup replies often only have the RFC
+	// Message-ID from the token flow, not a local provider thread record.
+	var parent *models.EmailMessageData
+	if req.InReplyTo != "" && req.Parent != nil {
+		parent = &models.EmailMessageData{
+			MessageID: req.Parent.MessageID,
+			ThreadID:  req.Parent.ThreadID,
+		}
+	} else if req.InReplyTo != "" {
+		parent = &models.EmailMessageData{
+			MessageID: strings.Trim(req.InReplyTo, "<>"),
+		}
+	}
+
+	// Warmup token + RFC 8058 one-click unsubscribe headers; RAW MIME carries
+	// them verbatim (the JSON message shape cannot).
+	customHeaders := buildSendHeaders(req)
+	attachments := toGraphAttachments(req.Attachments)
+
+	err := w.GraphData.Client.SendMessage(
+		ctx,
+		req.To,
+		req.Cc,
+		req.Bcc,
+		req.MessageID,
+		req.Subject,
+		req.BodyPlain,
+		bodyHTML,
+		parent,
+		attachments,
+		customHeaders,
+	)
+	if err != nil {
+		var mailErr *errx.MailError
+		if errors.As(err, &mailErr) {
+			result.Error = mailErr
+		} else {
+			result.Error = errx.MError(
+				errx.MailErrorWarning,
+				errx.MailErrorCodeServerUnreachable,
+				err.Error(),
+				errx.MailErrorResolveMethodRetry,
+			)
+		}
+		return result
+	}
+
+	result.Success = true
+	result.MessageID = req.MessageID
+	result.ProviderMsgID = req.MessageID // Graph sendMail returns no id
+	return result
+}
+
 // sendViaSMTP sends an email using SMTP
 func (w *WMail) sendViaSMTP(ctx context.Context, req *SendRequest, bodyHTML string) *SendResult {
 	result := &SendResult{
@@ -253,6 +329,22 @@ func toGoogAttachments(in []Attachment) []goog.Attachment {
 	out := make([]goog.Attachment, 0, len(in))
 	for _, a := range in {
 		out = append(out, goog.Attachment{
+			Filename: a.Filename,
+			MimeType: a.MimeType,
+			Data:     a.Data,
+		})
+	}
+	return out
+}
+
+// toGraphAttachments maps wmail attachments to the Graph transport shape.
+func toGraphAttachments(in []Attachment) []msgraph.Attachment {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]msgraph.Attachment, 0, len(in))
+	for _, a := range in {
+		out = append(out, msgraph.Attachment{
 			Filename: a.Filename,
 			MimeType: a.MimeType,
 			Data:     a.Data,

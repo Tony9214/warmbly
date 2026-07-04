@@ -64,6 +64,13 @@ type WorkerEnvConfig struct {
 	EventBusProvider string
 	NATSURL          string
 	CodecProvider    string
+
+	// Provider OAuth client credentials the worker needs to refresh delegated
+	// mailbox tokens locally (Cfg is not shipped in the AddWorkerEmail payload).
+	BoxGoogleClientID      string
+	BoxGoogleClientSecret  string
+	BoxOutlookClientID     string
+	BoxOutlookClientSecret string
 }
 
 type Orchestrator struct {
@@ -622,6 +629,10 @@ func (o *Orchestrator) renderEnvFile(ctx context.Context, workerID uuid.UUID) (e
 	write("EVENTBUS_PROVIDER", env.EventBusProvider)
 	write("NATS_URL", env.NATSURL)
 	write("CODEC_PROVIDER", env.CodecProvider)
+	write("BOX_GOOGLE_CLIENT_ID", env.BoxGoogleClientID)
+	write("BOX_GOOGLE_CLIENT_SECRET", env.BoxGoogleClientSecret)
+	write("BOX_OUTLOOK_CLIENT_ID", env.BoxOutlookClientID)
+	write("BOX_OUTLOOK_CLIENT_SECRET", env.BoxOutlookClientSecret)
 	return b.String(), image, nil
 }
 
