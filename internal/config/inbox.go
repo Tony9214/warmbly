@@ -30,6 +30,13 @@ func GoogleOauth2Inbox(baseURL string) *oauth2.Config {
 	}
 }
 
+// OutlookOauth2Inbox configures delegated Microsoft Graph access for Outlook /
+// Microsoft 365 mailboxes. Graph is the transport now (RAW MIME sendMail + delta
+// sync), so we request Graph scopes rather than the legacy IMAP/SMTP scopes:
+// Mail.Send (send), Mail.ReadWrite (delta sync + warmup move/mark/flag),
+// User.Read (resolve the mailbox owner via /me), and offline_access (refresh
+// token). None require tenant admin consent by default and all work on personal
+// Outlook.com accounts.
 func OutlookOauth2Inbox(baseURL string) *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     os.Getenv("BOX_OUTLOOK_CLIENT_ID"),
@@ -39,10 +46,10 @@ func OutlookOauth2Inbox(baseURL string) *oauth2.Config {
 			"openid",
 			"email",
 			"profile",
-			"https://outlook.office.com/IMAP.AccessAsUser.All",
-			"https://outlook.office.com/SMTP.Send",
-			"https://outlook.office.com/Mail.Send",
 			"offline_access",
+			"https://graph.microsoft.com/User.Read",
+			"https://graph.microsoft.com/Mail.Send",
+			"https://graph.microsoft.com/Mail.ReadWrite",
 		},
 		Endpoint: oauth2.Endpoint{
 			AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",

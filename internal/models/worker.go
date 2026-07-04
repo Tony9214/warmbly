@@ -201,6 +201,15 @@ type AddWorkerEmailSmtpImapData struct {
 	Credentials *SmtpImap     `json:"credentials" avro:"credentials"`
 }
 
+// AddWorkerEmailGraphData seeds a Microsoft Graph mailbox on the worker: the
+// delegated OAuth token and the opaque per-folder delta cursors persisted by the
+// control plane (empty on first connect, which primes the cursor without
+// backfilling history).
+type AddWorkerEmailGraphData struct {
+	Token      *oauth2.Token     `json:"token" avro:"token"`
+	DeltaLinks map[string]string `json:"delta_links" avro:"delta_links"`
+}
+
 type AddWorkerEmail struct {
 	ID        uuid.UUID                   `json:"id" avro:"id"`
 	UserID    uuid.UUID                   `json:"user_id" avro:"user_id"`
@@ -211,6 +220,7 @@ type AddWorkerEmail struct {
 	Type      InboxProvider               `json:"type" avro:"type"`
 	Google    *AddWorkerEmailGoogleData   `json:"google" avro:"google"`
 	SmtpImap  *AddWorkerEmailSmtpImapData `json:"smtp_imap" avro:"smtp_imap"`
+	Graph     *AddWorkerEmailGraphData    `json:"graph" avro:"graph"`
 
 	Cfg oauth2.Config `json:"-" avro:"-"`
 }

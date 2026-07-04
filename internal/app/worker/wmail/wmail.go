@@ -6,13 +6,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/app/cipher"
 	"github.com/warmbly/warmbly/internal/client/goog"
+	"github.com/warmbly/warmbly/internal/client/msgraph"
 	"github.com/warmbly/warmbly/internal/client/smtpimap/imap"
 	"github.com/warmbly/warmbly/internal/client/smtpimap/smtp"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/infrastructure/cache"
 	"github.com/warmbly/warmbly/internal/infrastructure/storage"
 	"github.com/warmbly/warmbly/internal/models"
-	"github.com/warmbly/warmbly/internal/pkg/stoken"
 	"github.com/warmbly/warmbly/internal/repository"
 	"golang.org/x/oauth2"
 )
@@ -31,6 +31,10 @@ type OutlookService struct {
 type GoogleData struct {
 	Client        *goog.Client
 	LastHistoryID uint64
+}
+
+type GraphData struct {
+	Client *msgraph.Client
 }
 
 type SmtpImapData struct {
@@ -53,6 +57,7 @@ type WMail struct {
 	EmailType models.InboxProvider
 
 	GoogleData   *GoogleData
+	GraphData    *GraphData
 	SmtpImapData *SmtpImapData
 
 	Cache                     *cache.Cache
@@ -101,6 +106,14 @@ func NewWMail(
 
 	switch data.Type {
 	case models.InboxProviderGoogle:
+		if data.Google == nil {
+			return nil, errx.MError(
+				errx.MailErrorCritical,
+				errx.MailErrorCodeAuthenticationFailed,
+				"missing Google credentials in add-email payload",
+				errx.MailErrorResolveMethodReload,
+			)
+		}
 		mail.GoogleData = &GoogleData{
 			Client: &goog.Client{
 				Email:     data.Email,
@@ -119,55 +132,59 @@ func NewWMail(
 		if err := mail.GoogleData.Client.Init(mailCtx, data.Google.Token, data.Cfg); err != nil {
 			return nil, err
 		}
-	default:
+	case models.InboxProviderOutlook:
+		// Microsoft/Outlook mailboxes run entirely on Microsoft Graph: RAW MIME
+		// sendMail plus delta-based inbound sync. There is no IMAP/SMTP path.
+		if data.Graph == nil {
+			return nil, errx.MError(
+				errx.MailErrorCritical,
+				errx.MailErrorCodeAuthenticationFailed,
+				"missing Microsoft Graph credentials in add-email payload",
+				errx.MailErrorResolveMethodReload,
+			)
+		}
+		token := data.Graph.Token
+		deltaLinks := data.Graph.DeltaLinks
+
+		mail.GraphData = &GraphData{
+			Client: &msgraph.Client{
+				Email:     data.Email,
+				FirstName: data.FirstName,
+				LastName:  data.LastName,
+
+				Cache:      mail.Cache,
+				DeltaLinks: cloneStringMap(deltaLinks),
+
+				OnMessageAdd:    mail.onGraphMessageAdd,
+				OnMessageRemove: mail.onGraphMessageRemove,
+				OnFlagsChange:   mail.onGraphFlagsChange,
+				OnDelta:         mail.onGraphDelta,
+				OnTokenRefresh: func(_ context.Context, t *oauth2.Token) error {
+					return mail.onTokenUpdate(t)
+				},
+			},
+		}
+
+		if err := mail.GraphData.Client.Init(mailCtx, token, data.Cfg); err != nil {
+			return nil, err
+		}
+	case models.InboxProviderSMTPIMAP:
+		// Generic SMTP/IMAP with plain-auth credentials (arbitrary providers).
+		if data.SmtpImap == nil || data.SmtpImap.Credentials == nil {
+			return nil, errx.MError(
+				errx.MailErrorCritical,
+				errx.MailErrorCodeInvalidCredentials,
+				"missing SMTP/IMAP credentials in add-email payload",
+				errx.MailErrorResolveMethodReload,
+			)
+		}
 		mail.SmtpImapData = &SmtpImapData{}
-		var smtpOauth2 *models.Oauth2Service
-		var imapOauth2 *models.Oauth2Service
-
-		var authType models.AuthType
-
-		switch data.Type {
-		case models.InboxProviderOutlook:
-			imapOauth2 = &models.Oauth2Service{
-				Host: "outlook.office365.com",
-				Port: 993,
-			}
-			smtpOauth2 = &models.Oauth2Service{
-				Host: "smtp-mail.outlook.com",
-				Port: 587,
-			}
-			authType = models.AuthOAuth2
-		case models.InboxProviderSMTPIMAP:
-			authType = models.AuthPlain
-		}
-
-		if data.SmtpImap.Token != nil {
-			ts := data.Cfg.TokenSource(mailCtx, data.SmtpImap.Token)
-			ts = oauth2.ReuseTokenSource(data.SmtpImap.Token, ts)
-			ts = stoken.New(ts, func(token *oauth2.Token) error {
-				return mail.onTokenUpdate(token)
-			})
-
-			tk := stoken.New(ts, mail.onTokenUpdate)
-
-			if imapOauth2 != nil {
-				imapOauth2.Token = tk
-			}
-			if smtpOauth2 != nil {
-				smtpOauth2.Token = tk
-			}
-		}
 
 		if data.ImapSync {
-			var imapCredentials *models.Service
-			if authType == models.AuthPlain {
-				imapCredentials = data.SmtpImap.Credentials.IMAP
-			}
 			mail.SmtpImapData.ImapClient = &imap.Client{
 				Email:       data.Email,
-				AuthType:    authType,
-				Credentials: imapCredentials,
-				Oauth2:      imapOauth2,
+				AuthType:    models.AuthPlain,
+				Credentials: data.SmtpImap.Credentials.IMAP,
 
 				OnUpdate: mail.onImapEmailUpdate,
 			}
@@ -180,10 +197,16 @@ func NewWMail(
 			FirstName:   data.FirstName,
 			LastName:    data.LastName,
 			Email:       data.Email,
-			AuthType:    authType,
+			AuthType:    models.AuthPlain,
 			Credentials: data.SmtpImap.Credentials.SMTP,
-			Oauth2:      smtpOauth2,
 		}
+	default:
+		return nil, errx.MError(
+			errx.MailErrorCritical,
+			errx.MailErrorCodeUnsupported,
+			"Unsupported email provider",
+			errx.MailErrorResolveMethodReload,
+		)
 	}
 
 	return mail, nil
