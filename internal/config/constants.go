@@ -133,3 +133,19 @@ const (
 	// Future: per-plan ceiling lookup. Today: single backstop.
 	MaxPendingScheduledSendsPerUser = 10000
 )
+
+// InboundClassificationHeaders are the internet headers the API-based inbound
+// sync (Gmail, Microsoft Graph) surfaces into EmailMessageData.Flags as
+// "Header:value" pseudo-flags. The sync model carries no arbitrary-header field,
+// so this is how the consumer's reply/bounce classifier (replyclassify via
+// buildReplyHeaders) sees the machine-reply and delivery-status-report markers.
+// From/Subject already ride the envelope; these add the high-signal headers.
+var InboundClassificationHeaders = []string{
+	"Auto-Submitted",
+	"Precedence",
+	"Content-Type",
+	"Return-Path",
+	"X-Autoreply",
+	"X-Autorespond",
+	"X-Auto-Response-Suppress",
+}
