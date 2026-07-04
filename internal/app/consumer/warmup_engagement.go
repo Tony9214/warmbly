@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -114,6 +115,10 @@ func rollPct(rate int, bias float64) bool {
 }
 
 // dwellSeconds returns a randomised delay within [min,max], nudged by persona.
+// The sample is heavy-tailed (u^2.2 curve), not uniform: most mail gets opened
+// within the first stretch of the range, a long tail waits much longer — the
+// shape of real inbox-checking, where a uniform "always read within N minutes
+// of delivery, around the clock" is a lockstep signature.
 func dwellSeconds(minS, maxS int, bias float64) int {
 	if maxS <= 0 || maxS < minS {
 		return 0
@@ -121,7 +126,8 @@ func dwellSeconds(minS, maxS int, bias float64) int {
 	span := maxS - minS
 	base := minS
 	if span > 0 {
-		base += rand.Intn(span + 1)
+		u := rand.Float64()
+		base += int(float64(span) * math.Pow(u, 2.2))
 	}
 	out := int(float64(base) * bias)
 	if out < minS {
@@ -131,4 +137,30 @@ func dwellSeconds(minS, maxS int, bias float64) int {
 		out = maxS
 	}
 	return out
+}
+
+// humanizeFireAt keeps recipient-side engagement inside plausible waking hours.
+// A read that fires at 3am local is a bot signature; anything landing in the
+// night window (22:30–07:30) is deferred to the next morning at a randomised
+// 07:30–09:30 moment in the recipient's timezone.
+func humanizeFireAt(fireAt time.Time, timezone string) time.Time {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil || timezone == "" {
+		return fireAt
+	}
+	local := fireAt.In(loc)
+	minutes := local.Hour()*60 + local.Minute()
+
+	const nightStart = 22*60 + 30
+	const morningEnd = 7*60 + 30
+	if minutes < nightStart && minutes >= morningEnd {
+		return fireAt
+	}
+
+	morning := time.Date(local.Year(), local.Month(), local.Day(), 7, 30, 0, 0, loc)
+	if minutes >= nightStart {
+		morning = morning.Add(24 * time.Hour)
+	}
+	offset := time.Duration(rand.Intn(120))*time.Minute + time.Duration(rand.Intn(60))*time.Second
+	return morning.Add(offset)
 }
