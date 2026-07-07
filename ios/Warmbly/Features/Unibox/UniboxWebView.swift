@@ -41,11 +41,19 @@ struct UniboxWebView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
         let document = Self.document(html: html, plain: plain)
-        // Reload when the content changed, or when the first load never
-        // committed (url stays nil if it was dropped mid-transition) — that is
-        // the "message stays blank until you tap it" failure.
-        let firstLoadDied = webView.url == nil && !webView.isLoading
-        guard document != context.coordinator.lastLoaded || firstLoadDied else { return }
+        // Reload when the content changed, or when a previous load left a
+        // blank view behind: never committed (url nil), or committed but never
+        // painted (zero content size) — both read as "white message" and only
+        // healed on a tap before. Capped so an genuinely empty body can't loop.
+        let blank = !webView.isLoading
+            && (webView.url == nil || webView.scrollView.contentSize.height < 2)
+        let shouldRetryBlank = blank && context.coordinator.blankRetries < 3
+        guard document != context.coordinator.lastLoaded || shouldRetryBlank else { return }
+        if document == context.coordinator.lastLoaded {
+            context.coordinator.blankRetries += 1
+        } else {
+            context.coordinator.blankRetries = 0
+        }
         context.coordinator.lastLoaded = document
         webView.loadHTMLString(document, baseURL: nil)
     }
@@ -89,15 +97,62 @@ struct UniboxWebView: UIViewRepresentable {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
+    // MARK: Native fast path
+
+    /// Returns the plain text when a body is plain-equivalent (its HTML is
+    /// just the plain text with breaks and simple wrappers). Those render as
+    /// native SwiftUI text — instant and immune to webview blank-outs — so
+    /// only genuinely rich HTML pays for a webview.
+    static func nativeText(html: String?, plain: String?) -> String? {
+        let plainText = (plain ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let htmlText = (html ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if htmlText.isEmpty { return plainText.isEmpty ? nil : plainText }
+        guard !plainText.isEmpty else { return nil }
+        var stripped = htmlText
+        for tag in [
+            "<br>", "<br/>", "<br />", "<p>", "</p>", "<div>", "</div>",
+            "<span>", "</span>", "<body>", "</body>", "<html>", "</html>"
+        ] {
+            stripped = stripped.replacingOccurrences(of: tag, with: "", options: .caseInsensitive)
+        }
+        return stripped.contains("<") ? nil : plainText
+    }
+
     // MARK: Coordinator
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
         var parent: UniboxWebView
         var lastLoaded: String?
+        var blankRetries = 0
         var sizeObservation: NSKeyValueObservation?
 
         init(_ parent: UniboxWebView) { self.parent = parent }
+
+        /// A killed web content process leaves a white, empty view behind —
+        /// the classic blank-message failure. Reload the same document.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            guard let document = lastLoaded else { return }
+            webView.loadHTMLString(document, baseURL: nil)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            retryOnce(webView)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            retryOnce(webView)
+        }
+
+        private func retryOnce(_ webView: WKWebView) {
+            guard blankRetries < 3, let document = lastLoaded else { return }
+            blankRetries += 1
+            webView.loadHTMLString(document, baseURL: nil)
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             measure(webView)

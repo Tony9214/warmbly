@@ -317,16 +317,25 @@ private struct UniboxMessageRow: View {
                 if showDetails, let detail {
                     detailBlock(detail)
                 }
-                if detail != nil {
-                    UniboxWebView(
-                        html: detail?.bodyHTML,
-                        plain: detail?.bodyPlain,
-                        height: Binding(
-                            get: { store.bodyHeights[message.id] ?? 40 },
-                            set: { store.bodyHeights[message.id] = $0 }
+                if let detail {
+                    if let native = UniboxWebView.nativeText(html: detail.bodyHTML, plain: detail.bodyPlain) {
+                        Text(native)
+                            .font(.system(size: 15))
+                            .lineSpacing(3)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 2)
+                    } else {
+                        UniboxWebView(
+                            html: detail.bodyHTML,
+                            plain: detail.bodyPlain,
+                            height: Binding(
+                                get: { store.bodyHeights[message.id] ?? 40 },
+                                set: { store.bodyHeights[message.id] = $0 }
+                            )
                         )
-                    )
-                    .frame(height: store.bodyHeights[message.id] ?? 40)
+                        .frame(height: store.bodyHeights[message.id] ?? 40)
+                    }
                     toolsRow
                 } else {
                     HStack(spacing: 8) {
