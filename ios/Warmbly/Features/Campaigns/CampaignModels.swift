@@ -236,6 +236,29 @@ extension Campaign {
         return raw.count == 7 ? raw : Array(repeating: [], count: 7)
     }
 
+    /// Seed the drag board in DISPLAY order (Monday = 0). Prefers the wire
+    /// windows (Sun-indexed); otherwise derives one window per active legacy
+    /// day. Matches the web editor's `seedWindows`.
+    func seedDisplayWindows() -> [[ScheduleInterval]] {
+        let wire = windows
+        if wire.contains(where: { !$0.isEmpty }) {
+            return (0..<7).map { wire[($0 + 1) % 7] }
+        }
+        guard let start = Self.minutes(from: startTime),
+              let end = Self.minutes(from: endTime), end > start else {
+            return Array(repeating: [], count: 7)
+        }
+        let mask = days ?? 0
+        return (0..<7).map { mask & (1 << $0) != 0 ? [ScheduleInterval(start: start, end: end)] : [] }
+    }
+
+    /// DISPLAY order (Mon=0) back to the wire `schedule_windows` shape (Sun=0).
+    static func wireWindows(fromDisplay display: [[ScheduleInterval]]) -> [[ScheduleInterval]] {
+        var wire = Array(repeating: [ScheduleInterval](), count: 7)
+        for i in 0..<7 where i < display.count { wire[(i + 1) % 7] = display[i] }
+        return wire
+    }
+
     var hasCustomWindows: Bool {
         windows.contains { !$0.isEmpty } && simpleSchedule == nil
     }
