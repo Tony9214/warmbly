@@ -565,18 +565,77 @@ struct UniboxComposer: View {
 
     // MARK: Schedule sheet
 
+    /// Gmail-style scheduling: one-tap presets first, then a calendar and a
+    /// dedicated time row for full control down to the minute.
     private var scheduleSheet: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                DatePicker(
-                    "Send at",
-                    selection: $scheduledAt,
-                    in: scheduleBounds,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-                .datePickerStyle(.graphical)
-                .padding(.horizontal, 12)
-                Spacer(minLength: 0)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(schedulePresets, id: \.label) { preset in
+                        Button {
+                            withAnimation(.snappy) {
+                                scheduledAt = preset.date
+                                sendMode = .scheduled
+                            }
+                            showSchedulePicker = false
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: preset.symbol)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(WTheme.accent)
+                                    .frame(width: 26)
+                                Text(preset.label)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                Spacer(minLength: 8)
+                                Text(preset.date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.footnote)
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 46)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(TapScaleStyle())
+                        Divider().padding(.leading, 54)
+                    }
+
+                    EyebrowLabel("Pick date and time")
+                        .padding(.horizontal, 16)
+                        .padding(.top, 20)
+                        .padding(.bottom, 2)
+                    DatePicker(
+                        "Date",
+                        selection: $scheduledAt,
+                        in: scheduleBounds,
+                        displayedComponents: [.date]
+                    )
+                    .datePickerStyle(.graphical)
+                    .padding(.horizontal, 12)
+                    Divider()
+                    HStack {
+                        Text("Time")
+                            .font(.subheadline.weight(.medium))
+                        Spacer(minLength: 8)
+                        DatePicker(
+                            "Time",
+                            selection: $scheduledAt,
+                            in: scheduleBounds,
+                            displayedComponents: [.hourAndMinute]
+                        )
+                        .labelsHidden()
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 52)
+                    Divider()
+                    Text("Will send \(scheduledAt.formatted(date: .complete, time: .shortened))")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                }
+                .padding(.bottom, 24)
             }
             .navigationTitle("Schedule send")
             .navigationBarTitleDisplayMode(.inline)
@@ -593,8 +652,35 @@ struct UniboxComposer: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+
+    /// Gmail-style quick options; only ones inside the server bounds show.
+    private var schedulePresets: [(label: String, symbol: String, date: Date)] {
+        var presets: [(label: String, symbol: String, date: Date)] = []
+        let calendar = Calendar.current
+        let now = Date()
+        if let laterToday = calendar.date(byAdding: .hour, value: 3, to: now),
+           calendar.isDateInToday(laterToday) {
+            presets.append((label: "Later today", symbol: "clock", date: laterToday))
+        }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) {
+            if let morning = calendar.date(bySettingHour: 8, minute: 0, second: 0, of: tomorrow) {
+                presets.append((label: "Tomorrow morning", symbol: "sunrise", date: morning))
+            }
+            if let afternoon = calendar.date(bySettingHour: 13, minute: 0, second: 0, of: tomorrow) {
+                presets.append((label: "Tomorrow afternoon", symbol: "sun.max", date: afternoon))
+            }
+        }
+        if let monday = calendar.nextDate(
+            after: now.addingTimeInterval(24 * 3600),
+            matching: DateComponents(hour: 8, minute: 0, weekday: 2),
+            matchingPolicy: .nextTime
+        ) {
+            presets.append((label: "Monday morning", symbol: "briefcase", date: monday))
+        }
+        return presets.filter { scheduleBounds.contains($0.date) }
     }
 
     // MARK: Labels + bounds
