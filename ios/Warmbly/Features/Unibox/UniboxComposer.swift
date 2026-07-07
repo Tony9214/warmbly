@@ -16,14 +16,26 @@ struct UniboxComposer: View {
     @State private var store = UniboxComposerStore()
     @State private var to: String
     @State private var cc: String
+    @State private var bcc = ""
     @State private var subject: String
     @State private var messageBody: String
-    @State private var showCC: Bool
+    @State private var showCcBcc: Bool
     @State private var sendMode: UniboxSendMode = .instant
     @State private var scheduledAt = Date().addingTimeInterval(3600)
-    @State private var showAIWriter = false
-    @State private var showTemplates = false
     @State private var showSchedulePicker = false
+    @State private var showTemplateBrowser = false
+
+    /// AI is inline, not a sheet: a prompt bar above the keyboard plus
+    /// rewrite actions on the current draft, with one-tap undo.
+    @State private var aiBarVisible: Bool
+    @State private var aiPrompt = ""
+    @State private var aiTone: AIWriteTone = .standard
+    @State private var isGenerating = false
+    @State private var aiUndo: String?
+    @FocusState private var aiFocused: Bool
+
+    /// Template names inline in the dropdown; the rest through the browser.
+    @State private var templates = TemplatesStore()
 
     init(context: UniboxComposeContext, openAIOnAppear: Bool = false, onSent: @escaping (UniboxSendResponse) -> Void) {
         self.context = context
@@ -33,8 +45,8 @@ struct UniboxComposer: View {
         _cc = State(initialValue: context.cc.joined(separator: ", "))
         _subject = State(initialValue: context.subject)
         _messageBody = State(initialValue: "")
-        _showCC = State(initialValue: !context.cc.isEmpty)
-        _showAIWriter = State(initialValue: openAIOnAppear)
+        _showCcBcc = State(initialValue: !context.cc.isEmpty)
+        _aiBarVisible = State(initialValue: openAIOnAppear)
     }
 
     private var canAI: Bool { env.session.can(.manageCampaigns) }
@@ -66,18 +78,30 @@ struct UniboxComposer: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.emailAddress)
-                    if !showCC {
-                        Button("Cc") {
-                            withAnimation(.snappy) { showCC = true }
+                    if !showCcBcc {
+                        Button {
+                            withAnimation(.snappy) { showCcBcc = true }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
                         }
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Add Cc and Bcc")
                     }
                 }
                 hairline
-                if showCC {
+                if showCcBcc {
                     labeledRow("Cc") {
                         TextField("", text: $cc)
+                            .font(.subheadline)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.emailAddress)
+                    }
+                    hairline
+                    labeledRow("Bcc") {
+                        TextField("", text: $bcc)
                             .font(.subheadline)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -115,17 +139,15 @@ struct UniboxComposer: View {
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(store.isSending)
         .sheet(isPresented: $showSchedulePicker) { scheduleSheet }
-        .sheet(isPresented: $showAIWriter) {
-            UniboxAIWriterSheet(replySubject: subject) { text in
-                insert(text)
-            }
-        }
-        .sheet(isPresented: $showTemplates) {
+        .sheet(isPresented: $showTemplateBrowser) {
             UniboxTemplatePicker { template in
                 if let body = template.bodyPlain, !body.isEmpty {
                     insert(body)
                 }
             }
+        }
+        .task {
+            if canTemplates { await templates.load(env.api) }
         }
     }
 
@@ -182,14 +204,14 @@ struct UniboxComposer: View {
                 }
                 if canTemplates {
                     Button {
-                        showTemplates = true
+                        showTemplateBrowser = true
                     } label: {
                         Label("Templates", systemImage: "doc.on.doc")
                     }
                 }
                 if canAI {
                     Button {
-                        showAIWriter = true
+                        withAnimation(.snappy) { aiBarVisible = true }
                     } label: {
                         Label("Write with AI", systemImage: "sparkles")
                     }
@@ -282,40 +304,211 @@ struct UniboxComposer: View {
 
     // MARK: Helper bar
 
-    /// Quiet helpers above the keyboard: AI, templates, character count.
+    /// Quiet helpers above the keyboard. The AI prompt bar swaps in here
+    /// instead of opening a sheet, so the draft stays visible while asking.
     @ViewBuilder
     private var helperBar: some View {
-        HStack(spacing: 18) {
-            if canAI {
-                Button {
-                    showAIWriter = true
-                } label: {
-                    Label("Write with AI", systemImage: "sparkles")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Tone.indigo.color)
-                }
-                .buttonStyle(TapScaleStyle())
+        VStack(spacing: 0) {
+            Divider()
+            if aiBarVisible {
+                aiPromptBar
+            } else {
+                helperRow
             }
-            if canTemplates {
+        }
+        .background(.bar)
+    }
+
+    private var helperRow: some View {
+        HStack(spacing: 18) {
+            if canAI { aiMenu }
+            if canTemplates { templatesMenu }
+            if aiUndo != nil {
                 Button {
-                    showTemplates = true
+                    withAnimation(.snappy) {
+                        messageBody = aiUndo ?? messageBody
+                        aiUndo = nil
+                    }
                 } label: {
-                    Label("Templates", systemImage: "doc.on.doc")
+                    Label("Undo", systemImage: "arrow.uturn.backward")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(WTheme.accent)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(TapScaleStyle())
+                .transition(.opacity)
             }
             Spacer(minLength: 0)
-            Text("\(messageBody.count) / \(UniboxComposerStore.bodyLimit)")
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.tertiary)
+            if isGenerating {
+                ProgressView().controlSize(.small)
+            } else {
+                Text("\(messageBody.count) / \(UniboxComposerStore.bodyLimit)")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+    }
+
+    /// AI dropdown: draft from a prompt, or rewrite what's already written.
+    private var aiMenu: some View {
+        Menu {
+            Button {
+                withAnimation(.snappy) { aiBarVisible = true }
+            } label: {
+                Label("Draft with AI", systemImage: "square.and.pencil")
+            }
+            if !messageBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Section("Rewrite draft") {
+                    Button("Improve writing") {
+                        Task { await rewrite("Improve the writing of this email reply; keep the meaning and roughly the same length") }
+                    }
+                    Button("Shorten") {
+                        Task { await rewrite("Make this email reply shorter and tighter without losing the point") }
+                    }
+                    Button("More formal") {
+                        Task { await rewrite("Rewrite this email reply in a more formal, professional tone") }
+                    }
+                    Button("More casual") {
+                        Task { await rewrite("Rewrite this email reply in a relaxed, casual tone") }
+                    }
+                    Button("Fix spelling & grammar") {
+                        Task { await rewrite("Fix the spelling and grammar of this email reply; change nothing else") }
+                    }
+                }
+            }
+        } label: {
+            Label("AI", systemImage: "sparkles")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Tone.indigo.color)
+        }
+        .disabled(isGenerating)
+    }
+
+    /// Templates dropdown: the first few by name for one-tap insert, then the
+    /// searchable browser for big libraries.
+    private var templatesMenu: some View {
+        Menu {
+            ForEach(templates.templates.prefix(8)) { template in
+                Button(template.name) {
+                    if let body = template.bodyPlain, !body.isEmpty { insert(body) }
+                }
+            }
+            if !templates.templates.isEmpty { Divider() }
+            Button {
+                showTemplateBrowser = true
+            } label: {
+                Label(
+                    templates.templates.count > 8 ? "All templates (\(templates.templates.count))" : "Browse templates",
+                    systemImage: "magnifyingglass"
+                )
+            }
+        } label: {
+            Label("Templates", systemImage: "doc.on.doc")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(WTheme.accent)
+        }
+    }
+
+    /// Inline prompt bar: sparkle, prompt field, tone, go — no sheet.
+    private var aiPromptBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Tone.indigo.color)
+            TextField("Tell AI what to write", text: $aiPrompt, axis: .vertical)
+                .font(.subheadline)
+                .lineLimit(1 ... 3)
+                .focused($aiFocused)
+                .onSubmit { Task { await draftFromPrompt() } }
+            Menu {
+                Picker("Tone", selection: $aiTone) {
+                    ForEach(AIWriteTone.allCases) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(aiTone == .standard ? Color.secondary : Tone.indigo.color)
+                    .frame(width: 28, height: 28)
+            }
+            .accessibilityLabel("Tone")
+            if isGenerating {
+                ProgressView().controlSize(.small)
+            } else {
+                Button {
+                    Task { await draftFromPrompt() }
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(
+                            aiPrompt.trimmingCharacters(in: .whitespaces).isEmpty
+                                ? Color(.systemGray3) : Tone.indigo.color
+                        )
+                }
+                .disabled(aiPrompt.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityLabel("Generate draft")
+            }
+            Button {
+                withAnimation(.snappy) { aiBarVisible = false }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.tertiary)
+            }
+            .accessibilityLabel("Close AI")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .task { aiFocused = true }
+    }
+
+    // MARK: AI generation
+
+    private func draftFromPrompt() async {
+        let prompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !isGenerating else { return }
+        await generate(prompt: prompt, replace: false)
+    }
+
+    /// Rewrite actions replace the draft wholesale; Undo brings the old text back.
+    private func rewrite(_ instruction: String) async {
+        await generate(
+            prompt: "\(instruction). Reply with only the rewritten email body, no commentary.\n\n\(messageBody)",
+            replace: true
+        )
+    }
+
+    private func generate(prompt: String, replace: Bool) async {
+        isGenerating = true
+        do {
+            var body = ["prompt": prompt]
+            if aiTone != .standard { body["tone"] = aiTone.rawValue }
+            let response: AIWriteResponse = try await env.api.post(
+                "generation/write", body: body, idempotent: true
+            )
+            withAnimation(.snappy) {
+                aiUndo = messageBody
+                if replace {
+                    messageBody = response.text
+                } else {
+                    insert(response.text)
+                }
+                aiBarVisible = false
+                aiPrompt = ""
+            }
+        } catch let error as APIError {
+            if case let .server(status, _) = error, status == 402 {
+                store.setError("You're out of AI credits for this billing period.")
+            } else {
+                store.setError(error.localizedDescription)
+            }
+        } catch {
+            store.setError(error.localizedDescription)
+        }
+        isGenerating = false
     }
 
     // MARK: Schedule sheet
@@ -375,8 +568,8 @@ struct UniboxComposer: View {
         let request = UniboxReplyRequest(
             emailAccountID: context.accountID,
             to: recipients,
-            cc: showCC ? addresses(cc).nilIfEmpty : nil,
-            bcc: nil,
+            cc: showCcBcc ? addresses(cc).nilIfEmpty : nil,
+            bcc: showCcBcc ? addresses(bcc).nilIfEmpty : nil,
             subject: subject.trimmingCharacters(in: .whitespaces),
             bodyHTML: htmlBody,
             bodyPlain: messageBody,
@@ -415,183 +608,18 @@ private extension Array where Element == String {
     var nilIfEmpty: [String]? { isEmpty ? nil : self }
 }
 
-// MARK: - AI writer
-
-/// "Write with AI": drafts reply copy from a short prompt via
-/// `POST /v1/generation/write`. One credit per generation; a 402 means the
-/// org's balance is spent.
-struct UniboxAIWriterSheet: View {
-    @Environment(AppEnvironment.self) private var env
-    @Environment(\.dismiss) private var dismiss
-
-    let replySubject: String
-    var onInsert: (String) -> Void
-
-    @State private var prompt = ""
-    @State private var tone: AIWriteTone = .standard
-    @State private var result: AIWriteResponse?
-    @State private var isGenerating = false
-    @State private var errorMessage: String?
-    @State private var generated = 0
-    @FocusState private var promptFocused: Bool
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    promptCard
-                    toneRow
-                    generateButton
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.subheadline)
-                            .foregroundStyle(WTheme.negative)
-                    }
-                    if let result {
-                        resultCard(result)
-                    }
-                }
-                .padding(18)
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Write with AI")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
-            .sensoryFeedback(.impact(weight: .light), trigger: generated)
-        }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .onAppear { promptFocused = true }
-    }
-
-    private var promptCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            EyebrowLabel("What should it say?")
-            TextField(
-                "e.g. Thank them and suggest a call on Thursday afternoon",
-                text: $prompt,
-                axis: .vertical
-            )
-            .font(.body)
-            .lineLimit(3 ... 6)
-            .focused($promptFocused)
-        }
-        .airCard()
-    }
-
-    private var toneRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 7) {
-                ForEach(AIWriteTone.allCases) { option in
-                    let selected = tone == option
-                    Button {
-                        withAnimation(.snappy) { tone = option }
-                    } label: {
-                        Text(option.label)
-                            .font(.subheadline.weight(selected ? .semibold : .medium))
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 7)
-                            .foregroundStyle(selected ? Color.white : Color.primary)
-                            .background(
-                                selected ? AnyShapeStyle(Tone.indigo.color.gradient) : AnyShapeStyle(Tone.slate.background),
-                                in: Capsule()
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 2)
-        }
-        .sensoryFeedback(.selection, trigger: tone)
-    }
-
-    private var generateButton: some View {
-        Button {
-            Task { await generate() }
-        } label: {
-            HStack(spacing: 8) {
-                if isGenerating {
-                    ProgressView().tint(.white)
-                    Text("Writing")
-                } else {
-                    Image(systemName: "sparkles")
-                    Text(result == nil ? "Generate draft" : "Try again")
-                }
-            }
-            .font(.body.weight(.semibold))
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(Tone.indigo.color)
-        .controlSize(.large)
-        .disabled(prompt.trimmingCharacters(in: .whitespaces).isEmpty || isGenerating)
-    }
-
-    private func resultCard(_ result: AIWriteResponse) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(result.text)
-                .font(.body)
-                .textSelection(.enabled)
-            HStack {
-                if let credits = result.creditsRemaining {
-                    Label("\(credits) credits left", systemImage: "bolt.fill")
-                        .font(.caption.weight(.medium))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    onInsert(result.text)
-                    dismiss()
-                } label: {
-                    Label("Insert", systemImage: "text.insert")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(WTheme.accent)
-            }
-        }
-        .airCard()
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
-    }
-
-    private func generate() async {
-        isGenerating = true
-        errorMessage = nil
-        do {
-            var body = ["prompt": prompt.trimmingCharacters(in: .whitespacesAndNewlines)]
-            if tone != .standard { body["tone"] = tone.rawValue }
-            let response: AIWriteResponse = try await env.api.post(
-                "generation/write", body: body, idempotent: true
-            )
-            withAnimation(.snappy) { result = response }
-            generated += 1
-        } catch let error as APIError {
-            if case let .server(status, _) = error, status == 402 {
-                errorMessage = "You're out of AI credits for this billing period."
-            } else {
-                errorMessage = error.localizedDescription
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isGenerating = false
-    }
-}
-
 // MARK: - Template picker
 
-/// Inserts a reply template's plain body into the draft.
+/// Browser for big template libraries: server-side search, name + snippet
+/// rows, tap to insert. The quick dropdown covers the first few; this covers
+/// the rest.
 struct UniboxTemplatePicker: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     var onPick: (EmailTemplate) -> Void
 
     @State private var store = TemplatesStore()
+    @State private var query = ""
 
     var body: some View {
         NavigationStack {
@@ -601,8 +629,10 @@ struct UniboxTemplatePicker: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if store.templates.isEmpty {
                     EmptyStateView(
-                        title: "No templates yet",
-                        message: "Save reply templates from the More tab or the web dashboard."
+                        title: query.isEmpty ? "No templates yet" : "No matches",
+                        message: query.isEmpty
+                            ? "Save reply templates from the More tab or the web dashboard."
+                            : "No template matches \"\(query)\"."
                     )
                 } else {
                     List {
@@ -615,11 +645,17 @@ struct UniboxTemplatePicker: View {
                                     Text(template.name)
                                         .font(.body.weight(.medium))
                                         .foregroundStyle(.primary)
+                                    if let subject = template.subject, !subject.isEmpty {
+                                        Text(subject)
+                                            .font(.footnote.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
                                     if let snippet = template.bodyPlain?
                                         .trimmingCharacters(in: .whitespacesAndNewlines), !snippet.isEmpty {
                                         Text(snippet)
                                             .font(.footnote)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(.tertiary)
                                             .lineLimit(2)
                                     }
                                 }
@@ -627,18 +663,32 @@ struct UniboxTemplatePicker: View {
                             }
                         }
                     }
+                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Templates")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(
+                text: $query,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Search templates"
+            )
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .task { await store.load(env.api) }
+        .task(id: query) {
+            // Debounce keystrokes; the store searches server-side (`q`).
+            if store.hasLoaded {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            guard !Task.isCancelled else { return }
+            store.query = query
+            await store.load(env.api)
+        }
     }
 }
