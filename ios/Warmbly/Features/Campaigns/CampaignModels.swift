@@ -152,6 +152,15 @@ struct CampaignUpdateBody: Encodable {
     var riskyEmails: Bool? = nil
     var timezone: String? = nil
     var scheduleWindows: [[ScheduleInterval]]? = nil
+    var senderStrategy: String? = nil
+    var rotationMode: String? = nil
+    var espMatchMode: String? = nil
+    var maxNewLeadsPerDay: Int? = nil
+    var prioritizeNewLeads: Bool? = nil
+    var rampEnabled: Bool? = nil
+    var rampStart: Int? = nil
+    var rampIncrement: Int? = nil
+    var rampCeiling: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case name, description, timezone
@@ -163,6 +172,15 @@ struct CampaignUpdateBody: Encodable {
         case unsubscribeHeader = "unsubscribe_header"
         case riskyEmails = "risky_emails"
         case scheduleWindows = "schedule_windows"
+        case senderStrategy = "sender_strategy"
+        case rotationMode = "rotation_mode"
+        case espMatchMode = "esp_match_mode"
+        case maxNewLeadsPerDay = "max_new_leads_per_day"
+        case prioritizeNewLeads = "prioritize_new_leads"
+        case rampEnabled = "ramp_enabled"
+        case rampStart = "ramp_start"
+        case rampIncrement = "ramp_increment"
+        case rampCeiling = "ramp_ceiling"
     }
 }
 
