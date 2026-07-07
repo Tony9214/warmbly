@@ -76,6 +76,21 @@ struct CampaignFolderCount: Codable, Sendable {
 
 struct CampaignCreateBody: Encodable {
     var name: String
+    var description: String?
+    var dailyLimit: Int?
+    var stopOnReply: Bool?
+    var openTracking: Bool?
+    var linkTracking: Bool?
+    var folderIDs: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case name, description
+        case dailyLimit = "daily_limit"
+        case stopOnReply = "stop_on_reply"
+        case openTracking = "open_tracking"
+        case linkTracking = "link_tracking"
+        case folderIDs = "folder_ids"
+    }
 }
 
 /// `POST /campaigns/:id/start|stop` -> `{"status": "started" | "stopped"}`.

@@ -191,10 +191,10 @@ final class CampaignsStore {
         await loadOverview(api)
     }
 
-    func create(_ api: APIClient, name: String) async throws -> Campaign {
+    func create(_ api: APIClient, body: CampaignCreateBody) async throws -> Campaign {
         let campaign: Campaign = try await api.post(
             "campaigns",
-            body: CampaignCreateBody(name: name),
+            body: body,
             idempotent: true
         )
         withAnimation(.snappy) {

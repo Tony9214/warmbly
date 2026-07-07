@@ -51,8 +51,8 @@ struct CampaignsRootView: View {
             .navigationDestination(for: Campaign.self) { campaign in
                 CampaignDetailView(campaign: campaign)
             }
-            .sheet(isPresented: $showCreate) {
-                CampaignCreateSheet(store: store) { campaign in
+            .fullScreenCover(isPresented: $showCreate) {
+                CampaignCreateFlow(store: store) { campaign in
                     path.append(campaign)
                 }
             }
