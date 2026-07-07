@@ -1,29 +1,5 @@
 import SwiftUI
 
-enum CampaignDetailTab: String, CaseIterable, Identifiable {
-    case overview, leads, steps, senders
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .overview: return "Overview"
-        case .leads: return "Leads"
-        case .steps: return "Steps"
-        case .senders: return "Senders"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .overview: return "chart.bar.fill"
-        case .leads: return "person.2.fill"
-        case .steps: return "list.number"
-        case .senders: return "envelope.fill"
-        }
-    }
-}
-
 struct CampaignToggleAction {
     let title: String
     let icon: String
@@ -44,6 +20,20 @@ final class CampaignDetailStore {
     func refresh(_ api: APIClient) async {
         if let fresh: Campaign = try? await api.get("campaigns/\(campaign.id)") {
             withAnimation(.snappy) { campaign = fresh }
+        }
+    }
+
+    /// Optimistic partial update: apply the local mutation immediately, PATCH,
+    /// then adopt the server's row (or roll back and surface the error).
+    func update(_ api: APIClient, body: CampaignUpdateBody, mutate: (inout Campaign) -> Void) async {
+        let previous = campaign
+        withAnimation(.snappy) { mutate(&campaign) }
+        do {
+            let fresh: Campaign = try await api.patch("campaigns/\(campaign.id)", body: body)
+            withAnimation(.snappy) { campaign = fresh }
+        } catch {
+            withAnimation(.snappy) { campaign = previous }
+            actionError = error.localizedDescription
         }
     }
 
@@ -75,51 +65,86 @@ final class CampaignDetailStore {
     }
 }
 
-/// Campaign detail: status header with start/stop, segmented tabs for
-/// Overview / Leads / Steps / Senders, presence claim on the record.
+/// Campaign hub: sky hero with status + start/pause, then one flat, full-bleed
+/// sheet (no cards) — headline volume in the hero, rates and secondary counts
+/// as bare stat columns, a live chart, then hairline-separated rows to browse
+/// (Leads / Sequence / Senders), tune sending inline, and open Schedule /
+/// Settings. Sub-pages push on the Campaigns tab's NavigationStack.
 struct CampaignDetailView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
 
     @State private var store: CampaignDetailStore
-    @State private var tab: CampaignDetailTab = .overview
     @State private var overviewStore = CampaignOverviewStore()
-    @State private var leadsStore = CampaignLeadsStore()
     @State private var stepsStore = CampaignStepsStore()
     @State private var sendersStore = CampaignSendersStore()
+    @State private var leadsStore = CampaignLeadsStore()
     @State private var confirmToggle = false
     @State private var confirmDelete = false
     @State private var deleteError: String?
+    @State private var dailyLimit: Int = 50
+    @State private var limitSaveTask: Task<Void, Never>?
 
     init(campaign: Campaign) {
         _store = State(initialValue: CampaignDetailStore(campaign: campaign))
+        _dailyLimit = State(initialValue: campaign.dailyLimit ?? 50)
     }
 
     private var campaign: Campaign { store.campaign }
     private var presenceKey: String { "campaign:\(campaign.id)" }
+    private var canManage: Bool { env.session.can(.manageCampaigns) }
+
+    private var sheetShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous)
+    }
+
+    /// Content leading where row text starts (16 inset + 34 tile + 12 gap), so
+    /// hairlines tuck under the text column, Gmail-style.
+    private static let rowTextLeading: CGFloat = 62
 
     var body: some View {
-        AirDetailScaffold(
-            tabs: CampaignDetailTab.allCases.map { AirTabItem(id: $0.rawValue, title: $0.title, icon: $0.icon) },
-            selection: Binding(
-                get: { tab.rawValue },
-                set: { tab = CampaignDetailTab(rawValue: $0) ?? .overview }
-            )
-        ) {
+        VStack(spacing: 0) {
             hero
-        } content: {
-            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+            hubList
+                .clipShape(sheetShape)
+                .background(
+                    sheetShape
+                        .fill(Color(.systemBackground))
+                        .ignoresSafeArea(edges: .bottom)
+                        .shadow(color: .black.opacity(0.12), radius: 18, y: -4)
+                )
         }
+        .background(alignment: .top) {
+            AirSkyWash().ignoresSafeArea(edges: .top)
+        }
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .presenceResource(presenceKey)
         .task {
             await store.refresh(env.api)
-            await overviewStore.load(env.api, campaignID: campaign.id)
+            dailyLimit = store.campaign.dailyLimit ?? 50
+            // Counts for the browse rows load alongside the analytics.
+            async let overview: Void = overviewStore.load(env.api, campaignID: campaign.id)
+            async let steps: Void = stepsStore.load(env.api, campaignID: campaign.id)
+            async let senders: Void = sendersStore.load(env.api, campaignID: campaign.id)
+            _ = await (overview, steps, senders)
         }
         .onChange(of: env.realtime.pulse(for: .campaigns)) {
-            Task { await store.refresh(env.api) }
+            Task {
+                await store.refresh(env.api)
+                dailyLimit = store.campaign.dailyLimit ?? 50
+            }
+        }
+        .onChange(of: env.realtime.pulse(for: .analytics)) {
+            Task { await overviewStore.load(env.api, campaignID: campaign.id) }
+        }
+        .onChange(of: dailyLimit) { _, newValue in
+            guard newValue != campaign.dailyLimit else { return }
+            saveDailyLimitDebounced(newValue)
         }
         .confirmationDialog(
             toggleAction?.isStart == true ? "Start this campaign?" : "Pause this campaign?",
@@ -178,13 +203,11 @@ struct CampaignDetailView: View {
                         .minimumScaleFactor(0.75)
                     HStack(spacing: 8) {
                         heroStatusPill
-                        if let schedule = scheduleLine {
-                            Text(schedule)
-                                .font(.footnote)
-                                .monospacedDigit()
-                                .foregroundStyle(.white.opacity(0.72))
-                                .lineLimit(1)
-                        }
+                        Text(campaign.scheduleSummary)
+                            .font(.footnote)
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
                     }
                     ResourceViewers(resource: presenceKey)
                 }
@@ -233,19 +256,6 @@ struct CampaignDetailView: View {
                 symbol: "arrowshape.turn.up.left.fill"
             )
         }
-    }
-
-    private var scheduleLine: String? {
-        var parts: [String] = []
-        if let start = campaign.startTime, let end = campaign.endTime, !start.isEmpty, !end.isEmpty {
-            // Times arrive as "08:00:00.000000"; show HH:MM.
-            parts.append("\(start.prefix(5))–\(end.prefix(5))")
-        }
-        if let timezone = campaign.timezone, !timezone.isEmpty {
-            parts.append(timezone.split(separator: "/").last.map(String.init) ?? timezone)
-        }
-        parts.append("\(campaign.dailyLimit ?? 50)/day")
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private var toggleAction: CampaignToggleAction? {
@@ -306,11 +316,14 @@ struct CampaignDetailView: View {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button {
-                    Task { await store.refresh(env.api) }
+                    Task {
+                        await store.refresh(env.api)
+                        await overviewStore.load(env.api, campaignID: campaign.id)
+                    }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                if env.session.can(.manageCampaigns) {
+                if canManage {
                     Button(role: .destructive) {
                         confirmDelete = true
                     } label: {
@@ -323,22 +336,326 @@ struct CampaignDetailView: View {
         }
     }
 
-    // MARK: Content
+    // MARK: Hub list (flat, full-bleed, no cards)
 
-    /// Horizontal page swipe between tabs, synced with the pill bar.
-    private var content: some View {
-        TabView(selection: $tab) {
-            CampaignOverviewTab(campaign: campaign, store: overviewStore)
-                .tag(CampaignDetailTab.overview)
-            CampaignLeadsTab(campaignID: campaign.id, store: leadsStore)
-                .tag(CampaignDetailTab.leads)
-            CampaignStepsTab(campaignID: campaign.id, store: stepsStore)
-                .tag(CampaignDetailTab.steps)
-            CampaignSendersTab(campaign: campaign, store: sendersStore)
-                .tag(CampaignDetailTab.senders)
+    private var hubList: some View {
+        List {
+            performanceSection
+            browseSection
+            sendingSection
+            setupSection
+            aboutSection
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        .animation(.snappy, value: tab)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 0)
+        .refreshable {
+            await store.refresh(env.api)
+            dailyLimit = store.campaign.dailyLimit ?? 50
+            await overviewStore.load(env.api, campaignID: campaign.id)
+        }
+    }
+
+    /// Eyebrow caption as a bare row — never a grouped `Section` header (that
+    /// reintroduces the sticky gray band). Whitespace above is the separator.
+    private func sectionHeader(_ title: String, top: CGFloat = 20) -> some View {
+        EyebrowLabel(title)
+            .padding(.horizontal, 20)
+            .padding(.top, top)
+            .padding(.bottom, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color(.systemBackground))
+    }
+
+    private func plainRow<Content: View>(
+        separator: Visibility = .automatic,
+        @ViewBuilder _ content: () -> Content
+    ) -> some View {
+        content()
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            .listRowSeparator(separator)
+            .alignmentGuide(.listRowSeparatorLeading) { _ in Self.rowTextLeading }
+            .listRowBackground(Color(.systemBackground))
+    }
+
+    // MARK: Performance
+
+    @ViewBuilder
+    private var performanceSection: some View {
+        let summary = overviewStore.analytics?.summary
+        sectionHeader("Performance", top: 14)
+        plainRow(separator: .hidden) {
+            let bounce = summary?.bounceRate ?? 0
+            LazyVGrid(columns: Self.statColumns, alignment: .leading, spacing: 16) {
+                miniStat("Open rate", rate(summary?.openRate), tone: .sky)
+                miniStat("Reply rate", rate(summary?.replyRate), tone: .emerald)
+                miniStat("Bounce rate", rate(summary?.bounceRate), tone: bounce >= 5 ? .rose : (bounce >= 2 ? .amber : nil))
+                miniStat("Clicks", WFormat.compact(summary?.uniqueClicks ?? 0))
+                miniStat("Unsubs", WFormat.compact(summary?.unsubscribes ?? 0))
+                miniStat("In queue", WFormat.compact(summary?.emailsPending ?? 0))
+            }
+            .padding(.vertical, 12)
+        }
+        if overviewStore.hasLoaded, !overviewStore.daily.isEmpty {
+            plainRow(separator: .hidden) {
+                CampaignDailyChartRow(daily: overviewStore.daily)
+            }
+        }
+        if let machine = summary?.machineOpens, machine > 0 {
+            plainRow(separator: .hidden) {
+                Text("\(WFormat.compact(machine)) automated opens (Apple Mail Privacy et al.) are excluded from the open rate.")
+                    .font(.footnote)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private static let statColumns = [
+        GridItem(.flexible(), alignment: .leading),
+        GridItem(.flexible(), alignment: .leading),
+        GridItem(.flexible(), alignment: .leading),
+    ]
+
+    private func miniStat(_ label: String, _ value: String, tone: Tone? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            EyebrowLabel(label)
+            Text(value)
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(tone?.color ?? Color.primary)
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func rate(_ value: Double?) -> String {
+        String(format: "%.1f%%", value ?? 0)
+    }
+
+    // MARK: Browse
+
+    @ViewBuilder
+    private var browseSection: some View {
+        sectionHeader("Manage")
+        plainRow {
+            navRow(
+                icon: "person.2.fill", tone: .sky, title: "Leads",
+                value: overviewStore.analytics?.summary?.totalContacts.map(WFormat.compact)
+            ) {
+                CampaignLeadsPageView(campaignID: campaign.id, store: leadsStore)
+            }
+        }
+        plainRow {
+            navRow(
+                icon: "list.number", tone: .indigo, title: "Sequence",
+                value: stepsStore.hasLoaded ? "\(stepsStore.steps.count) step\(stepsStore.steps.count == 1 ? "" : "s")" : nil
+            ) {
+                CampaignSequencePage(campaignID: campaign.id, store: stepsStore)
+            }
+        }
+        plainRow {
+            navRow(
+                icon: "tray.full.fill", tone: .emerald, title: "Senders",
+                value: sendersStore.hasLoaded ? WFormat.compact(sendersStore.senders.count) : nil
+            ) {
+                CampaignSendersPageView(campaign: campaign, store: sendersStore)
+            }
+        }
+    }
+
+    private func navRow<Destination: View>(
+        icon: String,
+        tone: Tone,
+        title: String,
+        value: String?,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: 12) {
+                IconTile(symbol: icon, tone: tone, size: 34)
+                Text(title)
+                    .font(.body.weight(.medium))
+                Spacer(minLength: 8)
+                if let value {
+                    Text(value)
+                        .font(.footnote)
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                        .contentTransition(.numericText())
+                }
+            }
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+    }
+
+    // MARK: Sending (inline editable)
+
+    @ViewBuilder
+    private var sendingSection: some View {
+        sectionHeader("Sending")
+        plainRow {
+            HStack(spacing: 12) {
+                IconTile(symbol: "gauge.with.dots.needle.50percent", tone: .amber, size: 34)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Daily limit")
+                        .font(.body.weight(.medium))
+                    Text("Emails per mailbox each day")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                stepper
+            }
+            .padding(.vertical, 9)
+        }
+        settingToggle(
+            "Stop on reply", subtitle: "Pause a lead when they answer",
+            icon: "hand.raised.fill", tone: .emerald,
+            value: campaign.stopOnReply ?? true,
+            body: { CampaignUpdateBody(stopOnReply: $0) },
+            mutate: { c, v in c.stopOnReply = v }
+        )
+        settingToggle(
+            "Open tracking", subtitle: "Count when a lead opens",
+            icon: "envelope.open.fill", tone: .sky,
+            value: campaign.openTracking ?? true,
+            body: { CampaignUpdateBody(openTracking: $0) },
+            mutate: { c, v in c.openTracking = v }
+        )
+        settingToggle(
+            "Link tracking", subtitle: "Count when a lead clicks",
+            icon: "link", tone: .sky,
+            value: campaign.linkTracking ?? true,
+            body: { CampaignUpdateBody(linkTracking: $0) },
+            mutate: { c, v in c.linkTracking = v }
+        )
+    }
+
+    /// Two-disc themed stepper (never the native boxed `Stepper`); clamps to
+    /// the server-validated 1...100 campaign-limit range.
+    private var stepper: some View {
+        HStack(spacing: 12) {
+            stepButton("minus", enabled: canManage && dailyLimit > 1) {
+                dailyLimit = max(1, dailyLimit - 1)
+            }
+            Text("\(dailyLimit)")
+                .font(.system(size: 17, weight: .semibold))
+                .monospacedDigit()
+                .frame(minWidth: 32)
+                .contentTransition(.numericText())
+            stepButton("plus", enabled: canManage && dailyLimit < 100) {
+                dailyLimit = min(100, dailyLimit + 1)
+            }
+        }
+    }
+
+    private func stepButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(enabled ? AnyShapeStyle(WTheme.accent) : AnyShapeStyle(Color(.tertiaryLabel)))
+                .frame(width: 30, height: 30)
+                .background(Tone.slate.background, in: Circle())
+        }
+        .buttonStyle(TapScaleStyle())
+        .disabled(!enabled)
+    }
+
+    private func settingToggle(
+        _ title: String,
+        subtitle: String,
+        icon: String,
+        tone: Tone,
+        value: Bool,
+        body: @escaping (Bool) -> CampaignUpdateBody,
+        mutate: @escaping (inout Campaign, Bool) -> Void
+    ) -> some View {
+        plainRow {
+            Toggle(isOn: Binding(
+                get: { value },
+                set: { newValue in
+                    Task {
+                        await store.update(env.api, body: body(newValue)) { mutate(&$0, newValue) }
+                    }
+                }
+            )) {
+                HStack(spacing: 12) {
+                    IconTile(symbol: icon, tone: tone, size: 34)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title)
+                            .font(.body.weight(.medium))
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .tint(WTheme.accent)
+            .disabled(!canManage)
+            .padding(.vertical, 9)
+        }
+    }
+
+    /// Steppers fire per tap; coalesce into one PATCH after the taps stop.
+    private func saveDailyLimitDebounced(_ value: Int) {
+        limitSaveTask?.cancel()
+        limitSaveTask = Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            await store.update(env.api, body: CampaignUpdateBody(dailyLimit: value)) {
+                $0.dailyLimit = value
+            }
+            dailyLimit = store.campaign.dailyLimit ?? value
+        }
+    }
+
+    // MARK: Setup
+
+    @ViewBuilder
+    private var setupSection: some View {
+        sectionHeader("Setup")
+        plainRow {
+            navRow(icon: "calendar", tone: .amber, title: "Schedule", value: nil) {
+                CampaignSchedulePage(store: store)
+            }
+        }
+        plainRow {
+            navRow(icon: "gearshape.fill", tone: .slate, title: "Settings", value: nil) {
+                CampaignSettingsPage(store: store, onDeleted: { dismiss() })
+            }
+        }
+    }
+
+    // MARK: About
+
+    @ViewBuilder
+    private var aboutSection: some View {
+        if let description = campaign.description, !description.isEmpty {
+            plainRow(separator: .hidden) {
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 18)
+            }
+        }
+        if let created = campaign.createdAt {
+            plainRow(separator: .hidden) {
+                Text("Created \(created.formatted(date: .abbreviated, time: .omitted)) · Updated \(WFormat.relative(campaign.updatedAt ?? created))")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 10)
+                    .padding(.bottom, 28)
+            }
+        }
     }
 
     private func deleteCampaign() async {

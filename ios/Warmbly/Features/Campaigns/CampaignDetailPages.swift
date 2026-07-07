@@ -1,12 +1,14 @@
 import SwiftUI
 import Charts
 
-// The four campaign-detail tabs. Each: SkeletonRows on first load, stale data
-// during reloads, ErrorStateView on failure, EmptyStateView when empty, and a
-// reload on the relevant realtime pulse. These are pushed inside the Campaigns
-// tab's NavigationStack, so none of them creates its own stack.
+// Pushed sub-pages of the campaign hub (Leads / Sequence / Senders) plus the
+// analytics store the hub's performance section reads. Each page: SkeletonRows
+// on first load, stale data during reloads, ErrorStateView on failure,
+// EmptyStateView when empty, and a reload on the relevant realtime pulse.
+// Heavy editing (writing steps, assigning senders) is a web-dashboard job;
+// those pages carry a WebHandoffBanner instead of half an editor.
 
-// MARK: - Overview
+// MARK: - Analytics store (hub performance section)
 
 @MainActor
 @Observable
@@ -41,85 +43,24 @@ final class CampaignOverviewStore {
     }
 }
 
-struct CampaignOverviewTab: View {
-    @Environment(AppEnvironment.self) private var env
-    let campaign: Campaign
-    let store: CampaignOverviewStore
+/// 30-day sent/replies chart cell for the hub's performance card. Hidden
+/// entirely until there are at least two days with any volume.
+struct CampaignDailyChartRow: View {
+    let daily: [CampaignDailyStat]
 
-    private let columns = [
-        GridItem(.flexible(), alignment: .leading),
-        GridItem(.flexible(), alignment: .leading),
-        GridItem(.flexible(), alignment: .leading),
-    ]
-
-    private var chartDays: [(id: Int, day: Date, sent: Int, opens: Int, replies: Int)] {
-        store.daily.enumerated().compactMap { index, day in
+    private var chartDays: [(id: Int, day: Date, sent: Int, replies: Int)] {
+        daily.enumerated().compactMap { index, day in
             guard let date = CampaignDates.day(from: day.date) else { return nil }
-            return (id: index, day: date, sent: day.sent ?? 0, opens: day.opens ?? 0, replies: day.replies ?? 0)
+            return (id: index, day: date, sent: day.sent ?? 0, replies: day.replies ?? 0)
         }
     }
 
     var body: some View {
-        Group {
-            if store.isLoading, !store.hasLoaded {
-                ScrollView { SkeletonRows(rows: 6) }
-            } else if let error = store.errorMessage, store.analytics == nil {
-                ErrorStateView(title: "Couldn't load analytics", message: error) {
-                    await store.load(env.api, campaignID: campaign.id)
-                }
-            } else {
-                List {
-                    summarySection
-                    dailySection
-                    stepsSection
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .background(Color(.systemBackground))
-                .refreshable { await store.load(env.api, campaignID: campaign.id) }
-            }
-        }
-        .task { if !store.hasLoaded { await store.load(env.api, campaignID: campaign.id) } }
-        .onChange(of: env.realtime.pulse(for: .analytics)) {
-            Task { await store.load(env.api, campaignID: campaign.id) }
-        }
-    }
-
-    @ViewBuilder
-    private var summarySection: some View {
-        let summary = store.analytics?.summary
-        Section {
-            EyebrowLabel("Performance")
-                .padding(.top, 14)
-                .listRowSeparator(.hidden)
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
-                CampaignStatCell(label: "Sent", value: WFormat.compact(summary?.emailsSent ?? 0))
-                CampaignStatCell(label: "Opens", value: WFormat.compact(summary?.uniqueOpens ?? 0), tone: .sky)
-                CampaignStatCell(label: "Replies", value: WFormat.compact(summary?.replies ?? 0), tone: .emerald)
-                CampaignStatCell(label: "Open rate", value: rate(summary?.openRate))
-                CampaignStatCell(label: "Reply rate", value: rate(summary?.replyRate))
-                CampaignStatCell(label: "Bounce rate", value: rate(summary?.bounceRate),
-                                 tone: (summary?.bounceRate ?? 0) >= 5 ? .rose : nil)
-            }
-            .padding(.vertical, 8)
-            .listRowSeparator(.hidden)
-            if let machine = summary?.machineOpens, machine > 0 {
-                Text("\(WFormat.compact(machine)) automated opens (Apple Mail Privacy et al.)")
-                    .font(.footnote)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .listRowSeparator(.hidden)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var dailySection: some View {
         if chartDays.count > 1, chartDays.contains(where: { $0.sent > 0 }) {
-            Section {
-                EyebrowLabel("Last 30 days")
-                    .padding(.top, 10)
-                    .listRowSeparator(.hidden)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Last 30 days")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
                 Chart(chartDays, id: \.id) { day in
                     BarMark(x: .value("Day", day.day), y: .value("Sent", day.sent))
                         .foregroundStyle(Tone.sky.color.opacity(0.75))
@@ -136,67 +77,9 @@ struct CampaignOverviewTab: View {
                     AxisMarks(position: .trailing, values: .automatic(desiredCount: 3))
                 }
                 .frame(height: 130)
-                .padding(.vertical, 6)
-                .listRowSeparator(.hidden)
             }
+            .padding(.vertical, 6)
         }
-    }
-
-    @ViewBuilder
-    private var stepsSection: some View {
-        let steps = store.analytics?.steps ?? []
-        if !steps.isEmpty {
-            Section {
-                EyebrowLabel("Per step")
-                    .padding(.top, 10)
-                    .listRowSeparator(.hidden)
-                ForEach(steps) { step in
-                    HStack(spacing: 12) {
-                        Text("\(step.position ?? 0)")
-                            .font(.footnote.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(Tone.sky.color)
-                            .frame(width: 28, height: 28)
-                            .background(Tone.sky.background, in: RoundedRectangle(cornerRadius: 8))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(step.name ?? "Step")
-                                .font(.body.weight(.medium))
-                                .lineLimit(1)
-                            Text("\(WFormat.compact(step.emailsSent ?? 0)) sent · \(WFormat.compact(step.opens ?? 0)) opens · \(WFormat.compact(step.replies ?? 0)) replies")
-                                .font(.footnote)
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 6)
-                }
-            }
-        }
-    }
-
-    private func rate(_ value: Double?) -> String {
-        String(format: "%.1f%%", value ?? 0)
-    }
-}
-
-/// Bold rounded stat number over an eyebrow label (detail-screen style).
-private struct CampaignStatCell: View {
-    let label: String
-    let value: String
-    var tone: Tone? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            EyebrowLabel(label)
-            Text(value)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(tone?.color ?? Color.primary)
-                .contentTransition(.numericText())
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -206,6 +89,7 @@ private struct CampaignStatCell: View {
 @Observable
 final class CampaignLeadsStore {
     private(set) var leads: [CampaignLead] = []
+    private(set) var total: Int?
     private(set) var nextCursor: String?
     private(set) var hasMore = false
     private(set) var isLoading = false
@@ -214,21 +98,24 @@ final class CampaignLeadsStore {
     private(set) var hasLoaded = false
 
     private var generation = 0
+    private var query = ""
 
-    func load(_ api: APIClient, campaignID: String) async {
+    func load(_ api: APIClient, campaignID: String, query: String = "") async {
         generation += 1
         let gen = generation
+        self.query = query
         isLoading = true
         if !hasLoaded { errorMessage = nil }
         do {
             let page: CampaignLeadsPage = try await api.post(
                 "contacts/search",
-                body: CampaignLeadsSearchBody(query: "", campaignIDs: [campaignID]),
+                body: CampaignLeadsSearchBody(query: query, campaignIDs: [campaignID]),
                 query: ["limit": "50"]
             )
             guard gen == generation else { return }
             withAnimation(.snappy) {
                 leads = page.data ?? []
+                total = page.pagination?.total.map(Int.init)
                 nextCursor = page.pagination?.nextCursor
                 hasMore = page.pagination?.hasMore ?? false
             }
@@ -250,7 +137,7 @@ final class CampaignLeadsStore {
         do {
             let page: CampaignLeadsPage = try await api.post(
                 "contacts/search",
-                body: CampaignLeadsSearchBody(query: "", campaignIDs: [campaignID]),
+                body: CampaignLeadsSearchBody(query: query, campaignIDs: [campaignID]),
                 query: ["limit": "50", "cursor": cursor]
             )
             guard gen == generation else { return }
@@ -266,10 +153,12 @@ final class CampaignLeadsStore {
     }
 }
 
-struct CampaignLeadsTab: View {
+struct CampaignLeadsPageView: View {
     @Environment(AppEnvironment.self) private var env
     let campaignID: String
     let store: CampaignLeadsStore
+
+    @State private var search = ""
 
     var body: some View {
         Group {
@@ -277,10 +166,14 @@ struct CampaignLeadsTab: View {
                 ScrollView { SkeletonRows(rows: 8) }
             } else if let error = store.errorMessage, store.leads.isEmpty {
                 ErrorStateView(title: "Couldn't load leads", message: error) {
-                    await store.load(env.api, campaignID: campaignID)
+                    await store.load(env.api, campaignID: campaignID, query: search)
                 }
             } else if store.leads.isEmpty {
-                EmptyStateView(title: "No leads yet", message: "Add contacts to this campaign to start sending.")
+                if search.isEmpty {
+                    EmptyStateView(title: "No leads yet", message: "Add contacts to this campaign on the web dashboard to start sending.")
+                } else {
+                    EmptyStateView(title: "No matches", message: "No leads match “\(search)”.")
+                }
             } else {
                 List {
                     ForEach(store.leads) { lead in
@@ -299,12 +192,21 @@ struct CampaignLeadsTab: View {
                     }
                 }
                 .listStyle(.plain)
-                .refreshable { await store.load(env.api, campaignID: campaignID) }
+                .refreshable { await store.load(env.api, campaignID: campaignID, query: search) }
             }
         }
+        .navigationTitle(store.total.map { "Leads (\(WFormat.compact($0)))" } ?? "Leads")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search leads")
         .task { if !store.hasLoaded { await store.load(env.api, campaignID: campaignID) } }
+        .task(id: search) {
+            guard store.hasLoaded else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await store.load(env.api, campaignID: campaignID, query: search)
+        }
         .onChange(of: env.realtime.pulse(for: .contacts)) {
-            Task { await store.load(env.api, campaignID: campaignID) }
+            Task { await store.load(env.api, campaignID: campaignID, query: search) }
         }
     }
 }
@@ -344,7 +246,7 @@ struct CampaignLeadRow: View {
     }
 }
 
-// MARK: - Steps
+// MARK: - Sequence
 
 @MainActor
 @Observable
@@ -372,7 +274,7 @@ final class CampaignStepsStore {
     }
 }
 
-struct CampaignStepsTab: View {
+struct CampaignSequencePage: View {
     @Environment(AppEnvironment.self) private var env
     let campaignID: String
     let store: CampaignStepsStore
@@ -386,17 +288,26 @@ struct CampaignStepsTab: View {
                     await store.load(env.api, campaignID: campaignID)
                 }
             } else if store.steps.isEmpty {
-                EmptyStateView(title: "No steps yet", message: "Build the sequence on the web dashboard.")
+                EmptyStateView(title: "No steps yet", message: "Write the sequence in Warmbly on the web; every step shows up here.")
             } else {
                 List {
                     ForEach(store.steps) { step in
-                        CampaignStepRow(step: step)
+                        NavigationLink {
+                            CampaignStepReader(step: step)
+                        } label: {
+                            CampaignStepRow(step: step)
+                        }
                     }
+                    WebHandoffBanner(text: "Writing and rearranging steps needs the full sequence editor. Open this campaign in Warmbly on the web to edit it.")
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 20, trailing: 16))
                 }
                 .listStyle(.plain)
                 .refreshable { await store.load(env.api, campaignID: campaignID) }
             }
         }
+        .navigationTitle("Sequence")
+        .navigationBarTitleDisplayMode(.inline)
         .task { if !store.hasLoaded { await store.load(env.api, campaignID: campaignID) } }
         .onChange(of: env.realtime.pulse(for: .campaigns)) {
             Task { await store.load(env.api, campaignID: campaignID) }
@@ -450,6 +361,55 @@ struct CampaignStepRow: View {
     }
 }
 
+/// Read-only step viewer: subject line and the full body exactly as it sends
+/// (HTML through the shared webview, plain text as a fallback).
+struct CampaignStepReader: View {
+    let step: CampaignStep
+
+    @State private var bodyHeight: CGFloat = 120
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Step \(step.position ?? 0)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Tone.sky.color)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Tone.sky.background, in: Capsule())
+                        if let wait = step.waitAfter, wait > 0 {
+                            Text("sends \(wait) day\(wait == 1 ? "" : "s") after the previous step")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if let subject = step.subject, !subject.isEmpty {
+                        Text(subject)
+                            .font(.title3.weight(.semibold))
+                    }
+                }
+                Divider()
+                if step.bodyHTML?.isEmpty == false || step.bodyPlain?.isEmpty == false {
+                    UniboxWebView(html: step.bodyHTML, plain: step.bodyPlain, height: $bodyHeight)
+                        .frame(height: bodyHeight)
+                } else {
+                    Text("This step has no body yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                WebHandoffBanner(text: "Edit this step in the sequence editor in Warmbly on the web.")
+                    .padding(.top, 6)
+            }
+            .padding(16)
+        }
+        .background(Color(.systemBackground))
+        .navigationTitle(step.name ?? "Step")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 // MARK: - Senders
 
 @MainActor
@@ -487,10 +447,16 @@ final class CampaignSendersStore {
     }
 }
 
-struct CampaignSendersTab: View {
+struct CampaignSendersPageView: View {
     @Environment(AppEnvironment.self) private var env
     let campaign: Campaign
     let store: CampaignSendersStore
+
+    private var strategyLine: String {
+        campaign.senderStrategy == "tags"
+            ? "Sends from mailboxes matching the campaign's tags."
+            : "Sends from the mailboxes listed here."
+    }
 
     var body: some View {
         Group {
@@ -509,14 +475,23 @@ struct CampaignSendersTab: View {
                 )
             } else {
                 List {
-                    ForEach(store.senders) { sender in
-                        CampaignSenderRow(sender: sender, account: store.addresses[sender.emailAccountID])
+                    Section {
+                        ForEach(store.senders) { sender in
+                            CampaignSenderRow(sender: sender, account: store.addresses[sender.emailAccountID])
+                        }
+                    } footer: {
+                        Text(strategyLine)
                     }
+                    WebHandoffBanner(text: "Assigning mailboxes, tags and rotation weights happens in the campaign preferences in Warmbly on the web.")
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 20, trailing: 16))
                 }
                 .listStyle(.plain)
                 .refreshable { await store.load(env.api, campaignID: campaign.id) }
             }
         }
+        .navigationTitle("Senders")
+        .navigationBarTitleDisplayMode(.inline)
         .task { if !store.hasLoaded { await store.load(env.api, campaignID: campaign.id) } }
         .onChange(of: env.realtime.pulse(for: .emailAccounts)) {
             Task { await store.load(env.api, campaignID: campaign.id) }

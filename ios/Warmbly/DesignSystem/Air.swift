@@ -304,6 +304,40 @@ struct AirSkyWash: View {
     }
 }
 
+// MARK: - Web handoff
+
+/// Points at the web dashboard for work that needs a big screen (sequence
+/// editing, sender assignment, advanced tuning). Informational, not a link:
+/// there is deliberately no in-app browser for editing flows.
+struct WebHandoffBanner: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "macbook")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(WTheme.accent)
+                .frame(width: 30, height: 30)
+                .background(Tone.sky.background, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Best on a big screen")
+                    .font(.footnote.weight(.semibold))
+                Text(text)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Tone.sky.color.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
 // MARK: - Press feedback
 
 /// Gentle press-down scale for tappable cards and rows.

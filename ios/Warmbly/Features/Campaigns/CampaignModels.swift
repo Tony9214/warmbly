@@ -14,37 +14,82 @@ struct Campaign: Codable, Identifiable, Hashable, Sendable {
     var stopOnReply: Bool?
     var openTracking: Bool?
     var linkTracking: Bool?
+    var textOnly: Bool?
+    var unsubscribeHeader: Bool?
+    var riskyEmails: Bool?
     var dailyLimit: Int?
+    var cc: [String]?
+    var bcc: [String]?
     var timezone: String?
+    /// Legacy day bitmask, Monday-indexed (bit 0 = Monday).
+    var days: Int?
     var startTime: String?
     var endTime: String?
     var startDate: Date?
     var endDate: Date?
+    /// Authoritative per-day windows when any day is non-empty; wire-indexed
+    /// by time.Weekday (0=Sunday). Empty days arrive as JSON null.
+    var scheduleWindows: [[ScheduleInterval]?]?
+    var emailTags: [String]?
+    var folders: [String]?
+    var contactOrderBy: String?
+    var contactOrderDir: String?
     var senderStrategy: String?
     var rotationMode: String?
     var rampEnabled: Bool?
+    var rampStart: Int?
+    var rampIncrement: Int?
+    var rampCeiling: Int?
+    var rampLevel: Int?
+    var espMatchMode: String?
+    var maxNewLeadsPerDay: Int?
+    var prioritizeNewLeads: Bool?
+    var trackingDomain: String?
+    var trackingDomainVerified: Bool?
     var lastStatusChangeAt: Date?
     var updatedAt: Date?
     var createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, description, status, timezone
+        case id, name, description, status, timezone, days, cc, bcc, folders
         case userID = "user_id"
         case stopOnReply = "stop_on_reply"
         case openTracking = "open_tracking"
         case linkTracking = "link_tracking"
+        case textOnly = "text_only"
+        case unsubscribeHeader = "unsubscribe_header"
+        case riskyEmails = "risky_emails"
         case dailyLimit = "daily_limit"
         case startTime = "start_time"
         case endTime = "end_time"
         case startDate = "start_date"
         case endDate = "end_date"
+        case scheduleWindows = "schedule_windows"
+        case emailTags = "email_tags"
+        case contactOrderBy = "contact_order_by"
+        case contactOrderDir = "contact_order_dir"
         case senderStrategy = "sender_strategy"
         case rotationMode = "rotation_mode"
         case rampEnabled = "ramp_enabled"
+        case rampStart = "ramp_start"
+        case rampIncrement = "ramp_increment"
+        case rampCeiling = "ramp_ceiling"
+        case rampLevel = "ramp_level"
+        case espMatchMode = "esp_match_mode"
+        case maxNewLeadsPerDay = "max_new_leads_per_day"
+        case prioritizeNewLeads = "prioritize_new_leads"
+        case trackingDomain = "tracking_domain"
+        case trackingDomainVerified = "tracking_domain_verified"
         case lastStatusChangeAt = "last_status_change_at"
         case updatedAt = "updated_at"
         case createdAt = "created_at"
     }
+}
+
+/// One sending window in minutes since local midnight.
+struct ScheduleInterval: Codable, Hashable, Sendable {
+    var start: Int
+    var end: Int
 }
 
 /// `GET /campaigns` envelope; `data` can be JSON null on empty result sets.
@@ -93,9 +138,129 @@ struct CampaignCreateBody: Encodable {
     }
 }
 
+/// Partial `PATCH /campaigns/:id` body. Synthesized Encodable omits nil
+/// fields, so each call sends only what it means to change.
+struct CampaignUpdateBody: Encodable {
+    var name: String? = nil
+    var description: String? = nil
+    var dailyLimit: Int? = nil
+    var stopOnReply: Bool? = nil
+    var openTracking: Bool? = nil
+    var linkTracking: Bool? = nil
+    var textOnly: Bool? = nil
+    var unsubscribeHeader: Bool? = nil
+    var riskyEmails: Bool? = nil
+    var timezone: String? = nil
+    var scheduleWindows: [[ScheduleInterval]]? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case name, description, timezone
+        case dailyLimit = "daily_limit"
+        case stopOnReply = "stop_on_reply"
+        case openTracking = "open_tracking"
+        case linkTracking = "link_tracking"
+        case textOnly = "text_only"
+        case unsubscribeHeader = "unsubscribe_header"
+        case riskyEmails = "risky_emails"
+        case scheduleWindows = "schedule_windows"
+    }
+}
+
 /// `POST /campaigns/:id/start|stop` -> `{"status": "started" | "stopped"}`.
 struct CampaignActionResponse: Codable, Sendable {
     var status: String?
+}
+
+// MARK: - Schedule
+
+/// A schedule expressible as "these days, one shared window": what the mobile
+/// editor can safely round-trip. Multi-window or per-day-differing schedules
+/// stay read-only on mobile (edited on the web).
+struct CampaignSimpleSchedule: Equatable {
+    /// Monday-first day indices (0 = Monday .. 6 = Sunday).
+    var days: Set<Int>
+    var startMinutes: Int
+    var endMinutes: Int
+
+    /// Wire shape for `schedule_windows`: 7 arrays indexed 0=Sun..6=Sat.
+    var wireWindows: [[ScheduleInterval]] {
+        var wire: [[ScheduleInterval]] = Array(repeating: [], count: 7)
+        for day in days {
+            wire[(day + 1) % 7] = [ScheduleInterval(start: startMinutes, end: endMinutes)]
+        }
+        return wire
+    }
+
+    static let dayLetters = ["M", "T", "W", "T", "F", "S", "S"]
+    static let dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    static func minutesLabel(_ minutes: Int) -> String {
+        String(format: "%02d:%02d", minutes / 60, minutes % 60)
+    }
+
+    var daysLabel: String {
+        if days.count == 7 { return "Every day" }
+        if days == Set(0...4) { return "Weekdays" }
+        if days == Set([5, 6]) { return "Weekends" }
+        if days.count > 3 { return "\(days.count) days" }
+        return days.sorted().map { Self.dayNames[$0].prefix(3) }.joined(separator: " ")
+    }
+
+    var summary: String {
+        "\(daysLabel) · \(Self.minutesLabel(startMinutes))–\(Self.minutesLabel(endMinutes))"
+    }
+}
+
+extension Campaign {
+    /// Per-day windows with wire nulls normalized to empty arrays.
+    var windows: [[ScheduleInterval]] {
+        let raw = (scheduleWindows ?? []).map { $0 ?? [] }
+        return raw.count == 7 ? raw : Array(repeating: [], count: 7)
+    }
+
+    var hasCustomWindows: Bool {
+        windows.contains { !$0.isEmpty } && simpleSchedule == nil
+    }
+
+    private static func minutes(from raw: String?) -> Int? {
+        guard let raw, raw.count >= 5 else { return nil }
+        let parts = raw.prefix(5).split(separator: ":")
+        guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
+        return h * 60 + m
+    }
+
+    /// nil when the schedule can't be expressed as one shared daily window.
+    var simpleSchedule: CampaignSimpleSchedule? {
+        let wire = windows
+        if wire.contains(where: { !$0.isEmpty }) {
+            var days = Set<Int>()
+            var shared: ScheduleInterval?
+            for (weekday, intervals) in wire.enumerated() where !intervals.isEmpty {
+                guard intervals.count == 1 else { return nil }
+                if let shared, shared != intervals[0] { return nil }
+                shared = intervals[0]
+                days.insert((weekday + 6) % 7)
+            }
+            guard let shared else { return nil }
+            return CampaignSimpleSchedule(days: days, startMinutes: shared.start, endMinutes: shared.end)
+        }
+        // Legacy fields: Monday-indexed bitmask + one window.
+        guard let start = Self.minutes(from: startTime),
+              let end = Self.minutes(from: endTime), end > start else { return nil }
+        let mask = days ?? 0
+        let active = Set((0..<7).filter { mask & (1 << $0) != 0 })
+        guard !active.isEmpty else { return nil }
+        return CampaignSimpleSchedule(days: active, startMinutes: start, endMinutes: end)
+    }
+
+    var scheduleSummary: String {
+        if let simple = simpleSchedule { return simple.summary }
+        let activeDays = windows.filter { !$0.isEmpty }.count
+        if activeDays > 0 {
+            return "Custom · \(activeDays) day\(activeDays == 1 ? "" : "s")"
+        }
+        return "Not set"
+    }
 }
 
 // MARK: - Status display
