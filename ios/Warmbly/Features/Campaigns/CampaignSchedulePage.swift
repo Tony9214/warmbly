@@ -161,7 +161,7 @@ struct CampaignSchedulePage: View {
     }
 
     private var footer: some View {
-        Text("Each day is independent. Sends spread across its windows in \(CampaignSchedulePage.cityName(timezone)) time. Run dates are set on the web.")
+        Text("Each day is independent — tap + for several windows a day (e.g. morning and afternoon), drag a bar to move it, tap it to set exact times. In \(CampaignSchedulePage.cityName(timezone)) time; run dates are set on the web.")
             .font(.caption)
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 16)
@@ -233,6 +233,7 @@ struct CampaignScheduleBoard: View {
     private var todayIndex: Int { (Calendar.current.component(.weekday, from: Date()) + 5) % 7 }
 
     @State private var active: BlockDrag?
+    @State private var editing: WindowRef?
 
     var body: some View {
         VStack(spacing: 8) {
@@ -241,6 +242,27 @@ struct CampaignScheduleBoard: View {
                 ForEach(0..<7, id: \.self) { day in
                     dayRow(day)
                 }
+            }
+        }
+        .sheet(item: $editing) { ref in
+            if ref.idx < windows[ref.day].count {
+                ScheduleWindowEditor(
+                    interval: Binding(
+                        get: { windows[ref.day].indices.contains(ref.idx) ? windows[ref.day][ref.idx] : ScheduleInterval(start: 0, end: 60) },
+                        set: { if windows[ref.day].indices.contains(ref.idx) { windows[ref.day][ref.idx] = $0 } }
+                    ),
+                    dayName: Self.dayNames[ref.day],
+                    onDelete: {
+                        removeWindow(ref.day, ref.idx)
+                        editing = nil
+                    },
+                    onDone: {
+                        withAnimation(.snappy) { windows[ref.day] = merge(windows[ref.day]) }
+                        editing = nil
+                    }
+                )
+                .presentationDetents([.height(320)])
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -356,7 +378,7 @@ struct CampaignScheduleBoard: View {
         let left = x(iv.start, W)
         let raw = x(iv.end, W) - left
         let w = max(raw, Self.minBar)
-        let wide = w >= 78
+        let wide = w >= 86
         return ZStack {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(
@@ -367,45 +389,26 @@ struct CampaignScheduleBoard: View {
                 )
                 .shadow(color: WTheme.accent.opacity(0.3), radius: 3, y: 1)
 
-            Text(wide ? "\(fmt(iv.start)) – \(fmt(iv.end))" : fmt(iv.start))
-                .font(.system(size: 10.5, weight: .semibold))
-                .monospacedDigit()
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .padding(.horizontal, 16)
-
-            if editable {
-                Button { removeWindow(day, idx) } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(WTheme.accent)
-                        .frame(width: 15, height: 15)
-                        .background(.white.opacity(0.92), in: Circle())
+            HStack(spacing: 4) {
+                if wide, editable {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.65))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(3)
+                Text(wide ? "\(fmt(iv.start)) – \(fmt(iv.end))" : fmt(iv.start))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
+            .padding(.horizontal, 7)
         }
         .frame(width: w, height: Self.barH)
-        .contentShape(Rectangle())
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .onTapGesture { if editable { editing = WindowRef(day: day, idx: idx) } }
         .conditionalGesture(editable, moveGesture(day: day, idx: idx, W: W))
-        .overlay(alignment: .leading) {
-            if editable { edgeHandle(day: day, idx: idx, mode: .resizeStart, W: W) }
-        }
-        .overlay(alignment: .trailing) {
-            if editable { edgeHandle(day: day, idx: idx, mode: .resizeEnd, W: W) }
-        }
         .offset(x: left)
-    }
-
-    private func edgeHandle(day: Int, idx: Int, mode: BlockDrag.Mode, W: CGFloat) -> some View {
-        Capsule()
-            .fill(.white.opacity(0.9))
-            .frame(width: 3, height: 16)
-            .frame(width: 18, height: Self.barH)
-            .contentShape(Rectangle())
-            .highPriorityGesture(resizeGesture(day: day, idx: idx, mode: mode, W: W))
     }
 
     // MARK: Gestures (horizontal)
@@ -413,14 +416,8 @@ struct CampaignScheduleBoard: View {
     // Global coordinate space so translation stays stable while the bar
     // re-lays-out under the finger (local space would feed back and jitter).
     private func moveGesture(day: Int, idx: Int, W: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 4, coordinateSpace: .global)
+        DragGesture(minimumDistance: 6, coordinateSpace: .global)
             .onChanged { g in applyDrag(day: day, idx: idx, mode: .move, delta: g.translation.width, span: W) }
-            .onEnded { _ in endDrag(day: day) }
-    }
-
-    private func resizeGesture(day: Int, idx: Int, mode: BlockDrag.Mode, W: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 2, coordinateSpace: .global)
-            .onChanged { g in applyDrag(day: day, idx: idx, mode: mode, delta: g.translation.width, span: W) }
             .onEnded { _ in endDrag(day: day) }
     }
 
@@ -457,14 +454,39 @@ struct CampaignScheduleBoard: View {
     // MARK: Mutations
 
     private func addWindow(_ day: Int) {
-        // Default 9–5, or stack a 2h block after the last one if the day is busy.
-        let candidate: ScheduleInterval
-        if let last = windows[day].map(\.end).max(), last <= kDay - 60 {
-            candidate = ScheduleInterval(start: last, end: min(last + 120, kDay))
-        } else {
-            candidate = ScheduleInterval(start: 9 * 60, end: 17 * 60)
+        let sorted = windows[day].sorted { $0.start < $1.start }
+        guard !sorted.isEmpty else {
+            withAnimation(.snappy) { windows[day] = [ScheduleInterval(start: 9 * 60, end: 17 * 60)] }
+            return
         }
-        withAnimation(.snappy) { windows[day] = merge(windows[day] + [candidate]) }
+        guard let slot = freeSlot(in: sorted) else { return }
+        withAnimation(.snappy) { windows[day] = merge(sorted + [slot]) }
+    }
+
+    /// A fresh ~2h window dropped into a free gap and kept an hour clear of its
+    /// neighbours so it stays a SEPARATE window (a second tap + on a day that
+    /// already sends adds a distinct second timeframe, e.g. morning + afternoon).
+    /// nil when the day has no room left.
+    private func freeSlot(in sorted: [ScheduleInterval]) -> ScheduleInterval? {
+        let gap = 60
+        let dur = 120
+        if let last = sorted.last, kDay - last.end >= gap + kMinDur {
+            let start = snap(last.end + gap)
+            return ScheduleInterval(start: start, end: snap(min(start + dur, kDay)))
+        }
+        if let first = sorted.first, first.start >= gap + kMinDur {
+            let end = snap(first.start - gap)
+            return ScheduleInterval(start: snap(max(0, end - dur)), end: end)
+        }
+        var cursor = sorted.first?.end ?? 0
+        for iv in sorted.dropFirst() {
+            if iv.start - cursor >= 2 * gap + kMinDur {
+                let start = snap(cursor + gap)
+                return ScheduleInterval(start: start, end: snap(min(start + dur, iv.start - gap)))
+            }
+            cursor = max(cursor, iv.end)
+        }
+        return nil
     }
 
     private func removeWindow(_ day: Int, _ idx: Int) {
@@ -496,6 +518,87 @@ struct CampaignScheduleBoard: View {
 }
 
 private func clampF(_ n: CGFloat, _ lo: CGFloat, _ hi: CGFloat) -> CGFloat { max(lo, min(hi, n)) }
+
+private struct WindowRef: Identifiable {
+    let day: Int
+    let idx: Int
+    var id: String { "\(day)-\(idx)" }
+}
+
+/// Precise tap-to-edit sheet for one window: start/end wheel pickers (snapped
+/// to 30 minutes) plus remove. This is how narrow windows are tuned exactly on
+/// mobile, where dragging a ~25pt bar can't be pixel-accurate.
+private struct ScheduleWindowEditor: View {
+    @Binding var interval: ScheduleInterval
+    let dayName: String
+    let onDelete: () -> Void
+    let onDone: () -> Void
+
+    private static let midnight = Calendar.current.startOfDay(for: Date())
+
+    private func date(_ minutes: Int) -> Date {
+        Self.midnight.addingTimeInterval(TimeInterval(minutes * 60))
+    }
+    private func minutes(_ date: Date) -> Int {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
+    private var startBinding: Binding<Date> {
+        Binding(
+            get: { date(interval.start) },
+            set: { d in
+                let m = snap(minutes(d))
+                interval = ScheduleInterval(start: min(m, interval.end - kMinDur), end: interval.end)
+            }
+        )
+    }
+    private var endBinding: Binding<Date> {
+        Binding(
+            get: { date(interval.end % kDay) },
+            set: { d in
+                var m = snap(minutes(d))
+                if m == 0 { m = kDay } // midnight as an end means end-of-day
+                interval = ScheduleInterval(start: interval.start, end: max(m, interval.start + kMinDur))
+            }
+        )
+    }
+
+    private var durationLabel: String {
+        let mins = interval.end - interval.start
+        let h = mins / 60, m = mins % 60
+        if m == 0 { return "\(h)h" }
+        if h == 0 { return "\(m)m" }
+        return "\(h)h \(m)m"
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker("Starts", selection: startBinding, displayedComponents: .hourAndMinute)
+                    DatePicker("Ends", selection: endBinding, displayedComponents: .hourAndMinute)
+                } header: {
+                    Text("Sending window · \(durationLabel)")
+                } footer: {
+                    Text("Sends spread evenly across this window. Add another window to this day for a second timeframe.")
+                }
+                Section {
+                    Button(role: .destructive, action: onDelete) {
+                        HStack { Spacer(); Text("Remove window"); Spacer() }
+                    }
+                }
+            }
+            .navigationTitle("\(dayName)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: onDone).fontWeight(.semibold)
+                }
+            }
+        }
+    }
+}
 
 private struct BlockDrag {
     enum Mode { case move, resizeStart, resizeEnd }
