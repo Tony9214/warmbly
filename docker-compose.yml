@@ -118,8 +118,28 @@ services:
       zookeeper:
         condition: service_healthy
     ports: ["9092:9092"]
+    # After an unclean stop the previous run's ephemeral /brokers/ids/1 stays
+    # owned by the dead session until zookeeper expires it shortly after boot,
+    # and cp-kafka fatal-exits on that NodeExists — which is why the first
+    # `make infra` after a hard shutdown failed and the retry worked. Wait for
+    # the stale registration to age out before starting the broker.
+    command:
+      - bash
+      - -c
+      - |
+        for i in $$(seq 1 30); do
+          if zookeeper-shell zookeeper:2181 stat /brokers/ids/1 2>&1 | grep -q "Node does not exist"; then
+            break
+          fi
+          echo "kafka: waiting for stale broker registration to expire ($$i)"
+          sleep 2
+        done
+        exec /etc/confluent/docker/run
     environment:
       KAFKA_BROKER_ID: 1
+      # Short session timeout so a dead broker's registration ages out in
+      # seconds, bounding the startup wait above.
+      KAFKA_ZOOKEEPER_SESSION_TIMEOUT_MS: "6000"
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       # PLAINTEXT_HOST is what host-run clients (native `make run`, or a dev
