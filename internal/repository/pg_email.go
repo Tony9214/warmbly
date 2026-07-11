@@ -944,7 +944,7 @@ func (r *emailRepository) SetWarmupLifecycle(ctx context.Context, userID, emailA
 func (r *emailRepository) GetByID(ctx context.Context, emailAccountID uuid.UUID) (*models.Email, *errx.Error) {
 	query := `
 		SELECT
-		 ea.id, ea.user_id, ea.organization_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
+		 ea.id, ea.user_id, ea.organization_id, ea.worker_id, ea.email, ea.name, ea.signature_plain, ea.signature_html, ea.signature_sync, ea.signature_code,
 		 ea.provider, ea.status, COALESCE(ea.last_synced_at, ea.created_at) AS last_synced_at, ea.last_id, ea.campaign_limit,
 		 ea.min_wait_time, ea.reply_to, ea.tracking_domain, ea.tracking_domain_verified, ea.tracking_domain_verified_at, ea.warmup, ea.warmup_paused_at, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag, ea.warmup_pool_type,
@@ -959,7 +959,7 @@ func (r *emailRepository) GetByID(ctx context.Context, emailAccountID uuid.UUID)
 
 	var i models.Email
 	err := r.DB.QueryRow(ctx, query, emailAccountID).Scan(
-		&i.ID, &i.UserID, &i.OrganizationID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode,
+		&i.ID, &i.UserID, &i.OrganizationID, &i.WorkerID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode,
 		&i.Provider, &i.Status, &i.LastSyncedAt, &i.LastID, &i.CampaignLimit,
 		&i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt, &i.Warmup, &i.WarmupPausedAt, &i.WarmupBase,
 		&i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.WarmupPoolType,
