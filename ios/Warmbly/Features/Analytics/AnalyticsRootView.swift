@@ -1,10 +1,10 @@
 import SwiftUI
 import Charts
 
-// MARK: - Tabs
+// MARK: - Scopes
 
-/// Swipeable analytics pages under the sky hero.
-enum AnalyticsTab: String, CaseIterable, Identifiable {
+/// Drawer sections of the analytics browser.
+enum AnalyticsScope: String, CaseIterable, Identifiable {
     case overview, deliverability, warmup, accounts
 
     var id: String { rawValue }
@@ -24,6 +24,15 @@ enum AnalyticsTab: String, CaseIterable, Identifiable {
         case .deliverability: "checkmark.shield.fill"
         case .warmup: "flame.fill"
         case .accounts: "envelope.fill"
+        }
+    }
+
+    var tone: Tone {
+        switch self {
+        case .overview: .sky
+        case .deliverability: .emerald
+        case .warmup: .orange
+        case .accounts: .indigo
         }
     }
 }
@@ -71,28 +80,81 @@ struct AnalyticsChartPoint: Identifiable {
 
 // MARK: - View
 
-/// Org-wide analytics hub: sky hero with period picker + headline chips, and
-/// swipeable Overview / Deliverability / Warmup / Accounts tabs. Pushed from
-/// Home and from the More tab.
+/// Analytics browser, presented as a full-screen cover from Home or More
+/// (like the mailboxes and CRM browsers): a sky hero with the period picker
+/// and headline chips, a slide-in drawer of sections, and the selected
+/// section as a flat full-bleed list on a rounded white sheet. Owns its
+/// NavigationStack; dismissal goes through `onClose` (the environment
+/// DismissAction is unreliable in this app's cover contexts).
 struct AnalyticsRootView: View {
+    var onClose: () -> Void = {}
+
     @Environment(AppEnvironment.self) private var env
     @State private var store = AnalyticsStore()
-    @State private var tab: AnalyticsTab = .overview
+    @State private var scope: AnalyticsScope = .overview
     @State private var metric: AnalyticsTrendMetric = .sent
+    @State private var sidebarOpen = false
+    @State private var sidebarDrag: CGFloat = 0
+
+    private static let sidebarWidth: CGFloat = 300
 
     var body: some View {
-        Group {
-            if !env.session.can(.viewAnalytics) {
-                EmptyStateView(
-                    title: "No access",
-                    message: "You need the view analytics permission to see this page."
-                )
-                .navigationTitle("Analytics")
-                .navigationBarTitleDisplayMode(.inline)
+        NavigationStack {
+            if env.session.can(.viewAnalytics) {
+                browser
             } else {
-                scaffold
+                noAccess
             }
         }
+    }
+
+    // MARK: No access
+
+    private var noAccess: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(Color(.secondarySystemBackground), in: Circle())
+                }
+                .buttonStyle(TapScaleStyle())
+                .accessibilityLabel("Close analytics")
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            EmptyStateView(
+                title: "No access",
+                message: "You need the view analytics permission to see this page."
+            )
+        }
+        .toolbarVisibility(.hidden, for: .navigationBar)
+    }
+
+    // MARK: Browser shell
+
+    private var browser: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                mainPane
+                    .scaleEffect(sidebarOpen ? 0.97 : 1, anchor: .trailing)
+                if sidebarOpen {
+                    Color.black.opacity(0.32)
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                        .onTapGesture { closeSidebar() }
+                }
+                drawer(topInset: geo.safeAreaInsets.top)
+            }
+        }
+        // Own chrome: the sky hero runs to the top edge and carries the
+        // hamburger + close buttons.
+        .toolbarVisibility(.hidden, for: .navigationBar)
         .task { await store.load(env.api) }
         .onChange(of: env.realtime.pulse(for: .analytics)) {
             Task { await store.load(env.api) }
@@ -100,53 +162,86 @@ struct AnalyticsRootView: View {
         .onChange(of: store.period) {
             Task { await store.load(env.api) }
         }
-    }
-
-    private var scaffold: some View {
-        AirDetailScaffold(
-            tabs: AnalyticsTab.allCases.map { AirTabItem(id: $0.rawValue, title: $0.title, icon: $0.icon) },
-            selection: Binding(
-                get: { tab.rawValue },
-                set: { tab = AnalyticsTab(rawValue: $0) ?? .overview }
-            )
-        ) {
-            hero
-        } content: {
-            TabView(selection: $tab) {
-                overviewTab
-                    .tag(AnalyticsTab.overview)
-                deliverabilityTab
-                    .tag(AnalyticsTab.deliverability)
-                warmupTab
-                    .tag(AnalyticsTab.warmup)
-                accountsTab
-                    .tag(AnalyticsTab.accounts)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .animation(.snappy, value: tab)
-        }
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(.selection, trigger: scope)
         .sensoryFeedback(.selection, trigger: store.period)
         .sensoryFeedback(.selection, trigger: metric)
+        .sensoryFeedback(.impact(weight: .light), trigger: sidebarOpen)
+    }
+
+    // MARK: Main pane
+
+    private var mainPane: some View {
+        VStack(spacing: 0) {
+            hero
+            sheet
+        }
+        .background(alignment: .top) {
+            AirSkyWash().ignoresSafeArea(edges: .top)
+        }
+        .background(Color(.systemBackground))
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 25)
+                .onEnded { value in
+                    // Gmail's edge swipe: open the drawer from the left edge.
+                    if !sidebarOpen, value.startLocation.x < 44, value.translation.width > 70 {
+                        openSidebar()
+                    }
+                }
+        )
     }
 
     // MARK: Hero
 
     private var hero: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Analytics")
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                Spacer()
-                periodPicker
-            }
+            topRow
+            periodPicker
             heroStats
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 16)
         .padding(.top, 2)
         .padding(.bottom, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var topRow: some View {
+        HStack(spacing: 12) {
+            skyCircleButton("line.3.horizontal", label: "Open analytics menu") {
+                openSidebar()
+            }
+            HStack(spacing: 8) {
+                WarmblyLogo()
+                    .fill(.white)
+                    .frame(width: 21, height: 21 * (764 / 746))
+                Text("Analytics")
+                    .font(.system(size: 20, weight: .heavy))
+                    .tracking(-0.4)
+                    .foregroundStyle(.white)
+                    .fixedSize()
+            }
+            Spacer()
+            PresenceAvatars()
+            skyCircleButton("xmark", label: "Close analytics", size: 15) {
+                onClose()
+            }
+        }
+    }
+
+    private func skyCircleButton(
+        _ symbol: String,
+        label: String,
+        size: CGFloat = 17,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(.white.opacity(0.16), in: Circle())
+        }
+        .buttonStyle(TapScaleStyle())
+        .accessibilityLabel(label)
     }
 
     /// White-glass capsule row bound to the store period; every load reacts.
@@ -166,8 +261,11 @@ struct AnalyticsRootView: View {
                         .background(.white.opacity(selected ? 0.22 : 0.10), in: Capsule())
                 }
                 .buttonStyle(TapScaleStyle())
+                .accessibilityLabel("Last \(period.days) days")
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
+        .padding(.horizontal, 4)
     }
 
     private var heroStats: some View {
@@ -189,72 +287,141 @@ struct AnalyticsRootView: View {
                 symbol: "arrowshape.turn.up.left.fill"
             )
         }
+        .padding(.horizontal, 4)
     }
 
-    // MARK: Overview tab
+    // MARK: Sheet
+
+    private var sheetShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous)
+    }
+
+    private var sheet: some View {
+        sectionList
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(sheetShape)
+            .background(
+                sheetShape
+                    .fill(Color(.systemBackground))
+                    .ignoresSafeArea(edges: .bottom)
+                    .shadow(color: .black.opacity(0.12), radius: 18, y: -4)
+            )
+    }
 
     @ViewBuilder
-    private var overviewTab: some View {
+    private var sectionList: some View {
+        switch scope {
+        case .overview: overviewList.transition(.opacity)
+        case .deliverability: deliverabilityList.transition(.opacity)
+        case .warmup: warmupList.transition(.opacity)
+        case .accounts: accountsList.transition(.opacity)
+        }
+    }
+
+    /// Full-bleed flat row (the row content manages its own gutters).
+    private func fullBleedRow<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color(.systemBackground))
+    }
+
+    /// Breathing room after the last row of each section.
+    private var sectionFooter: some View {
+        Color.clear
+            .frame(height: 24)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color(.systemBackground))
+    }
+
+    /// Tertiary trailing text for the scope caption rows.
+    private var periodCaption: some View {
+        Text("last \(store.period.rawValue)")
+            .font(.caption.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
+            .contentTransition(.numericText())
+    }
+
+    // MARK: Overview
+
+    @ViewBuilder
+    private var overviewList: some View {
         if store.dashboard != nil {
             List {
-                Section {
-                    statStrip
-                    activeRow
-                    chartSection
-                }
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets())
-
+                AnalyticsSectionCaption("Overview", top: 18) { periodCaption }
+                fullBleedRow { statStrip }
+                fullBleedRow { activeRow }
+                fullBleedRow { chartSection }
                 AnalyticsTopCampaignsSection(campaigns: store.dashboard?.topCampaigns ?? [])
                 AnalyticsActivitySection(items: store.dashboard?.recentActivity ?? [])
+                sectionFooter
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 0)
             .refreshable { await store.load(env.api) }
         } else if let error = store.dashboardError {
             ErrorStateView(title: "Couldn't load analytics", message: error) {
                 await store.load(env.api)
             }
         } else {
-            SkeletonRows(rows: 10)
+            ScrollView { SkeletonRows(rows: 10) }
         }
     }
 
-    // MARK: Deliverability tab
+    // MARK: Deliverability
 
-    private var deliverabilityTab: some View {
+    private var deliverabilityList: some View {
         List {
-            AnalyticsDeliverabilitySection(summary: store.deliverability, error: store.deliverabilityError)
+            AnalyticsDeliverabilitySection(
+                summary: store.deliverability,
+                error: store.deliverabilityError,
+                captionTop: 18
+            )
+            sectionFooter
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 0)
         .refreshable { await store.load(env.api) }
     }
 
-    // MARK: Warmup tab
+    // MARK: Warmup
 
-    private var warmupTab: some View {
+    private var warmupList: some View {
         List {
-            AnalyticsWarmupSection(warmup: store.warmup, error: store.warmupError, periodLabel: store.period.rawValue)
+            AnalyticsWarmupSection(
+                warmup: store.warmup,
+                error: store.warmupError,
+                periodLabel: store.period.rawValue,
+                captionTop: 18
+            )
+            sectionFooter
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 0)
         .refreshable { await store.load(env.api) }
     }
 
-    // MARK: Accounts tab
+    // MARK: Accounts
 
-    private var accountsTab: some View {
+    private var accountsList: some View {
         List {
             AnalyticsAccountsSection(
                 accounts: store.accounts,
                 counts: store.dashboard?.accountHealth,
                 error: store.accountsError,
-                isLoading: store.isLoading
+                isLoading: store.isLoading,
+                captionTop: 18
             )
+            sectionFooter
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 0)
         .refreshable { await store.load(env.api) }
     }
 
@@ -290,6 +457,9 @@ struct AnalyticsRootView: View {
                     tone: bounceRate >= 5 ? .rose : (bounceRate >= 2 ? .amber : nil)
                 )
             }
+            // Cells carry 14pt internal padding; 6 more lands the first
+            // column on the shared 20pt gutter.
+            .padding(.horizontal, 6)
         }
     }
 
@@ -312,7 +482,7 @@ struct AnalyticsRootView: View {
             .font(.footnote.weight(.medium))
             .monospacedDigit()
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
             .padding(.top, 10)
     }
 
@@ -331,7 +501,7 @@ struct AnalyticsRootView: View {
         let points = chartPoints
         return VStack(alignment: .leading, spacing: 10) {
             EyebrowLabel("\(metric.title) per day")
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
             if points.count > 1 {
                 Chart(points) { point in
                     AreaMark(
@@ -371,7 +541,7 @@ struct AnalyticsRootView: View {
                     }
                 }
                 .frame(height: 180)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
             } else {
                 Text("Not enough activity to chart yet.")
                     .font(.subheadline)
@@ -381,6 +551,59 @@ struct AnalyticsRootView: View {
         }
         .padding(.top, 14)
         .padding(.bottom, 14)
+    }
+
+    // MARK: Drawer
+
+    private func drawer(topInset: CGFloat) -> some View {
+        AnalyticsSidebar(
+            store: store,
+            selection: scope,
+            topInset: topInset,
+            revealed: sidebarOpen
+        ) { newScope in
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) { scope = newScope }
+            // Let the highlight capsule slide to the tapped row before closing.
+            Task {
+                try? await Task.sleep(for: .milliseconds(280))
+                closeSidebar()
+            }
+        }
+        .frame(width: Self.sidebarWidth)
+        .frame(maxHeight: .infinity)
+        .background(Color(.systemBackground))
+        .clipShape(UnevenRoundedRectangle(bottomTrailingRadius: 26, topTrailingRadius: 26, style: .continuous))
+        .shadow(color: .black.opacity(sidebarOpen ? 0.22 : 0), radius: 30, x: 6, y: 0)
+        .ignoresSafeArea()
+        .offset(x: drawerOffset)
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    sidebarDrag = min(0, value.translation.width)
+                }
+                .onEnded { value in
+                    if value.translation.width < -80 || value.predictedEndTranslation.width < -160 {
+                        closeSidebar()
+                    } else {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { sidebarDrag = 0 }
+                    }
+                }
+        )
+    }
+
+    private var drawerOffset: CGFloat {
+        (sidebarOpen ? 0 : -Self.sidebarWidth - 40) + sidebarDrag
+    }
+
+    private func openSidebar() {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) { sidebarOpen = true }
+    }
+
+    private func closeSidebar() {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            sidebarOpen = false
+            sidebarDrag = 0
+        }
     }
 }
 

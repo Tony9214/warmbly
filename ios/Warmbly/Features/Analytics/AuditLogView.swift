@@ -267,16 +267,18 @@ struct AuditLogView: View {
     private var feed: some View {
         List {
             ForEach(store.sections) { section in
-                Section {
-                    ForEach(section.entries) { entry in
-                        NavigationLink {
-                            AuditEntryDetailView(entry: entry)
-                        } label: {
-                            AuditRowView(entry: entry)
-                        }
+                // Day captions are bare rows, not sticky grouped headers.
+                AnalyticsSectionCaption(
+                    section.label,
+                    top: section.id == store.sections.first?.id ? 14 : 20
+                )
+                ForEach(section.entries) { entry in
+                    NavigationLink {
+                        AuditEntryDetailView(entry: entry)
+                    } label: {
+                        AuditRowView(entry: entry)
                     }
-                } header: {
-                    EyebrowLabel(section.label)
+                    .analyticsPlainRow(separatorLeading: 64)
                 }
             }
             if store.hasMore {
@@ -287,7 +289,7 @@ struct AuditLogView: View {
                 }
                 .frame(height: 44)
                 .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+                .listRowBackground(Color(.systemBackground))
                 .onAppear {
                     Task { await store.loadMore(env.api) }
                 }
@@ -298,10 +300,13 @@ struct AuditLogView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                    .listRowBackground(Color(.systemBackground))
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 0)
+        .background(Color(.systemBackground))
         .refreshable { await store.load(env.api) }
     }
 
@@ -386,7 +391,7 @@ struct AuditRowView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
     }
 }
 
@@ -421,66 +426,72 @@ struct AuditEntryDetailView: View {
 
     var body: some View {
         List {
-            Section {
-                HStack(spacing: 12) {
-                    IconTile(symbol: AuditFmt.actionIcon(entry.action), tone: AuditFmt.actionTone(entry.action), size: 42)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text(AuditFmt.humanize(entry.action))
-                                .font(.body.weight(.semibold))
-                            AuditEntityChip(entityType: entry.entityType)
-                        }
-                        Text(entry.actor?.displayName ?? "former member")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                IconTile(symbol: AuditFmt.actionIcon(entry.action), tone: AuditFmt.actionTone(entry.action), size: 42)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(AuditFmt.humanize(entry.action))
+                            .font(.body.weight(.semibold))
+                        AuditEntityChip(entityType: entry.entityType)
                     }
-                    Spacer()
+                    Text(entry.actor?.displayName ?? "former member")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 4)
-                .listRowSeparator(.hidden)
+                Spacer()
             }
+            .padding(.top, 16)
+            .padding(.bottom, 6)
+            .analyticsPlainRow(separator: .hidden)
 
-            Section {
-                if let when = entry.when {
-                    AuditDetailRow(label: "When", value: when.formatted(date: .abbreviated, time: .standard))
-                }
-                if let email = entry.actor?.email, !email.isEmpty {
-                    AuditDetailRow(label: "Actor", value: email)
-                }
-                if let entityID = entry.entityID, !entityID.isEmpty {
-                    AuditDetailRow(label: "Entity id", value: entityID, mono: true)
-                }
-                if let ip = entry.ipAddress, !ip.isEmpty {
-                    AuditDetailRow(label: "IP address", value: ip, mono: true)
-                }
-                if let agent = entry.userAgent, !agent.isEmpty {
-                    AuditDetailRow(label: "User agent", value: agent)
-                }
-            } header: {
-                EyebrowLabel("Details")
+            AnalyticsSectionCaption("Details")
+            if let when = entry.when {
+                AuditDetailRow(label: "When", value: when.formatted(date: .abbreviated, time: .standard))
+                    .analyticsPlainRow()
+            }
+            if let email = entry.actor?.email, !email.isEmpty {
+                AuditDetailRow(label: "Actor", value: email)
+                    .analyticsPlainRow()
+            }
+            if let entityID = entry.entityID, !entityID.isEmpty {
+                AuditDetailRow(label: "Entity id", value: entityID, mono: true)
+                    .analyticsPlainRow()
+            }
+            if let ip = entry.ipAddress, !ip.isEmpty {
+                AuditDetailRow(label: "IP address", value: ip, mono: true)
+                    .analyticsPlainRow()
+            }
+            if let agent = entry.userAgent, !agent.isEmpty {
+                AuditDetailRow(label: "User agent", value: agent)
+                    .analyticsPlainRow()
             }
 
             if !changePairs.isEmpty {
-                Section {
-                    ForEach(changePairs, id: \.key) { pair in
-                        AuditDetailRow(label: AuditFmt.humanize(pair.key), value: pair.value, mono: true)
-                    }
-                } header: {
-                    EyebrowLabel("Changes")
+                AnalyticsSectionCaption("Changes")
+                ForEach(changePairs, id: \.key) { pair in
+                    AuditDetailRow(label: AuditFmt.humanize(pair.key), value: pair.value, mono: true)
+                        .analyticsPlainRow()
                 }
             }
 
             if !metadataPairs.isEmpty {
-                Section {
-                    ForEach(metadataPairs, id: \.key) { pair in
-                        AuditDetailRow(label: AuditFmt.humanize(pair.key), value: pair.value, mono: true)
-                    }
-                } header: {
-                    EyebrowLabel("Metadata")
+                AnalyticsSectionCaption("Metadata")
+                ForEach(metadataPairs, id: \.key) { pair in
+                    AuditDetailRow(label: AuditFmt.humanize(pair.key), value: pair.value, mono: true)
+                        .analyticsPlainRow()
                 }
             }
+
+            Color.clear
+                .frame(height: 24)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color(.systemBackground))
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 0)
+        .background(Color(.systemBackground))
         .navigationTitle("Activity")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -503,6 +514,6 @@ struct AuditDetailRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
     }
 }

@@ -14,6 +14,17 @@ final class AnalyticsStore {
 
     private(set) var isLoading = false
     private(set) var dashboardError: String?
+
+    /// Accounts actively warming, for the drawer's live badge.
+    var warmingCount: Int {
+        accounts.count { $0.warmupStatus?.enabled == true && $0.warmupStatus?.paused != true }
+    }
+
+    /// Accounts whose health checks flagged problems.
+    var issueCount: Int {
+        accounts.count { $0.health?.status == "warning" || $0.health?.status == "error" }
+    }
+
     private(set) var deliverabilityError: String?
     private(set) var warmupError: String?
     private(set) var accountsError: String?

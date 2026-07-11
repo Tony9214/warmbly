@@ -48,8 +48,6 @@ final class HomeStore {
 // MARK: - Routes
 
 enum HomeRoute: Hashable {
-    case mailboxes
-    case analytics
     case activity
 }
 
@@ -63,6 +61,8 @@ struct HomeView: View {
     @State private var store = HomeStore()
     @State private var path: [HomeRoute] = []
     @State private var appeared = false
+    @State private var showMailboxes = false
+    @State private var showAnalytics = false
 
     private var canAnalytics: Bool { env.session.can(.viewAnalytics) }
     private var canEmails: Bool { env.session.can(.manageEmails) }
@@ -87,10 +87,17 @@ struct HomeView: View {
             .toolbarVisibility(.hidden, for: .navigationBar)
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
-                case .mailboxes: MailboxesRootView()
-                case .analytics: AnalyticsRootView()
                 case .activity: AuditLogView()
                 }
+            }
+            // Mailboxes and analytics are drawer browsers; like the CRM
+            // browsers they own their chrome as covers instead of fighting
+            // the push back gestures.
+            .fullScreenCover(isPresented: $showMailboxes) {
+                MailboxesRootView(onClose: { showMailboxes = false })
+            }
+            .fullScreenCover(isPresented: $showAnalytics) {
+                AnalyticsRootView(onClose: { showAnalytics = false })
             }
             .navigationDestination(for: EmailAccount.self) { account in
                 MailboxDetailView(account: account)
@@ -279,7 +286,7 @@ struct HomeView: View {
 
     private var attentionCard: some View {
         Button {
-            path.append(.mailboxes)
+            showMailboxes = true
         } label: {
             HStack(spacing: 12) {
                 IconTile(symbol: "exclamationmark.triangle.fill", tone: .rose)
@@ -306,11 +313,11 @@ struct HomeView: View {
     private var mailboxSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             AirSectionHeader(title: "Mailboxes", actionTitle: "All \(store.accountTotal ?? store.accounts.count)") {
-                path.append(.mailboxes)
+                showMailboxes = true
             }
             if store.accounts.isEmpty {
                 Button {
-                    path.append(.mailboxes)
+                    showMailboxes = true
                 } label: {
                     HStack(spacing: 12) {
                         IconTile(symbol: "plus", tone: .sky)
@@ -389,7 +396,7 @@ struct HomeView: View {
     private func trendSection(_ trend: [AnalyticsTrendPoint]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             AirSectionHeader(title: "This week", actionTitle: "Analytics") {
-                path.append(.analytics)
+                showAnalytics = true
             }
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 18) {
@@ -541,7 +548,7 @@ struct HomeView: View {
     private func activitySection(_ items: [AnalyticsActivityItem]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             AirSectionHeader(title: "Latest activity", actionTitle: "Analytics") {
-                path.append(.analytics)
+                showAnalytics = true
             }
             VStack(spacing: 0) {
                 ForEach(Array(items.prefix(4).enumerated()), id: \.offset) { index, item in
