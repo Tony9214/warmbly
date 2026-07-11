@@ -88,7 +88,9 @@ final class PhoenixSocket: NSObject, URLSessionWebSocketDelegate, @unchecked Sen
         guard proceed else { return }
 
         state = .connecting
-        guard let url = await urlProvider?() else {
+        // Two-step unwrap: `await urlProvider?()` crashes the Xcode 26.6
+        // type checker (fixed in 27).
+        guard let provider = urlProvider, let url = await provider() else {
             scheduleReconnect()
             return
         }

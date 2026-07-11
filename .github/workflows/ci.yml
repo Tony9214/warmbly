@@ -340,12 +340,15 @@ jobs:
           xcodebuild -version
 
       - name: Build (iOS Simulator, no signing)
+        # arm64 only: the generic destination otherwise also builds the
+        # x86_64 slice, doubling build time for a compile check.
         run: |
           set -o pipefail
           xcodebuild build \
             -project ios/Warmbly.xcodeproj \
             -scheme Warmbly \
             -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO
 
   security:
