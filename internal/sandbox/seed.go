@@ -139,6 +139,9 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 	if err := repairContactVerification(ctx, pool); err != nil {
 		return err
 	}
+	if err := deactivateIdleFixtureWorkers(ctx, pool); err != nil {
+		return err
+	}
 
 	fmt.Println("sandbox seeded:")
 	fmt.Printf("  dashboard  %s / %s (org: Sunrise Labs)\n", SandboxLoginEmail, SandboxLoginPassword)
@@ -458,6 +461,26 @@ func repairContactVerification(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	if n := tag.RowsAffected(); n > 0 {
 		fmt.Printf("  verification repaired for %d fixture contacts\n", n)
+	}
+	return nil
+}
+
+// deactivateIdleFixtureWorkers deactivates every seeded worker except the two
+// the native stack actually runs (`make worker` / `make worker-premium`).
+// Fixture workers are seeded active but never heartbeat, so placement keeps
+// choosing them and the dead-worker sweep keeps draining them - an assignment
+// ping-pong that strands mailboxes mid-send. `make seed` re-activates them
+// for the docker `make sim` flow.
+func deactivateIdleFixtureWorkers(ctx context.Context, pool *pgxpool.Pool) error {
+	tag, err := pool.Exec(ctx, `
+		UPDATE workers SET active = FALSE, updated_at = NOW()
+		WHERE active AND id NOT IN ($1, $2)`,
+		uuid.MustParse("10c8f5e4-1c39-5b2a-9c8b-3d2f0a8b1a01"), sandboxWorker)
+	if err != nil {
+		return err
+	}
+	if n := tag.RowsAffected(); n > 0 {
+		fmt.Printf("  deactivated %d fixture workers not running in the native stack\n", n)
 	}
 	return nil
 }
