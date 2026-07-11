@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -277,14 +278,14 @@ func seedCampaigns(ctx context.Context, pool *pgxpool.Pool) error {
 			contacts:    launchContacts,
 			steps: []stepSeed{
 				{uuid.MustParse("55555555-aaaa-0000-0000-000000000011"), "Intro",
-					"Quick question about {{company}}",
-					"Hi {{first_name}},\n\nWe just launched a tool that cuts outbound setup from weeks to minutes, and {{company}} came up twice in customer calls last month.\n\nWorth a quick look? Here is a two minute overview: https://warmbly.com/overview\n\nBest,\nSunrise team", 0},
+					"Quick question about {{.Company}}",
+					"Hi {{.FirstName}},\n\nWe just launched a tool that cuts outbound setup from weeks to minutes, and {{.Company}} came up twice in customer calls last month.\n\nWorth a quick look? Here is a two minute overview: https://warmbly.com/overview\n\nBest,\nSunrise team", 0},
 				{uuid.MustParse("55555555-aaaa-0000-0000-000000000012"), "Follow-up",
-					"Re: Quick question about {{company}}",
-					"Hi {{first_name}},\n\nFloating this back up. Happy to share the deliverability numbers from the beta if useful: https://warmbly.com/benchmarks\n\nBest,\nSunrise team", 2},
+					"Re: Quick question about {{.Company}}",
+					"Hi {{.FirstName}},\n\nFloating this back up. Happy to share the deliverability numbers from the beta if useful: https://warmbly.com/benchmarks\n\nBest,\nSunrise team", 2},
 				{uuid.MustParse("55555555-aaaa-0000-0000-000000000013"), "Breakup",
 					"Closing the loop",
-					"Hi {{first_name}},\n\nSounds like the timing is off. I will stop here; if outbound comes back on the roadmap, you know where to find us.\n\nBest,\nSunrise team", 4},
+					"Hi {{.FirstName}},\n\nSounds like the timing is off. I will stop here; if outbound comes back on the roadmap, you know where to find us.\n\nBest,\nSunrise team", 4},
 			},
 		},
 		{
@@ -293,11 +294,11 @@ func seedCampaigns(ctx context.Context, pool *pgxpool.Pool) error {
 			contacts:    agencyContacts,
 			steps: []stepSeed{
 				{uuid.MustParse("55555555-aaaa-0000-0000-000000000021"), "Partner intro",
-					"Partnering with {{company}}",
-					"Hi {{first_name}},\n\nWe work with agencies like {{company}} on white-label sending infrastructure. Margins are meaningfully better than reselling seats.\n\nOpen to a short call? Details: https://warmbly.com/partners\n\nBest,\nSunrise partnerships", 0},
+					"Partnering with {{.Company}}",
+					"Hi {{.FirstName}},\n\nWe work with agencies like {{.Company}} on white-label sending infrastructure. Margins are meaningfully better than reselling seats.\n\nOpen to a short call? Details: https://warmbly.com/partners\n\nBest,\nSunrise partnerships", 0},
 				{uuid.MustParse("55555555-aaaa-0000-0000-000000000022"), "Partner follow-up",
-					"Re: Partnering with {{company}}",
-					"Hi {{first_name}},\n\nOne more nudge; the partner program closes new slots at the end of the quarter.\n\nBest,\nSunrise partnerships", 3},
+					"Re: Partnering with {{.Company}}",
+					"Hi {{.FirstName}},\n\nOne more nudge; the partner program closes new slots at the end of the quarter.\n\nBest,\nSunrise partnerships", 3},
 			},
 		},
 		{
@@ -305,8 +306,8 @@ func seedCampaigns(ctx context.Context, pool *pgxpool.Pool) error {
 			contactBase: "66666666-aaaa-0000-0003",
 			steps: []stepSeed{
 				{uuid.MustParse("55555555-aaaa-0000-0000-000000000031"), "Win-back",
-					"We miss you at {{company}}",
-					"Hi {{first_name}},\n\nA lot has shipped since you last looked. Draft for review before this goes anywhere.\n\nBest,\nSunrise team", 0},
+					"We miss you at {{.Company}}",
+					"Hi {{.FirstName}},\n\nA lot has shipped since you last looked. Draft for review before this goes anywhere.\n\nBest,\nSunrise team", 0},
 			},
 		},
 	}
@@ -485,14 +486,21 @@ func deactivateIdleFixtureWorkers(ctx context.Context, pool *pgxpool.Pool) error
 	return nil
 }
 
-// plainToHTML renders the plaintext step body as minimal paragraph HTML so
-// tracking (pixel + link wrapping) has an HTML part to operate on.
+// plainToHTML renders the plaintext step body as minimal paragraph HTML,
+// linkifying bare URLs into anchors so tracking has both a pixel target and
+// hrefs to wrap into click tickets.
 func plainToHTML(body string) string {
 	html := ""
 	for _, para := range splitParagraphs(body) {
-		html += "<p>" + para + "</p>"
+		html += "<p>" + linkifyURLs(para) + "</p>"
 	}
 	return html
+}
+
+var urlPattern = regexp.MustCompile(`https://[^\s<]+`)
+
+func linkifyURLs(s string) string {
+	return urlPattern.ReplaceAllString(s, `<a href="$0">$0</a>`)
 }
 
 func splitParagraphs(s string) []string {
