@@ -435,8 +435,30 @@ struct AuthFlowView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: mode == .signIn)
     }
 
+    /// Shown when the app signed the user out because the session expired or
+    /// was revoked, so landing back here never feels like a glitch.
+    private var sessionExpiredNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Tone.amber.color)
+            Text("You were signed out because your session expired. Sign in to continue.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Tone.amber.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.bottom, 14)
+    }
+
     private var emailStepContent: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if env.session.wasSignedOutBySession, mode == .signIn {
+                sessionExpiredNotice
+            }
             sheetTitle(
                 mode == .signIn ? "Welcome back" : "Create your account",
                 mode == .signIn ? "Sign in to pick up where you left off." : "Free to start. No credit card required."

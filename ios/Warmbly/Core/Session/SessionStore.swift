@@ -27,6 +27,9 @@ final class SessionStore {
     let api: APIClient
 
     private(set) var phase: SessionPhase = .launching
+    /// True when the last sign-out was forced by an expired/revoked session
+    /// (not a manual logout); the auth screen shows a notice explaining it.
+    private(set) var wasSignedOutBySession = false
     private(set) var user: User?
     private(set) var memberships: [OrganizationMember] = []
     private(set) var currentOrgID: String?
@@ -70,7 +73,9 @@ final class SessionStore {
             await enterApp()
         } catch let error as APIError {
             if case .unauthorized = error {
-                // The token really is dead; only then drop to sign-in.
+                // The token really is dead; only then drop to sign-in. The
+                // user believed they were signed in, so say why they aren't.
+                wasSignedOutBySession = true
                 await clearSession()
             } else {
                 phase = .unreachable
@@ -203,6 +208,7 @@ final class SessionStore {
 
     private func completeLogin(with token: AuthToken) async throws {
         await api.setToken(token)
+        wasSignedOutBySession = false
         try await loadIdentity()
         await enterApp()
     }
@@ -261,11 +267,19 @@ final class SessionStore {
     func logout() async {
         // Treat a 401 on logout as already logged out.
         let _: EmptyBody? = try? await api.post("auth/logout")
+        wasSignedOutBySession = false
         await clearSession()
     }
 
     private func handleAuthFailure() {
-        Task { await clearSession() }
+        Task {
+            // Only flag it when the user was actually inside the app; a failed
+            // bootstrap already lands on sign-in without needing a banner.
+            if phase == .ready || phase == .selectOrg || phase == .onboarding {
+                wasSignedOutBySession = true
+            }
+            await clearSession()
+        }
     }
 
     private func clearSession() async {

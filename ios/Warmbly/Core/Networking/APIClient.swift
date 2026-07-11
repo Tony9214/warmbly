@@ -69,7 +69,12 @@ actor APIClient {
 
     private func validAccessToken() async throws -> String {
         if let refreshTask { return try await refreshTask.value.accessToken }
-        guard let token else { throw APIError.unauthorized(nil) }
+        guard let token else {
+            // No token at all: kick straight to sign-in instead of stranding
+            // the screen on an inline "session expired" error.
+            failAuth()
+            throw APIError.unauthorized(nil)
+        }
         // Proactive refresh shortly before expiry, mirroring the web client.
         if token.accessTokenExpiresAt.timeIntervalSinceNow > 30 { return token.accessToken }
         return try await refresh().accessToken
@@ -78,7 +83,10 @@ actor APIClient {
     @discardableResult
     private func refresh() async throws -> AuthToken {
         if let refreshTask { return try await refreshTask.value }
-        guard let current = token else { throw APIError.unauthorized(nil) }
+        guard let current = token else {
+            failAuth()
+            throw APIError.unauthorized(nil)
+        }
         // Don't burn the single-use refresh nonce on a doomed call.
         guard current.refreshTokenExpiresAt.timeIntervalSinceNow > 0 else {
             failAuth()
@@ -90,7 +98,14 @@ actor APIClient {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try Self.encoder.encode(["refresh_token": current.refreshToken])
-            let (data, response) = try await session.data(for: request)
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch {
+                // Offline / server down is NOT a dead session.
+                throw APIError.network(error)
+            }
             guard let http = response as? HTTPURLResponse else { throw APIError.network(URLError(.badServerResponse)) }
             guard http.statusCode == 200 else {
                 let payload = try? Self.decoder.decode(APIErrorPayload.self, from: data)
@@ -106,6 +121,11 @@ actor APIClient {
             return fresh
         } catch {
             refreshTask = nil
+            // Only a definitive rejection kills the session; a network failure
+            // keeps the tokens so the user stays signed in through blips.
+            if case APIError.network = error {
+                throw error
+            }
             failAuth()
             throw error
         }
