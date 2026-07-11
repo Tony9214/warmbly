@@ -125,7 +125,7 @@ func (r *planRepository) scanPlan(ctx context.Context, query string, args ...int
 		&plan.ID, &plan.Name, &plan.MaxContacts, &plan.DailyEmails, &plan.AIGeneration, &plan.AccountLimit,
 		&plan.Price, &plan.DiscountedPrice, &duration, &plan.Savings, &plan.Public,
 		&plan.StripePriceID, &plan.StripePriceIDYearly, &plan.StripeProductID, &plan.DedicatedWorkers, &plan.DailyCampaignLimit,
-		&plan.CreatedAt, &plan.UpdatedAt,
+		&plan.ReferralRewardPercent, &plan.CreatedAt, &plan.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil
