@@ -94,11 +94,20 @@ type emailRepository struct {
 	Encrypt *encrypt.Encrypter
 }
 
-func NewEmailRepostory(db *db.DB) EmailRepository {
+// NewEmailRepostory builds the email repository. enc seals SMTP/IMAP and
+// OAuth credentials at rest (CREDENTIALS_ENCRYPTION_KEY); nil is tolerated so
+// deployments without the key keep booting, but credential reads/writes then
+// fail with a captured error instead of a nil-pointer panic.
+func NewEmailRepostory(db *db.DB, enc *encrypt.Encrypter) EmailRepository {
 	return &emailRepository{
-		DB: db,
+		DB:      db,
+		Encrypt: enc,
 	}
 }
+
+// errNoCredentialEncrypter is returned when credential sealing is attempted
+// without CREDENTIALS_ENCRYPTION_KEY configured.
+var errNoCredentialEncrypter = errors.New("credential encrypter not configured (set CREDENTIALS_ENCRYPTION_KEY)")
 
 func (r *emailRepository) ExistsForUser(ctx context.Context, userID, email string) (bool, *errx.Error) {
 	var exists bool
@@ -292,6 +301,10 @@ func (r *emailRepository) NewOauthAccount(ctx context.Context, userID string, da
 }
 
 func (r *emailRepository) NewSMTPIMAPAccount(ctx context.Context, userID string, data models.NewSMTPIMAPAccount) (*models.Email, *errx.Error) {
+	if r.Encrypt == nil {
+		sentry.CaptureException(errNoCredentialEncrypter)
+		return nil, errx.InternalError()
+	}
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		db.CaptureError(err, "", nil, "begin")
@@ -1132,6 +1145,10 @@ func (r *emailRepository) GetByCampaignSenders(ctx context.Context, userID strin
 
 // GetSMTPCredentials retrieves SMTP/IMAP credentials for an email account
 func (r *emailRepository) GetSMTPCredentials(ctx context.Context, emailAccountID uuid.UUID) (*SMTPCredentials, *errx.Error) {
+	if r.Encrypt == nil {
+		sentry.CaptureException(errNoCredentialEncrypter)
+		return nil, errx.InternalError()
+	}
 	query := `
 		SELECT smtp_host, smtp_port, smtp_user, smtp_password,
 		       imap_host, imap_port, imap_user, imap_password
@@ -1192,6 +1209,10 @@ func (r *emailRepository) GetSMTPCredentials(ctx context.Context, emailAccountID
 
 // GetOAuthCredentials retrieves OAuth credentials for an email account
 func (r *emailRepository) GetOAuthCredentials(ctx context.Context, emailAccountID uuid.UUID) (*OAuthCredentials, *errx.Error) {
+	if r.Encrypt == nil {
+		sentry.CaptureException(errNoCredentialEncrypter)
+		return nil, errx.InternalError()
+	}
 	query := `
 		SELECT access_token, refresh_token, expires_at
 		FROM email_accounts_oauth
