@@ -91,7 +91,12 @@ final class PhoenixSocket: NSObject, URLSessionWebSocketDelegate, @unchecked Sen
         guard proceed else { return }
 
         state = .connecting
-        guard let url = await urlProvider() else {
+        // Three plain statements on purpose: touching this closure property
+        // inside a guard condition (binding it or awaiting it) crashes the
+        // Xcode 26.6 type checker under StrictConcurrency (fixed in 27).
+        let provider = urlProvider
+        let resolved = await provider()
+        guard let url = resolved else {
             scheduleReconnect()
             return
         }
