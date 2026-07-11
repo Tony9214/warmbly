@@ -87,7 +87,9 @@ final class PhoenixSocket: NSObject, URLSessionWebSocketDelegate, @unchecked Sen
     }
 
     private func openSocket() async {
-        let proceed = locked { shouldRun && task == nil }
+        // Explicit self: the local `task` below otherwise wins the capture
+        // and Xcode 26.6 rejects it as used before declaration.
+        let proceed = locked { shouldRun && self.task == nil }
         guard proceed else { return }
 
         state = .connecting
