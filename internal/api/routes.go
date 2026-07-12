@@ -1037,6 +1037,9 @@ func Run(
 		adminRoutes.GET("/campaigns/:id", middleware.RequireAdminPermission(models.AdminPermViewCampaigns), h.AdminGetCampaign)
 		adminRoutes.POST("/campaigns/:id/stop", middleware.RequireAdminPermission(models.AdminPermStopCampaigns), h.AdminStopCampaign)
 
+		// System status (infrastructure liveness probes)
+		adminRoutes.GET("/system/status", middleware.RequireAdminPermission(models.AdminPermViewAnalytics), h.AdminSystemStatus)
+
 		// Analytics Dashboard
 		adminRoutes.GET("/analytics/overview", middleware.RequireAdminPermission(models.AdminPermViewAnalytics), h.AdminGetPlatformOverview)
 		adminRoutes.GET("/analytics/trends", middleware.RequireAdminPermission(models.AdminPermViewAnalytics), h.AdminGetAnalyticsTrends)

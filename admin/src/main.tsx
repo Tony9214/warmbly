@@ -27,6 +27,10 @@ import AuditPage from "@/app/dashboard/AuditPage";
 import InfrastructurePage from "@/app/settings/InfrastructurePage";
 import CloudProvidersPage from "@/app/settings/CloudProvidersPage";
 import ProvisioningTemplatesPage from "@/app/settings/ProvisioningTemplatesPage";
+import ProvisioningPolicyPage from "@/app/settings/ProvisioningPolicyPage";
+import WorkerProfilesPage from "@/app/settings/WorkerProfilesPage";
+import ReleasesPage from "@/app/settings/ReleasesPage";
+import AwsCredentialsPage from "@/app/settings/AwsCredentialsPage";
 import ProvisioningJobsPage from "@/app/dashboard/ProvisioningJobsPage";
 import OrganizationsPage from "@/app/dashboard/OrganizationsPage";
 import OrganizationDetailPage from "@/app/dashboard/OrganizationDetailPage";
@@ -49,6 +53,9 @@ import OutreachPage from "@/app/dashboard/OutreachPage";
 import AnalyticsPage from "@/app/dashboard/AnalyticsPage";
 import MailboxesPage from "@/app/dashboard/MailboxesPage";
 import PlacementPage from "@/app/dashboard/PlacementPage";
+import EventsPage from "@/app/dashboard/EventsPage";
+import SystemStatusPage from "@/app/dashboard/SystemStatusPage";
+import RealtimeManager from "@/lib/realtime/RealtimeManager";
 import { NotFoundPage } from "@/app/dashboard/StubPages";
 
 // Mirror of web/src/main.tsx's tuned defaults. The admin app sees less
@@ -119,13 +126,19 @@ const router = createBrowserRouter([
                     { path: "limit-requests", element: <LimitRequestsPage /> },
                     { path: "outreach", element: <OutreachPage /> },
                     { path: "analytics", element: <AnalyticsPage /> },
+                    { path: "events", element: <EventsPage /> },
+                    { path: "system", element: <SystemStatusPage /> },
                     { path: "audit", element: <AuditPage /> },
                     {
                         path: "settings",
                         children: [
                             { index: true, element: <Navigate to="/settings/cloud-providers" replace /> },
                             { path: "cloud-providers", element: <CloudProvidersPage /> },
+                            { path: "aws-credentials", element: <AwsCredentialsPage /> },
+                            { path: "worker-profiles", element: <WorkerProfilesPage /> },
                             { path: "provisioning-templates", element: <ProvisioningTemplatesPage /> },
+                            { path: "provisioning-policy", element: <ProvisioningPolicyPage /> },
+                            { path: "releases", element: <ReleasesPage /> },
                             { path: "infrastructure", element: <InfrastructurePage /> },
                         ],
                     },
@@ -136,11 +149,16 @@ const router = createBrowserRouter([
     },
 ]);
 
-// AppShell renders an <Outlet/> for the page. Wrapping it lets us reach
-// for additional context (theming etc.) here later without touching
-// AppShell directly.
+// AppShell renders an <Outlet/> for the page. RealtimeManager is mounted
+// here (inside QueryClientProvider, only for authenticated admins) so the
+// admin:platform socket connects once and survives route changes.
 function AppShellWithKey() {
-    return <AppShell />;
+    return (
+        <>
+            <RealtimeManager />
+            <AppShell />
+        </>
+    );
 }
 
 // Tiny outlet helper exported so React-Router's typing is happy when

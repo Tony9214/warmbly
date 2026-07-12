@@ -33,6 +33,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/socket"
 	"github.com/warmbly/warmbly/internal/app/stripe"
 	"github.com/warmbly/warmbly/internal/app/subscription"
+	"github.com/warmbly/warmbly/internal/app/sysstatus"
 	"github.com/warmbly/warmbly/internal/app/team"
 	"github.com/warmbly/warmbly/internal/app/template"
 	"github.com/warmbly/warmbly/internal/app/token"
@@ -206,4 +207,8 @@ type Handler struct {
 
 	// Danger zone (delayed deletions for orgs & user accounts)
 	DangerZoneService dangerzone.Service
+
+	// Infrastructure liveness probes for the admin System Status page.
+	// Wired in cmd/backend/main.go where the concrete clients live.
+	SystemChecker *sysstatus.Checker
 }
