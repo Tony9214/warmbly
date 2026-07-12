@@ -56,7 +56,17 @@ func pageMetaFor(offset, limit, returned, total int) pageMeta {
 	return pageMeta{Total: total, HasMore: hasMore, NextCursor: next}
 }
 
-// AdminWarmupContentOverview returns content-bank counts + generator status.
+// warmupSegmentStock is one row of the library's stock-vs-target breakdown.
+type warmupSegmentStock struct {
+	Segment string `json:"segment"`
+	Active  int    `json:"active"`
+	Target  int    `json:"target"`
+}
+
+// AdminWarmupContentOverview returns content-bank counts + generator status,
+// including everything the UI needs to render the automatic top-up pipeline:
+// whether an AI client is wired, today's spend against the daily cap, and
+// per-segment stock against the scheduler's targets.
 func (h *Handler) AdminWarmupContentOverview(c *gin.Context) {
 	ctx := c.Request.Context()
 	stats, err := h.WarmupContentRepo.ConversationStats(ctx)
@@ -76,13 +86,40 @@ func (h *Handler) AdminWarmupContentOverview(c *gin.Context) {
 		settings = &def
 	}
 
+	aiConfigured := h.WarmupContentService != nil && h.WarmupContentService.Enabled()
+	// Same daily window the scheduler uses for its cap accounting.
+	generatedToday, _ := h.WarmupContentRepo.GeneratedCountSince(ctx, time.Now().Truncate(24*time.Hour))
+
+	stock := make([]warmupSegmentStock, 0, 4)
+	for _, pool := range settings.Pools {
+		if !pool.Enabled {
+			continue
+		}
+		segments := pool.Segments
+		if len(segments) == 0 {
+			segments = []string{""}
+		}
+		for _, seg := range segments {
+			active, _ := h.WarmupContentRepo.CountActiveConversations(ctx, pool.PoolType, seg)
+			stock = append(stock, warmupSegmentStock{Segment: seg, Active: active, Target: pool.TargetActiveThreads})
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"total_active":      totalActive,
-		"total_archived":    totalArchived,
-		"by_pool":           stats,
-		"last_generated_at": lastGen,
-		"ai_enabled":        settings.Enabled,
-		"schedule_enabled":  settings.ScheduleEnabled,
+		"total_active":         totalActive,
+		"total_archived":       totalArchived,
+		"by_pool":              stats,
+		"last_generated_at":    lastGen,
+		"ai_enabled":           settings.Enabled,
+		"schedule_enabled":     settings.ScheduleEnabled,
+		"ai_configured":        aiConfigured,
+		"cadence_hours":        settings.CadenceHours,
+		"refresh_enabled":      settings.RefreshEnabled,
+		"refresh_per_run":      settings.RefreshPerRun,
+		"ai_selection_share":   settings.AISelectionShare,
+		"daily_generation_cap": settings.DailyGenerationCap,
+		"generated_today":      generatedToday,
+		"stock":                stock,
 	})
 }
 

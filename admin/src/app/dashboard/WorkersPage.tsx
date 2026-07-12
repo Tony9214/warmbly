@@ -23,6 +23,8 @@ import {
     NumberRangeFilter,
 } from "@/components/data/Explorer";
 import { DataTable, type Column } from "@/components/data/DataTable";
+import { StateLegend } from "@/components/StateLegend";
+import { WORKER_RISK_POOL_LEGEND } from "@/lib/legends";
 import { emptyRange, rangeActive, type DateRange } from "@/lib/dateRange";
 import { listManagedWorkers } from "@/lib/api/client/admin/workers";
 import type {
@@ -304,6 +306,7 @@ export default function WorkersPage() {
                 title="Workers"
                 description="Physical worker processes managed over SSH. One worker = one machine running the Warmbly worker binary."
             >
+                <StateLegend label="Risk pools explained" entries={WORKER_RISK_POOL_LEGEND} />
                 <Link to="/workers/provisioning-jobs" className="text-xs text-muted-foreground underline hover:text-foreground">
                     View provisioning jobs
                 </Link>

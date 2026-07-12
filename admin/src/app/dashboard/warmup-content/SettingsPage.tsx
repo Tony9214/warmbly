@@ -174,6 +174,12 @@ export default function SettingsPage() {
                         checked={form.schedule_enabled}
                         onChange={(v) => patch({ schedule_enabled: v })}
                     />
+                    <ToggleRow
+                        label="Continuous refresh"
+                        hint="Keep generating after the target is reached: each run retires the most-used threads and mints fresh replacements, so content never goes stale."
+                        checked={form.refresh_enabled}
+                        onChange={(v) => patch({ refresh_enabled: v })}
+                    />
                 </div>
             </section>
 
@@ -216,6 +222,17 @@ export default function SettingsPage() {
                         value={form.daily_generation_cap}
                         min={0}
                         onChange={(v) => patch({ daily_generation_cap: v })}
+                    />
+                    <NumberField
+                        id="set-refresh-per-run"
+                        label="Recycled per run"
+                        hint="Threads retired and regenerated each scheduled run when continuous refresh is on (1–25)."
+                        value={form.refresh_per_run}
+                        min={1}
+                        max={25}
+                        onChange={(v) =>
+                            patch({ refresh_per_run: Math.max(1, Math.min(25, v)) })
+                        }
                     />
                     <NumberField
                         id="set-ai-share"

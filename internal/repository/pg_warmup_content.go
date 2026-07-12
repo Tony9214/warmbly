@@ -51,6 +51,10 @@ type WarmupContentRepository interface {
 	GetConversation(ctx context.Context, id uuid.UUID) (*models.WarmupConversation, error)
 	ListConversations(ctx context.Context, f ConversationFilter) ([]models.WarmupConversation, int, error)
 	SetConversationStatus(ctx context.Context, id uuid.UUID, status string) error
+	// RetireMostUsedConversations archives the n most-used active AI threads
+	// for a segment so the scheduler can replace them with fresh generations.
+	// Static-source rows are never touched (they aren't regenerable).
+	RetireMostUsedConversations(ctx context.Context, poolType, segment string, n int) (int, error)
 	DeleteConversation(ctx context.Context, id uuid.UUID) error
 	IncrementConversationUsage(ctx context.Context, id uuid.UUID) error
 	CountActiveConversations(ctx context.Context, poolType, segment string) (int, error)
@@ -206,6 +210,21 @@ func (r *warmupContentRepository) ListConversations(ctx context.Context, f Conve
 func (r *warmupContentRepository) SetConversationStatus(ctx context.Context, id uuid.UUID, status string) error {
 	_, err := r.db.Exec(ctx, `UPDATE warmup_conversations SET status = $2, updated_at = NOW() WHERE id = $1`, id, status)
 	return err
+}
+
+func (r *warmupContentRepository) RetireMostUsedConversations(ctx context.Context, poolType, segment string, n int) (int, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE warmup_conversations SET status = 'archived', updated_at = NOW()
+		WHERE id IN (
+			SELECT id FROM warmup_conversations
+			WHERE pool_type = $1 AND segment = $2 AND status = 'active' AND source = 'ai'
+			ORDER BY usage_count DESC, created_at ASC
+			LIMIT $3
+		)`, poolType, segment, n)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 func (r *warmupContentRepository) DeleteConversation(ctx context.Context, id uuid.UUID) error {

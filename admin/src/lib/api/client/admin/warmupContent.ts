@@ -21,6 +21,12 @@ export interface WarmupContentPoolBreakdown {
     archived: number;
 }
 
+export interface WarmupSegmentStock {
+    segment: string;
+    active: number;
+    target: number;
+}
+
 export interface WarmupContentOverview {
     total_active: number;
     total_archived: number;
@@ -28,6 +34,15 @@ export interface WarmupContentOverview {
     last_generated_at: string | null;
     ai_enabled: boolean;
     schedule_enabled: boolean;
+    /** Whether an AI client is wired on the backend (OPENAI_API_KEY set). */
+    ai_configured: boolean;
+    cadence_hours: number;
+    refresh_enabled: boolean;
+    refresh_per_run: number;
+    ai_selection_share: number;
+    daily_generation_cap: number;
+    generated_today: number;
+    stock: WarmupSegmentStock[];
 }
 
 export interface WarmupConversationRow {
@@ -162,6 +177,9 @@ export interface WarmupGenerationSettings {
     enabled: boolean;
     schedule_enabled: boolean;
     cadence_hours: number;
+    /** Keep generating after the target: recycle most-used threads each run. */
+    refresh_enabled: boolean;
+    refresh_per_run: number;
     model: string;
     max_messages_per_thread: number;
     daily_generation_cap: number;
