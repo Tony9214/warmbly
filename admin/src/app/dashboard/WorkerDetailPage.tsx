@@ -1,13 +1,15 @@
 // Single worker detail — overview header + the four SSH lifecycle
 // actions (test, install, restart, uninstall) wired to the admin
-// endpoints. Logs panel pulls the last 200 lines from journald.
+// endpoints. Logs panel tails journald with a selectable line count
+// and an optional follow mode.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
     ArrowLeft,
+    Copy,
     Download,
     Hammer,
     PlayCircle,
@@ -17,10 +19,20 @@ import {
     StopCircle,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { StateLegend } from "@/components/StateLegend";
+import { WORKER_HEALTH_LEGEND, WORKER_RISK_POOL_LEGEND } from "@/lib/legends";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
     getManagedWorker,
     getWorkerEmails,
@@ -66,12 +78,34 @@ export default function WorkerDetailPage() {
         retry: false,
     });
 
+    const [logLines, setLogLines] = useState(200);
+    const [followLogs, setFollowLogs] = useState(false);
+    const logScrollRef = useRef<HTMLDivElement>(null);
+
     const logsQ = useQuery({
-        queryKey: ["admin", "worker", id, "logs"],
-        queryFn: () => getWorkerLogs(id, 200),
+        queryKey: ["admin", "worker", id, "logs", logLines],
+        queryFn: () => getWorkerLogs(id, logLines),
         enabled: !!id,
         retry: false,
+        refetchInterval: followLogs ? 5_000 : false,
     });
+
+    // Follow mode pins the viewport to the newest lines on every refetch.
+    useEffect(() => {
+        if (!followLogs) return;
+        const el = logScrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [followLogs, logsQ.data]);
+
+    const copyLogs = async () => {
+        if (!logsQ.data?.logs) return;
+        try {
+            await navigator.clipboard.writeText(logsQ.data.logs);
+            toast.success("Logs copied to clipboard");
+        } catch {
+            toast.error("Could not copy logs");
+        }
+    };
 
     const emailsQ = useQuery({
         queryKey: ["admin", "worker", id, "emails"],
@@ -285,6 +319,10 @@ export default function WorkerDetailPage() {
                     <CardHeader>
                         <CardTitle>Fleet position</CardTitle>
                         <CardDescription>How this worker is being used today.</CardDescription>
+                        <div className="flex flex-wrap gap-3 pt-1">
+                            <StateLegend label="Health states" entries={WORKER_HEALTH_LEGEND} />
+                            <StateLegend label="Risk pools" entries={WORKER_RISK_POOL_LEGEND} />
+                        </div>
                     </CardHeader>
                     <CardContent className="pt-0 text-sm space-y-2">
                         <KV label="Type" value={w.worker_type} />
@@ -421,20 +459,55 @@ export default function WorkerDetailPage() {
 
             <Card className="mt-4">
                 <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
+                    <CardTitle className="flex flex-wrap items-center justify-between gap-2">
                         <span>Recent logs</span>
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => logsQ.refetch()}
-                            disabled={logsQ.isFetching}
-                        >
-                            <RefreshCw className="size-4" />
-                            {logsQ.isFetching ? "Loading…" : "Reload"}
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Select
+                                value={String(logLines)}
+                                onValueChange={(v) => setLogLines(Number(v))}
+                            >
+                                <SelectTrigger className="h-8 w-[120px] text-xs" size="sm">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="100">100 lines</SelectItem>
+                                    <SelectItem value="200">200 lines</SelectItem>
+                                    <SelectItem value="500">500 lines</SelectItem>
+                                    <SelectItem value="1000">1000 lines</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <label className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                                <Switch
+                                    checked={followLogs}
+                                    onCheckedChange={setFollowLogs}
+                                />
+                                Follow
+                            </label>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={copyLogs}
+                                disabled={!logsQ.data?.logs}
+                            >
+                                <Copy className="size-4" />
+                                Copy
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => logsQ.refetch()}
+                                disabled={logsQ.isFetching}
+                            >
+                                <RefreshCw
+                                    className={`size-4 ${logsQ.isFetching ? "animate-spin" : ""}`}
+                                />
+                                {logsQ.isFetching ? "Loading…" : "Reload"}
+                            </Button>
+                        </div>
                     </CardTitle>
                     <CardDescription>
-                        Tail of the worker's systemd journal — last 200 lines pulled over SSH.
+                        Tail of the worker's systemd journal, last {logLines} lines pulled over
+                        SSH. Follow refetches every 5s and keeps the newest lines in view.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-0">
@@ -445,9 +518,14 @@ export default function WorkerDetailPage() {
                         </div>
                     )}
                     {logsQ.data && (
-                        <pre className="text-[11px] leading-relaxed font-mono bg-zinc-950 text-zinc-100 rounded-md p-3 overflow-auto max-h-96">
-                            {logsQ.data.logs || "(no log output)"}
-                        </pre>
+                        <div
+                            ref={logScrollRef}
+                            className="rounded-md border border-zinc-800 bg-zinc-950 overflow-auto max-h-96"
+                        >
+                            <pre className="text-[11px] leading-relaxed font-mono text-zinc-100 p-3">
+                                {logsQ.data.logs || "(no log output)"}
+                            </pre>
+                        </div>
                     )}
                     {logsQ.data?.logs && (
                         <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">

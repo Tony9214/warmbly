@@ -169,6 +169,30 @@ func (s *service) RunScheduled(ctx context.Context) error {
 		}
 		for _, segment := range segments {
 			active, _ := s.repo.CountActiveConversations(ctx, pool.PoolType, segment)
+
+			// Continuous refresh: once the library is at target, retire the
+			// most-used AI threads so the top-up below mints fresh replacements.
+			// Retire only what today's budget can regenerate, so the library
+			// never shrinks without being refilled.
+			if settings.RefreshEnabled && pool.TargetActiveThreads > 0 && active >= pool.TargetActiveThreads {
+				recycle := settings.RefreshPerRun
+				if recycle > 25 {
+					recycle = 25
+				}
+				if settings.DailyGenerationCap > 0 && recycle > remaining {
+					recycle = remaining
+				}
+				if recycle > 0 {
+					retired, err := s.repo.RetireMostUsedConversations(ctx, pool.PoolType, segment, recycle)
+					if err != nil {
+						log.Warn().Err(err).Str("segment", segment).Msg("warmup generation: refresh retirement failed")
+					} else if retired > 0 {
+						active -= retired
+						log.Info().Int("retired", retired).Str("segment", segment).Msg("warmup generation: recycled most-used threads for refresh")
+					}
+				}
+			}
+
 			deficit := pool.TargetActiveThreads - active
 			if deficit <= 0 {
 				continue

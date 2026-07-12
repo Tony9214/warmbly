@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -57,6 +59,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/socket"
 	"github.com/warmbly/warmbly/internal/app/stripe"
 	"github.com/warmbly/warmbly/internal/app/subscription"
+	"github.com/warmbly/warmbly/internal/app/sysstatus"
 	"github.com/warmbly/warmbly/internal/app/team"
 	"github.com/warmbly/warmbly/internal/app/template"
 	"github.com/warmbly/warmbly/internal/app/token"
@@ -104,6 +107,7 @@ func main() {
 	var ginMode string
 	var websocketURI string
 	var allowedOrigins []string
+	var systemChecker *sysstatus.Checker
 
 	var tzService tz.TzService
 
@@ -1099,6 +1103,22 @@ func main() {
 		ginMode = apiCfg.GinMode
 		websocketURI = apiCfg.WebsocketURI
 		allowedOrigins = apiCfg.AllowedOrigins
+
+		// Infrastructure liveness probes for the admin System Status page.
+		// Wired here because the concrete clients live in this scope.
+		systemChecker = sysstatus.New()
+		systemChecker.Add("postgres", func(ctx context.Context) error { return primaryDB.Ping(ctx) })
+		systemChecker.Add("redis", func(ctx context.Context) error { return cache.Ping(ctx).Err() })
+		systemChecker.Add("kafka", sysstatus.TCPCheck(kafkaBootstrapServers))
+		if schemaEndpoint != "" {
+			systemChecker.Add("schema-registry", sysstatus.HTTPCheck(strings.TrimRight(schemaEndpoint, "/")+"/subjects"))
+		}
+		if hu := wsHealthURL(websocketURI); hu != "" {
+			systemChecker.Add("realtime", sysstatus.HTTPCheck(hu))
+		}
+		if v := os.Getenv("TRACKING_SERVICE_URL"); v != "" {
+			systemChecker.Add("tracking", sysstatus.HTTPCheck(strings.TrimRight(v, "/")+"/health"))
+		}
 	}
 
 	h := &handler.Handler{
@@ -1220,6 +1240,9 @@ func main() {
 		// Danger zone
 		DangerZoneService: dangerZoneService,
 
+		// Admin System Status probes
+		SystemChecker: systemChecker,
+
 		// Organization-wide audit trail, backed by Postgres. The no-op
 		// fallback (audit.NewNoOpService) remains for entrypoints without
 		// a database.
@@ -1281,4 +1304,25 @@ func getenvDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// wsHealthURL derives the realtime service's HTTP /health URL from the
+// public websocket URI (ws[s]://host[:port]/... -> http[s]://host[:port]/health).
+func wsHealthURL(wsURI string) string {
+	if wsURI == "" {
+		return ""
+	}
+	u, err := url.Parse(wsURI)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	switch u.Scheme {
+	case "wss":
+		u.Scheme = "https"
+	default:
+		u.Scheme = "http"
+	}
+	u.Path = "/health"
+	u.RawQuery = ""
+	return u.String()
 }

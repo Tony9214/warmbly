@@ -111,8 +111,14 @@ type WarmupGenerationSettings struct {
 	// live send selection. When false the static library is used exclusively.
 	Enabled bool `json:"enabled"`
 	// ScheduleEnabled runs the background generation job on CadenceHours.
-	ScheduleEnabled      bool                         `json:"schedule_enabled"`
-	CadenceHours         int                          `json:"cadence_hours"`
+	ScheduleEnabled bool `json:"schedule_enabled"`
+	CadenceHours    int  `json:"cadence_hours"`
+	// RefreshEnabled keeps generation running after the target is reached:
+	// each scheduled run retires the most-used AI threads and mints fresh
+	// replacements, so content rotates continuously instead of going stale.
+	RefreshEnabled bool `json:"refresh_enabled"`
+	// RefreshPerRun is how many threads are recycled per scheduled run.
+	RefreshPerRun        int                          `json:"refresh_per_run"`
 	Model                string                       `json:"model"`
 	MaxMessagesPerThread int                          `json:"max_messages_per_thread"`
 	DailyGenerationCap   int                          `json:"daily_generation_cap"`
@@ -131,6 +137,8 @@ func DefaultWarmupGenerationSettings() WarmupGenerationSettings {
 		Enabled:              false,
 		ScheduleEnabled:      false,
 		CadenceHours:         24,
+		RefreshEnabled:       true,
+		RefreshPerRun:        10,
 		Model:                "gpt-4o-mini",
 		MaxMessagesPerThread: 6,
 		DailyGenerationCap:   200,
@@ -169,6 +177,12 @@ func (s *WarmupGenerationSettings) Normalize() {
 	}
 	if s.DailyGenerationCap < 0 {
 		s.DailyGenerationCap = 0
+	}
+	if s.RefreshPerRun < 1 {
+		s.RefreshPerRun = 10
+	}
+	if s.RefreshPerRun > 25 {
+		s.RefreshPerRun = 25 // matches the per-segment per-run generation cap
 	}
 	s.AISelectionShare = clampPct(s.AISelectionShare)
 	s.Engagement.SpamRescueRate = clampPct(s.Engagement.SpamRescueRate)
