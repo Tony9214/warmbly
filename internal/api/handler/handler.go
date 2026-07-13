@@ -147,6 +147,12 @@ type Handler struct {
 	CreditService    credits.CreditService
 	WritingGenerator generation.WritingGenerator
 
+	// AI provider layer (RunAgent tool-loop backend) + pluggable web search,
+	// shared by the dashboard agent, research, automation AI nodes, and the
+	// inbox agent. Nil when no LLM provider is configured.
+	AIProvider generation.Provider
+	AISearch   generation.SearchClient
+
 	// Seed inbox-placement testing.
 	PlacementRepo    repository.PlacementRepository
 	PlacementService placement.Service

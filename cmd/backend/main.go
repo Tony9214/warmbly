@@ -142,6 +142,8 @@ func main() {
 	var creditRepository repository.CreditRepository
 	var creditService credits.CreditService
 	var writingGenerator generation.WritingGenerator
+	var aiProvider generation.Provider
+	var aiSearch generation.SearchClient
 	var emailVerifyService emailverifyapp.Service
 	var placementRepository repository.PlacementRepository
 	var placementService placement.Service
@@ -550,20 +552,42 @@ func main() {
 		// optional: without OPENAI_API_KEY the live send path simply keeps using
 		// the static library and admin generation returns "not configured".
 		warmupContentRepo = repository.NewWarmupContentRepository(primaryDB.Pool)
+		openaiKey := cfg.GetSecretOptional(ctx, "OPENAI_API_KEY", "openai_api_key", "")
 		var generationClient *generation.GenerationClient
-		if openaiKey := cfg.GetSecretOptional(ctx, "OPENAI_API_KEY", "openai_api_key", ""); openaiKey != "" {
+		if openaiKey != "" {
+			// The SDK client stays dedicated to the warmup Batch API path.
 			generationClient = generation.NewClient(openaiKey)
 		}
 		warmupContentService = warmupcontent.NewService(warmupContentRepo, generationClient)
 
-		// AI writing assistant: prefer Anthropic (claude-haiku free / sonnet paid);
-		// fall back to the existing OpenAI client when ANTHROPIC_API_KEY is unset.
-		// If neither is configured, writingGenerator stays nil and the endpoint
-		// returns 503 "not configured".
-		if anthropicKey := cfg.GetSecretOptional(ctx, "ANTHROPIC_API_KEY", "anthropic_api_key", ""); anthropicKey != "" {
+		// AI provider layer (OpenAI-first; the Anthropic connector is used only
+		// when no OpenAI key is set). One RunAgent tool-loop backend serves every
+		// server-side AI feature; self-hosters retarget it with OPENAI_BASE_URL or
+		// the Anthropic key. Pluggable web search (Serper/SearXNG) backs search_web.
+		anthropicKey := cfg.GetSecretOptional(ctx, "ANTHROPIC_API_KEY", "anthropic_api_key", "")
+		aiSearch = generation.NewSearchClient(
+			cfg.GetStringOptional(ctx, "SEARCH_PROVIDER", "search/provider", ""),
+			cfg.GetStringOptional(ctx, "SEARCH_API_URL", "search/api_url", ""),
+			cfg.GetSecretOptional(ctx, "SEARCH_API_KEY", "search/api_key", ""),
+		)
+		if provider, perr := generation.NewProvider(generation.ProviderConfig{
+			OpenAIAPIKey:     openaiKey,
+			OpenAIBaseURL:    cfg.GetStringOptional(ctx, "OPENAI_BASE_URL", "openai_base_url", ""),
+			OpenAIModelTrial: cfg.GetStringOptional(ctx, "OPENAI_MODEL_TRIAL", "openai_model_trial", ""),
+			OpenAIModelPaid:  cfg.GetStringOptional(ctx, "OPENAI_MODEL_PAID", "openai_model_paid", ""),
+			AnthropicAPIKey:  anthropicKey,
+			Search:           aiSearch,
+		}); perr == nil {
+			aiProvider = provider
+		}
+
+		// Writing assistant generator: the OpenAI provider implements
+		// WritingGenerator directly; the Anthropic connector delegates writing to
+		// the dedicated Anthropic writing client. Neither configured => nil => 503.
+		if wg, ok := aiProvider.(generation.WritingGenerator); ok {
+			writingGenerator = wg
+		} else if anthropicKey != "" {
 			writingGenerator = generation.NewAnthropicClient(anthropicKey)
-		} else if generationClient != nil {
-			writingGenerator = generationClient
 		}
 		creditRepository = repository.NewCreditRepository(primaryDB)
 		creditService = credits.NewService(creditRepository, cache)
@@ -1221,6 +1245,8 @@ func main() {
 		// AI writing assistant + credit ledger
 		CreditService:    creditService,
 		WritingGenerator: writingGenerator,
+		AIProvider:       aiProvider,
+		AISearch:         aiSearch,
 
 		// Pre-send email verification
 		EmailVerifyService: emailVerifyService,
