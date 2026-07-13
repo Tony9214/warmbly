@@ -49,7 +49,8 @@ const (
 	APIPermWarmupRouting // Manage warmup routing rules
 
 	// AI
-	APIPermAIAgent // Run the AI assistant / agent (dashboard agent + MCP)
+	APIPermAIAgent    // Run the AI assistant / agent (dashboard agent + MCP)
+	APIPermAIResearch // Run AI contact research
 )
 
 // AllAPIPermissionsMask is the OR of every defined permission bit.
@@ -67,7 +68,7 @@ const AllAPIPermissionsMask uint64 = APIPermReadEmails | APIPermReadCampaigns |
 	APIPermReadCRM | APIPermWriteCRM |
 	APIPermReadAuditLogs |
 	APIPermIntegrations | APIPermWarmupRouting |
-	APIPermAIAgent
+	APIPermAIAgent | APIPermAIResearch
 
 // Preset permission sets surfaced via GET /api-keys/permissions so a
 // caller can grant a sane default without picking bits by hand.
@@ -84,7 +85,7 @@ var (
 		APIPermWriteTemplates | APIPermWriteCRM |
 		APIPermRealtimeSubscribe | APIPermWebhooks | APIPermAPIKeys |
 		APIPermIntegrations | APIPermWarmupRouting |
-		APIPermAIAgent
+		APIPermAIAgent | APIPermAIResearch
 )
 
 type APIPermission struct {
@@ -118,6 +119,7 @@ var AllAPIPermissions = []APIPermission{
 	{"INTEGRATIONS", APIPermIntegrations, "Connect and manage third-party integrations", "special"},
 	{"WARMUP_ROUTING", APIPermWarmupRouting, "Manage warmup routing rules", "special"},
 	{"AI_AGENT", APIPermAIAgent, "Run the AI assistant and MCP tools", "special"},
+	{"AI_RESEARCH", APIPermAIResearch, "Run AI contact research", "special"},
 }
 
 // HasAPIPermission reports whether the bitmask grants every bit in `required`.

@@ -115,6 +115,18 @@ func (r *creditRepository) EnsureLedger(ctx context.Context, orgID uuid.UUID) (*
 	return l, nil
 }
 
+// scopeKey namespaces a client-supplied idempotency key with the org id, so a
+// key value from one tenant can never replay against (or return) another
+// tenant's ledger entry. Empty stays empty (non-idempotent). Server-generated
+// keys (Stripe event ids, "research:<uuid>") are already unique but are scoped
+// too for uniformity.
+func scopeKey(orgID uuid.UUID, key string) string {
+	if key == "" {
+		return ""
+	}
+	return orgID.String() + ":" + key
+}
+
 // replayByKey returns the prior transaction for an idempotency key, if any.
 // Must run inside the caller's transaction.
 func replayByKey(ctx context.Context, tx pgx.Tx, idempotencyKey string) (*models.CreditTransaction, error) {
@@ -153,6 +165,7 @@ func (r *creditRepository) Consume(ctx context.Context, orgID uuid.UUID, amount 
 	if amount <= 0 {
 		return 0, nil, false, errors.New("consume amount must be positive")
 	}
+	idempotencyKey = scopeKey(orgID, idempotencyKey)
 
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -230,6 +243,7 @@ func (r *creditRepository) grant(ctx context.Context, orgID uuid.UUID, amount in
 	if amount <= 0 {
 		return 0, nil, errors.New("grant amount must be positive")
 	}
+	idempotencyKey = scopeKey(orgID, idempotencyKey)
 
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -289,6 +303,7 @@ func (r *creditRepository) ResetMonthly(ctx context.Context, orgID uuid.UUID, al
 	if allowance < 0 {
 		return nil, errors.New("allowance must be non-negative")
 	}
+	idempotencyKey = scopeKey(orgID, idempotencyKey)
 
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {

@@ -468,6 +468,10 @@ defmodule RealtimeWeb.OrgChannel do
       String.contains?(event_type, "CONTACT") ->
         has.(:view_contacts)
 
+      # AI contact research progress: findings are about contacts.
+      String.contains?(event_type, "RESEARCH") ->
+        has.(:view_contacts)
+
       # Mailbox account + warmup health transitions
       String.contains?(event_type, "ACCOUNT") or String.contains?(event_type, "WARMUP") ->
         has.(:manage_emails)

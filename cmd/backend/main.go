@@ -56,6 +56,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/ratelimit"
 	"github.com/warmbly/warmbly/internal/app/referral"
 	"github.com/warmbly/warmbly/internal/app/releases"
+	"github.com/warmbly/warmbly/internal/app/research"
 	"github.com/warmbly/warmbly/internal/app/sequence"
 	"github.com/warmbly/warmbly/internal/app/settings"
 	"github.com/warmbly/warmbly/internal/app/socket"
@@ -148,6 +149,7 @@ func main() {
 	var aiSearch generation.SearchClient
 	var aiToolRegistry *aitools.Registry
 	var aiAgentService aiagent.Service
+	var researchService research.Service
 	var emailVerifyService emailverifyapp.Service
 	var placementRepository repository.PlacementRepository
 	var placementService placement.Service
@@ -1004,6 +1006,13 @@ func main() {
 				repository.NewAgentRepository(primaryDB),
 				aiToolRegistry, aiProvider, creditService, featureGateService, auditService,
 			)
+			// Contact research agent + its bounded background drain pool.
+			researchService = research.NewService(
+				repository.NewResearchRepository(primaryDB),
+				aiToolRegistry, aiProvider, creditService, featureGateService,
+				contactService, organizationService, streamingPublisher,
+			)
+			researchService.StartDrainPool(ctx)
 		}
 		advancedService = advanced.NewService(
 			advancedRepository,
@@ -1280,6 +1289,7 @@ func main() {
 		AISearch:         aiSearch,
 		AITools:          aiToolRegistry,
 		AIAgentService:   aiAgentService,
+		ResearchService:  researchService,
 
 		// Pre-send email verification
 		EmailVerifyService: emailVerifyService,

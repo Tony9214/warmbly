@@ -68,6 +68,11 @@ All paths below are relative to the versioned base URL `https://api.warmbly.com/
 | DELETE | `/contacts/:id/notes/:noteId` | `WRITE_CONTACTS` |
 | GET | `/contacts/:id/activities` | `READ_CONTACTS` |
 | GET | `/contacts/:id/deals` | `READ_CRM` |
+| POST | `/contacts/:id/research` | `AI_RESEARCH` |
+| GET | `/contacts/:id/research` | `AI_RESEARCH` |
+| POST | `/contacts/research/batch` | `AI_RESEARCH` |
+
+AI contact research charges credits (2 per run, billable even when it finds nothing) and only saves cited findings. See the [AI contact research](/guides/ai-contact-research/) guide. The batch endpoint accepts up to 500 contact ids and drains in the background.
 
 ### Unibox
 

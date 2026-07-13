@@ -75,6 +75,10 @@ const (
 	// API-key subscribers receive it without hosting a public webhook URL.
 	EventCustomFired EventType = "CUSTOM_EVENT"
 
+	// AI contact research progress (org-scoped). Fires as each run completes so
+	// teammates see a batch advance and the contact's research refreshes live.
+	EventAIResearchProgress EventType = "AI_RESEARCH_PROGRESS"
+
 	// In-app notification feed (user-scoped). The web client refreshes the bell
 	// feed + may toast on any event type containing "NOTIFICATION".
 	EventNotificationCreated EventType = "NOTIFICATION_CREATED"
@@ -472,6 +476,43 @@ type AutomationEvent struct {
 
 // PublishAutomationEvent emits an org-scoped automation event. actorID may be
 // uuid.Nil for system-triggered runs (the event reaches org:<id> subscribers).
+// AIResearchEvent is the org-scoped payload for AI_RESEARCH_PROGRESS. OrgID is
+// set on the struct (not BaseEvent) so the Elixir subscriber routes it to the
+// org channel.
+type AIResearchEvent struct {
+	BaseEvent
+	OrgID     string `json:"org_id"`
+	ContactID string `json:"contact_id,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Status    string `json:"status,omitempty"`
+}
+
+// PublishAIResearchProgress emits AI_RESEARCH_PROGRESS for one completed run.
+func (p *StreamingPublisher) PublishAIResearchProgress(ctx context.Context, orgID, actorID uuid.UUID, contactID, runID, status string) {
+	if p == nil || p.client == nil || orgID == uuid.Nil {
+		return
+	}
+	event := &AIResearchEvent{
+		BaseEvent: BaseEvent{
+			EventType: EventAIResearchProgress,
+			UserID:    actorID.String(),
+			Timestamp: time.Now(),
+		},
+		OrgID:     orgID.String(),
+		ContactID: contactID,
+		RunID:     runID,
+		Status:    status,
+	}
+	attrs := map[string]string{
+		"user_id":    actorID.String(),
+		"org_id":     orgID.String(),
+		"event_type": string(EventAIResearchProgress),
+	}
+	if err := p.client.Publish(ctx, TopicUserEvents, event, attrs); err != nil {
+		// Best-effort: realtime is a nicety, not a requirement.
+	}
+}
+
 func (p *StreamingPublisher) PublishAutomationEvent(ctx context.Context, orgID, actorID uuid.UUID, eventType EventType, automationID, name string) {
 	if p == nil || p.client == nil || orgID == uuid.Nil {
 		return

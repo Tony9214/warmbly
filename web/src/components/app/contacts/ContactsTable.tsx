@@ -28,6 +28,7 @@ import {
     RefreshCcwIcon,
     Settings2Icon,
     SheetIcon,
+    SparklesIcon,
     TrashIcon,
     UploadIcon,
     UserPlusIcon,
@@ -37,6 +38,7 @@ import { useConfirm } from "@/hooks/context/confirm";
 import useSearchContacts from "@/lib/api/hooks/app/contacts/useSearchContacts";
 import type SearchContacts from "@/lib/api/models/app/contacts/SearchContacts";
 import useDeleteContacts from "@/lib/api/hooks/app/contacts/useDeleteContacts";
+import { useBatchResearch } from "@/lib/api/hooks/app/contacts/useContactResearch";
 import useIntegrationConnections from "@/lib/api/hooks/app/integrations/useIntegrationConnections";
 import { usePushContacts } from "@/lib/api/hooks/app/integrations/usePushContacts";
 import {
@@ -219,6 +221,22 @@ export default function ContactsTable({
         }
     }
 
+    // Bulk AI research. Confirms the credit cost (2 per contact) before queuing;
+    // runs drain in the background and the tab refreshes live via realtime.
+    const batchResearch = useBatchResearch();
+    function bulkResearch() {
+        if (selected.length === 0) return;
+        const ids = selected;
+        confirm?.show(
+            `Research ${ids.length} ${ids.length === 1 ? "contact" : "contacts"}? This uses up to ${ids.length * 2} AI credits and runs in the background.`,
+            async () => {
+                const res = await batchResearch.mutateAsync({ contactIds: ids, objective: "" });
+                toast.success(`Queued research for ${res.queued} contacts`);
+                setSelected([]);
+            },
+        );
+    }
+
     const embedded = !!current_campaign;
     const tableNode = (
         <ContactsTableBody
@@ -326,6 +344,8 @@ export default function ContactsTable({
                         pushing={pushContacts.isPending}
                         onPush={pushToCRM}
                         onBulkEdit={() => setBulkEdit(true)}
+                        onResearch={bulkResearch}
+                        researching={batchResearch.isPending}
                         onDelete={() =>
                             confirm?.show(
                                 `Are you sure you want to delete ${selected.length} contacts?`,
@@ -531,6 +551,8 @@ export default function ContactsTable({
                 pushing={pushContacts.isPending}
                 onPush={pushToCRM}
                 onBulkEdit={() => setBulkEdit(true)}
+                onResearch={bulkResearch}
+                researching={batchResearch.isPending}
                 onDelete={() =>
                     confirm?.show(
                         `Are you sure you want to delete ${selected.length} contacts?`,
@@ -1057,6 +1079,8 @@ function SelectionBar({
     pushing,
     onPush,
     onBulkEdit,
+    onResearch,
+    researching,
     onDelete,
     onClear,
 }: {
@@ -1066,6 +1090,8 @@ function SelectionBar({
     pushing: boolean;
     onPush: (connectionId: string, providerLabel: string) => void;
     onBulkEdit: () => void;
+    onResearch: () => void;
+    researching: boolean;
     onDelete: () => void;
     onClear: () => void;
 }) {
@@ -1113,6 +1139,15 @@ function SelectionBar({
                 className="h-7 px-2.5 rounded text-[12px] text-slate-700 hover:text-slate-900 hover:bg-slate-100 font-medium transition-colors"
             >
                 Edit
+            </button>
+            <button
+                type="button"
+                onClick={onResearch}
+                disabled={researching}
+                className="h-7 px-2.5 rounded text-[12px] text-slate-700 hover:text-sky-700 hover:bg-sky-50 font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+            >
+                {researching ? <Loader2Icon className="w-3 h-3 animate-spin" /> : <SparklesIcon className="w-3 h-3" />}
+                <span className="hidden sm:inline">Research</span>
             </button>
             <button
                 type="button"

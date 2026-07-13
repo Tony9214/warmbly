@@ -31,6 +31,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/ratelimit"
 	"github.com/warmbly/warmbly/internal/app/referral"
 	"github.com/warmbly/warmbly/internal/app/releases"
+	"github.com/warmbly/warmbly/internal/app/research"
 	"github.com/warmbly/warmbly/internal/app/sequence"
 	"github.com/warmbly/warmbly/internal/app/socket"
 	"github.com/warmbly/warmbly/internal/app/stripe"
@@ -162,6 +163,9 @@ type Handler struct {
 	// AIAgentService orchestrates the dashboard agent (sessions, SSE runs,
 	// approvals, per-iteration credits). Nil when no LLM provider is configured.
 	AIAgentService aiagent.Service
+
+	// ResearchService runs the AI contact-research agent (sync + batch).
+	ResearchService research.Service
 
 	// Seed inbox-placement testing.
 	PlacementRepo    repository.PlacementRepository

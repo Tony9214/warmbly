@@ -79,6 +79,12 @@ type CreditService interface {
 	// Stripe event id) makes webhook retries safe.
 	ResetMonthlyAllowance(ctx context.Context, orgID uuid.UUID, allowance int, idempotencyKey string) error
 
+	// CheckUsageCaps returns ErrCapExceeded when the org has hit a rolling 5h
+	// or daily generation cap, WITHOUT consuming. Lets a caller gate expensive
+	// AI work (e.g. a research run) before doing it, so a cap trip at charge
+	// time does not waste a full run.
+	CheckUsageCaps(ctx context.Context, orgID uuid.UUID) error
+
 	// ListTransactions returns recent ledger transactions, newest first.
 	ListTransactions(ctx context.Context, orgID uuid.UUID, limit int) ([]models.CreditTransaction, *errx.Error)
 
@@ -183,6 +189,10 @@ func (s *creditService) ResetMonthlyAllowance(ctx context.Context, orgID uuid.UU
 	}
 	_, err := s.repo.ResetMonthly(ctx, orgID, allowance, idempotencyKey)
 	return err
+}
+
+func (s *creditService) CheckUsageCaps(ctx context.Context, orgID uuid.UUID) error {
+	return s.checkCaps(ctx, orgID, "")
 }
 
 func (s *creditService) ListTransactions(ctx context.Context, orgID uuid.UUID, limit int) ([]models.CreditTransaction, *errx.Error) {

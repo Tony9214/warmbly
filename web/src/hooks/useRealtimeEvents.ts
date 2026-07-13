@@ -80,6 +80,18 @@ export function useRealtimeEvents() {
         return
       }
 
+      // AI contact research finished for one contact (batch progress arrives as
+      // one of these per completion).
+      if (includes('AI_RESEARCH', 'RESEARCH_PROGRESS')) {
+        invalidate([['contacts']])
+        if (contactId)
+          invalidate([
+            ['contacts', contactId],
+            ['contacts', contactId, 'research'],
+          ])
+        return
+      }
+
       if (includes('CONTACT')) {
         invalidate([
           ['contacts'],

@@ -405,6 +405,13 @@ func Run(
 				contacts.GET("/:id/emails", m.RequireAccess(models.PermViewContacts, models.APIPermReadContacts), h.ListContactEmails)
 				contacts.GET("/:id/timeline", m.RequireAccess(models.PermViewContacts, models.APIPermReadContacts), h.ListContactTimeline)
 
+				// AI contact research (dedicated AI_RESEARCH scope; JWT callers by
+				// the matching contact permission). Batch queues and drains in the
+				// background; the sync run executes in the request.
+				contacts.POST("/research/batch", m.RequireAccess(models.PermManageContacts, models.APIPermAIResearch), h.BatchResearch)
+				contacts.POST("/:id/research", m.RequireAccess(models.PermManageContacts, models.APIPermAIResearch), h.ResearchContact)
+				contacts.GET("/:id/research", m.RequireAccess(models.PermViewContacts, models.APIPermAIResearch), h.ListContactResearch)
+
 				// CRM: Notes & Activities (under contacts)
 				contacts.GET("/:id/notes", m.RequireAccess(models.PermViewContacts, models.APIPermReadContacts), h.ListContactNotes)
 				contacts.POST("/:id/notes", m.RequireAccess(models.PermManageContacts, models.APIPermWriteContacts), h.CreateContactNote)

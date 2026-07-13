@@ -119,6 +119,37 @@ func (r *Registry) ToolDefs(inv Invocation) []generation.ToolDef {
 	return defs
 }
 
+// ToolDefsByName returns bound ToolDefs for only the named tools the invocation
+// is permitted to use (unknown or unpermitted names are skipped). Feature agents
+// (e.g. contact research) use this to pull a specific subset like search_web +
+// fetch_url without exposing the whole registry.
+func (r *Registry) ToolDefsByName(inv Invocation, names ...string) []generation.ToolDef {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	defs := make([]generation.ToolDef, 0, len(names))
+	for _, name := range r.order {
+		if !want[name] {
+			continue
+		}
+		t := r.tools[name]
+		if !t.allowed(inv) {
+			continue
+		}
+		defs = append(defs, generation.ToolDef{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+			Risk:        t.Risk,
+			Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+				return t.Handler(ctx, inv, args)
+			},
+		})
+	}
+	return defs
+}
+
 // Call invokes a single tool by name under inv, enforcing its permission gate.
 // Used by the MCP server (M8) tools/call and anywhere a direct single-tool
 // invocation is needed. Returns ErrToolNotFound / ErrToolForbidden as needed.
