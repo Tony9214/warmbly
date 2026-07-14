@@ -339,6 +339,7 @@ func main() {
 		orgRepoConsumer,
 		uniboxRepo,
 		nil, // skills preamble optional; not constructed in the consumer
+		contactRepo,
 		repository.NewAIDraftRepository(primaryDB.Pool),
 		streamingPublisher,
 	)

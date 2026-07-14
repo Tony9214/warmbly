@@ -17,6 +17,7 @@ import (
 
 	"github.com/warmbly/warmbly/internal/app/credits"
 	"github.com/warmbly/warmbly/internal/app/feature"
+	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/pkg/generation"
 	"github.com/warmbly/warmbly/internal/repository"
@@ -44,6 +45,12 @@ type SkillsSource interface {
 	EnabledPreamble(ctx context.Context, orgID uuid.UUID) string
 }
 
+// ContactReader optionally grounds the draft in the counterpart contact's CRM
+// record (name, company, custom fields). Satisfied by repository.ContactRepository.
+type ContactReader interface {
+	GetByID(ctx context.Context, contactID uuid.UUID) (*models.Contact, *errx.Error)
+}
+
 // DraftPublisher emits the AI_DRAFT_READY realtime event (*pubsub.StreamingPublisher).
 type DraftPublisher interface {
 	PublishAIDraftReady(ctx context.Context, orgID, actorID uuid.UUID, threadID, draftID, emailID string)
@@ -63,6 +70,7 @@ type service struct {
 	orgs      OrgReader
 	threads   ThreadReader
 	skills    SkillsSource
+	contacts  ContactReader
 	draftRepo repository.AIDraftRepository
 	publisher DraftPublisher
 }
@@ -77,6 +85,7 @@ func NewService(
 	orgs OrgReader,
 	threads ThreadReader,
 	skills SkillsSource,
+	contacts ContactReader,
 	draftRepo repository.AIDraftRepository,
 	publisher DraftPublisher,
 ) Service {
@@ -87,6 +96,7 @@ func NewService(
 		orgs:      orgs,
 		threads:   threads,
 		skills:    skills,
+		contacts:  contacts,
 		draftRepo: draftRepo,
 		publisher: publisher,
 	}
@@ -168,7 +178,7 @@ func (s *service) draft(ctx context.Context, r models.InboxAgentReply) {
 	model := s.provider.ModelForTier(true) // inbox agent is paid-only
 	res, gerr := s.provider.Complete(ctx, generation.CompletionRequest{
 		System: system,
-		Prompt: buildReplyPrompt(history),
+		Prompt: buildReplyPrompt(history, s.contactGrounding(ctx, r.ContactID)),
 		Model:  model,
 	})
 	if gerr != nil || res == nil || strings.TrimSpace(res.Text) == "" {
@@ -245,12 +255,49 @@ func (s *service) threadHistory(ctx context.Context, orgID uuid.UUID, threadID s
 	return strings.TrimSpace(b.String())
 }
 
-func buildReplyPrompt(history string) string {
+func buildReplyPrompt(history, contactCtx string) string {
 	var b strings.Builder
 	b.WriteString("Thread so far (oldest first):\n\n")
 	b.WriteString(history)
+	if contactCtx != "" {
+		b.WriteString("\n\n")
+		b.WriteString(contactCtx)
+	}
 	b.WriteString("\n\nWrite a reply to the most recent message in this thread. Keep it natural and specific to what they said.")
 	return b.String()
+}
+
+// contactGrounding renders a compact CRM block for the counterpart contact
+// (name, company, known custom fields), or "" when there is no contact or no
+// reader wired. Best-effort: a lookup failure just drops the grounding.
+func (s *service) contactGrounding(ctx context.Context, contactID uuid.UUID) string {
+	if s.contacts == nil || contactID == uuid.Nil {
+		return ""
+	}
+	c, err := s.contacts.GetByID(ctx, contactID)
+	if err != nil || c == nil {
+		return ""
+	}
+	var b strings.Builder
+	if name := strings.TrimSpace(c.FirstName + " " + c.LastName); name != "" {
+		b.WriteString("Contact: " + name)
+		if c.Company != "" {
+			b.WriteString(" at " + c.Company)
+		}
+		b.WriteString("\n")
+	}
+	if len(c.CustomFields) > 0 {
+		parts := make([]string, 0, len(c.CustomFields))
+		for k, v := range c.CustomFields {
+			if k = strings.TrimSpace(k); k != "" && strings.TrimSpace(v) != "" {
+				parts = append(parts, k+": "+v)
+			}
+		}
+		if len(parts) > 0 {
+			b.WriteString("Known details: " + strings.Join(parts, ", ") + "\n")
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // replySubject prefixes "Re: " once, mirroring a normal reply subject.

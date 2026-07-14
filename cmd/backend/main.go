@@ -1105,7 +1105,7 @@ func main() {
 		advancedService.WireInboxAgent(inboxagent.NewService(
 			aiProvider, creditService, featureGateService,
 			organizationRepository, uniboxRepository, skillsService,
-			aiDraftRepo, streamingPublisher,
+			contactRepostory, aiDraftRepo, streamingPublisher,
 		))
 		emailSender := tasks.NewEmailSender(emailRepostory, eventsPublisher)
 		tasksService = tasks.NewService(
