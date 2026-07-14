@@ -17,6 +17,7 @@ import (
 
 	"github.com/warmbly/warmbly/internal/app/credits"
 	"github.com/warmbly/warmbly/internal/app/feature"
+	"github.com/warmbly/warmbly/internal/app/replyclassify"
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/models"
 	"github.com/warmbly/warmbly/internal/pkg/generation"
@@ -137,6 +138,13 @@ func (s *service) draft(ctx context.Context, r models.InboxAgentReply) {
 	// Per-org opt-in + voice grounding come from the org row.
 	org, oerr := s.orgs.GetByID(ctx, r.OrganizationID)
 	if oerr != nil || org == nil || !org.InboxAgentEnabled {
+		return
+	}
+
+	// A trivial ack ("thanks", "ok, got it") does not warrant a paid reply
+	// draft. Reuse the classifier's content-sanity gate so an org isn't charged
+	// 5 credits to reply to one-liners.
+	if !replyclassify.WorthModeling(replyclassify.Input{BodyText: r.Snippet}) {
 		return
 	}
 

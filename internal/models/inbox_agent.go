@@ -59,6 +59,9 @@ type InboxAgentReply struct {
 	// Counterpart is the human who replied — the recipient of the drafted reply.
 	Counterpart string
 	Subject     string
+	// Snippet is the inbound reply's body preview, used to skip drafting a reply
+	// to a trivial ack ("thanks", "ok") that isn't worth a paid draft.
+	Snippet string
 	// InReplyTo is the RFC Message-Id of the inbound reply (referenced on send).
 	InReplyTo   string
 	ContactID   uuid.UUID
