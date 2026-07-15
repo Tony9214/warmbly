@@ -48,6 +48,9 @@ export type AgentTab = {
   credits: number | null
   budget: number
   iteration: number
+  // True when this conversation is running on a free/local model (AI_LOCAL_MODEL):
+  // the composer shows a "free model" notice and no credits are charged.
+  freeModel: boolean
 }
 
 let tabSeq = 0
@@ -65,6 +68,7 @@ function makeTab(partial?: Partial<AgentTab>): AgentTab {
     credits: null,
     budget: 20,
     iteration: 0,
+    freeModel: false,
     ...partial,
   }
 }
