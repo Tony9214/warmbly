@@ -44,9 +44,13 @@ Sending is different. If an action would send mail it is never auto-approved, an
 
 When you ask the assistant to build a campaign or an automation, it creates it as a **draft** (a campaign is never started, an automation is left disabled) and gives you a button to open it in the real editor. You review, adjust, and turn it on yourself. Nothing the assistant builds goes live on its own.
 
+Any email copy or reply the assistant writes is grounded in your workspace [voice profile](/guides/unibox/#ai-reply-drafts) (what you sell, who you sell to, and your house voice, set under Settings, Workspace), and runs through the same human-writing rules as the rest of Warmbly, so it reads like a real person and not like AI.
+
 ## Credits and limits
 
 Each step the assistant takes costs one AI credit, and a single request is capped at a set number of steps (shown as the run progresses) so a question can never run away. The credits remaining are shown at the bottom of the panel. If you run out, the assistant stops and tells you; see [AI credits](/guides/ai-credits/) for how allowances and top-ups work.
+
+On a self-hosted install pointed at a free or local model, runs are not charged and the assistant shows a "free model" notice, since a smaller local model can produce lower-quality answers.
 
 You can stop a run at any time with the stop button, and start a fresh conversation with **New**.
 

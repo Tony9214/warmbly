@@ -206,6 +206,22 @@ cd realtime
 mix deps.get && mix phx.server
 ```
 
+## Free local AI model
+
+The AI features (the dashboard assistant, reply drafts, contact research, and automation AI nodes) are off by default in local dev, so the assistant returns a clean `503` until you configure a provider. You do not need a paid OpenAI key to develop against them: the provider is a plain OpenAI-compatible client, so a local model served by [Ollama](https://ollama.com/) works.
+
+```bash
+# one-time: install Ollama, then pull a tool-capable model
+ollama pull llama3.1        # or qwen2.5
+
+# run the backend against it
+make backend AI_LOCAL=1
+# override the model or host if you like
+make run AI_LOCAL=1 OLLAMA_MODEL=qwen2.5
+```
+
+`AI_LOCAL=1` points the backend at `http://localhost:11434/v1`, uses the local model for both tiers, and sets `AI_LOCAL_MODEL=true`. That flag marks the model as free/local, so AI credits are not charged and the assistant shows a "free model" notice. Local models are less capable, but tool calls and the full agent loop work. Leave `AI_LOCAL` unset to keep AI off.
+
 ## Mailpit
 
 All outbound mail is captured by Mailpit. The backend uses plain SMTP (`mailpit:1025`) in dev rather than SES, so no AWS credentials are needed. Mailpit accepts SMTP AUTH with any credentials (no TLS required), so worker sends from sandbox mailboxes are captured too.

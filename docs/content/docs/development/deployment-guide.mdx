@@ -93,6 +93,31 @@ RELEASES_WEBHOOK_SECRET=<shared with GitHub>
 RELEASES_GITHUB_TOKEN=<optional PAT for higher API limits>
 ```
 
+AI provider (optional; omit all of it to run with the AI features off, in which case the assistant returns a clean `503`). Warmbly is OpenAI-first, but the provider is a plain OpenAI-compatible client, so any compatible endpoint works. Set these on the backend and the consumer:
+
+```
+OPENAI_API_KEY=sk-...              # required to turn AI on
+OPENAI_MODEL_TRIAL=gpt-4o-mini     # optional; model for trial orgs
+OPENAI_MODEL_PAID=gpt-4o           # optional; model for paid orgs
+OPENAI_BASE_URL=                   # optional; override for a compatible endpoint
+
+ANTHROPIC_API_KEY=                 # optional connector, used only when OPENAI_API_KEY is unset
+
+SEARCH_PROVIDER=                   # optional; enables the assistant's web-search tool
+SEARCH_API_URL=
+SEARCH_API_KEY=
+```
+
+Self-hosted or local model (Ollama, vLLM, LocalAI, and similar): point `OPENAI_BASE_URL` at the compatible endpoint, use any placeholder for `OPENAI_API_KEY` (it becomes the ignored bearer token), and set the model ids your endpoint serves. Set `AI_LOCAL_MODEL=true` to mark it as a free/local model, which skips AI credit charges and shows a "free model" notice in the assistant.
+
+```
+OPENAI_API_KEY=ollama
+OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_MODEL_TRIAL=llama3.1         # or qwen2.5, etc.
+OPENAI_MODEL_PAID=llama3.1
+AI_LOCAL_MODEL=true
+```
+
 A full env reference is `deploy/config/env.example`.
 
 ## Step 3: Build and push images
