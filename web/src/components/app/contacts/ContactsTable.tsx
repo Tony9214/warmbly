@@ -950,6 +950,7 @@ const LEAD_META: Record<
 > = {
     pending: { label: "Queued", dot: "bg-slate-300", text: "text-slate-500", Icon: ClockIcon },
     active: { label: "Processing", dot: "bg-sky-500", text: "text-sky-700", Icon: ClockIcon },
+    completed: { label: "Done", dot: "bg-indigo-500", text: "text-indigo-700", Icon: CheckIcon },
     replied: { label: "Replied", dot: "bg-emerald-500", text: "text-emerald-700", Icon: CornerUpLeftIcon },
     bounced: { label: "Bounced", dot: "bg-rose-500", text: "text-rose-600", Icon: AlertTriangleIcon },
     unsubscribed: { label: "Unsubscribed", dot: "bg-slate-300", text: "text-slate-400", Icon: BanIcon },
@@ -989,6 +990,7 @@ function LeadProgressStrip({
         const c: Record<LeadStatus, number> = {
             pending: 0,
             active: 0,
+            completed: 0,
             replied: 0,
             bounced: 0,
             unsubscribed: 0,
@@ -1002,6 +1004,7 @@ function LeadProgressStrip({
 
     const segs: { key: LeadStatus; color: string }[] = [
         { key: "active", color: "bg-sky-500" },
+        { key: "completed", color: "bg-indigo-500" },
         { key: "replied", color: "bg-emerald-500" },
         { key: "pending", color: "bg-slate-300" },
         { key: "bounced", color: "bg-rose-400" },
@@ -1025,6 +1028,7 @@ function LeadProgressStrip({
             </div>
             <div className="flex items-center gap-3 text-[11px] flex-wrap">
                 <StripChip dot="bg-sky-500" label="Processing" n={counts.active} loader={counts.active > 0} />
+                <StripChip dot="bg-indigo-500" label="Done" n={counts.completed} />
                 <StripChip dot="bg-emerald-500" label="Replied" n={counts.replied} />
                 <StripChip dot="bg-slate-300" label="Queued" n={counts.pending} />
                 <StripChip dot="bg-rose-400" label="Bounced" n={counts.bounced} />
