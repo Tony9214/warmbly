@@ -247,6 +247,7 @@ func main() {
 		OpenAIModelTrial: cfg.GetStringOptional(ctx, "OPENAI_MODEL_TRIAL", "openai_model_trial", ""),
 		OpenAIModelPaid:  cfg.GetStringOptional(ctx, "OPENAI_MODEL_PAID", "openai_model_paid", ""),
 		AnthropicAPIKey:  cfg.GetSecretOptional(ctx, "ANTHROPIC_API_KEY", "anthropic_api_key", ""),
+		Local:            cfg.GetBoolOptional(ctx, "AI_LOCAL_MODEL", "ai_local_model", false),
 	}); perr == nil {
 		aiProviderC = p
 	}

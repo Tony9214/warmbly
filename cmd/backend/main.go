@@ -590,6 +590,7 @@ func main() {
 			OpenAIModelPaid:  cfg.GetStringOptional(ctx, "OPENAI_MODEL_PAID", "openai_model_paid", ""),
 			AnthropicAPIKey:  anthropicKey,
 			Search:           aiSearch,
+			Local:            cfg.GetBoolOptional(ctx, "AI_LOCAL_MODEL", "ai_local_model", false),
 		}); perr == nil {
 			aiProvider = provider
 		}
@@ -1023,6 +1024,7 @@ func main() {
 			aiAgentService = aiagent.NewService(
 				repository.NewAgentRepository(primaryDB),
 				aiToolRegistry, aiProvider, creditService, featureGateService, auditService, skillsService,
+				aiagent.NewVoicePreamble(organizationService),
 			)
 			// Contact research agent + its bounded background drain pool.
 			researchService = research.NewService(
