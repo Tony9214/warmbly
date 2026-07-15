@@ -108,6 +108,7 @@ export default function AgentPanel() {
                           }
                         : null,
                     title: tr.title || t.title,
+                    freeModel: tr.free_model ?? t.freeModel,
                     hydrated: true,
                 }));
             })
@@ -154,6 +155,7 @@ export default function AgentPanel() {
                         ...(typeof ev.iteration === "number"
                             ? { iteration: ev.iteration }
                             : {}),
+                        ...(ev.free_model ? { freeModel: true } : {}),
                     });
                     return;
                 }
@@ -408,9 +410,18 @@ export default function AgentPanel() {
                                 </button>
                             )}
                         </div>
+                        {activeTab?.freeModel && (
+                            <div className="mt-2 flex items-center gap-1.5 text-[10.5px] text-amber-600">
+                                <AlertTriangleIcon className="w-3 h-3 shrink-0" />
+                                <span>
+                                    Free local model. Responses may be lower quality, and
+                                    nothing is charged.
+                                </span>
+                            </div>
+                        )}
                         <div className="mt-2 flex items-center justify-between text-[10.5px] text-slate-400">
                             <span>Read actions run automatically. Writes ask first.</span>
-                            {activeTab?.credits != null && (
+                            {!activeTab?.freeModel && activeTab?.credits != null && (
                                 <span className="font-mono tabular-nums">
                                     {activeTab.credits.toLocaleString()} credits
                                 </span>
