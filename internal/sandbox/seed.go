@@ -147,6 +147,9 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 	if err := deactivateIdleFixtureWorkers(ctx, pool); err != nil {
 		return err
 	}
+	if err := deactivateFixtureMailboxes(ctx, pool); err != nil {
+		return err
+	}
 
 	fmt.Println("sandbox seeded:")
 	fmt.Printf("  dashboard  %s / %s (org: Sunrise Labs)\n", SandboxLoginEmail, SandboxLoginPassword)
@@ -494,6 +497,30 @@ func deactivateIdleFixtureWorkers(ctx context.Context, pool *pgxpool.Pool) error
 	}
 	if n := tag.RowsAffected(); n > 0 {
 		fmt.Printf("  deactivated %d fixture workers not running in the native stack\n", n)
+	}
+	return nil
+}
+
+// deactivateFixtureMailboxes turns off the base-fixture demo mailboxes (the Acme
+// and Globex orgs), which ship with fake, unsealed placeholder credentials and
+// point at hosts that don't exist. Left active + worker-assigned, the worker
+// reconciler tries to decrypt their placeholder credentials every cycle and logs
+// a load failure (invalid-hex on the "seed-fake-..." value). The sandbox runs
+// entirely on the real Sunrise mailboxes, so quiet everything else: unassign it
+// from a worker and mark it inactive so the reconciler, warmup scheduler, and
+// placement all skip it. Idempotent; `make seed` re-activates them for the
+// docker sim flow.
+func deactivateFixtureMailboxes(ctx context.Context, pool *pgxpool.Pool) error {
+	tag, err := pool.Exec(ctx, `
+		UPDATE email_accounts
+		SET status = 'inactive', worker_id = NULL, updated_at = NOW()
+		WHERE organization_id <> $1 AND (status = 'active' OR worker_id IS NOT NULL)`,
+		sandboxOrg)
+	if err != nil {
+		return err
+	}
+	if n := tag.RowsAffected(); n > 0 {
+		fmt.Printf("  deactivated %d fixture mailboxes with placeholder credentials\n", n)
 	}
 	return nil
 }
