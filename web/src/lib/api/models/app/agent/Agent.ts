@@ -52,6 +52,7 @@ export interface AgentTranscript {
     title: string;
     turns: AgentHydratedTurn[];
     pending: PendingAgentTool | null;
+    free_model?: boolean;
 }
 
 // AgentStreamEvent is one SSE step from a message/approval run.
@@ -73,6 +74,9 @@ export interface AgentStreamEvent {
     iteration?: number;
     credits_remaining?: number;
     budget?: number;
+    // True when the run is on a free/local model (AI_LOCAL_MODEL): the client
+    // warns the user and no credits are charged.
+    free_model?: boolean;
     code?: string;
     message?: string;
     entity_type?: string;
