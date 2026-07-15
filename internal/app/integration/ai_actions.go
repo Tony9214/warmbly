@@ -93,20 +93,23 @@ func (s *service) execAIAction(ctx context.Context, a models.Automation, n model
 	}
 
 	// gate -> consume(Idempotency-Key) -> call -> refund-on-failure. The key is
-	// scoped to this run + node so a retried walk never double-charges.
+	// scoped to this run + node so a retried walk never double-charges. A
+	// free/local model (AI_LOCAL_MODEL) runs un-metered, so skip the charge.
 	model := s.aiProvider.ModelForTier(false)
 	idemKey := "auto_ai:" + stringFromMap(data, automationRunIDKey) + ":" + n.ID
-	if _, cerr := s.credits.Consume(ctx, a.OrganizationID, aiNodeCredits, "automation_ai", model, 0, idemKey); cerr != nil {
-		switch {
-		case errors.Is(cerr, credits.ErrInsufficientCredits):
-			if feedPause {
-				s.noteAICreditFailure(ctx, a)
+	if !s.aiProvider.IsLocal() {
+		if _, cerr := s.credits.Consume(ctx, a.OrganizationID, aiNodeCredits, "automation_ai", model, 0, idemKey); cerr != nil {
+			switch {
+			case errors.Is(cerr, credits.ErrInsufficientCredits):
+				if feedPause {
+					s.noteAICreditFailure(ctx, a)
+				}
+				return fmt.Errorf("out of AI credits: this step needs %d credit", aiNodeCredits)
+			case errors.Is(cerr, credits.ErrCapExceeded):
+				return errors.New("AI usage cap reached; try again later")
+			default:
+				return cerr
 			}
-			return fmt.Errorf("out of AI credits: this step needs %d credit", aiNodeCredits)
-		case errors.Is(cerr, credits.ErrCapExceeded):
-			return errors.New("AI usage cap reached; try again later")
-		default:
-			return cerr
 		}
 	}
 
