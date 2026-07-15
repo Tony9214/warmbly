@@ -70,7 +70,14 @@ type WritingGenerator interface {
 	// tier (paid → stronger model). The handler calls this rather than knowing
 	// which concrete provider is active.
 	ModelForTier(paid bool) string
+
+	// IsLocal reports whether this is an explicitly free/local backend
+	// (AI_LOCAL_MODEL). The writing surfaces skip credit charges when true.
+	IsLocal() bool
 }
+
+// IsLocal is always false for the Anthropic writing client (hosted API).
+func (c *AnthropicClient) IsLocal() bool { return false }
 
 // ModelForTier returns the Anthropic writing model ID for the org's tier.
 func (c *AnthropicClient) ModelForTier(paid bool) string {

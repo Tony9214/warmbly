@@ -16,6 +16,11 @@ func (c *GenerationClient) ModelForTier(paid bool) string {
 	return ModelWritingFreeOpenAI
 }
 
+// IsLocal is false: GenerationClient targets the hosted OpenAI API (batch /
+// conversation paths); a local OpenAI-compatible endpoint uses openAIProvider as
+// the WritingGenerator instead.
+func (c *GenerationClient) IsLocal() bool { return false }
+
 // GenerateWriting implements WritingGenerator using the existing OpenAI client.
 // It is the fallback provider used only when ANTHROPIC_API_KEY is unset but
 // OPENAI_API_KEY is present. The handler depends on the WritingGenerator
