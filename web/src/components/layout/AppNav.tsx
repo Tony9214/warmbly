@@ -626,6 +626,9 @@ function LivePanel() {
     }, [emails]);
 
     const live = connection === "connected";
+    // Connected == green, always. When quiet we say READY (not the old "IDLE",
+    // which with a gray dot read as "not connected"); when a mailbox is warming
+    // or sending we say LIVE and pulse. Only a real disconnect is gray.
     const label =
         connection === "disconnected"
             ? "OFFLINE"
@@ -633,7 +636,19 @@ function LivePanel() {
                 ? "CONNECTING"
                 : active > 0
                     ? "LIVE"
-                    : "IDLE";
+                    : "READY";
+    const dotClass =
+        connection === "disconnected"
+            ? "bg-slate-300"
+            : connection === "connecting"
+                ? "bg-amber-500"
+                : "bg-emerald-500";
+    const labelTone =
+        connection === "disconnected"
+            ? "text-slate-400"
+            : connection === "connecting"
+                ? "text-amber-600"
+                : "text-emerald-600";
 
     // Latency bucketing: <100ms great, <300ms okay, ≥300ms poor.
     const latencyTone =
@@ -652,23 +667,21 @@ function LivePanel() {
         >
             <div className="flex items-center gap-1.5">
                 <span className="relative inline-flex shrink-0">
-                    <span
-                        className={cn(
-                            "w-1.5 h-1.5 rounded-full",
-                            connection === "disconnected"
-                                ? "bg-slate-400"
-                                : connection === "connecting"
-                                    ? "bg-amber-500"
-                                    : active > 0
-                                        ? "bg-emerald-500"
-                                        : "bg-slate-400",
-                        )}
-                    />
-                    {live && active > 0 && (
+                    <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} />
+                    {/* Active mailboxes pulse; a quiet-but-connected workspace gets a
+                        soft static halo so "READY" still reads as clearly online. */}
+                    {live && active > 0 ? (
                         <span className="absolute inset-0 rounded-full bg-emerald-500/40 animate-ping" />
-                    )}
+                    ) : live ? (
+                        <span className="absolute -inset-[3px] rounded-full ring-2 ring-emerald-500/20" />
+                    ) : null}
                 </span>
-                <span className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">
+                <span
+                    className={cn(
+                        "text-[10px] uppercase tracking-[0.14em] font-semibold",
+                        labelTone,
+                    )}
+                >
                     {label}
                 </span>
                 <span
