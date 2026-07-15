@@ -227,14 +227,17 @@ func (s *service) draft(ctx context.Context, r models.InboxAgentReply) {
 	// the reserved row so no free draft lingers. Delete on a FRESH context: the
 	// draft ctx may be near its deadline after a slow completion, and a failed
 	// delete would orphan an unpaid pending draft that could later be
-	// approved-and-sent for free.
-	if _, chErr := s.credits.Consume(ctx, r.OrganizationID, credits.CostInboxAgentThread, "inbox_agent_draft", res.Model, res.TokensUsed, "inbox_agent:"+draft.ID.String()); chErr != nil {
-		delCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if derr := s.draftRepo.DeleteDraft(delCtx, draft.ID); derr != nil {
-			log.Error().Err(derr).Str("draft_id", draft.ID.String()).Msg("inbox agent: failed to unwind unpaid draft after credit charge failure")
+	// approved-and-sent for free. A free/local model (AI_LOCAL_MODEL) runs
+	// un-metered, so skip the charge (and the unwind).
+	if !s.provider.IsLocal() {
+		if _, chErr := s.credits.Consume(ctx, r.OrganizationID, credits.CostInboxAgentThread, "inbox_agent_draft", res.Model, res.TokensUsed, "inbox_agent:"+draft.ID.String()); chErr != nil {
+			delCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if derr := s.draftRepo.DeleteDraft(delCtx, draft.ID); derr != nil {
+				log.Error().Err(derr).Str("draft_id", draft.ID.String()).Msg("inbox agent: failed to unwind unpaid draft after credit charge failure")
+			}
+			return
 		}
-		return
 	}
 
 	// Live: the whole team sees the draft land on the thread awaiting review. The
