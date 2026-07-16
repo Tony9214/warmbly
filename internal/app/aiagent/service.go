@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -451,6 +452,9 @@ func (s *service) runLoop(ctx context.Context, inv aitools.Invocation, sess *mod
 
 	result, rerr := s.provider.RunAgent(ctx, req)
 	if rerr != nil {
+		// The client only ever sees the generic message; the real cause goes to
+		// the server log so a failing provider is debuggable.
+		log.Printf("aiagent: run failed (org=%s session=%s provider=%s model=%s): %v", inv.OrgID, sess.ID, s.provider.Name(), model, rerr)
 		// The credit for the failed iteration was charged before the model call
 		// (PreIteration); refund it so the user is not billed for output they
 		// never received. Nothing to refund on the free/local path.
@@ -465,7 +469,9 @@ func (s *service) runLoop(ctx context.Context, inv aitools.Invocation, sess *mod
 
 	// Persist the new transcript tail.
 	if len(result.Messages) > baseline {
-		_ = s.persist(ctx, sess.OrgID, sess.UserID, sess.ID, result.Messages[baseline:], result.TokensUsed)
+		if perr := s.persist(ctx, sess.OrgID, sess.UserID, sess.ID, result.Messages[baseline:], result.TokensUsed); perr != nil {
+			log.Printf("aiagent: transcript persist failed (org=%s session=%s): %v", inv.OrgID, sess.ID, perr)
+		}
 	}
 
 	switch result.StopReason {
