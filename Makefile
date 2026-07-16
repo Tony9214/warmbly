@@ -351,24 +351,28 @@ CREDENTIALS_KEY_DEV := 0123456789abcdef0123456789abcdef0123456789abcdef012345678
 # CODEC_PROVIDER=json: the worker command/result envelopes carry `any`
 # bodies that Avro cannot serialize, so worker messaging only works on the
 # JSON codec. tracking-events stays Avro (dedicated Avrov2 path).
-# Free local AI model for dev. Off by default: with no key the assistant returns
-# a clean 503, so nothing accidentally hits an Ollama that isn't running. Turn it
-# on with `make backend AI_LOCAL=1` (needs `ollama serve` + `ollama pull llama3.1`).
-# Any OpenAI-compatible endpoint works; override host/model as needed. AI_LOCAL_MODEL
-# tells the backend this is a free/local model, so it skips credit charges and the
-# assistant shows a "free model" notice.
-AI_LOCAL ?=
-OLLAMA_HOST ?= localhost
-OLLAMA_MODEL ?= llama3.1
-ifeq ($(AI_LOCAL),1)
-AI_DEV_ENV := \
-	OPENAI_API_KEY=ollama \
-	OPENAI_BASE_URL=http://$(OLLAMA_HOST):11434/v1 \
-	OPENAI_MODEL_TRIAL=$(OLLAMA_MODEL) \
-	OPENAI_MODEL_PAID=$(OLLAMA_MODEL) \
-	AI_LOCAL_MODEL=true
-else
+# AI provider for dev. Off by default (no provider => the assistant returns a
+# clean 503). Pick a backend with AI_PROVIDER and supply a key + model; the preset
+# fills in the base URL. AI_PROVIDER=ollama runs a free local model with no key.
+#   make backend AI_PROVIDER=ollama                                    # free, local, no key
+#   make backend AI_PROVIDER=openrouter AI_KEY=sk-or-... AI_MODEL=deepseek/deepseek-chat
+#   make backend AI_PROVIDER=groq AI_KEY=gsk_... AI_MODEL=openai/gpt-oss-20b
+#   make backend AI_PROVIDER=openai AI_KEY=sk-...
+# Switch models by changing AI_MODEL (OpenRouter fronts every vendor). AI_FREE=true
+# marks a free model so credits are not charged; ollama sets it automatically.
+AI_PROVIDER ?=
+AI_KEY ?=
+AI_MODEL ?=
+AI_BASE_URL ?=
+AI_FREE ?=
+ifeq ($(AI_PROVIDER),)
 AI_DEV_ENV :=
+else
+AI_DEV_ENV := AI_PROVIDER=$(AI_PROVIDER) \
+	$(if $(AI_KEY),AI_API_KEY=$(AI_KEY),) \
+	$(if $(AI_MODEL),AI_MODEL=$(AI_MODEL),) \
+	$(if $(AI_BASE_URL),AI_BASE_URL=$(AI_BASE_URL),) \
+	$(if $(AI_FREE),AI_FREE=$(AI_FREE),)
 endif
 
 GO_DEV_ENV := \
