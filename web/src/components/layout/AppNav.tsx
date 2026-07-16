@@ -679,7 +679,7 @@ function LivePanel() {
                     {live && active > 0 ? (
                         <span className="absolute inset-0 rounded-full bg-emerald-500/40 animate-ping" />
                     ) : live ? (
-                        <span className="absolute -inset-[3px] rounded-full bg-emerald-400/30 animate-pulse [animation-duration:2.4s]" />
+                        <span className="absolute -inset-[3px] rounded-full bg-emerald-400/50 status-breathe" />
                     ) : null}
                 </span>
                 <span
