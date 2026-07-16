@@ -10,11 +10,9 @@ The sandbox turns a local stack into a living product demo. It seeds a paid show
 Run each in its own terminal:
 
 ```bash
-make infra      # postgres, kafka, mailpit, dovecot, localstack, ... (once)
-make run        # backend + consumer + both shared workers
+make dev        # infra + backend + consumer + workers + dashboard, one command
 make tracking   # open/click tracking (Rust; needs cargo + cmake)
 make realtime   # websocket fanout (Elixir; optional but recommended)
-make web        # dashboard on http://localhost:5173
 make sandbox    # seed the showcase org + run the simulator (foreground)
 ```
 
