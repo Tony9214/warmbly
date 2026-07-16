@@ -25,7 +25,7 @@ PROTO_GEN_FILES := $(PROTO_DIR)/tasks.pb.go
 .PHONY: setup-tools fmt lint proto check-proto \
         up sim seed seed-plan sandbox sandbox-seed reset logs status stop down tools test-seed \
         restart restart-go restart-all infra infra-down app app-down app-logs \
-        backend consumer worker worker-premium run tracking realtime web \
+        backend consumer worker worker-premium run dev tracking realtime web \
         admin site docs grant-admin revoke-admin
 
 setup-tools:
@@ -491,6 +491,51 @@ run:
 	$(MAKE) --no-print-directory consumer & \
 	$(MAKE) --no-print-directory worker & \
 	$(MAKE) --no-print-directory worker-premium & \
+	wait
+
+# ─── one-command dev stack ───────────────────────────────────────────────
+#
+# `make dev` is the "just make it work" target for a fresh clone or a fresh
+# morning: brings up the docker infra, waits until it is actually ready
+# (postgres accepting connections, kafka topics + KMS/S3 init one-shots
+# done), applies migrations, loads the seed fixtures (idempotent), installs
+# web deps on first run, then starts backend + consumer + both shared
+# workers + the dashboard together in this terminal. Ctrl-C stops the app;
+# infra stays up for next time (`make infra-down` stops it too).
+#
+#   make dev                      # everything; dashboard on :5173
+#   make dev SEED=false           # skip fixture seeding
+#   make dev AI_PROVIDER=ollama   # with the AI assistant on (see AI env above)
+#
+# Log in with dev@warmbly.com / password123 (from the seed fixtures).
+# Tracking (:3000) and realtime (:4000) stay separate — `make tracking` /
+# `make realtime` — because they need the cargo / elixir toolchains.
+SEED ?= true
+dev:
+	@command -v docker >/dev/null || { echo "docker is required: https://docs.docker.com/get-docker/"; exit 1; }
+	@command -v go >/dev/null || { echo "go 1.25+ is required: https://go.dev/dl/"; exit 1; }
+	@command -v pnpm >/dev/null || { echo "pnpm is required: https://pnpm.io/installation"; exit 1; }
+	$(DEV_COMPOSE) up -d $(INFRA_SVCS)
+	@echo "Waiting for infra to be ready (postgres, kafka topics, KMS/S3 init)..."
+	@until $(COMPOSE) exec -T postgres pg_isready -U warmbly >/dev/null 2>&1; do sleep 1; done
+	@for svc in kafka-init schema-registry-init localstack-init; do \
+		until [ "$$($(COMPOSE) ps -a --format '{{.State}}' $$svc 2>/dev/null | head -1)" = "exited" ]; do sleep 1; done; \
+		code=$$($(COMPOSE) ps -a --format '{{.ExitCode}}' $$svc | head -1); \
+		if [ "$$code" != "0" ]; then echo "$$svc failed (exit $$code); check: make logs $$svc"; exit 1; fi; \
+	done
+	$(GO_DEV_ENV) go run ./cmd/migrate
+	@if [ "$(SEED)" = "true" ]; then $(GO_DEV_ENV) SEED_RICH=true SEED_FULL=true go run ./cmd/seed; fi
+	@if [ ! -d web/node_modules ]; then echo "Installing web dependencies (first run)..."; cd web && pnpm install; fi
+	@echo ""
+	@echo "Starting backend + consumer + both workers + dashboard. Ctrl-C stops them (infra stays up)."
+	@echo "Dashboard: http://localhost:5173    Login: dev@warmbly.com / password123"
+	@echo ""
+	@trap 'kill 0' INT TERM; \
+	$(MAKE) --no-print-directory backend & \
+	$(MAKE) --no-print-directory consumer & \
+	$(MAKE) --no-print-directory worker & \
+	$(MAKE) --no-print-directory worker-premium & \
+	$(MAKE) --no-print-directory web & \
 	wait
 
 # ─── other native services (Rust tracking, Elixir realtime) ──────────────
