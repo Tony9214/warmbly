@@ -547,7 +547,8 @@ Rules:
 - Read tools run automatically. Write actions (creating or changing data) require the user's approval, which the product handles for you; just call the tool and it will be gated.
 - Never claim you sent an email. You can draft replies, but the user always sends.
 - When you create a draft campaign or automation, tell the user it is a draft and give them the link to open it.
-- If a tool returns an error, explain it plainly and suggest a next step.`)
+- If a tool returns an error, explain it plainly and suggest a next step.
+- Format answers in simple Markdown: short paragraphs, "-" lists, **bold** for key names and numbers, and fenced code blocks only for actual code or raw data. No tables and no headings.`)
 	if strings.TrimSpace(voiceBlock) != "" {
 		b.WriteString("\n\n")
 		b.WriteString(voiceBlock)
