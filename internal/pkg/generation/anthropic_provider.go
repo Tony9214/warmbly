@@ -15,7 +15,7 @@ import (
 // anthropicProvider is the optional self-host connector: it drives the same
 // tool-use agent loop over Anthropic's Messages API. Warmbly's hosted product
 // runs on OpenAI; this exists so a self-hoster who prefers Anthropic can set
-// ANTHROPIC_API_KEY (with no OPENAI_API_KEY) and get the identical Provider
+// AI_PROVIDER=anthropic and get the identical Provider
 // behavior.
 type anthropicProvider struct {
 	apiKey string

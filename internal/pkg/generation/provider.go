@@ -10,7 +10,7 @@ import (
 // server-side AI feature (dashboard agent, contact research, automation AI
 // nodes, inbox agent). Warmbly's hosted product runs on OpenAI; the same
 // interface lets a self-hoster point at any OpenAI-compatible endpoint
-// (Ollama, vLLM, LocalAI, OpenRouter) via OPENAI_BASE_URL, or use the
+// (Ollama, vLLM, LocalAI, OpenRouter) via an AI_PROVIDER preset or AI_BASE_URL, or use the
 // Anthropic connector, without any caller change.
 
 // RiskClass classifies what a tool can do, which drives the approval policy in
@@ -184,7 +184,7 @@ type Provider interface {
 	// accounting even when pointed at a local/self-hosted endpoint.
 	Name() string
 	// IsLocal reports whether this provider is an explicitly-declared free/local
-	// backend (AI_LOCAL_MODEL). Callers use it to warn the user and to skip
+	// backend (AI_FREE). Callers use it to warn the user and to skip
 	// credit charges; it is never inferred from the base URL (OpenRouter/Azure
 	// also set one), so it stays a deliberate operator opt-in.
 	IsLocal() bool
@@ -197,7 +197,7 @@ var ErrApprovalRequired = errors.New("tool approval required")
 
 // ErrProviderNotConfigured is returned by NewProvider when neither an OpenAI
 // nor an Anthropic key is configured.
-var ErrProviderNotConfigured = errors.New("no LLM provider configured: set OPENAI_API_KEY or ANTHROPIC_API_KEY")
+var ErrProviderNotConfigured = errors.New("no LLM provider configured: set AI_PROVIDER and AI_API_KEY")
 
 // Default agent-loop bounds, applied when a request leaves them zero.
 const (
@@ -219,7 +219,7 @@ type ProviderConfig struct {
 	OpenAIModelTrial string
 	OpenAIModelPaid  string
 
-	// Local marks this as a free/local model backend (AI_LOCAL_MODEL). It flips
+	// Local marks this as a free/local model backend (AI_FREE). It flips
 	// the empty-model default to a local-friendly tag and lets the agent warn
 	// the user and skip credit charges. Set deliberately by the operator; never
 	// inferred from OpenAIBaseURL.

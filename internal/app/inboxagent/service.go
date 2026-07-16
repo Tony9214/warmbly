@@ -227,7 +227,7 @@ func (s *service) draft(ctx context.Context, r models.InboxAgentReply) {
 	// the reserved row so no free draft lingers. Delete on a FRESH context: the
 	// draft ctx may be near its deadline after a slow completion, and a failed
 	// delete would orphan an unpaid pending draft that could later be
-	// approved-and-sent for free. A free/local model (AI_LOCAL_MODEL) runs
+	// approved-and-sent for free. A free/local model (AI_FREE) runs
 	// un-metered, so skip the charge (and the unwind).
 	if !s.provider.IsLocal() {
 		if _, chErr := s.credits.Consume(ctx, r.OrganizationID, credits.CostInboxAgentThread, "inbox_agent_draft", res.Model, res.TokensUsed, "inbox_agent:"+draft.ID.String()); chErr != nil {

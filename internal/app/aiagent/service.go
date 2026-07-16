@@ -89,7 +89,7 @@ type StreamEvent struct {
 	CreditsRemaining int    `json:"credits_remaining,omitempty"`
 	Budget           int    `json:"budget,omitempty"`
 	// FreeModel is true when the run is on an explicitly free/local backend
-	// (AI_LOCAL_MODEL): the client warns the user and no credits are charged.
+	// (AI_FREE): the client warns the user and no credits are charged.
 	FreeModel bool   `json:"free_model,omitempty"`
 	Code      string `json:"code,omitempty"`
 	Message   string `json:"message,omitempty"`
@@ -364,7 +364,7 @@ func (s *service) runLoop(ctx context.Context, inv aitools.Invocation, sess *mod
 	paid, _ := s.feature.IsPaidOrganization(ctx, inv.OrgID)
 	model := s.provider.ModelForTier(paid)
 	sess.Context.Model = model
-	// Free/local backends (AI_LOCAL_MODEL) run un-metered and warn the user.
+	// Free/local backends (AI_FREE) run un-metered and warn the user.
 	freeModel := s.provider.IsLocal()
 	chargeCredits := !freeModel
 	sess.Context.FreeModel = freeModel

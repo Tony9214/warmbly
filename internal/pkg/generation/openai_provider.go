@@ -16,7 +16,7 @@ import (
 // the writing assistant over the OpenAI (or any OpenAI-compatible) chat
 // completions API via a lean HTTP client. Using plain HTTP (rather than the SDK
 // used for the warmup batch path) keeps the tool-call JSON explicit and lets a
-// self-hoster retarget the whole loop with OPENAI_BASE_URL.
+// self-hoster retarget the whole loop with an AI_PROVIDER preset or AI_BASE_URL.
 type openAIProvider struct {
 	apiKey     string
 	baseURL    string
@@ -32,9 +32,9 @@ type openAIProvider struct {
 const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 
 // defaultLocalModel is the fall-back model tag for a free/local backend
-// (AI_LOCAL_MODEL) when no explicit model id is set, so a dev who forgets
-// OPENAI_MODEL_* does not 404 on "gpt-4o-mini". llama3.1 has reliable
-// tool-calling in Ollama; override with OPENAI_MODEL_TRIAL / _PAID.
+// (AI_FREE) when no explicit model id is set, so a dev who forgets
+// AI_MODEL does not 404 on "gpt-4o-mini". llama3.1 has reliable
+// tool-calling in Ollama; override with AI_MODEL (or AI_MODEL_TRIAL / _PAID).
 const defaultLocalModel = "llama3.1"
 
 func newOpenAIProvider(cfg ProviderConfig) *openAIProvider {

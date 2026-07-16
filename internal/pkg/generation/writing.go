@@ -22,9 +22,8 @@ func (c *GenerationClient) ModelForTier(paid bool) string {
 func (c *GenerationClient) IsLocal() bool { return false }
 
 // GenerateWriting implements WritingGenerator using the existing OpenAI client.
-// It is the fallback provider used only when ANTHROPIC_API_KEY is unset but
-// OPENAI_API_KEY is present. The handler depends on the WritingGenerator
-// interface, so it never needs to know which provider is active.
+// The handler depends on the WritingGenerator interface, so it never needs to
+// know which provider is active.
 func (c *GenerationClient) GenerateWriting(ctx context.Context, model, prompt string, voice VoiceContext) (*WritingResult, error) {
 	if c == nil {
 		return nil, ErrNotConfigured

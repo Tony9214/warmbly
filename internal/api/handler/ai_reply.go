@@ -79,7 +79,7 @@ func (h *Handler) DraftReply(c *gin.Context) {
 	voice := h.orgVoice(c.Request.Context(), *orgID, "")
 
 	// Charge 2 credits up front (idempotent on the client's key); refund on
-	// provider failure. A free/local model (AI_LOCAL_MODEL) runs un-metered.
+	// provider failure. A free/local model (AI_FREE) runs un-metered.
 	idemKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	local := h.AIProvider != nil && h.AIProvider.IsLocal()
 	var remaining int

@@ -12,7 +12,7 @@ import (
 // OpenAI-first, self-hostable backend as every other AI feature. It is
 // platform-paid: this path never charges org credits (it settles only the
 // ambiguous sentiment middle the cheap deterministic layers can't). When no
-// provider is wired (no OPENAI_API_KEY / ANTHROPIC_API_KEY) the layer is a pure
+// provider is wired (no AI_PROVIDER) the layer is a pure
 // no-op that resolves the middle to "unknown" WITHOUT any network call.
 //
 // The model is constrained to the three nuanced sentiment classes the cheap

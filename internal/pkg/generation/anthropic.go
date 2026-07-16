@@ -72,7 +72,7 @@ type WritingGenerator interface {
 	ModelForTier(paid bool) string
 
 	// IsLocal reports whether this is an explicitly free/local backend
-	// (AI_LOCAL_MODEL). The writing surfaces skip credit charges when true.
+	// (AI_FREE). The writing surfaces skip credit charges when true.
 	IsLocal() bool
 }
 

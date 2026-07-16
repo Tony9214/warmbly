@@ -101,7 +101,7 @@ func (h *Handler) GenerateWriting(c *gin.Context) {
 	model := h.WritingGenerator.ModelForTier(paid)
 
 	// Consume one credit up front, unless this is a free/local model, which runs
-	// un-metered (AI_LOCAL_MODEL). On the metered path the DB enforces the
+	// un-metered (AI_FREE). On the metered path the DB enforces the
 	// no-negative / no-replay invariants and returns 402 on a depleted balance.
 	idemKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	local := h.WritingGenerator.IsLocal()

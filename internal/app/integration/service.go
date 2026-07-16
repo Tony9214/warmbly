@@ -96,7 +96,7 @@ type Service interface {
 	// SetAI wires the LLM provider + credit ledger the AI automation nodes
 	// (ai_classify / ai_extract / ai_generate) use. Both may be nil (AI steps
 	// then fail with a clear "not available" error); the provider is nil when no
-	// OPENAI_API_KEY / ANTHROPIC_API_KEY is configured.
+	// AI_PROVIDER is configured.
 	SetAI(p generation.Provider, c credits.CreditService)
 
 	// ListSyncRuns returns recent observability records for a connection.

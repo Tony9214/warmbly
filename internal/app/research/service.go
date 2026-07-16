@@ -279,7 +279,7 @@ func (s *service) execute(ctx context.Context, inv aitools.Invocation, run *mode
 		run.Status = models.ResearchFailed
 		run.Error = "no findings were saved"
 	default:
-		// Charge on save, idempotent per run. A free/local model (AI_LOCAL_MODEL)
+		// Charge on save, idempotent per run. A free/local model (AI_FREE)
 		// runs un-metered, so skip the charge entirely.
 		if !s.provider.IsLocal() {
 			if _, cerr := s.credits.Consume(ctx, orgID, credits.CostResearchRun, "research_run", model, run.TokensUsed, "research:"+run.ID.String()); cerr != nil {

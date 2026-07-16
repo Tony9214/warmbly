@@ -31,7 +31,7 @@ type AgentSessionContext struct {
 	// Model is the provider model id resolved for this session's tier.
 	Model string `json:"model,omitempty"`
 	// FreeModel is true when the session ran on a free/local backend
-	// (AI_LOCAL_MODEL): persisted so a reopened tab still shows the warning.
+	// (AI_FREE): persisted so a reopened tab still shows the warning.
 	FreeModel bool `json:"free_model,omitempty"`
 	// Pending is the tool call awaiting the user's approve/deny when a run is
 	// paused; nil when the session is idle or running.

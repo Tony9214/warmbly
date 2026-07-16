@@ -94,7 +94,7 @@ func (s *service) execAIAction(ctx context.Context, a models.Automation, n model
 
 	// gate -> consume(Idempotency-Key) -> call -> refund-on-failure. The key is
 	// scoped to this run + node so a retried walk never double-charges. A
-	// free/local model (AI_LOCAL_MODEL) runs un-metered, so skip the charge.
+	// free/local model (AI_FREE) runs un-metered, so skip the charge.
 	model := s.aiProvider.ModelForTier(false)
 	idemKey := "auto_ai:" + stringFromMap(data, automationRunIDKey) + ":" + n.ID
 	if !s.aiProvider.IsLocal() {
