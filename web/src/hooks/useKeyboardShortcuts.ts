@@ -38,10 +38,17 @@ export function useKeyboardShortcuts() {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       // Cmd/Ctrl+I toggles the AI assistant from anywhere (even while typing),
-      // since it is a modifier combo, not text input.
+      // since it is a modifier combo, not text input. When the panel is docked
+      // (minimized), it restores instead of closing.
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'i') {
         event.preventDefault()
-        toggleAIAssistant()
+        const s = useAppStore.getState()
+        if (s.aiAssistantOpen && s.agentMinimized) {
+          s.setAgentMinimized(false)
+        } else {
+          if (!s.aiAssistantOpen) s.setAgentMinimized(false)
+          toggleAIAssistant()
+        }
         return
       }
 

@@ -45,6 +45,10 @@ export type AgentTab = {
   running: boolean
   // Unsent composer text, kept per tab so switching tabs never leaks input.
   draft: string
+  // A run finished while the user wasn't looking at this tab (panel closed,
+  // minimized, or another tab active). Drives the tab dot, the dock status,
+  // and the header-icon badge; cleared the moment the tab is actually viewed.
+  unseen: boolean
   // hydrated is false for a tab opened from history until its transcript loads.
   hydrated: boolean
   credits: number | null
@@ -67,6 +71,7 @@ function makeTab(partial?: Partial<AgentTab>): AgentTab {
     pending: null,
     running: false,
     draft: '',
+    unseen: false,
     hydrated: true,
     credits: null,
     budget: 20,
@@ -80,8 +85,12 @@ export interface AgentSlice {
   agentTabs: AgentTab[]
   agentActiveKey: string | null
   agentExpanded: boolean
+  // Minimized docks the open panel into a compact bottom-right status bar;
+  // runs keep streaming and the dock mirrors their state.
+  agentMinimized: boolean
 
   setAgentExpanded: (v: boolean) => void
+  setAgentMinimized: (v: boolean) => void
   // Ensure at least one tab exists (called when the panel first opens).
   agentEnsureTab: () => void
   // Open a brand-new empty conversation tab and focus it.
@@ -101,8 +110,10 @@ export const createAgentSlice: StateCreator<AgentSlice, [], [], AgentSlice> = (s
   agentTabs: [],
   agentActiveKey: null,
   agentExpanded: false,
+  agentMinimized: false,
 
   setAgentExpanded: (agentExpanded) => set({ agentExpanded }),
+  setAgentMinimized: (agentMinimized) => set({ agentMinimized }),
 
   agentEnsureTab: () => {
     if (get().agentTabs.length > 0) return
