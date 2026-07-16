@@ -472,3 +472,136 @@ const searchPill = (placeholder: string) => `
     }
   }
 </style>
+
+<script>
+  const root = document.getElementById('mobile-app');
+  if (root) {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // ── Scale the fixed-width phone stage to fit, keep the bottom cut ──
+    // MAX_SCALE renders the phone at roughly real-device size (~330px wide)
+    // instead of blowing the 400px stage up to full size on desktop.
+    const DESIGN_W = 400;
+    const VISIBLE = 600; // phone px shown before the section edge slices it
+    const MAX_SCALE = 0.82;
+    const clip = root.querySelector<HTMLElement>('.mob-clip');
+    const stage = root.querySelector<HTMLElement>('.mob-stage');
+    const fit = () => {
+      if (!clip || !stage) return;
+      const s = Math.min(MAX_SCALE, clip.clientWidth / (DESIGN_W + 24));
+      stage.style.transform = `translateX(-50%) scale(${s})`;
+      clip.style.height = `${Math.round(VISIBLE * s)}px`;
+    };
+    if (clip) new ResizeObserver(fit).observe(clip);
+    fit();
+    window.addEventListener('load', fit);
+
+    // ── Story switcher: segments fill, auto-advance, tap to jump ──
+    const STORY_MS = 6000;
+    const stories = Array.from(root.querySelectorAll<HTMLElement>('.mob-story'));
+    const fills = stories.map((s) => s.querySelector<HTMLElement>('.mob-story-fill'));
+    const screens = Array.from(root.querySelectorAll<HTMLElement>('.phone-screen'));
+    const order = stories.map((s) => s.getAttribute('data-screen') || '');
+    let current = 0;
+    let inView = false;
+    let storyTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const select = (idx: number) => {
+      current = idx;
+      if (storyTimer !== undefined) { clearTimeout(storyTimer); storyTimer = undefined; }
+
+      stories.forEach((s, i) => s.setAttribute('aria-selected', String(i === idx)));
+      root.querySelector('.phone-status')?.classList.toggle('is-dark', order[idx] !== 'home');
+      screens.forEach((s) => {
+        const sIdx = order.indexOf(s.getAttribute('data-screen') || '');
+        const active = sIdx === idx;
+        if (!active) s.style.transform = `translateX(${sIdx < idx ? -28 : 28}px)`;
+        else s.style.transform = '';
+        s.classList.toggle('is-active', active);
+      });
+
+      // Paint segments: done ones full, upcoming empty, the active one filling.
+      fills.forEach((f, i) => {
+        if (!f) return;
+        f.style.transition = 'none';
+        f.style.width = i < idx || (i === idx && (reduced || !inView)) ? '100%' : '0%';
+      });
+      const fill = fills[idx];
+      if (fill && !reduced && inView) {
+        fill.offsetWidth; // reflow so the width transition starts from 0
+        fill.style.transition = `width ${STORY_MS}ms linear`;
+        fill.style.width = '100%';
+        storyTimer = setTimeout(() => select((current + 1) % order.length), STORY_MS);
+      }
+    };
+    stories.forEach((s, i) => s.addEventListener('click', () => select(i)));
+    select(0);
+
+    // ── In-view lifecycle: entrance, ring fill, chart draw, demo loops ──
+    const float = root.querySelector<HTMLElement>('.mob-float');
+    const notif = root.querySelector<HTMLElement>('.mob-notif');
+    const notifTitle = root.querySelector<HTMLElement>('.mob-notif-title');
+    const notifBody = root.querySelector<HTMLElement>('.mob-notif-body');
+    const notifications = [
+      { title: 'Positive reply', body: 'jenna@northwind.dev: Thursday 10am works for me, send over an invite' },
+      { title: 'Campaign finished', body: 'Q1 SaaS founders wrapped up: 1,248 sent, 41% opened, 78 replies' },
+      { title: 'Mailbox needs attention', body: 'ben@coastline.io slipped to 61 after a bounce spike. Warmup slowed down.' },
+    ];
+    let notifIdx = 0;
+    let notifTimer: ReturnType<typeof setTimeout> | undefined;
+    let played = false;
+
+    const playOnce = () => {
+      if (played) return;
+      played = true;
+      root.querySelectorAll<SVGCircleElement>('.mob-ring-fill').forEach((c) => {
+        const score = Number(c.closest('.mob-ring')?.getAttribute('data-score') || '0');
+        const target = 91.1 * (1 - Math.min(1, Math.max(0.04, score / 100)));
+        if (reduced) c.style.strokeDashoffset = `${target}`;
+        else requestAnimationFrame(() => { c.style.strokeDashoffset = `${target}`; });
+      });
+      root.querySelectorAll<SVGPathElement>('.mob-spark').forEach((p) => {
+        const len = p.getTotalLength();
+        if (reduced) return;
+        p.style.strokeDasharray = `${len}`;
+        p.style.strokeDashoffset = `${len}`;
+        p.style.transition = 'stroke-dashoffset 1.5s cubic-bezier(0.22, 1, 0.36, 1) 0.2s';
+        requestAnimationFrame(() => { p.style.strokeDashoffset = '0'; });
+      });
+      root.querySelector('.phone-screens')?.classList.add('mob-charted');
+    };
+
+    // A banner every ~16s: visible briefly, then a long quiet gap so it stays
+    // an accent instead of permanently covering the hero.
+    const showNotif = () => {
+      if (!notif || !notifTitle || !notifBody) return;
+      const n = notifications[notifIdx % notifications.length];
+      notifIdx++;
+      notifTitle.textContent = n.title;
+      notifBody.textContent = n.body;
+      notif.classList.add('is-in');
+      notifTimer = setTimeout(() => {
+        notif.classList.remove('is-in');
+        notifTimer = setTimeout(showNotif, 12000);
+      }, 4200);
+    };
+
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          inView = true;
+          float?.classList.add('is-in');
+          playOnce();
+          select(current); // restart the active story segment
+          if (!reduced && notifTimer === undefined) notifTimer = setTimeout(showNotif, 2800);
+        } else {
+          inView = false;
+          if (storyTimer !== undefined) { clearTimeout(storyTimer); storyTimer = undefined; }
+          if (notifTimer !== undefined) { clearTimeout(notifTimer); notifTimer = undefined; }
+          notif?.classList.remove('is-in');
+        }
+      }
+    }, { threshold: 0.18 });
+    io.observe(root);
+  }
+</script>
