@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +26,16 @@ type openAIProvider struct {
 	search     SearchClient
 	local      bool
 	http       *http.Client
+
+	// Sticky parameter-compatibility flags. Newer OpenAI models (gpt-5.x,
+	// o-series) reject the legacy max_tokens param (they want
+	// max_completion_tokens) and any non-default temperature, while most
+	// OpenAI-compatible backends (Ollama, Groq, OpenRouter) only know the
+	// legacy shape. Instead of a model-family table that goes stale, the first
+	// such 400 flips the flag and the call retries adapted; every later call
+	// uses the adapted shape directly.
+	useMaxCompletionTokens atomic.Bool
+	omitTemperature        atomic.Bool
 }
 
 // defaultOpenAIBaseURL is the public OpenAI API. Overridable for
@@ -112,12 +123,15 @@ type oaiMessage struct {
 }
 
 type oaiRequest struct {
-	Model       string       `json:"model"`
-	MaxTokens   int          `json:"max_tokens,omitempty"`
-	Messages    []oaiMessage `json:"messages"`
-	Tools       []oaiTool    `json:"tools,omitempty"`
-	ToolChoice  string       `json:"tool_choice,omitempty"`
-	Temperature *float64     `json:"temperature,omitempty"`
+	Model string `json:"model"`
+	// Exactly one of MaxTokens / MaxCompletionTokens is set per call, driven
+	// by the provider's useMaxCompletionTokens compatibility flag.
+	MaxTokens           int          `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int          `json:"max_completion_tokens,omitempty"`
+	Messages            []oaiMessage `json:"messages"`
+	Tools               []oaiTool    `json:"tools,omitempty"`
+	ToolChoice          string       `json:"tool_choice,omitempty"`
+	Temperature         *float64     `json:"temperature,omitempty"`
 }
 
 type oaiResponse struct {
@@ -133,10 +147,14 @@ type oaiResponse struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
-	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	} `json:"error"`
+	Error *oaiError `json:"error"`
+}
+
+type oaiError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Param   string `json:"param"`
+	Code    string `json:"code"`
 }
 
 // toolDefsToWire converts the provider-agnostic tool defs to OpenAI tools.
@@ -180,47 +198,85 @@ func transcriptToWire(system string, msgs []AgentMessage) []oaiMessage {
 	return out
 }
 
-// complete performs one chat-completion call.
+// complete performs one chat-completion call, retrying once per parameter when
+// the backend rejects the legacy request shape (see the compatibility flags on
+// openAIProvider).
 func (p *openAIProvider) complete(ctx context.Context, model string, maxTokens int, msgs []oaiMessage, tools []oaiTool, temperature *float64) (*oaiResponse, error) {
-	reqBody := oaiRequest{Model: model, MaxTokens: maxTokens, Messages: msgs, Temperature: temperature}
-	if len(tools) > 0 {
-		reqBody.Tools = tools
-		reqBody.ToolChoice = "auto"
-	}
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, err
-	}
-	var parsed oaiResponse
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("openai: decode response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if parsed.Error != nil {
-			return nil, fmt.Errorf("openai: %s: %s", parsed.Error.Type, parsed.Error.Message)
+	for attempt := 0; ; attempt++ {
+		reqBody := oaiRequest{Model: model, Messages: msgs}
+		if p.useMaxCompletionTokens.Load() {
+			reqBody.MaxCompletionTokens = maxTokens
+		} else {
+			reqBody.MaxTokens = maxTokens
 		}
-		return nil, fmt.Errorf("openai: unexpected status %d", resp.StatusCode)
+		if !p.omitTemperature.Load() {
+			reqBody.Temperature = temperature
+		}
+		if len(tools) > 0 {
+			reqBody.Tools = tools
+			reqBody.ToolChoice = "auto"
+		}
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+		resp, err := p.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		var parsed oaiResponse
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, fmt.Errorf("openai: decode response: %w", err)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if resp.StatusCode == http.StatusBadRequest && attempt < 2 && p.adaptParams(parsed.Error) {
+				continue
+			}
+			if parsed.Error != nil {
+				return nil, fmt.Errorf("openai: %s: %s", parsed.Error.Type, parsed.Error.Message)
+			}
+			return nil, fmt.Errorf("openai: unexpected status %d", resp.StatusCode)
+		}
+		if len(parsed.Choices) == 0 {
+			return nil, errors.New("openai: empty completion")
+		}
+		return &parsed, nil
 	}
-	if len(parsed.Choices) == 0 {
-		return nil, errors.New("openai: empty completion")
+}
+
+// adaptParams flips the sticky compatibility flag matching a 400 that names a
+// parameter this backend rejects. Returns true when a retry makes sense.
+func (p *openAIProvider) adaptParams(e *oaiError) bool {
+	if e == nil {
+		return false
 	}
-	return &parsed, nil
+	switch {
+	case e.Param == "max_tokens" || strings.Contains(e.Message, "max_completion_tokens"):
+		if p.useMaxCompletionTokens.Load() {
+			return false
+		}
+		p.useMaxCompletionTokens.Store(true)
+		return true
+	case e.Param == "temperature":
+		if p.omitTemperature.Load() {
+			return false
+		}
+		p.omitTemperature.Store(true)
+		return true
+	}
+	return false
 }
 
 // RunAgent implements the provider-agnostic tool-use loop. See provider.go for
