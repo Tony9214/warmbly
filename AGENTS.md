@@ -79,6 +79,7 @@ Event codec: `CODEC_PROVIDER=json` is required wherever workers are exercised (t
 
 Infra runs in docker; the Go services and frontends run natively on the host for fast iteration — no docker image rebuilds when you change app code. Targets live in the `Makefile`.
 
+- `make dev` — the one-command stack: brings up the docker infra and waits for readiness (postgres, kafka topics, KMS/S3 init), applies migrations, loads seed fixtures (skip with `SEED=false`), installs web deps on first run, then starts backend + consumer + both shared workers + the dashboard in one terminal. Login: dev@warmbly.com / password123. Ctrl-C stops the app; infra stays up.
 - `make infra` — start the backing services in docker (postgres, redis, kafka, schema-registry, mailpit, localstack + init, cloud-tasks, stripe-mock). Run once; leave running.
 - `make backend` — run the API natively on `:8080` (applies the embedded migrations on boot against the docker postgres).
 - `make consumer` / `make worker` / `make worker-premium` — run those Go services natively, each in its own terminal. Two native workers exist because tier placement is strict: free-trial orgs place onto the free-tier worker (`make worker`), paid orgs onto the premium one (`make worker-premium`). The workers read encrypted DEKs through the backend's `/internal/dek` endpoint (the prod `http` provider, no worker DB), so `make backend` must be running and their `INTERNAL_API_TOKEN` must match (the targets are pre-wired to match).
