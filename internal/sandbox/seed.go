@@ -132,6 +132,9 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 	if err := seedSubscription(ctx, pool); err != nil {
 		return err
 	}
+	if err := seedCredits(ctx, pool); err != nil {
+		return err
+	}
 	if err := seedCampaigns(ctx, pool); err != nil {
 		return err
 	}
@@ -157,6 +160,50 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 	fmt.Println("  campaigns  Sunrise Q3 launch + Agency partnerships (active), Dormant reactivation (draft)")
 	fmt.Println("  warmup     enabled on all senders, premium pool")
 	fmt.Println("  history    funnel progress, unified inbox, CRM pipeline, templates, notifications, chart rollups")
+	fmt.Printf("  credits    plan allowance + %d purchased (AI assistant ready)\n", sandboxTopupCredits)
+	return nil
+}
+
+// sandboxTopupCredits is the purchased-pool demo top-up, generous enough that
+// AI features never hit "out of credits" mid-demo (Starter's monthly allowance
+// alone is 250 and a single agent run can spend up to 20).
+const sandboxTopupCredits = 5000
+
+// seedCredits fills the sandbox org's AI-credit ledger: the monthly pool at the
+// plan allowance plus a purchased top-up, so every AI surface works out of the
+// box. Re-seeding refills both pools; the grant transactions are idempotent so
+// the history shows exactly one grant and one purchase.
+func seedCredits(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO credit_ledger (org_id, balance, purchased_balance, total_purchased, month_reset_at)
+		SELECT $1, p.monthly_credits, $3, $3, NOW() FROM plans p WHERE p.id = $2
+		ON CONFLICT (org_id) DO UPDATE SET
+			balance = EXCLUDED.balance,
+			purchased_balance = EXCLUDED.purchased_balance,
+			total_purchased = EXCLUDED.total_purchased,
+			month_reset_at = NOW(),
+			updated_at = NOW()`,
+		sandboxOrg, seed.PlanStarterID, sandboxTopupCredits); err != nil {
+		return fmt.Errorf("credit ledger: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO credit_ledger_transactions
+			(org_id, amount, reason, balance_after, purchased_delta, purchased_balance_after, idempotency_key)
+		SELECT $1, p.monthly_credits, 'monthly_reset', p.monthly_credits, 0, 0, 'sandbox-monthly-grant'
+		FROM plans p WHERE p.id = $2
+		ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
+		sandboxOrg, seed.PlanStarterID); err != nil {
+		return fmt.Errorf("credit grant txn: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO credit_ledger_transactions
+			(org_id, amount, reason, balance_after, purchased_delta, purchased_balance_after, idempotency_key)
+		SELECT $1, $2, 'credit_topup', p.monthly_credits, $2, $2, 'sandbox-topup'
+		FROM plans p WHERE p.id = $3
+		ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
+		sandboxOrg, sandboxTopupCredits, seed.PlanStarterID); err != nil {
+		return fmt.Errorf("credit topup txn: %w", err)
+	}
 	return nil
 }
 
