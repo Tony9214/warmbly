@@ -149,6 +149,21 @@ func (c *Config) GetBoolOptional(ctx context.Context, envKey, awsKey string, def
 	return defaultVal
 }
 
+// GetBoolPtr retrieves an optional boolean, returning nil when the value is
+// unset (rather than a default), so a caller can distinguish "not configured"
+// from an explicit false and fall back to its own default.
+func (c *Config) GetBoolPtr(ctx context.Context, envKey, awsKey string) *bool {
+	raw := c.GetStringOptional(ctx, envKey, awsKey, "")
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return nil
+	}
+	return &b
+}
+
 // GetStringOptionalRaw retrieves an optional configuration value using raw AWS key.
 func (c *Config) GetStringOptionalRaw(ctx context.Context, envKey, awsKey, defaultVal string) string {
 	if val := os.Getenv(envKey); val != "" {
