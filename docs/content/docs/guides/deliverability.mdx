@@ -88,7 +88,7 @@ These are the default bands and the metrics that move a mailbox into each one. A
 
 What each band does:
 
-- **Watch**: lower the mailbox's warmup volume, increase spacing between sends, and watch it more closely.
+- **Watch**: lower the mailbox's warmup volume, increase spacing between sends, and watch it more closely. Cold campaign volume for the mailbox is dampened by the same factor, so a mailbox showing early warning signs slows down across both warmup and cold sending before it ever reaches quarantine.
 - **Quarantine**: immediately remove the mailbox from the shared paid warmup pool for `7 days`. If the same mailbox is also sending cold campaigns, that sending is throttled or paused. A quarantined mailbox is not selected as a warmup sender or as a warmup recipient.
 - **Blocked**: block the mailbox from the shared paid pool for `30 days` and require review before it can re-enter.
 - **Catastrophic**: a spam placement of `80%` or higher triggers an immediate long-duration block and a full reputation reset. The mailbox does not return to the shared paid pool automatically.
