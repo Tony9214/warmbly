@@ -23,7 +23,7 @@
 #   - kafka-ui 18090 (8080 is taken by backend)
 #
 # Standard ports for everything else:
-#   backend 8080, tracking 3000, realtime 4000, web 5173,
+#   backend 8080, tracking 3000, realtime 4000, web 5174,
 #   kafka 9092, schema-registry 8081, localstack 4566,
 #   stripe-mock 12111, cloud-tasks 8123.
 
@@ -325,9 +325,9 @@ services:
       # Web origin for CORS. Backend's allow-list resolution checks
       # CORS_ALLOW_ORIGINS, then APP_URL, then a fallback derived from
       # WEBSOCKET_URL. Without this the origin would default to the
-      # realtime port (4000), not the Vite dev server (5173), and
+      # realtime port (4000), not the Vite dev server (5174), and
       # browser preflights from the dashboard get 403'd.
-      APP_URL: "http://localhost:5173"
+      APP_URL: "http://localhost:5174"
       WEBSOCKET_URL: ws://localhost:4000/socket/websocket
 
       PRIMARY_DB: postgres://warmbly:warmbly@postgres:5432/warmbly_dev?sslmode=disable
@@ -516,7 +516,7 @@ services:
     volumes:
       - ./web:/app
       - web_node_modules:/app/node_modules
-    ports: ["5173:5173"]
+    ports: ["5174:5173"]
     # Retry corepack only — that one tends to fail transiently while it
     # downloads the pnpm version. pnpm install failures are PERMANENT (bad
     # package.json, unresolvable peer dep, etc.) so we fail fast instead of
@@ -528,7 +528,7 @@ services:
       pnpm dev --host
       '
     environment:
-      VITE_APP_URL: "http://localhost:5173"
+      VITE_APP_URL: "http://localhost:5174"
       VITE_API_URL: "http://localhost:8080"
       VITE_TRACKING_DOMAIN: "localhost:3000"
       VITE_TURNSTILE_KEY: "1x00000000000000000000AA"
