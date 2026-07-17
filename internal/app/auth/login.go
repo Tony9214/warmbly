@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -39,21 +40,24 @@ func (s *authService) LoginStart(ctx context.Context, data *AuthData, ipaddr str
 		return nil, errx.InternalError()
 	}
 
-	code, xerr := crypt.VerificationCode()
-	if xerr != nil {
-		sentry.CaptureException(xerr)
-		return nil, errx.InternalError()
-	}
+	code := "000000"
+	if os.Getenv("APP_ENV") != "dev" {
+		code, xerr = crypt.VerificationCode()
+		if xerr != nil {
+			sentry.CaptureException(xerr)
+			return nil, errx.InternalError()
+		}
 
-	text, xerr := templates.GenerateLoginCodeHTML(code)
-	if xerr != nil {
-		sentry.CaptureException(xerr)
-		return nil, errx.InternalError()
-	}
+		text, xerr := templates.GenerateLoginCodeHTML(code)
+		if xerr != nil {
+			sentry.CaptureException(xerr)
+			return nil, errx.InternalError()
+		}
 
-	if xerr := s.sendAuthEmail(ctx, data.Email, "Your Login Code", text); xerr != nil {
-		sentry.CaptureException(xerr)
-		return nil, errx.InternalError()
+		if xerr := s.sendAuthEmail(ctx, data.Email, "Your Login Code", text); xerr != nil {
+			sentry.CaptureException(xerr)
+			return nil, errx.InternalError()
+		}
 	}
 
 	codeHash, xerr := argon2.Hash(code)

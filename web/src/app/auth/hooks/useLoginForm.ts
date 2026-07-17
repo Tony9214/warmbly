@@ -1,7 +1,10 @@
 import type React from "react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import useLogin from "@/lib/api/hooks/auth/useLogin";
+import { saveTokens } from "@/lib/auth";
+import getUser from "@/lib/api/client/auth/getUser";
 import toast from "react-hot-toast";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
@@ -9,6 +12,7 @@ import buildError from "@/lib/helper/buildError";
 export function useLoginForm() {
     const params = useParams();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const login = useLogin();
 
     const actionType = params["action"] ?? "";
@@ -24,6 +28,13 @@ export function useLoginForm() {
                 login.mutateAsync({ email: mail, password, turnstile: token }),
                 { loading: "Loading...", error: (err: AppError) => buildError(err) }
             );
+            if (r.access_token) {
+                saveTokens(r);
+                queryClient.clear();
+                await queryClient.fetchQuery({ queryKey: ["auth", "me"], queryFn: getUser });
+                navigate("/app/emails");
+                return;
+            }
             navigate(`/auth/login/confirm?session=${r.session}&to=${mail}`);
         } finally { setPending(false); }
     };

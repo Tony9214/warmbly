@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,15 @@ func (h *Handler) LoginStart(c *gin.Context) {
 	resp, err := h.AuthService.LoginStart(ctx, &data, c.ClientIP())
 	if err != nil {
 		errx.Handle(c, err)
+		return
+	}
+	if os.Getenv("APP_ENV") == "dev" {
+		result, err := h.AuthService.LoginConfirm(ctx, &auth.ConfirmData{Code: "000000"}, resp.Session, c.ClientIP(), c.Request.UserAgent())
+		if err != nil {
+			errx.Handle(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
 		return
 	}
 
