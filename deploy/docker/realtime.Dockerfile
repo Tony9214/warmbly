@@ -25,7 +25,7 @@ RUN mix compile
 RUN mix release
 
 # Runtime stage
-FROM alpine:3.20
+FROM alpine:3.23
 
 RUN apk add --no-cache libstdc++ openssl ncurses-libs
 RUN adduser -D -u 1000 warmbly
