@@ -407,6 +407,11 @@ export default function LoginPage() {
         withCaptcha(async (token) => {
             try {
                 const res = await loginMutation.mutateAsync({ email, password: data.password, turnstile: token });
+                if (res.access_token) {
+                    toast.success("Welcome back!");
+                    await completeSession(res as unknown as Token);
+                    return;
+                }
                 toast.success("Verification code sent!");
                 setSession(res.session);
                 goTo("verify");
