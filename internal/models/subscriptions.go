@@ -167,9 +167,10 @@ func (s *Subscription) IsFreeTrialExpired() bool {
 	return time.Now().After(*s.FreeTrialEndsAt)
 }
 
-// HasPaidSubscription returns true if user has an active paid Stripe subscription
+// HasPaidSubscription returns true for an active Stripe or Enterprise subscription.
+// Enterprise subscriptions may be provisioned outside Stripe.
 func (s *Subscription) HasPaidSubscription() bool {
-	return s.StripeSubscriptionID != nil && s.Status.IsActive()
+	return s.Status.IsActive() && (s.StripeSubscriptionID != nil || s.IsEnterprise)
 }
 
 // CanSendEmails returns true if user can send campaign emails
